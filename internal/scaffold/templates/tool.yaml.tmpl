@@ -5,14 +5,14 @@
 [[end]][[else if eq .ExecutionKind "knowledge"]]description: [[quote .Description]]
 knowledge:
   base: [[.KnowledgeBase]]
-[[if .Announce]]announce: [[quote .Announce]]
+[[if .Announce]]announce: [[announce 2 .Announce]]
 [[end]][[else if eq .ExecutionKind "slng"]][[if .Description]]description: [[quote .Description]]
 [[end]]slng:[[if .SlngName]] [[.SlngName]]
 [[else if .SlngHash]]
   hash: [[.SlngHash]]
 [[else]] {}
 [[end]]
-[[if .Announce]]announce: [[quote .Announce]]
+[[if .Announce]]announce: [[announce 2 .Announce]]
 [[end]]interruption: provider_default
 effect: returns_data
 [[else if eq .ExecutionKind "mcp"]]mcp:
@@ -39,7 +39,7 @@ input:[[yamlBlock 2 .Input]]
     token_env: [[.Auth.TokenEnv]]
 [[if .Auth.Header]]    header: [[.Auth.Header]]
 [[end]][[end]]
-[[if .Announce]]announce: [[quote .Announce]]
+[[if .Announce]]announce: [[announce 2 .Announce]]
 [[end]]interruption: provider_default
 effect: returns_data
 [[end]]

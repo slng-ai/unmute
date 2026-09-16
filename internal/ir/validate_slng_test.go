@@ -776,12 +776,42 @@ func TestSlngRefusesAGroupSkip(t *testing.T) {
 	wantSlngError(t, row, "a skippable group step", "compile to livekit or pipecat")
 }
 
+// A tool announcement compiles to the attachment's one pre_action_message, so
+// there is nowhere to put a second line and nowhere to pick between them.
+// Refused rather than quietly narrowed to the first: an author who wrote three
+// and heard one on every call has nothing to read that says why.
+func TestSlngRefusesAnnounceAlternatives(t *testing.T) {
+	agent := slngAgent(t)
+	agent.Tools["look_it_up"] = Tool{
+		Description: "Look something up.", Execution: ToolSlngHosted,
+		Announce: []string{"One moment.", "Let me have a look."},
+	}
+
+	row := validateSlng(t, agent)
+	wantSlngError(t, row, "announce: alternatives", "one pre-action message", "compile to livekit or pipecat")
+}
+
+// One line is what the target does carry, so it is not refused. The pair is the
+// point: the refusal is about the shape, not about announcements.
+func TestSlngKeepsOneAnnounceLine(t *testing.T) {
+	agent := slngAgent(t)
+	agent.Tools["look_it_up"] = Tool{
+		Description: "Look something up.", Execution: ToolSlngHosted,
+		Announce: []string{"One moment."},
+	}
+
+	row := validateSlng(t, agent)
+	if joined := strings.Join(row.Errors, "\n"); strings.Contains(joined, "announce:") {
+		t.Errorf("one announce line was refused:\n%s", joined)
+	}
+}
+
 func TestSlngRefusesAListeningOpening(t *testing.T) {
 	agent := slngAgent(t)
 	if agent.Tasks == nil {
 		agent.Tasks = map[string]Task{}
 	}
-	agent.Tasks["take_note"] = Task{Instructions: "Take a note.", Opening: OpeningListen, Announce: "What shall I pass on?"}
+	agent.Tasks["take_note"] = Task{Instructions: "Take a note.", Opening: OpeningListen, Announce: []string{"What shall I pass on?"}}
 
 	row := validateSlng(t, agent)
 	wantSlngError(t, row, "a step opening", "compile to livekit or pipecat")

@@ -1147,7 +1147,7 @@ func addTask(pkg *packagespec.Package, name string) {
 func TestDelegateAnnounceIsAFieldOfItsOwn(t *testing.T) {
 	pkg := loadSafeCore(t)
 	task := packagespec.Task{
-		Name: "collect", Instructions: "instructions.md", When: "Collect the details.", Announce: "  One moment.  ",
+		Name: "collect", Instructions: "instructions.md", When: "Collect the details.", Announce: packagespec.Announce{"  One moment.  "},
 	}
 	def := pkg.Agent.Agents["intake"]
 	def.Tasks = append(def.Tasks, packagespec.TaskItem{Task: &task})
@@ -1166,7 +1166,7 @@ func TestDelegateAnnounceIsAFieldOfItsOwn(t *testing.T) {
 	// One TrimSpace, matching buildTool: a blank or whitespace-only line reads as
 	// no announcement, so every driver sees a settled value and none of them has
 	// to decide what " " means.
-	if delegate.Announce != "One moment." {
+	if len(delegate.Announce) != 1 || delegate.Announce[0] != "One moment." {
 		t.Errorf("announce = %q, want the trimmed sentence", delegate.Announce)
 	}
 }
@@ -1355,13 +1355,13 @@ func TestBuildToolAnnounceTrimsToASettledValue(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			pkg := loadSafeCore(t)
 			tool := pkg.Tools["lookup_customer"]
-			tool.Announce = tc.authored
+			tool.Announce = packagespec.Announce{tc.authored}
 			pkg.Tools["lookup_customer"] = tool
 			agent, err := Build(pkg)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := agent.Tools["lookup_customer"].Announce; got != tc.want {
+			if got := agent.Tools["lookup_customer"].Announce; strings.Join(got, "|") != tc.want {
 				t.Errorf("announce = %q, want %q", got, tc.want)
 			}
 		})

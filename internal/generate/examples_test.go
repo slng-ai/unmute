@@ -42,8 +42,8 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("target %q does not generate: %v", name, err)
 			}
-			if name == "livekit" && !strings.Contains(artifactFile(t, artifact, "agent.py"), "llm=_GoogleVertexLLM(") {
-				t.Error("salon-concierge must use native Gemini on Vertex EU")
+			if name == "livekit" && !strings.Contains(artifactFile(t, artifact, "agent.py"), `model="gpt-5.6-luna"`) {
+				t.Error("salon-concierge must reason on gpt-5.6-luna")
 			}
 		})
 	}
@@ -82,15 +82,21 @@ func loadExample(t *testing.T, name string) *ir.Agent {
 
 func TestSalonConciergeFeatureContract(t *testing.T) {
 	resolved := loadExample(t, "salon-concierge")
-	// Keep both targets on native Gemini with explicit EU routing.
+	// Keep both targets on gpt-5.6-luna with reasoning off.
+	//
+	// Native Gemini 3.5 Flash-Lite held this slot from 2026-09-14 to 2026-09-16
+	// and came out after one live call (trace 917975e9) lost 18.5 seconds to two
+	// `MALFORMED_FUNCTION_CALL` aborts, which is Gemini throwing away a turn
+	// whose tool call it emitted as plain text. Nothing in this package reaches
+	// it and Google has no fix, so the model left rather than the symptom being
+	// made cheaper. The emitted session caps LLM retries either way.
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		reason := targetByProvider(t, resolved, provider).Models.Reason["reasoning"]
-		if reason.Provider != "google" || reason.Model != "gemini-3.5-flash-lite" || reason.Router() {
-			t.Errorf("%s reasoning must use native Gemini 3.5 Flash-Lite: %#v", provider, reason)
+		if reason.Provider != "openai" || reason.Model != "gpt-5.6-luna" || reason.Router() {
+			t.Errorf("%s reasoning must use gpt-5.6-luna: %#v", provider, reason)
 		}
-		thinking, _ := reason.Params["thinking_config"].(map[string]any)
-		if reason.Params["vertexai"] != true || reason.Params["location"] != "eu" || thinking["thinking_level"] != "minimal" {
-			t.Errorf("%s reasoning params = %#v, want Vertex EU with minimal thinking", provider, reason.Params)
+		if reason.Params["reasoning_effort"] != "none" {
+			t.Errorf("%s reasoning params = %#v, want reasoning_effort none", provider, reason.Params)
 		}
 		// No host pin and no prompt directive: this binding is on Google's own
 		// endpoint, which serves one implementation of the model.
@@ -298,19 +304,45 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			t.Errorf("booking is split again into %q; one task owns draft, confirm and apply", name)
 		}
 	}
-	// One group, two steps: verification and the one booking task. The steps are
-	// not split further, which is what the loop above holds; the group is what
-	// removes the owner request between them (spec 010).
-	group, grouped := resolved.TaskGroups["book"]
-	if !grouped {
-		t.Fatalf("task groups = %v, want a book group holding verification and the booking step",
+	// Two plain tasks the concierge runs in order, and deliberately NOT a task
+	// group. A `book` group held the same two steps until 2026-09-16 and was a
+	// better shape on LiveKit: it chained the steps itself, so the owner spent
+	// no model request deciding to enter the second one.
+	//
+	// It came out because it does not run on Pipecat at all. On the live Pipecat
+	// call of that day (trace 5a330c65) the group was entered, held the call for
+	// eleven seconds, made no model request and produced no audio, and the
+	// caller heard only the greeting. The lowering compiles and validates; it
+	// never speaks. One extra round trip is the price of the shipped example
+	// working on both targets.
+	//
+	// Put the group back only with a Pipecat call proving it speaks.
+	if len(resolved.TaskGroups) != 0 {
+		t.Errorf("task groups = %v, want none: groups produce no speech on Pipecat",
 			slices.Sorted(maps.Keys(resolved.TaskGroups)))
 	}
-	if len(group.Steps) != 2 || group.Steps[0].Task != "verify_customer" || group.Steps[1].Task != "manage_booking" {
-		t.Errorf("book steps = %+v, want verify_customer then manage_booking", group.Steps)
-	}
-	if group.Steps[0].SkipWhenConfirmed != "customer_phone" {
-		t.Errorf("verification is not skippable: %+v; a second booking would ask for the number again", group.Steps[0])
+	for _, name := range []string{"verify_customer", "manage_booking"} {
+		if _, ok := resolved.Tasks[name]; !ok {
+			t.Fatalf("task %q is gone; the concierge runs verification then booking", name)
+		}
+		// Both need a trigger now. As group steps only the group carried one,
+		// and a task with no `when:` is a definition its agent cannot decide to
+		// run, so it would reach the model as a tool nothing describes.
+		delegate, ok := resolved.Controls[name].(*ir.Delegate)
+		if !ok {
+			t.Errorf("%q is not a delegate the concierge can call: %T", name, resolved.Controls[name])
+			continue
+		}
+		if delegate.When == "" {
+			t.Errorf("delegate %q has no when:, so the concierge cannot decide to run it", name)
+		}
+		// One announcement each, and both at the seam. The diary line sat on
+		// `find_slots` until 2026-09-16: a tool's line is emitted inside the
+		// tool body, so a model that read the diary twice in one turn spoke
+		// twice (trace 917975e9). A delegate's fires once per entry.
+		if len(delegate.Announce) == 0 {
+			t.Errorf("delegate %q says nothing as it is entered", name)
+		}
 	}
 	// One read and one write, and the seam is the conversation's own: find_slots
 	// answers "what do they hold" and "what is free" together, because a caller
@@ -387,9 +419,38 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if got := slices.Sorted(maps.Keys(booking.Result)); !slices.Equal(got, []string{"appointment"}) {
 		t.Errorf("booking result = %v, want the typed appointment saved after success", got)
 	}
-	bookingDelegate, ok := resolved.Controls["book"].(*ir.Delegate)
-	if !ok || bookingDelegate.Group != "book" || bookingDelegate.Task != "" {
-		t.Fatalf("book = %#v, want a delegate to the booking group", resolved.Controls["book"])
+	// The saved appointment carries the confirmation phrase, and the concierge
+	// is told to read it. Three live calls on 2026-09-16 got a different part
+	// of that sentence wrong, every time because the agent built it from
+	// something other than the record: a weekday worked out from a date, a
+	// 24 hour time read back as "09:00 AM", and a move saved at 09:00
+	// confirmed as "3:00 PM" off the caller's earlier words "the same time".
+	// The tool composes it now, so a package that drops this field puts the
+	// agent back to composing one.
+	var hasSpoken bool
+	for _, field := range resolved.Shapes["Appointment"].Fields {
+		hasSpoken = hasSpoken || field.Name == "spoken"
+	}
+	if !hasSpoken {
+		t.Error("the Appointment shape has no spoken phrase, so the agent composes the day and time itself")
+	}
+	if !strings.Contains(resolved.Agents["concierge"].Instructions, "`spoken` phrase, word for word") {
+		t.Error("the concierge is not told to read the saved phrase word for word")
+	}
+	// Hanging up is the one action with no undo on a live call, so the rule
+	// against it lives in the tool the model reads and not only in a prompt.
+	// A live call on 2026-09-16 ended on "can we just recap when I have the
+	// next appointment?", which a description reading "when the caller is
+	// finished" left open to interpretation.
+	if !strings.Contains(resolved.Tools["end_call"].Description, "A question is never one of those") {
+		t.Error("end_call does not say a question is not an ending, and a live call hung up on one")
+	}
+	// A delegate straight to the task, not to a group. The `book` group that
+	// wrapped it came out on 2026-09-16; the assertion above holds that none is
+	// back.
+	bookingDelegate, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
+	if !ok || bookingDelegate.Task != "manage_booking" || bookingDelegate.Group != "" {
+		t.Fatalf("manage_booking = %#v, want a delegate to the booking task", resolved.Controls["manage_booking"])
 	}
 	// Both steps end on their own tools, which is the pair of requests spec 010
 	// removes. A step that stops declaring finish: goes back to asking the model
@@ -723,10 +784,10 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if len(resolved.Agents) != 2 {
 		t.Errorf("the example has %d agents, want 2: %v", len(resolved.Agents), slices.Sorted(maps.Keys(resolved.Agents)))
 	}
-	if _, ok := resolved.Controls["book"].(*ir.Delegate); !ok {
-		t.Fatalf("book = %T, want a delegate", resolved.Controls["book"])
+	if _, ok := resolved.Controls["manage_booking"].(*ir.Delegate); !ok {
+		t.Fatalf("manage_booking = %T, want a delegate", resolved.Controls["manage_booking"])
 	}
-	if !slices.Contains(resolved.Agents[resolved.EntryAgent].Tools, "book") {
+	if !slices.Contains(resolved.Agents[resolved.EntryAgent].Tools, "manage_booking") {
 		t.Errorf("the entry agent does not hold the booking flow: %v", resolved.Agents[resolved.EntryAgent].Tools)
 	}
 }

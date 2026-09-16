@@ -300,9 +300,10 @@ type Tool struct {
 	// the pull. The console does not edit it; `unmute pull` writes it.
 	SlngHash string
 	// Announce is one fixed sentence spoken as a webhook, local, knowledge or
-	// slng tool starts, so a slow call is not silence (ir.Tool.Announce).
+	// slng tool starts, so a slow call is not silence (ir.Tool.Announce), or the
+	// alternatives one of which is spoken each firing.
 	// Editable by the console.
-	Announce    string
+	Announce    spec.Announce
 	Input       string // JSON Schema object
 	Output      string // optional JSON Schema object
 	AttachTo    []string
@@ -396,7 +397,7 @@ type Task struct {
 	// written rather than paired back through a naming convention.
 	Agent    string
 	When     string
-	Announce string
+	Announce spec.Announce
 	Assign   []spec.Pair // ordered saved-variable assignments
 	// Finish and Opening are carried for one reason: a key this struct does not
 	// hold is a key `unmute maintain` deletes from the author's file at exit 0.
@@ -416,7 +417,7 @@ type TaskGroup struct {
 	ThenTarget   string
 	Agent        string
 	When         string
-	Announce     string
+	Announce     spec.Announce
 }
 
 type Channel struct {
@@ -1106,6 +1107,21 @@ func parseTemplate(name string, raw []byte) (*template.Template, error) {
 	return template.New(name).Funcs(template.FuncMap{
 		"boolValue": func(value *bool) bool { return value != nil && *value },
 		"quote":     strconv.Quote,
+		// announce renders `announce:` in whichever shape the author wrote: one
+		// sentence stays on the key's own line, alternatives become a list
+		// indented under it. Without this a round-trip through `unmute maintain`
+		// would flatten a list, which is the silent data loss
+		// TestMaintainKeepsATasksAnnounce exists to stop.
+		"announce": func(indent int, a spec.Announce) string {
+			if len(a) == 1 {
+				return strconv.Quote(a[0])
+			}
+			var b strings.Builder
+			for _, line := range a {
+				b.WriteString("\n" + strings.Repeat(" ", indent) + "- " + strconv.Quote(line))
+			}
+			return b.String()
+		},
 		"yaml":      yamlScalar,
 		"yamlBlock": blockYAML,
 		"pairs": func(indent int, pairs []spec.Pair) (string, error) {

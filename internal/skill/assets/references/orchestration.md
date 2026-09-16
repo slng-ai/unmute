@@ -638,6 +638,19 @@ owner is handed the unserved status.
 - `context_scope: isolated` starts each member without inherited group
   conversation. Saved variables remain available through explicit prompt references.
 
+**A task or group that already ran is refused until the caller speaks again.**
+Not authorable, and it applies to every step on both code targets. A completed
+result with no new caller turn above it is the model reading its own finished
+work as though it were a fresh request: a live call saved a booking, re-entered
+the flow on the caller's own "3 o'clock" still sitting above the result, read
+the diary twice more, and the caller's last words on the call were an agent
+saying it was off to check the diary. The refusal comes before the step's
+`announce:`, so a refused call speaks nothing at all.
+
+Write the owner's prompt to expect this rather than to work around it: a bare
+"yes" above a completed flow is the caller answering the flow's own question,
+which the flow has already acted on.
+
 Task results are private. Each completed step supplies only completion status;
 later tasks read saved values through `{{name}}` or `{{name.field}}`.
 With `then: return`, the owner gets its original context back plus `completed`

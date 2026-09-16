@@ -486,10 +486,13 @@ func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []
 		if hosted && !tool.DescriptionAuthored {
 			ref.Description = ""
 		}
-		if tool.Announce != "" {
+		// One line, always: the attachment carries exactly one pre-action
+		// message, which is why ir.Validate refuses alternatives on this target
+		// rather than silently speaking the first of them.
+		if len(tool.Announce) > 0 {
 			ref.Policy = &slngPolicy{PreActionMessage: &slngPreAction{
 				Enabled: true,
-				Text:    slngSegments{Segments: []slngSegment{{Type: "literal", Value: tool.Announce}}},
+				Text:    slngSegments{Segments: []slngSegment{{Type: "literal", Value: tool.Announce[0]}}},
 			}}
 		}
 		ref.Arguments = slngArguments(tool.Inject)

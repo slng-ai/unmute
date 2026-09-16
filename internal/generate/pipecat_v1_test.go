@@ -2774,7 +2774,7 @@ func TestPipecatV1TaskToolAnnounceQueuesFrameFromFlowManager(t *testing.T) {
 		// find_slots is listed on the booking task, never on an agent,
 		// so it can only be reached through the flows-handler path.
 		tool := agent.Tools["find_slots"]
-		tool.Announce = announce
+		tool.Announce = []string{announce}
 		agent.Tools["find_slots"] = tool
 		artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
 		if err != nil {
@@ -2844,10 +2844,10 @@ func TestPipecatV1ToolAnnounceQueuesFrameWithoutWaiting(t *testing.T) {
 	}
 
 	webhook := agent.Tools["get_invoice"]
-	webhook.Announce = "Let me pull that invoice up."
+	webhook.Announce = []string{"Let me pull that invoice up."}
 	agent.Tools["get_invoice"] = webhook
 	lookup := agent.Tools["lookup_customer"]
-	lookup.Announce = "Give me one second to find you."
+	lookup.Announce = []string{"Give me one second to find you."}
 	lookup.Interruption = ir.ToolContinue
 	agent.Tools["lookup_customer"] = lookup
 
@@ -2906,7 +2906,7 @@ func TestPipecatV1ToolAnnounceOnInlinePath(t *testing.T) {
 	}
 	agent.Tracing = nil // the inline path is scoped to no-tracing
 	tool := agent.Tools["lookup_customer"]
-	tool.Announce = "Let me look that up."
+	tool.Announce = []string{"Let me look that up."}
 	agent.Tools["lookup_customer"] = tool
 
 	bot := artifactFile(t, mustGeneratePipecatInline(t, agent), "bot.py")

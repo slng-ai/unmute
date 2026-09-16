@@ -37,7 +37,7 @@ func knowledgeAgent(t *testing.T) *ir.Agent {
 	tool.Webhook, tool.Input, tool.Output = nil, nil, nil
 	tool.Knowledge = &spec.ToolKnowledge{Base: "refunds"}
 	tool.Description = "Look up the salon's refund and complaints policy."
-	tool.Announce = "Let me check the policy."
+	tool.Announce = spec.Announce{"Let me check the policy."}
 	pkg.Tools["lookup_customer"] = tool
 	agent, err := ir.Build(pkg)
 	if err != nil {

@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from livekit.agents import (
+    APIConnectOptions,
     NOT_GIVEN,
     Agent,
     AgentTask,
@@ -30,6 +31,9 @@ from livekit.agents import (
     stt,
 )
 from livekit.agents.voice import MetricsCollectedEvent
+# Not re-exported from livekit.agents or livekit.agents.voice, so it comes from
+# the module that defines it. Checked against 1.6.10 and 1.8.x.
+from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import deepgram, elevenlabs, openai, silero
 
 import dev_metrics
@@ -671,6 +675,17 @@ class IgnorePhrasesMixin:
         return _filtered()
 
 
+def _caller_turns(chat_ctx) -> int:
+    """How many turns the caller has taken in this context.
+
+    The one signal that separates "they asked again" from "the model re-read its
+    own finished work". A step that has already run and returned cannot have a
+    new request in front of it unless somebody spoke, so this is what each
+    delegate's re-entry guard compares.
+    """
+    return sum(1 for message in chat_ctx.messages() if message.role == "user")
+
+
 # --- router cache scope ------------------------------------------------------
 async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     """Agent.default.llm_node, plus everything this request's own scope and
@@ -827,17 +842,59 @@ class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
     @function_tool
     async def run_collect(self, ctx: RunContext) -> dict:
         """Collect the caller's account details. When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. A completed status means the step finished. Read any saved values through your own prompt references. An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."""
+        # Already ran, and nobody has spoken since. Then this is not a second
+        # request, it is the model reading its own completed result as though it
+        # were one, and running the whole thing again is the worst possible
+        # answer: on a live call on 2026-09-16 (trace 917975e9) a booking saved,
+        # the flow re-entered on the caller's own "3 o'clock" still sitting
+        # above the result, read the diary twice more, and the last thing the
+        # caller heard was an agent saying it was off to check the diary.
+        #
+        # Refused here rather than asked for in the prompt, which this package
+        # did twice and which failed twice. The announcement is below this, so a
+        # refused call speaks nothing at all.
+        if _caller_turns(self.chat_ctx) == getattr(self, "_ran_at_run_collect", None):
+            return {
+                "refused": "This already ran and finished, and the caller has "
+                "not spoken since, so its result is the answer to what they "
+                "asked. Reply to them from the values in your prompt. Run it "
+                "again only once they have asked for something new."
+            }
         owner_ctx = self.chat_ctx.copy()
         try:
             result = await Collect(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
         finally:
             await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+            # Counted after the restore, so a turn a step consumed and carried
+            # back is included: that turn is the one the owner is about to read,
+            # and it is exactly the turn that must not be mistaken for a new
+            # request. Set in the finally so a step that raised still blocks an
+            # immediate retry the caller did not ask for.
+            self._ran_at_run_collect = _caller_turns(self.chat_ctx)
         dev_metrics.dev_task_returned(ctx, result)
         return _task_status(result)
 
     @function_tool
     async def run_triage(self, ctx: RunContext) -> dict:
         """Run the triage group. When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. A completed status means the step finished. Read any saved values through your own prompt references. An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."""
+        # Already ran, and nobody has spoken since. Then this is not a second
+        # request, it is the model reading its own completed result as though it
+        # were one, and running the whole thing again is the worst possible
+        # answer: on a live call on 2026-09-16 (trace 917975e9) a booking saved,
+        # the flow re-entered on the caller's own "3 o'clock" still sitting
+        # above the result, read the diary twice more, and the last thing the
+        # caller heard was an agent saying it was off to check the diary.
+        #
+        # Refused here rather than asked for in the prompt, which this package
+        # did twice and which failed twice. The announcement is below this, so a
+        # refused call speaks nothing at all.
+        if _caller_turns(self.chat_ctx) == getattr(self, "_ran_at_run_triage", None):
+            return {
+                "refused": "This already ran and finished, and the caller has "
+                "not spoken since, so its result is the answer to what they "
+                "asked. Reply to them from the values in your prompt. Run it "
+                "again only once they have asked for something new."
+            }
         owner_ctx = self.chat_ctx.copy()
         try:
             task_results = {}
@@ -858,6 +915,12 @@ class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
                     break
         finally:
             await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+            # Counted after the restore, so a turn a step consumed and carried
+            # back is included: that turn is the one the owner is about to read,
+            # and it is exactly the turn that must not be mistaken for a new
+            # request. Set in the finally so a step that raised still blocks an
+            # immediate retry the caller did not ask for.
+            self._ran_at_run_triage = _caller_turns(self.chat_ctx)
         dev_metrics.dev_task_returned(ctx, *task_results.values())
         return _group_status(task_results)
 
@@ -1167,6 +1230,22 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.add_shutdown_callback(_close_slng_client)
     session = AgentSession[Userdata](
         userdata=slng_state,
+        # One retry, not the framework's three. A failed completion is retried
+        # four times by default with 0.1 + 2.0 + 2.0 seconds of sleep between the
+        # attempts, on top of four round trips to the provider: a live call on
+        # 2026-09-16 (trace 917975e9) spent 18.5 seconds in two of those and the
+        # caller asked whether anybody was still there.
+        #
+        # A caller cannot wait that out, and a retry loop tuned for a batch job
+        # is the wrong default for a conversation. One retry still covers a
+        # transient fault and costs 0.1s, because the first retry is nearly
+        # immediate; anything worse is better surfaced than slept through.
+        #
+        # ponytail: fixed, not authorable. No package would want a different
+        # number, and the one that does can say so when it turns up.
+        conn_options=SessionConnectOptions(
+            llm_conn_options=APIConnectOptions(max_retry=1),
+        ),
         stt=deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3"),
         llm=openai.LLM(client=slng_state.slng_client, model="gpt-5.6-luna"),
         tts=elevenlabs.TTS(api_key=os.environ["ELEVEN_API_KEY"], voice_id="cgSgspJ2msm6clMCkdW9"),

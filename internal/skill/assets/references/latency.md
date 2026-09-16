@@ -250,6 +250,22 @@ local:
 announce: Let me get that written down.
 ```
 
+Write it as a **list** when the line can fire more than once in a call, and the
+caller hears one of them each time, never the one that site used last:
+
+```yaml
+announce:
+  - Let me double check what I have available.
+  - Let me see what is free.
+  - Right, let me have a look at the diary.
+```
+
+One sentence spoken twice in a minute is what an agent sounds like when it is a
+recording. A live call entered the salon's booking flow twice in forty-four
+seconds and played the identical line both times. The `slng` target takes one
+line only, because an attachment carries a single pre-action message, and a list
+there is refused rather than narrowed.
+
 Keep the line **shorter than the gap**. A long line runs into the answer and
 breaks its own promise of a wait: "Okay, one sec." works where "One sec, let me
 pull up your details and see what we have" does not. Put it only on tools that
@@ -263,6 +279,40 @@ single model request between them: "Sure, let me get that sorted for you." then
 "Hmm, let me check the diary." One line per request. The hesitation the caller
 hears before the answer itself belongs in the prompt, written onto the front of
 the sentence that does the work, where it costs no speech and no request.
+
+**Put the line on the step, not on the group above it or the tool below it.**
+
+A group's `announce:` fires on entry, before any step runs, so it is spoken
+whether or not a `skip_when_confirmed:` step is skipped, and there is often no
+sentence that is true on both halves.
+
+A tool's `announce:` is emitted inside the tool body, so it fires once per call
+rather than once per request. A model that calls the same tool twice in one turn
+speaks twice, and no prompt rule reliably stops one chaining a tool: the salon
+had a rule saying not to and a live call read the diary twice 0.8 seconds apart,
+with a different sentence each time.
+
+A **task's** own `announce:` is spoken once as that step is entered, only when
+it runs, and before the model has decided anything. That is the only one of the
+three where "exactly one line per request" is a shape rather than a rule, and it
+is also the earliest of the three by about half a second. The salon carries both
+of its lines there: `verify_customer` says "Let me get you verified." as that
+step opens, and `manage_booking` says "Let me see what is free." as the booking
+step opens, which is the only line a caller hears on a booking after the first.
+
+**Say nothing about the line in the prompt that follows it.** A line spoken by
+code is not a caller turn, so a step that opens with "Got it," is agreeing with
+itself. A live call did exactly that on Pipecat, where the spoken frame never
+reaches the LLM context at all. Tell the step in one sentence that a fixed line
+was already spoken and to go straight to its question.
+
+**A retry loop is not a latency knob, it is a latency cliff.** The emitted
+LiveKit session caps LLM retries at one. The framework's default is four
+attempts with 0.1 + 2.0 + 2.0 seconds of sleep between them, on top of four
+round trips to the provider, and a provider that throws a turn away hands the
+caller that whole wait in silence: a live call spent 18.5 seconds across two of
+them and the caller asked whether anybody was still there. Nothing to author;
+every package gets the cap.
 
 Do not put one on a tool that can **refuse** the call. The line is spoken when
 the tool is called, not when it succeeds. The salon's booking tool refuses a save

@@ -108,7 +108,7 @@ starts failing gets the **code** fixed, not the gate loosened, and a disabled
 check carries its reason inline, the way `.golangci.yml` explains every
 `errcheck` exclusion and every `forbidigo` pattern.
 
-Every gate and what fails it is [`docs/GATES.md`](docs/GATES.md), 231 rows.
+Every gate and what fails it is [`docs/GATES.md`](docs/GATES.md), 242 rows.
 Read it before adding a rule, and when one fails.
 
 ## Four places document emitted behaviour

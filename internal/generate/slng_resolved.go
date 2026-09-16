@@ -154,8 +154,9 @@ func SlngAuthoredConfig(agent *ir.Agent) map[string]map[string]any {
 func SlngAuthoredAnnouncements(agent *ir.Agent) map[string]string {
 	out := map[string]string{}
 	for name, tool := range agent.Tools {
-		if tool.Announce != "" {
-			out[name] = tool.Announce
+		// One line: a list never reaches this target, ir.Validate refuses it.
+		if len(tool.Announce) > 0 {
+			out[name] = tool.Announce[0]
 		}
 	}
 	return out

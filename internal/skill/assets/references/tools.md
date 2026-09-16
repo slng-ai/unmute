@@ -618,7 +618,7 @@ announce: Let me check the calendar.
 |---|---|---|---|
 | `interruption` | `provider_default`, `continue`, `cancel` | `provider_default` | what happens to the call if the caller speaks while the tool runs |
 | `effect` | `returns_data`, `ends_conversation` | `returns_data` | whether the conversation continues after the tool |
-| `announce` | any one sentence | absent, nothing is spoken | a fixed line the agent speaks as the tool starts, so a slow call is not silence |
+| `announce` | one sentence, or a list of alternatives | absent, nothing is spoken | a fixed line the agent speaks as the tool starts, so a slow call is not silence |
 
 A tool run by `prefetch:` carries no field of its own for this. The pre-fetch
 entry that runs it declares `writes: true` or `writes: false`, because the
@@ -645,6 +645,23 @@ shorter than the wait it covers:
 |---|---|
 | `Let me check the calendar.` | `Let me find you some great times!` |
 | `One moment while I look that up.` | `I'm querying the availability API.` |
+
+**Write a list when the tool can fire twice in one call.** One sentence is the
+same sentence every time, and a caller who books and then moves the booking
+hears it twice inside a minute, which is what a recording sounds like. Give the
+key a list and the caller hears one of them per firing, never the one that tool
+used last:
+
+```yaml
+announce:
+  - Let me check the calendar.
+  - Let me see what is free.
+  - Right, let me have a look at the diary.
+```
+
+The `slng` target takes one line, because an attachment carries a single
+pre-action message. A list there is refused by `unmute validate`, with the
+line, rather than quietly narrowed to the first entry.
 
 If the package instructions already tell the agent to say it is checking
 something, remove that instruction when you add `announce:`. Otherwise the model

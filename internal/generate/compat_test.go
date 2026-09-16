@@ -69,6 +69,25 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // the point: the three keys change the shared emitted Python, the task prompt
 // tail and the group runtime, and each of those is inserted into files nobody
 // reads on a package that asked for none of it.
+//
+// What this does NOT hold is a deliberate change to the shared runtime that is
+// meant to reach every package. Those re-record, and the distinction is the
+// whole meaning of the test: a package getting bytes it did not ask for is the
+// defect, not a package getting a fix nobody opts out of.
+//
+// Re-recorded once, on 2026-09-16, for two such changes:
+//
+//  1. the emitted LiveKit session caps LLM retries at one. The framework's
+//     default is four attempts with 4.1 seconds of sleep between them, and a
+//     live call (trace 917975e9) spent 18.5 seconds in two of those while the
+//     caller asked whether anybody was still there;
+//  2. every task and group delegate refuses re-entry when the caller has not
+//     spoken since it returned. The same call saved a booking, re-entered the
+//     flow on the caller's own words still sitting above the result, and read
+//     the diary twice more.
+//
+// Both are named in the pull request that ships them. A regeneration without
+// that treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {
 	packages := compatPackages(t)
 	if len(packages) == 0 {

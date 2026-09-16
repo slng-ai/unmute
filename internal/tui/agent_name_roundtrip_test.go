@@ -113,7 +113,7 @@ func TestMaintainKeepsATasksAnnounce(t *testing.T) {
 		Agents: []scaffold.Agent{{Name: "billing", Instructions: "Handle billing."}},
 		Tasks: []scaffold.Task{{
 			Name: "collect", Instructions: "Collect the details.", Agent: "assistant",
-			When: "Collect first.", Announce: "One moment while I check.",
+			When: "Collect first.", Announce: spec.Announce{"One moment while I check."},
 			History: "full",
 		}},
 	}
@@ -140,7 +140,7 @@ func TestMaintainKeepsATasksAnnounce(t *testing.T) {
 	if collect == nil {
 		t.Fatal("the task did not survive the round trip at all")
 	}
-	if collect.Announce != "One moment while I check." {
+	if len(collect.Announce) != 1 || collect.Announce[0] != "One moment while I check." {
 		t.Errorf("task announce = %q, want it carried through", collect.Announce)
 	}
 }
@@ -158,7 +158,7 @@ func TestMaintainKeepsAScalarSlngTool(t *testing.T) {
 		Tools: []scaffold.Tool{{
 			Name: "order_status", Execution: "slng", SlngName: "check_order",
 			Description: "Look up an order by its number.",
-			Announce:    "One moment while I look that up.",
+			Announce:    spec.Announce{"One moment while I look that up."},
 			Inject:      []spec.Pair{{Key: "limit", Value: 0}},
 		}},
 	}
@@ -191,7 +191,7 @@ func TestMaintainKeepsAScalarSlngTool(t *testing.T) {
 	if tool.SlngHash != "" {
 		t.Errorf("SlngHash = %q, want empty: a scalar reference authors no hash", tool.SlngHash)
 	}
-	if tool.Announce != "One moment while I look that up." {
+	if len(tool.Announce) != 1 || tool.Announce[0] != "One moment while I look that up." {
 		t.Errorf("Announce = %q, want it carried through", tool.Announce)
 	}
 	if len(tool.Inject) != 1 || tool.Inject[0].Key != "limit" {
@@ -224,7 +224,7 @@ func TestMaintainKeepsALegacySlngToolsAnnounceAndInject(t *testing.T) {
 			Name: "check_order", Execution: "slng",
 			SlngHash:    "f169d60d6496768081448551f1a84286a34569063a61c480b0aa12475759a00f",
 			Description: "Look up an order by its number.",
-			Announce:    "One moment while I look that up.",
+			Announce:    spec.Announce{"One moment while I look that up."},
 			Inject:      []spec.Pair{{Key: "limit", Value: 0}},
 		}},
 	}
@@ -257,7 +257,7 @@ func TestMaintainKeepsALegacySlngToolsAnnounceAndInject(t *testing.T) {
 	if tool.SlngHash != "f169d60d6496768081448551f1a84286a34569063a61c480b0aa12475759a00f" {
 		t.Errorf("SlngHash = %q, want the authored pin carried through", tool.SlngHash)
 	}
-	if tool.Announce != "One moment while I look that up." {
+	if len(tool.Announce) != 1 || tool.Announce[0] != "One moment while I look that up." {
 		t.Errorf("Announce = %q, want it carried through", tool.Announce)
 	}
 	if len(tool.Inject) != 1 || tool.Inject[0].Key != "limit" {
@@ -411,7 +411,7 @@ func TestMaintainKeepsATasksFinish(t *testing.T) {
 		Tasks: []scaffold.Task{{
 			Name: "collect", Instructions: "Collect the details.", Agent: "assistant",
 			When: "Collect first.", History: "full", Opening: "listen",
-			Announce: "What is the reference?",
+			Announce: spec.Announce{"What is the reference?"},
 			Finish: []spec.FinishEntry{{
 				Tool:    "look_up",
 				Success: []spec.SuccessPair{{Field: "status", Values: []string{"found"}}},

@@ -15,11 +15,26 @@ agents:
     tasks:
       - name: verify_customer
         when: >-
-          Run only when the caller explicitly corrects their phone number. Every
-          other route into verification goes through the booking flow, which
-          runs this step itself when the saved number is not confirmed. A change
-          of date, time or service is not a phone correction.
+          Run this before the booking step whenever `customer_verified` is
+          empty, and run it on its own when the caller explicitly corrects their
+          phone number. Never run it twice for one booking: once
+          `customer_verified` names a status, the caller is verified for the
+          rest of the call. A change of date, time or service is not a phone
+          correction and needs no verification.
         instructions: tasks/verify-customer.md
+        # Spoken as this step is entered, on both routes in, and only when the
+        # step actually runs: the group skips it once the number is confirmed,
+        # so nothing ever says "verified" on a call where nobody was. That is
+        # why the line is here and not on the group, whose own line fires on
+        # every entry and could be honest on neither half.
+        #
+        # Alternatives because a caller can enter verification twice in a call,
+        # by correcting their number after a booking, and the second identical
+        # sentence is what makes an agent sound like a recording.
+        announce:
+          - Let me verify you first.
+          - First, let me get you verified.
+          - One moment, let me pull your details up.
         tools:
           - find_or_create_customer
         # One entry per tool, and the alternatives are a list under the field.
@@ -33,15 +48,41 @@ agents:
                   - created
         assign:
           - customer_phone: result.customer_phone
+          # What the concierge reads to know verification already happened. It
+          # exists because this is no longer a group step: `skip_when_confirmed:`
+          # decided that structurally and there is no equivalent for a plain
+          # task, so the decision moves into the owner's prompt and the owner
+          # needs something to read. Deliberately the status and not the number:
+          # the concierge must never hold a phone number it could speak.
+          - customer_verified: result.customer_status
         context:
           history: messages
 
-      # No `announce:` here. A task's own line is spoken only under
-      # `opening: listen`, and this step's opening has to report what the diary
-      # holds, which is a generated turn. The line that covers this step's entry
-      # rides on `find_slots` instead, which is the first thing it does.
       - name: manage_booking
+        when: >-
+          The caller wants to create, move or cancel a booking. Includes a
+          change to an appointment just made.
         instructions: tasks/booking.md
+        # Spoken as this step is entered, and it used to sit on `find_slots`
+        # instead. A tool's line is emitted inside the tool body, so it fires
+        # once per invocation: on the live call of 2026-09-16 (trace 917975e9)
+        # the model read the diary twice in one turn and the caller heard two
+        # announcements 0.8 seconds apart. A step's line fires once in `on_enter`
+        # whatever the step then does, so the repetition is not a rule the model
+        # has to follow, it is a shape it cannot break.
+        #
+        # It is also earlier. The step's line is spoken before the model has
+        # decided anything; the tool's was spoken after the request that chose
+        # the tool. Measured on the same trace, step entry ran at t=25.46 and the
+        # tool at t=26.10, so the caller hears this 0.64 seconds sooner.
+        #
+        # Alternatives because this fires once per booking, and a caller can
+        # book and then move it inside a minute. A live call played one sentence
+        # twice in forty-four seconds, which is what a recording sounds like.
+        announce:
+          - Let me double check what I have available.
+          - Let me see what is free.
+          - Right, let me have a look at the diary.
         tools:
           - find_slots
           - save_booking
@@ -58,8 +99,6 @@ agents:
           - appointment: result.appointment
         context:
           history: messages
-    task_groups:
-      - book
     handoffs:
       - to_complaints
     escalations:
@@ -110,55 +149,33 @@ shapes:
       - booking_id: Id
       - service: Literal["haircut", "hair-color", "blowout"]
       - date: Date
-      # The agent says this out loud and cannot work one out from the date. A
-      # live call on 2026-09-16 booked 2026-09-18, which is the Friday the
-      # caller asked for, and confirmed it as "Thursday the 18th": every turn
-      # before it had the day right, and the one sentence read off this record
-      # was wrong, because the record held a date and nothing else. The tool
-      # fills it, so no prompt does the arithmetic.
-      - weekday: string
+      # The whole confirmation phrase, "Friday at 9:00 AM", composed by the
+      # tool. Three live calls on 2026-09-16 got a different part of it wrong,
+      # each time because the agent built the sentence from something other
+      # than this record: a Friday read off a date as "Thursday the 18th", a
+      # "09:00" read back as "09:00 AM", and a move saved at 09:00 confirmed as
+      # "3:00 PM", which was the time the caller had said two turns earlier.
+      # The record already knows the answer, so no prompt composes one.
+      - spoken: string
       - time: Time
       - action: Literal["book", "move", "cancel"]
 
-# One booking request, start to finish, with no owner request between the two
-# steps. Verification is skipped when the caller's number is already confirmed,
-# which is every booking after the first on a call. The `announce:` covers
-# entering the group, so the caller hears something while the first step opens.
+# No `task_groups:` here, and there was one until 2026-09-16. A `book` group ran
+# verify_customer then manage_booking as two steps of one invocation, which is a
+# better shape than what replaced it: the group chained the steps itself, so the
+# owner spent no model request deciding to enter the second one.
 #
-# That line has to be true on both paths, because this group opens on the
-# verification question the first time and on the diary every time after. A
-# line naming either one is a lie on the other half of the calls: "let me pull
-# that up" was spoken and then followed by a question about the caller's phone
-# number, which is not something you pull up.
+# It came out because it does not run on Pipecat. On the live Pipecat call of
+# 2026-09-16 (trace 5a330c65) the group was entered, held the call for eleven
+# seconds, produced no model request and no audio at all, and the caller heard
+# only the greeting before asking "Hello?". Entering it a second time did the
+# same. The lowering compiles and validates; it just never speaks.
 #
-# It is also the only announce in this flow, because the skill's latency page
-# says not to put one on two tools that fire in the same turn. Measured on the
-# live LiveKit call of 2026-09-16: the request that enters this group and the
-# verification turn after it together leave about 2.6 seconds between the caller
-# finishing their request and hearing anything, the longest silence in the call.
-#
-# One line spoken on every entry means the caller hears the same sentence once
-# per booking, which on a call with two bookings sounds like a recording. The
-# same call played it three times in fifty seconds, and the third was a bug in
-# the owner's prompt rather than in this line: the group returns a neutral
-# `completed` and carries the caller's last turn back with it, so the owner read
-# "Okay, great. Let's do 3:00 PM." above a completed result as a request nobody
-# had served and entered here again. The diary refused the duplicate with
-# slot_taken and the step then had nothing to save. The owner's workflow now
-# says a completed flow is a served request; varying the line itself would take
-# a list here, which this key does not accept.
-task_groups:
-  book:
-    when: >-
-      The caller wants to create, move or cancel a booking. Includes a change to
-      an appointment just made.
-    announce: Sure, let me get that sorted for you.
-    steps:
-      - task: verify_customer
-        skip_when_confirmed: customer_phone
-      - manage_booking
-    context_scope: shared
-    then: return
+# Two plain tasks cost one extra model request on the booking turn, which is the
+# price of the example running on both targets. Verification is no longer
+# skipped by `skip_when_confirmed:`, which is a group-step field: the concierge
+# reads `customer_verified` and decides, which is what it did before the group
+# existed.
 
 variables:
   appointment:
@@ -214,6 +231,26 @@ variables:
       verification step has heard them agree this value stays unconfirmed and
       appears in no prompt but that step's own.
 
+  customer_verified:
+    # Plain string rather than a Literal of the two statuses that can reach it.
+    # The step's `finish:` only fires on existing or created, so `invalid` never
+    # lands here, but the compiler checks the tool's declared output against the
+    # variable and not the gate in front of it, so a narrower type is refused.
+    type: string
+    default: ""
+    description: >-
+      Whether verification has already run on this call, and what it found. Set
+      by the verification step as it ends, which only happens on a number the
+      caller agreed to, so a value here means the number beside it is confirmed.
+
+      It exists for the concierge, which has to decide whether to verify before
+      running the booking step and cannot read `customer_phone` to find out: an
+      unconfirmed number renders in no prompt but the verification step's own,
+      and a confirmed one must not be in front of an agent that might say it out
+      loud. This carries the same fact with nothing sensitive in it.
+
+      Empty means nobody has been verified yet on this call.
+
 prefetch:
   - name: today
     clock: now
@@ -229,7 +266,6 @@ prefetch:
       - customer_phone: result.value
 
 secrets:
-  - GOOGLE_API_KEY
   - OPENAI_API_KEY
   - SLNG_API_KEY
   - LANGFUSE_SECRET_KEY
@@ -257,14 +293,24 @@ knowledge:
 
 models:
   think:
+    # Back off native Gemini on 2026-09-16, after one live call (trace 917975e9)
+    # lost 18.5 seconds to two `MALFORMED_FUNCTION_CALL` aborts and the caller
+    # asked whether anybody was still there. That finish reason is a Gemini
+    # server-side abort: the model emits its tool call as plain text instead of
+    # a structured part, and the turn is thrown away. Nothing in this package
+    # reaches it. The one deterministic trigger anybody has bisected is a tool
+    # property named after a Python keyword, and none of ours is.
+    #
+    # The plugin then makes one abort cost nine seconds: MALFORMED is not in
+    # livekit-plugins-google's non-retryable list (llm.py:122-129 in 1.8.2), so
+    # the agents loop runs four attempts with 4.1 seconds of sleep between them.
+    # The emitted session now caps that at one retry, which is worth having on
+    # any provider, but a model that does not abort is worth more.
     reasoning:
-      provider: google
-      model: gemini-3.5-flash-lite
+      provider: openai
+      model: gpt-5.6-luna
       params:
-        vertexai: true
-        location: eu
-        thinking_config:
-          thinking_level: minimal
+        reasoning_effort: "none"
   speak:
     voice:
       provider: slng

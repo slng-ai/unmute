@@ -193,6 +193,12 @@ receiving agent. It does not return through the task owner. A task definition
 has `tools:` and `handoffs:` and no other list, so a task or an escalation on a
 task is unwritable rather than rejected: there is no key to put one in.
 
+A step is refused, rather than run, when the caller has not spoken since it last
+returned. A completed result with no new caller turn above it is the model
+reading its own finished work as though it were a fresh request, and running the
+step again answers nothing while costing the caller a turn. The refusal arrives
+before the step's `announce:`, so a refused call speaks nothing at all.
+
 A task that lists no handoff still has a way out. Every task prompt here
 ends with one generated rule: when the caller asks for something none of the
 step's tools can do, and no handoff on the step covers it, call `finish` right
@@ -423,6 +429,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 from dataclasses import dataclass
 from typing import Annotated
 import httpx
@@ -430,6 +437,7 @@ from dotenv import load_dotenv
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from livekit.agents import (
+    APIConnectOptions,
     NOT_GIVEN,
     Agent,
     AgentTask,
@@ -447,6 +455,9 @@ from livekit.agents import (
 )
 from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup
 from livekit.agents.voice import MetricsCollectedEvent
+# Not re-exported from livekit.agents or livekit.agents.voice, so it comes from
+# the module that defines it. Checked against 1.6.10 and 1.8.x.
+from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import openai, silero, slng
 
 import dev_metrics
@@ -459,6 +470,27 @@ logger.setLevel(logging.INFO)
 
 load_dotenv()
 
+
+
+# --- announcements ---------------------------------------------------------
+
+# A line a package writes as `announce:` is spoken by this code, not written by
+# the model, so one sentence is the same sentence every time it fires. A live
+# call on 2026-09-16 entered the booking flow twice inside a minute and played
+# "Sure, let me get that sorted for you." both times. An author writing several
+# alternatives gets one of them per firing, and never the one that site used
+# last.
+_ANNOUNCE_LAST: dict[str, str] = {}
+
+
+def _announce(key: str, lines: list[str]) -> str:
+    """One of these lines, never the one this key used last."""
+    # ponytail: process wide, not per call. Two concurrent callers can only
+    # affect each other's variety, which is the whole thing this is for.
+    choices = [line for line in lines if line != _ANNOUNCE_LAST.get(key)] or lines
+    pick = random.choice(choices)
+    _ANNOUNCE_LAST[key] = pick
+    return pick
 
 # --- prompts ---------------------------------------------------------------
 
@@ -955,6 +987,17 @@ class _GroupStop(Exception):
         self.results = results
 
 
+def _caller_turns(chat_ctx) -> int:
+    """How many turns the caller has taken in this context.
+
+    The one signal that separates "they asked again" from "the model re-read its
+    own finished work". A step that has already run and returned cannot have a
+    new request in front of it unless somebody spoke, so this is what each
+    delegate's re-entry guard compares.
+    """
+    return sum(1 for message in chat_ctx.messages() if message.role == "user")
+
+
 async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent, flow: dict) -> None:
     """Fill LiveKit's empty task tool output before the next shared task.
 
@@ -1056,6 +1099,24 @@ class Events(Agent):
     @function_tool
     async def do_event(self, ctx: RunContext) -> dict:
         """The caller is ready to plan their event; run the events flow. When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. A completed status means the step finished. Read any saved values through your own prompt references. An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."""
+        # Already ran, and nobody has spoken since. Then this is not a second
+        # request, it is the model reading its own completed result as though it
+        # were one, and running the whole thing again is the worst possible
+        # answer: on a live call on 2026-09-16 (trace 917975e9) a booking saved,
+        # the flow re-entered on the caller's own "3 o'clock" still sitting
+        # above the result, read the diary twice more, and the last thing the
+        # caller heard was an agent saying it was off to check the diary.
+        #
+        # Refused here rather than asked for in the prompt, which this package
+        # did twice and which failed twice. The announcement is below this, so a
+        # refused call speaks nothing at all.
+        if _caller_turns(self.chat_ctx) == getattr(self, "_ran_at_do_event", None):
+            return {
+                "refused": "This already ran and finished, and the caller has "
+                "not spoken since, so its result is the answer to what they "
+                "asked. Reply to them from the values in your prompt. Run it "
+                "again only once they have asked for something new."
+            }
         owner_ctx = self.chat_ctx.copy()
         # What the group reached, recorded as it goes: a group that stops early
         # still owes the owner the steps it did run.
@@ -1074,6 +1135,12 @@ class Events(Agent):
             task_results = stop.results
         finally:
             await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+            # Counted after the restore, so a turn a step consumed and carried
+            # back is included: that turn is the one the owner is about to read,
+            # and it is exactly the turn that must not be mistaken for a new
+            # request. Set in the finally so a step that raised still blocks an
+            # immediate retry the caller did not ask for.
+            self._ran_at_do_event = _caller_turns(self.chat_ctx)
         dev_metrics.dev_task_returned(ctx, *task_results.values())
         return _group_status(task_results)
 
@@ -1152,6 +1219,24 @@ class Reservations(Agent):
     @function_tool
     async def do_reserve(self, ctx: RunContext) -> dict:
         """The caller is ready to book a table; run the reservation flow. When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. A completed status means the step finished. Read any saved values through your own prompt references. An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."""
+        # Already ran, and nobody has spoken since. Then this is not a second
+        # request, it is the model reading its own completed result as though it
+        # were one, and running the whole thing again is the worst possible
+        # answer: on a live call on 2026-09-16 (trace 917975e9) a booking saved,
+        # the flow re-entered on the caller's own "3 o'clock" still sitting
+        # above the result, read the diary twice more, and the last thing the
+        # caller heard was an agent saying it was off to check the diary.
+        #
+        # Refused here rather than asked for in the prompt, which this package
+        # did twice and which failed twice. The announcement is below this, so a
+        # refused call speaks nothing at all.
+        if _caller_turns(self.chat_ctx) == getattr(self, "_ran_at_do_reserve", None):
+            return {
+                "refused": "This already ran and finished, and the caller has "
+                "not spoken since, so its result is the answer to what they "
+                "asked. Reply to them from the values in your prompt. Run it "
+                "again only once they have asked for something new."
+            }
         owner_ctx = self.chat_ctx.copy()
         # What the group reached, recorded as it goes: a group that stops early
         # still owes the owner the steps it did run.
@@ -1162,7 +1247,7 @@ class Reservations(Agent):
                 on_task_completed=lambda event: _share_task_result(group, event, _flow),
             )
             await group.update_chat_ctx(owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True), exclude_invalid_function_calls=False)
-            group.add(lambda: FindSlot(), id="find_slot", description="find slot")
+            group.add(lambda: FindSlot(speak_opening=True), id="find_slot", description="find slot")
             group.add(lambda: ConfirmBooking(), id="confirm_booking", description="confirm booking")
             result = await group
             task_results = result.task_results
@@ -1170,6 +1255,12 @@ class Reservations(Agent):
             task_results = stop.results
         finally:
             await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+            # Counted after the restore, so a turn a step consumed and carried
+            # back is included: that turn is the one the owner is about to read,
+            # and it is exactly the turn that must not be mistaken for a new
+            # request. Set in the finally so a step that raised still blocks an
+            # immediate retry the caller did not ask for.
+            self._ran_at_do_reserve = _caller_turns(self.chat_ctx)
         dev_metrics.dev_task_returned(ctx, *task_results.values())
         return _group_status(task_results)
 
@@ -1398,10 +1489,15 @@ class ConfirmBooking(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         self._finish_call_id = ctx.function_call.call_id
 
 class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
-    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, speak_opening: bool = False) -> None:
         super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx)
         if isinstance(chat_ctx, llm.ChatContext):
             self._chat_ctx = chat_ctx.copy()
+        # A group step speaks its own `announce:` as it is entered. A delegate
+        # says it at the seam instead, before this class is even built, so the
+        # caller of a standalone entry leaves this False and nothing says it
+        # twice.
+        self._speak_opening = speak_opening
         self._response_tool_call_ids: set[str] = set()
         # The call id of the ending that committed. A group reads it to fill its
         # own tool output, and a handoff called beside a terminal tool reads it
@@ -1410,6 +1506,11 @@ class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
 
     async def on_enter(self) -> None:
         await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
+        # Said here, not at the seam, so it lands in this step's own context and
+        # the model can see the sentence it just spoke. Not awaited: the opening
+        # request runs while it plays.
+        if self._speak_opening:
+            dev_say(self.session, _announce("task:find_slot", ["Let me see what is open.", "One moment, let me look at the book."]))
         # The task's own instructions describe this step; let them drive the opening.
         self.session.generate_reply()
 
@@ -1493,6 +1594,22 @@ async def entrypoint(ctx: JobContext) -> None:
     require_env()
     session = AgentSession[Userdata](
         userdata=Userdata(),
+        # One retry, not the framework's three. A failed completion is retried
+        # four times by default with 0.1 + 2.0 + 2.0 seconds of sleep between the
+        # attempts, on top of four round trips to the provider: a live call on
+        # 2026-09-16 (trace 917975e9) spent 18.5 seconds in two of those and the
+        # caller asked whether anybody was still there.
+        #
+        # A caller cannot wait that out, and a retry loop tuned for a batch job
+        # is the wrong default for a conversation. One retry still covers a
+        # transient fault and costs 0.1s, because the first retry is nearly
+        # immediate; anything worse is better surfaced than slept through.
+        #
+        # ponytail: fixed, not authorable. No package would want a different
+        # number, and the one that does can say so when it turns up.
+        conn_options=SessionConnectOptions(
+            llm_conn_options=APIConnectOptions(max_retry=1),
+        ),
         stt=slng.STT(api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3-en"),
         llm=openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o-mini", temperature=0.4),
         tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-thalia-en", model="slng/deepgram/aura:2-en"),

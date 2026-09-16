@@ -17,7 +17,7 @@ On this page:
 - [What you need](#what-you-need) - the values in `.env`
 - [Structure](#structure) - what each path holds
 - [The two agents and their tasks](#the-two-agents-and-their-tasks) - who does what
-- [The booking flow](#the-booking-flow) - one group, two steps
+- [The booking flow](#the-booking-flow) - two tasks, run in order
 - [Typed values and context](#typed-values-and-context) - what crosses a handoff
 - [Before the greeting](#before-the-greeting) - the pre-fetch block
 - [The manager transfer and the knowledge bases](#the-manager-transfer-and-the-knowledge-bases) - escalation and documents
@@ -56,17 +56,25 @@ the package.
 
 | Name | Purpose |
 |---|---|
-| `GOOGLE_API_KEY` | Gemini 3.5 Flash-Lite through Google's EU Vertex endpoint; needs `aiplatform.endpoints.predict` access |
 | `OPENAI_API_KEY` | the knowledge embeddings at startup |
 | `SLNG_API_KEY` | the voice and the transcription. One key for both |
 | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` | trace ingest. All three together, or startup fails |
 | `MANAGER_PHONE_NUMBER` | the transfer destination, in E.164. Needed only for a phone call |
 
-Both targets use their native Google plugin with Gemini 3.5 Flash-Lite and
-minimal thinking. The Vertex client is pinned to
-`https://aiplatform.eu.rep.googleapis.com`; no model request falls back globally.
-This selects the reasoning endpoint only. The knowledge embeddings still use
-OpenAI, and speech uses the SLNG gateways declared below.
+Both targets reason on `gpt-5.6-luna` with `reasoning_effort: none`, which is
+the model this package was qualified on: 12 out of 12 on multi-turn tool
+routing, measured against its own prompts and tools.
+
+Native Gemini 3.5 Flash-Lite held the slot for two days in September 2026 and
+came out after one live call lost 18.5 seconds to two `MALFORMED_FUNCTION_CALL`
+aborts, which is Gemini throwing away a turn whose tool call it emitted as plain
+text rather than as a structured part. Nothing in this package triggers it and
+Google has no fix, so the model left rather than the symptom being made cheaper.
+Screen a replacement on multi-turn tool routing before latency; latency and
+single-turn tool calls predict neither.
+
+The knowledge embeddings use OpenAI, and speech uses the SLNG gateways declared
+below.
 
 A real inbound call also needs its carrier credentials. The `livekit` target
 needs `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD` and
@@ -94,8 +102,8 @@ call. Customer care is a second agent because it holds a document set and a
 permission the concierge must not have: the refund policy and the complaint
 record.
 
-**Two tasks, and both are steps of the booking group.** Verification confirms
-who is calling. Booking does book, move and cancel in one task and saves a typed
+**Two tasks, run in that order by the concierge.** Verification confirms who is
+calling. Booking does book, move and cancel in one task and saves a typed
 Appointment.
 
 A task is worth a model request when something has to happen in an order.
@@ -117,13 +125,23 @@ its own fixed line as it starts, so the prompt adds none of its own.
 
 ## The booking flow
 
-**One booking flow, two steps, no request between them.** `book` is a task group:
-verification, then booking. The concierge calls it once and does not choose
-between the two steps, and the group does not ask the concierge which comes
-next. Verification carries `skip_when_confirmed: customer_phone`, so a second
-booking on the same call goes straight to the booking step; a caller who
-corrects their number gets verification again, because entering that step
-withdraws the confirmation it made.
+**Two steps, and the concierge runs them in order.** Verification, then booking.
+The concierge reads `customer_verified`: empty means nobody on this call has been
+identified, so it runs `verify_customer` first; a status there means that caller
+is verified for the rest of the call and it goes straight to `manage_booking`. A
+caller who corrects their number gets verification again, because entering that
+step withdraws the confirmation it made.
+
+**This was a task group until September 2026, and the group was the better
+shape.** `book` held the same two steps and chained them itself, so the concierge
+spent no model request deciding to enter the second one. It came out because it
+does not run on Pipecat: on a live call the group was entered, held the call for
+eleven seconds, made no model request and produced no audio at all, and the
+caller heard only the greeting. The lowering compiles and validates; it never
+speaks. One extra model request on the booking turn is what the example costs to
+work on both targets. `skip_when_confirmed:` went with it, because that is a
+group-step field, and the decision it made structurally is now the concierge's
+to make from `customer_verified`.
 
 **Both steps end on their own tools.** `verify_customer` names its lookup
 under `finish:`, and `manage_booking` names `save_booking` once, with its three
@@ -136,11 +154,10 @@ hands over, with no model request in between and without the result reaching
 the model. A result that is not a success, a `not_confirmed` or a
 `slot_taken`, goes back to the model and the step stays open.
 
-Together, the group and `finish:` take the model out of the seams. The group
-means the concierge makes one call and never chooses between the two steps, and
-`finish:` removes the model request between a tool succeeding and the hand-over
-that follows it, on both steps. The one request left on the turn that books is
-the concierge saying it is done.
+`finish:` is what takes the model out of the seams now: it removes the model
+request between a tool succeeding and the hand-over that follows it, on both
+steps. The one request left on the turn that books is the concierge saying it is
+done.
 
 `save_booking` returns the record it saved, whole, on success: the
 `appointment`, complete. That is what makes the step's `assign:` possible
@@ -154,34 +171,94 @@ breath. Asking for those separately cost two model round trips for one request.
 `save_booking` is the only tool that changes anything, so the caller's yes is
 checked in one place.
 
-**One line covers the wait.** The `book` group speaks a fixed sentence as it
-starts, and nothing else in the flow speaks one. That covers the longest silence
-in the call: on a live LiveKit call, about 2.6 seconds between the caller
-finishing their request and hearing anything, because the delegate call and the
-verification turn are two model requests back to back.
+**One line per step, and neither is on a tool.** A booking has two silences in
+it and they need different lines, because different things are happening behind
+them.
 
-Three lines were tried and each of the other two was a different mistake. The
-`manage_booking` step's own line never reached the caller at all, because a
-task's `announce:` is spoken only under `opening: listen` and this step opens on
-a generated turn. Moving it onto `find_slots` made it audible and made it
-collide: on the second booking of a call, verification is skipped, so the
-group's line and the tool's landed back to back with one model request between
-them. And `save_booking`'s line was a promise the tool could break, because an
-`announce:` is spoken when a tool is called and this one refuses a save that
-arrives unconfirmed. The caller heard "putting that through now" and then a
-question asking their permission.
+The front one is `verify_customer`'s. It fires as the concierge calls the step,
+covering the two model requests it takes to ask the caller for their number.
+
+The second is `manage_booking`'s, covering the three requests between the caller
+confirming their number and hearing what is free: the lookup, the diary read,
+then the turn that says what is open. On a booking after the first this is the
+only line the caller hears, because verification is skipped.
+
+**Both sit on the step, not on the tool it calls, and that is the useful part.**
+A tool's `announce:` is emitted inside the tool body, so it fires once per call
+rather than once per request. The diary line lived on `find_slots` until
+September 2026, when a live call had the model read the diary twice in one turn
+and the caller heard two different announcements 0.8 seconds apart. No prompt
+rule stops a model chaining a tool, and this package had one that said not to.
+
+A step's line fires once in the entry, before the model has decided anything, so
+the repetition is not a rule to follow but a shape that cannot break. It is also
+earlier: measured on that same call, the step entry ran 0.64 seconds ahead of
+the tool.
+
+**Both lines are written as alternatives.** `announce:` takes a list, and the
+caller hears one of its entries each time the line fires, never the one that site
+used last. One fixed sentence is the same sentence every time, and a caller who
+books and then moves the booking hears it twice inside a minute.
+
+Three other places were tried and each was a different mistake. The `book` group
+carried one line for both steps, and no sentence was true on both halves: "let
+me pull that up" was followed by a question about the caller's phone number, and
+"let me get you verified" would play again on a move where nobody is verified.
+`find_or_create_customer` lost its line to the step above it, which is earlier
+and honest on both routes in. And `save_booking`'s line was a promise the tool
+could break, because an `announce:` is spoken when a tool is called and this one
+refuses a save that arrives unconfirmed. The caller heard "putting that through
+now" and then a question asking their permission.
+
+**A spoken line is not a caller turn.** A step that opens with "Got it," after
+its own announcement is agreeing with itself, which a live call on Pipecat did,
+because a `TTSSpeakFrame` never reaches the model's context there. Both step
+prompts say in one sentence that a fixed line was already spoken and to go
+straight to the question, so the two targets behave the same.
 
 The hesitation a person actually makes before answering rides on the answer
 instead. The booking prompt opens its first sentence with a written "hmm" or
 "okay", which the voice reads as thinking, and which costs no speech of its own
-and no extra request.
+and no extra request. When the caller has just confirmed their number it opens
+by closing that off instead, "Perfect, got you.", and writes no hesitation as
+well. That opener is not "you're all set", because the concierge already owns
+that line for the moment a booking lands, and a live call played both of them
+thirteen seconds apart.
 
-**Two rules live in the booking backend, not the prompt.** `save_booking`
+**The offer turn asks a question, and which question depends on the count.**
+Three times read out with nothing asked is a wasted round trip: a live call
+answered "Gotcha." to a bare list, and the next turn had to guess which slot the
+caller meant. Several free times end the turn with "which works best for you?".
+Exactly one free time ends it with "would that work for you?", because a call
+offered a single slot and asked which one suited them, and the caller answered
+"Um, well. It's the only one that you have." That second question is already the
+confirming question, so a yes to it saves.
+
+**Three rules live in the booking backend, not the prompt.** `save_booking`
 refuses with `has_booking` while the caller already holds one, unless the model
 passes `additional` because the caller asked for another appointment. A change
 to a booking is `action: move`, and a prompt rule alone does not stop a model
 from answering "move it" with a second booking. And a slot earlier than the
 salon's own clock today is not offered and not accepted.
+
+The third is `find_slots`, and it is a rule about what the tool does **not**
+offer. The booking step opens with a generated turn, and a step whose whole job
+is the diary pulls the model straight at the diary tool. While an empty `date`
+was a documented way to call it, the model took that route on entry, every turn,
+before the caller had named a day. A live call on 2026-09-16 did it twice, read
+the two empty lists and the `ok` beside them as a finished search, invented an
+appointment the diary had just denied, and asked for the service three times.
+The step prompt already said to ask for a day first, which is the repo's own
+lesson that a tool in reach beats a prompt rule.
+
+So the empty date is gone from the tool's description: every call names a day.
+Nothing is lost, because `bookings` comes back whatever day you ask for, so a
+caller changing an appointment is found by asking for today. `need_date` stays
+as the backstop, returned when a dateless call arrives from a caller holding
+nothing, and it says what to do rather than reporting success. A text run before
+the description changed called the tool with an empty date on three consecutive
+turns, each one speaking an `announce:` line; after it, every call carried a day
+and the turn with nothing new to look up made no call at all.
 
 ## Typed values and context
 
@@ -196,6 +273,15 @@ book, move or cancellation succeeds. The owner and customer care read it through
 explicit prompt references, so a later complaint can refer to the updated date
 without asking again. Tools inject the confirmed phone number. No value is
 automatically added to a prompt.
+
+That record carries a `spoken` field, which is the confirmation sentence itself:
+"Friday at 9:00 AM". It is there because every part of that sentence the agent
+composed itself, it got wrong on a live call. A weekday worked out from a date
+turned a Friday booking into "Thursday the 18th". A 24 hour time copied out of
+the record was read back as "09:00 AM". A move saved at 09:00 was confirmed as
+"3:00 PM", which was what the caller had meant two turns earlier by "the same
+time". A value the backend already knows is cheaper to write down than to ask
+the model to derive, and it is right every time.
 
 **Five variables, and each one is read somewhere.** A saved value costs a task
 to write and a line in every prompt that names it, so a value nothing reads is
@@ -291,9 +377,9 @@ python3 scripts/read_langfuse_trace.py --env examples/salon-concierge/.env
 
 ### It stops at startup and nothing speaks
 
-A value the agent reads at startup is missing from `.env`. `GOOGLE_API_KEY` is
-read for Gemini, `OPENAI_API_KEY` embeds the knowledge documents, and the three
-Langfuse values have to be there together.
+A value the agent reads at startup is missing from `.env`. `OPENAI_API_KEY`
+reasons and embeds the knowledge documents, `SLNG_API_KEY` covers both speech
+legs, and the three Langfuse values have to be there together.
 
 **Fix:** take the names from the generated example file, fill them in, and run
 again.

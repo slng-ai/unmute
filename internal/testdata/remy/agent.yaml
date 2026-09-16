@@ -32,7 +32,18 @@ agents:
     # Both steps of do_reserve. Neither carries a when:, so neither is something
     # this agent decides to run on its own: the group runs them in order.
     tasks:
+      # The only announcing step in this package, and the only one a single
+      # group runs, which is what makes it countable: its line has to be emitted
+      # exactly once, as the step is entered, and not again where the agent
+      # calls it. Alternatives so the chooser is exercised too. It lives here
+      # because the shipped example that used to hold this gate,
+      # examples/salon-concierge, dropped its task group on 2026-09-16 when
+      # groups turned out to produce no speech at all on Pipecat (trace
+      # 5a330c65).
       - name: find_slot
+        announce:
+          - Let me see what is open.
+          - One moment, let me look at the book.
         instructions: tasks/find_slot.md
         tools:
           - check_availability

@@ -433,7 +433,7 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		// announce needs a body to speak before, so it follows inject's rule.
 		// Blank already resolved to empty in Build, so reaching here means the
 		// author wrote a real sentence.
-		if tool.Announce != "" {
+		if len(tool.Announce) > 0 {
 			switch tool.Execution {
 			// A knowledge lookup is a body to speak before, the same as a
 			// webhook call, so FR-029 reuses this field rather than adding one.
@@ -447,8 +447,11 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			// Fixed sentence, same rule as the transfer announcement: a
 			// rendered line would need the variable set to be in scope at the
 			// moment the tool fires, which is not a promise this field makes.
-			if HasTemplate(tool.Announce) {
-				errors = add(errors, fmt.Sprintf("tool %q announce does not support templates", name))
+			for _, line := range tool.Announce {
+				if HasTemplate(line) {
+					errors = add(errors, fmt.Sprintf("tool %q announce does not support templates", name))
+					break
+				}
 			}
 		}
 		if tool.Execution == ToolBuiltin {
@@ -1012,7 +1015,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		if task.Opening != "" && task.Opening != OpeningGenerate {
 			applyCapability(caps, targetcap.FieldTaskOpening, provider, row)
 		}
-		if task.Opening == OpeningListen && task.Announce == "" {
+		if task.Opening == OpeningListen && len(task.Announce) == 0 {
 			row.Warnings = append(row.Warnings, fmt.Sprintf(
 				"%s opens by listening and has no announce:, so the caller hears nothing until they speak; "+
 					"add an announce: line or drop opening: listen", name))
@@ -1043,7 +1046,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 			if control.Task != "" {
 				applyCapability(caps, targetcap.FieldTask, provider, row)
 			}
-			if control.Announce != "" {
+			if len(control.Announce) > 0 {
 				applyCapability(caps, targetcap.FieldDelegateAnnounce, provider, row)
 			}
 		case *AgentTransfer:
@@ -2236,7 +2239,7 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 		if len(tool.Dependencies) > 0 {
 			applyCapability(caps, targetcap.FieldToolDependencies, provider, row)
 		}
-		if tool.Announce != "" {
+		if len(tool.Announce) > 0 {
 			applyCapability(caps, targetcap.FieldToolAnnounce, provider, row)
 		}
 	}
@@ -2251,7 +2254,7 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 			if agent.Tools[ref].Execution == ToolKnowledge {
 				applyCapability(caps, targetcap.FieldToolKnowledgeTask, provider, row)
 			}
-			if agent.Tools[ref].Announce != "" {
+			if len(agent.Tools[ref].Announce) > 0 {
 				applyCapability(caps, targetcap.FieldToolAnnounceTask, provider, row)
 			}
 		}

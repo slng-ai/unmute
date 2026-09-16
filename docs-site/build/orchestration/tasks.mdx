@@ -361,6 +361,18 @@ Let the owner confirm it once, using its own placeholders. If the task waits
 for another turn, it may receive a new request before saving the first result.
 An `unserved` status does not undo an action already completed by a tool.
 
+## A finished task will not run again until the caller speaks
+
+A task the owner already ran is refused, not re-run, while the caller has said
+nothing since it returned. A completed result with no new caller turn above it is
+the model reading its own finished work as a fresh request: the owner reruns the
+whole step, repeats its announcement, and answers nothing. The refusal arrives
+before the step's `announce:`, so a refused call is silent.
+
+Nothing to configure. Write the owner's prompt to expect it: a bare "yes" above a
+completed task is the caller answering the question that task already asked and
+acted on, so the owner should read its saved values and reply.
+
 Better still, let the tool end the task. See
 [Say what success looks like](#say-what-success-looks-like).
 

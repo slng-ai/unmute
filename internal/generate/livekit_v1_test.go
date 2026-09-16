@@ -1098,7 +1098,7 @@ func TestLiveKitV1IsolatedGroupTaskAgentTransfer(t *testing.T) {
 		// Walked as a plan so the sequence can stop when a step ends unserved,
 		// the same way a shared group does.
 		`_plan = ["find_slot", "confirm_booking"]`,
-		`"find_slot": lambda: FindSlot(chat_ctx=llm.ChatContext()),`,
+		`"find_slot": lambda: FindSlot(chat_ctx=llm.ChatContext(), speak_opening=True),`,
 		`"confirm_booking": lambda: ConfirmBooking(chat_ctx=llm.ChatContext()),`,
 		"for _id in _plan:",
 		`if isinstance(task_results[_id], dict) and task_results[_id].get("unserved_request"):`,
@@ -1354,7 +1354,7 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	for _, want := range []string{
 		// the isolated flow: fresh AgentTasks, results dict, typed return
 		"async def do_reserve(self, ctx: RunContext) -> dict:",
-		`"find_slot": lambda: FindSlot(chat_ctx=llm.ChatContext()),`,
+		`"find_slot": lambda: FindSlot(chat_ctx=llm.ChatContext(), speak_opening=True),`,
 		`"confirm_booking": lambda: ConfirmBooking(chat_ctx=llm.ChatContext()),`,
 		"return _group_status(task_results)",
 		// do_event stays shared, so TaskGroup is still imported and used
@@ -3055,7 +3055,7 @@ func TestLiveKitV1ToolAnnounceSpeaksBeforeTheWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	webhook := agent.Tools["get_invoice"]
-	webhook.Announce = "Let me pull that invoice up."
+	webhook.Announce = []string{"Let me pull that invoice up."}
 	agent.Tools["get_invoice"] = webhook
 	agent.Tools["fetch_notes"] = ir.Tool{
 		Description: "Fetch the caller's saved notes.",
@@ -3063,7 +3063,7 @@ func TestLiveKitV1ToolAnnounceSpeaksBeforeTheWork(t *testing.T) {
 		Execution:   ir.ToolLocal, Handler: "tools/fetch_notes.py",
 		HandlerSource: "def fetch_notes(topic):\n    return {\"notes\": []}\n",
 		Interruption:  ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
-		Announce: "One moment while I find your notes.",
+		Announce: []string{"One moment while I find your notes."},
 	}
 	def := agent.Agents["billing"]
 	def.Tools = append(def.Tools, "fetch_notes")

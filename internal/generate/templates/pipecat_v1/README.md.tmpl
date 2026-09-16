@@ -352,7 +352,13 @@ owner is handed the unserved status.
 {{range .ListeningSteps}}`{{.Step}}` speaks its `announce:` line once and waits for the caller. No
 opening request is made.
 
-{{end}}{{end}}{{end}}A task that lists no handoff still has a way out. Every node's
+{{end}}{{end}}{{end}}A step is refused, rather than run, when the caller has not spoken since it last
+returned. A completed result with no new caller turn above it is the model
+reading its own finished work as though it were a fresh request, and running the
+step again answers nothing while costing the caller a turn. The refusal arrives
+before the step's `announce:`, so a refused call speaks nothing at all.
+
+A task that lists no handoff still has a way out. Every node's
 `role_message` here ends with one generated rule: when the caller asks for
 something none of the step's tools can do, and no handoff on the step covers it,
 call that node's `finish_<task>_<step>` function right away with the closest
