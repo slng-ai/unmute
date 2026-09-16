@@ -123,9 +123,14 @@ async def main():
     running = asyncio.create_task(runner.run())
     try:
         await asyncio.wait_for(returned.wait(), timeout=10)
-        assert state.customer_status == "created"
+        # The task's save landed and its confirmation cleared: that is what the
+        # owner resuming has to see. There is no verification marker to read out
+        # of the owner's prompt any more, because the number is confirm-gated and
+        # the concierge prompt deliberately holds none. The leak check below is
+        # the other half of that same rule.
+        assert state.customer_phone == "+15005550006", state.customer_phone
+        assert "customer_phone" not in state._unconfirmed, state._unconfirmed
         request = requests[-1]
-        assert "Verification status: created." in request["messages"][0]["content"]
         # The booking step runs inside the book group now, so what the owner
         # advertises is the flow rather than the step.
         assert "book" in [tool["function"]["name"] for tool in request["tools"]]

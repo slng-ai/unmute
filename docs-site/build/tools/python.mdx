@@ -71,7 +71,7 @@ def cancel_appointment(customer_id):
 
 Those two are a worked example rather than a quote: they are the smallest shape
 that shows a handler receiving an injected value. For real ones, every tool in
-`examples/salon-concierge` is a local handler, and all eight share the one
+`examples/salon-concierge` is a local handler, and all seven share the one
 `tools/salon.py`.
 
 ## The block
@@ -106,11 +106,11 @@ same way a webhook does. `announce:` gives the agent one fixed sentence to speak
 as the handler starts, and it does not wait for that sentence to finish, so the
 result arrives no later than it would in silence:
 
-```yaml tools/check_availability.yaml
+```yaml tools/record_complaint.yaml
 local:
   handler: tools/salon.py
 
-announce: Let me check.
+announce: Let me get that written down.
 ```
 
 That one is real, from `examples/salon-concierge`. Keep the line shorter than the
@@ -118,6 +118,15 @@ gap it covers: a long one runs into the answer and breaks its own promise of a
 wait. The fixtures above carry no `announce:`, because they return instantly and a
 tool that speaks before doing nothing slow is just noise. Full rules in
 [the behavior fields](/build/tools/overview#the-three-behavior-fields).
+
+Two more things decide whether a tool should carry one at all. The line is spoken
+when the tool is **called**, not when it succeeds, so a tool that can refuse the
+call will sometimes promise something it then does not do. The salon's booking
+tool refuses a save that arrives unconfirmed, and the caller heard "putting that
+through now" followed by a question asking their permission. And only one line
+belongs in a turn: a task group's own `announce:` and a tool's fire together when
+the group's first step calls that tool, which the caller hears as two promises to
+go and look.
 
 ## Where it ends up
 

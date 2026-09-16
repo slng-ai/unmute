@@ -287,15 +287,15 @@ prefetch:
       - customer_phone: result.value
 
   - name: profile
-    tool: look_up_customer
+    tool: look_up_account
     # Required on a tool: entry, never defaulted. Answers "does running this
     # unasked, on every call including wrong numbers, change anything".
     writes: false
     args:
       - phone: "{{customer_phone}}"
     assign:
-      - customer_name: result.name
-      - customer_on_file: result.status
+      - account_name: result.name
+      - account_on_file: result.status
 ```
 
 `profile` assigns two variables from one lookup. An entry can `assign:` as

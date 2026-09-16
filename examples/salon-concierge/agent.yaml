@@ -22,6 +22,9 @@ agents:
         instructions: tasks/verify-customer.md
         tools:
           - find_or_create_customer
+        # One entry per tool, and the alternatives are a list under the field.
+        # Two entries naming one tool, or two pairs naming one field, are both
+        # silently reduced to the last one written.
         finish:
           - tool: find_or_create_customer
             success:
@@ -30,42 +33,27 @@ agents:
                   - created
         assign:
           - customer_phone: result.customer_phone
-          - customer_status: result.customer_status
         context:
           history: messages
 
-      - name: take_confirmation_contact
-        when: >-
-          Run when the caller wants the booking confirmation emailed to them, or
-          asks to change where it goes. Not needed for a caller who does not ask
-          for one, so it never blocks a booking.
-        instructions: tasks/confirmation-contact.md
-        assign:
-          - confirmation_contact: result.confirmation_contact
-          - confirmation_email: result.confirmation_contact.email
-        context:
-          history: messages
-
+      # No `announce:` here. A task's own line is spoken only under
+      # `opening: listen`, and this step's opening has to report what the diary
+      # holds, which is a generated turn. The line that covers this step's entry
+      # rides on `find_slots` instead, which is the first thing it does.
       - name: manage_booking
         instructions: tasks/booking.md
         tools:
-          - list_bookings
-          - check_availability
-          - create_booking
-          - modify_booking
-          - cancel_booking
+          - find_slots
+          - save_booking
         handoffs:
           - to_complaints
         finish:
-          - tool: create_booking
+          - tool: save_booking
             success:
-              - status: booked
-          - tool: modify_booking
-            success:
-              - status: modified
-          - tool: cancel_booking
-            success:
-              - status: cancelled
+              - status:
+                  - booked
+                  - moved
+                  - cancelled
         assign:
           - appointment: result.appointment
         context:
@@ -81,30 +69,14 @@ agents:
     instructions: agents/complaint-specialist.md
     think: reasoning
     speak: voice
+    # record_complaint sits here rather than behind a task of its own. Filing a
+    # complaint is one action, not a step that has to happen in an order, so a
+    # task around it cost a model round trip to enter and bought nothing. The
+    # specialist's own prompt gets the caller's agreement before calling it.
     tools:
+      - record_complaint
       - look_up_refund_policy
       - end_call
-    tasks:
-      # Deliberately not verify_customer. The concierge is the only agent that
-      # verifies. A task in reach beats a prompt rule, so the task is not listed
-      # here. Every tool that needs the number refuses while it is unconfirmed,
-      # and to_concierge is the way back.
-      - name: handle_complaint
-        when: The verified caller wants a complaint recorded.
-        instructions: tasks/complaint.md
-        tools:
-          - record_complaint
-        handoffs:
-          - to_concierge
-          - to_complaints
-        finish:
-          - tool: record_complaint
-            success:
-              - status: recorded
-        assign:
-          - complaints+: result.complaint
-        context:
-          history: messages
     handoffs:
       - to_concierge
     escalations:
@@ -138,24 +110,49 @@ shapes:
       - booking_id: Id
       - service: Literal["haircut", "hair-color", "blowout"]
       - date: Date
+      # The agent says this out loud and cannot work one out from the date. A
+      # live call on 2026-09-16 booked 2026-09-18, which is the Friday the
+      # caller asked for, and confirmed it as "Thursday the 18th": every turn
+      # before it had the day right, and the one sentence read off this record
+      # was wrong, because the record held a date and nothing else. The tool
+      # fills it, so no prompt does the arithmetic.
+      - weekday: string
       - time: Time
-      - action: Literal["create", "modify", "cancel"]
-
-  - name: Complaint
-    description: One recorded complaint; a requested resolution is not an approval.
-    fields:
-      - complaint_id: Id
-      - summary: str
-      - requested_resolution: str
+      - action: Literal["book", "move", "cancel"]
 
 # One booking request, start to finish, with no owner request between the two
 # steps. Verification is skipped when the caller's number is already confirmed,
-# which is every booking after the first on a call.
+# which is every booking after the first on a call. The `announce:` covers
+# entering the group, so the caller hears something while the first step opens.
+#
+# That line has to be true on both paths, because this group opens on the
+# verification question the first time and on the diary every time after. A
+# line naming either one is a lie on the other half of the calls: "let me pull
+# that up" was spoken and then followed by a question about the caller's phone
+# number, which is not something you pull up.
+#
+# It is also the only announce in this flow, because the skill's latency page
+# says not to put one on two tools that fire in the same turn. Measured on the
+# live LiveKit call of 2026-09-16: the request that enters this group and the
+# verification turn after it together leave about 2.6 seconds between the caller
+# finishing their request and hearing anything, the longest silence in the call.
+#
+# One line spoken on every entry means the caller hears the same sentence once
+# per booking, which on a call with two bookings sounds like a recording. The
+# same call played it three times in fifty seconds, and the third was a bug in
+# the owner's prompt rather than in this line: the group returns a neutral
+# `completed` and carries the caller's last turn back with it, so the owner read
+# "Okay, great. Let's do 3:00 PM." above a completed result as a request nobody
+# had served and entered here again. The diary refused the duplicate with
+# slot_taken and the step then had nothing to save. The owner's workflow now
+# says a completed flow is a served request; varying the line itself would take
+# a list here, which this key does not accept.
 task_groups:
   book:
     when: >-
       The caller wants to create, move or cancel a booking. Includes a change to
       an appointment just made.
+    announce: Sure, let me get that sorted for you.
     steps:
       - task: verify_customer
         skip_when_confirmed: customer_phone
@@ -164,17 +161,9 @@ task_groups:
     then: return
 
 variables:
-  customer_status:
-    type: Literal["existing", "created", "invalid"]
-    description: The customer lookup status saved after the caller confirms their number.
-
   appointment:
     type: Appointment
     description: The latest successful booking action, saved only after the tool succeeds.
-
-  complaints:
-    type: list[Complaint]
-    description: Complaints recorded during this call.
 
   booking_date:
     type: Date
@@ -225,52 +214,6 @@ variables:
       verification step has heard them agree this value stays unconfirmed and
       appears in no prompt but that step's own.
 
-  customer_name:
-    type: string
-    default: ""
-    description: >-
-      The name on the record the caller's number belongs to, looked up before the
-      greeting. Inherits `customer_phone`'s confirming step, because a name found
-      from a number nobody has agreed to is exactly as unconfirmed as that number
-      was: greeting a stranger by the account holder's name is the worst thing
-      this feature could do, and the compiler refuses the prompt that would.
-
-  customer_on_file:
-    type: string
-    default: ""
-    description: >-
-      Whether the caller's number was already on file: `existing` or `unknown`.
-      From the same lookup as `customer_name`, in the same call. It is here to
-      show that one entry fills as many variables as the result has fields, and
-      it earns its place: the agent greets a returning customer differently from
-      somebody ringing for the first time, and asking would waste a turn.
-
-      Inherits `customer_phone`'s confirming step, exactly as `customer_name`
-      does, because a status found from a number nobody agreed to is as
-      unconfirmed as that number was.
-
-  confirmation_contact:
-    type: NameEmail
-    description: >-
-      Who the confirmation goes to, name and email address held apart. The type
-      is one this compiler supplies, so the two parts are readable separately:
-      the agent can say whose name the booking is under without reading an
-      address out loud, which is what nobody wants over the phone.
-
-      Also takes the whole thing as one string, so a tool returning
-      `Fred Bloggs <fred@example.com>` needs nothing written here to be
-      understood. The address itself is checked by email-validator, with no DNS
-      lookup, because this runs inside a turn and a slow resolver would hold the
-      caller in silence.
-
-  confirmation_email:
-    type: EmailStr
-    default: ""
-    description: >-
-      The address on its own, plain text a tool can post to as it stands. Taken
-      off `confirmation_contact` rather than asked for again, so the caller
-      spells it out once and both values are filled from that one answer.
-
 prefetch:
   - name: today
     clock: now
@@ -284,15 +227,6 @@ prefetch:
     source: from_number
     assign:
       - customer_phone: result.value
-
-  - name: profile
-    tool: look_up_customer
-    writes: false
-    args:
-      - phone: "{{customer_phone}}"
-    assign:
-      - customer_name: result.name
-      - customer_on_file: result.status
 
 secrets:
   - GOOGLE_API_KEY
@@ -355,15 +289,11 @@ models:
 
 tools:
   - find_or_create_customer
-  - look_up_customer
+  - find_slots
+  - save_booking
+  - record_complaint
   - look_up_refund_policy
   - look_up_salon_info
-  - list_bookings
-  - check_availability
-  - create_booking
-  - modify_booking
-  - cancel_booking
-  - record_complaint
   - end_call
 
 conversation:

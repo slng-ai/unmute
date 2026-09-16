@@ -46,7 +46,7 @@ agents:
         when: The caller wants to move a booking.
         instructions: tasks/reschedule-booking.md
         tools:
-          - modify_booking
+          - save_booking
         context:
           history: messages
 ```
@@ -134,7 +134,7 @@ agents:
         when: Move the selected appointment after its new date and time are saved.
         instructions: tasks/reschedule-booking.md
         tools:
-          - modify_booking
+          - save_booking
         context:
           history: reset
 ```
@@ -145,7 +145,7 @@ Requested new date: {{appointment_date}}
 Requested new time: {{appointment_time}}
 
 If any value is missing, ask the caller for it. Otherwise use these values.
-Confirm the exact change before calling modify_booking.
+Confirm the exact change before calling save_booking.
 If the requested time is unavailable, ask the caller to choose another time.
 After a successful change, finish immediately.
 ```
@@ -184,7 +184,7 @@ assign:
 Add the assignment to `reschedule_booking` and change its final instruction:
 
 ```markdown tasks/reschedule-booking.md
-After modify_booking reports success, copy the saved appointment from its
+After save_booking reports success, copy the saved appointment from its
 result and finish immediately with appointment. Do not wait for another
 caller request. Let the owner confirm the change.
 ```
@@ -197,10 +197,11 @@ When a booking task completes, confirm this appointment once.
 Use it instead of older dates mentioned in the conversation.
 ```
 
-Follow the same pattern for verification. Save a status such as
-`Literal["existing", "created", "invalid"]` in the verification task, then
-reference it in each prompt that should reuse verification. Tell those
-prompts when verification must run again, such as a corrected phone number.
+Verification reuses a different mechanism: mark the confirmed variable with
+`confirm:` on the verification task, then put that task as a task-group step
+with `skip_when_confirmed:` naming the variable. The group skips the step once
+it is confirmed, and runs it again once the caller corrects the value. See
+[Reuse verification deliberately](/best-practices/state-design#reuse-verification-deliberately).
 
 Finishing with a non-empty `unserved_request` saves no assignments. It also
 does not undo a booking tool that already succeeded. Finish promptly after
@@ -245,7 +246,7 @@ Try these cases and inspect the model input in your trace:
 | Caller gives the new day before a `messages` task | The task uses that speech without asking for the day again |
 | Selection task saves values, then a `reset` task starts | The reset prompt contains the referenced values and no old conversation |
 | Caller gives a detail that was never saved before `reset` | The task asks for the missing detail |
-| A later agent needs the verified status and moved appointment | Its prompt references both, and it uses the latest saved facts |
+| A later agent needs the confirmed number and moved appointment | Its prompt references both, and it uses the latest saved facts |
 | A reset prompt references no variables | No saved values are added to its prompt |
 
 The public [salon-concierge example](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)

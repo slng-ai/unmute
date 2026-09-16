@@ -1,0 +1,107 @@
+description: >-
+  Read the diary: what the caller already has booked, and what times are free.
+  Call this before offering any time and before changing any booking. It never
+  writes anything, so call it whenever you are unsure what the caller holds.
+
+  Give a date to see free times on that date. Leave the service out to see every
+  service. The caller's own bookings come back every time, whatever you asked.
+
+input:
+  type: object
+  properties:
+    date:
+      type: string
+      description: >-
+        The date to look at, YYYY-MM-DD. An empty string reads only the caller's
+        own bookings and offers no times.
+    service:
+      type: string
+      description: >-
+        Narrow the free times to one service, or `any` to see all three. Use
+        `any` when the caller has not said which service they want.
+      enum:
+        - any
+        - haircut
+        - hair-color
+        - blowout
+
+  # Both properties are required and an empty string means "not asked for". The
+  # LiveKit target emits each input property as a required parameter whatever a
+  # `required:` list says, so stating them keeps one contract on both targets.
+  required:
+    - date
+    - service
+
+inject:
+  - customer_phone: "{{customer_phone}}"
+
+output:
+  type: object
+  properties:
+    bookings:
+      type: array
+      description: Every booking this caller currently holds, soonest first.
+      items:
+        type: object
+        properties:
+          booking_id:
+            type: string
+          service:
+            type: string
+          date:
+            type: string
+          time:
+            type: string
+        required:
+          - booking_id
+          - service
+          - date
+          - time
+    slots:
+      type: array
+      description: Free times on the requested date, empty when no date was given.
+      items:
+        type: object
+        properties:
+          slot_id:
+            type: string
+          service:
+            type: string
+          date:
+            type: string
+          time:
+            type: string
+        required:
+          - slot_id
+          - service
+          - date
+          - time
+    status:
+      type: string
+      enum:
+        - ok
+        - full
+        - invalid_date
+        - invalid_service
+  required:
+    - bookings
+    - slots
+    - status
+
+local:
+  handler: tools/salon.py
+
+# No `announce:` here, and the reason is the rule in the skill's latency page:
+# never put one on two tools that fire in the same turn. The `book` group's line
+# already covers entering this flow, and on the second booking of a call
+# verification is skipped, so the group's line and this one landed back to back
+# with a single model call between them. A text run on 2026-09-16 produced
+# "Sure, let me get that sorted for you." followed by "Hmm, let me check the
+# diary." for one request.
+#
+# The hesitation the caller hears before the diary answer rides on the answer
+# itself instead, written into the booking prompt's opening sentence, which
+# costs no extra speech and no extra request.
+
+interruption: provider_default
+effect: returns_data

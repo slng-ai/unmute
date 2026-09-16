@@ -138,13 +138,13 @@ prefetch:
       - customer_phone: result.value
 
   - name: profile
-    tool: look_up_customer
+    tool: look_up_account
     writes: false
     args:
       - phone: "{{customer_phone}}"
     assign:
-      - customer_name: result.name
-      - customer_on_file: result.status
+      - account_name: result.name
+      - account_on_file: result.status
 ```
 
 `profile` reads once and assigns twice. An entry can fill as many variables as
@@ -164,10 +164,10 @@ variables:
   customer_phone:
     type: Phone
     default: ""
-  customer_name:
+  account_name:
     type: string
     default: ""
-  customer_on_file:
+  account_on_file:
     type: string
     default: ""
 ```
@@ -253,7 +253,7 @@ Until they say yes, the value is held back:
   path refuses to run until it is confirmed. A prefetch lookup may still read
   the candidate so it can prepare a record before the greeting.
 
-This carries over. `customer_name` was looked up from a number nobody has
+This carries over. `account_name` was looked up from a number nobody has
 confirmed yet, so it is unconfirmed too. That is what stops the agent greeting a
 stranger by the account holder's name.
 
@@ -294,10 +294,14 @@ be used. If they change it, values looked up from the old number are cleared.
 They are not automatically fetched again: use a task tool to look up the new
 number and save its result. Unrelated facts, such as today's date, remain.
 
-To avoid repeating verification in another task or agent, also save a typed
-verification status and reference it in the receiving prompt. The public
+To avoid repeating verification in another task or agent, do not track a second
+"is this confirmed" variable of your own: `confirm:` already marks it. A
+[task group](/build/orchestration/task-groups#skip-a-step-whose-work-is-already-done)
+step can name the variable in `skip_when_confirmed:` and the step is skipped
+once it is confirmed. The public
 [salon example](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
-shows this pattern.
+shows this: its booking task group skips the verification step entirely once
+`customer_phone` is already confirmed.
 
 ## Where it works
 
@@ -436,7 +440,7 @@ check.
 ```yaml agent.yaml
 prefetch:
   - name: profile
-    tool: look_up_customer
+    tool: look_up_account
     writes: false
 ```
 

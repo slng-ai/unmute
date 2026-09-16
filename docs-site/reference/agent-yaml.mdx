@@ -434,7 +434,7 @@ values verified in the provider's own documentation.
 
 ```yaml
 variables:
-  customer_name:
+  caller_name:
     type: string
     source: call_start
     default: there
@@ -654,7 +654,7 @@ agents:
     think: reasoning
     speak: voice
     tools:
-      - check_availability
+      - check_slots
 ```
 
 <ParamField path="instructions" type="string" required>
@@ -1034,7 +1034,7 @@ pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twi
 
 ```yaml
 tools:
-  - check_availability
+  - check_slots
   - end_call
 ```
 

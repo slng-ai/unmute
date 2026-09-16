@@ -1,0 +1,130 @@
+description: >-
+  Write the diary: book a new time, move an existing booking, or cancel one.
+  This is the only tool that changes anything, so nothing is booked, moved or
+  cancelled until it runs and says so.
+
+  Call it only after the caller has heard the whole thing back in one sentence,
+  the service, the day, the time and their phone number, and has said yes to
+  that sentence. Choosing a time is not a yes. Use a slot_id and a booking_id
+  exactly as find_slots returned them; never invent either.
+
+input:
+  type: object
+  properties:
+    action:
+      type: string
+      description: book a new time, move an existing booking, or cancel one
+      enum:
+        - book
+        - move
+        - cancel
+    slot_id:
+      type: string
+      description: >-
+        The exact slot_id from find_slots when booking or moving. An empty
+        string when cancelling, which needs no slot.
+    booking_id:
+      type: string
+      description: >-
+        The exact booking_id from find_slots when moving or cancelling. An empty
+        string when booking, which has no booking yet.
+    confirmed:
+      type: boolean
+      description: True only after the caller said yes to the sentence you read back.
+    additional:
+      type: boolean
+      description: >-
+        True only when the caller asked for a second appointment on top of one
+        they already hold. A caller who holds a booking is changing it, so this
+        is false for an ordinary booking and the tool refuses with has_booking.
+  # Every property is required and an empty string means "not applicable". The
+  # LiveKit target emits each input property as a required parameter whatever
+  # this list says, so an optional property is optional on Pipecat and missing
+  # on LiveKit. Stating them all keeps one contract on both targets.
+  required:
+    - action
+    - slot_id
+    - booking_id
+    - confirmed
+    - additional
+
+inject:
+  - customer_phone: "{{customer_phone}}"
+
+output:
+  type: object
+  properties:
+    status:
+      type: string
+      enum:
+        - booked
+        - moved
+        - cancelled
+        - not_confirmed
+        - slot_taken
+        - not_found
+        - has_booking
+        - invalid
+    booking_id:
+      type: string
+    service:
+      type: string
+    date:
+      type: string
+    time:
+      type: string
+    appointment:
+      type: object
+      description: >-
+        The saved booking, present and complete on success and absent otherwise.
+        The step saves this without asking the model for it.
+      properties:
+        booking_id:
+          type: string
+        service:
+          type: string
+          enum:
+            - haircut
+            - hair-color
+            - blowout
+        date:
+          type: string
+        weekday:
+          type: string
+          description: >-
+            The day this booking falls on, spelled out in English. The tool
+            works it out from the date, because the agent has to say it aloud
+            and cannot derive one: a live call confirmed a Friday booking as
+            "Thursday the 18th" off a record that carried the date alone.
+        time:
+          type: string
+        action:
+          type: string
+          enum:
+            - book
+            - move
+            - cancel
+    summary:
+      type: string
+      description: One plain sentence saying what happened, or what went wrong.
+  required:
+    - status
+    - summary
+
+local:
+  handler: tools/salon.py
+
+# No `announce:` here on purpose, and it is the one tool in this package that
+# has the strongest case for one. An announce is spoken when the tool is
+# *called*, not when it succeeds, and this tool refuses a call that arrives with
+# `confirmed` false. A text run on 2026-09-16 produced exactly that: the model
+# tried the save, the diary returned not_confirmed, and the caller heard
+# "putting that through now" followed by a question asking their permission.
+#
+# It buys nothing either way. On the live LiveKit call the save itself took two
+# milliseconds and the reply after it under a second, while the line took one
+# and a half seconds to speak. A promise that is sometimes false, to cover a
+# wait that is never there.
+
+interruption: provider_default
+effect: returns_data

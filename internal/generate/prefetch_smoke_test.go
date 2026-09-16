@@ -19,11 +19,11 @@ import (
 // same block, in the same process, resolves one entry, skips another, survives a
 // timeout and survives an exception, and starts a session afterwards every time.
 func TestSmokePrefetchOutcomes(t *testing.T) {
-	runLiveKitSmokeScript(t, "salon-concierge", nil, nil, prefetchOutcomesSmokeScript)
+	runLiveKitSmokeScript(t, "salon-concierge-v3", nil, nil, prefetchOutcomesSmokeScript)
 }
 
 func TestSmokePrefetchOutcomesPipecat(t *testing.T) {
-	runPipecatSmokeScript(t, "salon-concierge", nil, nil, prefetchOutcomesPipecatSmokeScript)
+	runPipecatSmokeScript(t, "salon-concierge-v3", nil, nil, prefetchOutcomesPipecatSmokeScript)
 }
 
 // TestSmokePrefetchZoneResolves is separate and deliberately narrow: if a future
@@ -59,15 +59,15 @@ def fresh():
 #    runs at all rather than being skipped wholesale.
 resolved = fresh()
 asyncio.run(agent._prefetch(resolved, None))
-assert resolved.booking_date, "the clock entry resolved nothing"
-assert len(resolved.booking_date) == 10, resolved.booking_date
-assert resolved.booking_date.count("-") == 2, resolved.booking_date
+assert resolved.today_date, "the clock entry resolved nothing"
+assert len(resolved.today_date) == 10, resolved.today_date
+assert resolved.today_date.count("-") == 2, resolved.today_date
 
 # 2. Skipped, twice over: no call context, so the caller entry has nothing to read,
 #    and the profile entry that reads what it would have assigned skips with it.
 assert resolved.customer_phone == "", resolved.customer_phone
 assert resolved.customer_name == "", resolved.customer_name
-assert resolved._unconfirmed == {"customer_phone", "customer_name", "customer_on_file"}, resolved._unconfirmed
+assert resolved._unconfirmed == {"customer_phone", "customer_name", "customer_id"}, resolved._unconfirmed
 
 # 2b. And with a call context, the caller entry resolves and is marked unconfirmed.
 seeded = fresh()
@@ -86,7 +86,7 @@ for withheld in ("", "anonymous", "ANONYMOUS", "+266696687", "+8628245225"):
     hidden = fresh()
     asyncio.run(agent._prefetch(hidden, {"from_number": withheld}))
     assert hidden.customer_phone == "", (withheld, hidden.customer_phone)
-    assert hidden._unconfirmed == {"customer_phone", "customer_name", "customer_on_file"}, (withheld, hidden._unconfirmed)
+    assert hidden._unconfirmed == {"customer_phone", "customer_name", "customer_id"}, (withheld, hidden._unconfirmed)
 
 # And a real number is still a real number, including one that begins with the
 # digits a placeholder spells. "unknown" spells 8656696, and +86 5669 6xxx is an
@@ -112,7 +112,7 @@ asyncio.run(agent._prefetch(timed_out, {"from_number": "+34600111222"}))
 assert timed_out.customer_name == "", "a timed-out lookup wrote a value"
 # The number still landed: the entry that timed out is the lookup, not the caller.
 assert timed_out.customer_phone == "+34600111222", timed_out.customer_phone
-assert timed_out.booking_date, "a timed-out lookup lost the clock reading too"
+assert timed_out.today_date, "a timed-out lookup lost the clock reading too"
 
 # 4. Raised. Anything at all, and the call still greets.
 def explode(*_args, **_kwargs):
@@ -124,7 +124,7 @@ failed = fresh()
 asyncio.run(agent._prefetch(failed, {"from_number": "+34600111222"}))
 assert failed.customer_name == "", "a failed lookup wrote a value"
 assert failed.customer_phone == "+34600111222", failed.customer_phone
-assert failed.booking_date, "a failed lookup lost the clock reading too"
+assert failed.today_date, "a failed lookup lost the clock reading too"
 
 agent.tools.look_up_customer.look_up_customer = original
 
@@ -134,7 +134,7 @@ first, second = fresh(), fresh()
 asyncio.run(agent._prefetch(first, {"from_number": "+34600111222"}))
 asyncio.run(agent._prefetch(second, None))
 assert "customer_phone" in first._unconfirmed, first._unconfirmed
-assert second._unconfirmed == {"customer_phone", "customer_name", "customer_on_file"}, second._unconfirmed
+assert second._unconfirmed == {"customer_phone", "customer_name", "customer_id"}, second._unconfirmed
 
 # And an unconfirmed value refuses any tool call that would inject it, which is
 # the whole point of marking it: the emitted _refusal helper is what a tool
@@ -165,9 +165,9 @@ def fresh():
 
 resolved = fresh()
 asyncio.run(bot._prefetch(resolved, None))
-assert resolved.booking_date, "the clock entry resolved nothing"
+assert resolved.today_date, "the clock entry resolved nothing"
 assert resolved.customer_phone == "", resolved.customer_phone
-assert resolved._unconfirmed == {"customer_phone", "customer_name", "customer_on_file"}, resolved._unconfirmed
+assert resolved._unconfirmed == {"customer_phone", "customer_name", "customer_id"}, resolved._unconfirmed
 
 seeded = fresh()
 asyncio.run(bot._prefetch(seeded, {"from_number": "+34600111222"}))
@@ -186,7 +186,7 @@ bot.tools.look_up_customer.look_up_customer = too_slow
 timed_out = fresh()
 asyncio.run(bot._prefetch(timed_out, {"from_number": "+34600111222"}))
 assert timed_out.customer_name == "", "a timed-out lookup wrote a value"
-assert timed_out.booking_date, "a timed-out lookup lost the clock reading too"
+assert timed_out.today_date, "a timed-out lookup lost the clock reading too"
 
 
 def explode(*_args, **_kwargs):
@@ -197,7 +197,7 @@ bot.tools.look_up_customer.look_up_customer = explode
 failed = fresh()
 asyncio.run(bot._prefetch(failed, {"from_number": "+34600111222"}))
 assert failed.customer_name == "", "a failed lookup wrote a value"
-assert failed.booking_date, "a failed lookup lost the clock reading too"
+assert failed.today_date, "a failed lookup lost the clock reading too"
 
 bot.tools.look_up_customer.look_up_customer = original
 
@@ -318,10 +318,10 @@ func deadlineFixture(agent *ir.Agent) {
 	}
 }
 func TestSmokePrefetchDeadlineLiveKit(t *testing.T) {
-	runLiveKitSmokeScript(t, "salon-concierge", nil, deadlineFixture, deadlineScript("agent", "Userdata()"))
+	runLiveKitSmokeScript(t, "salon-concierge-v3", nil, deadlineFixture, deadlineScript("agent", "Userdata()"))
 }
 func TestSmokePrefetchDeadlinePipecat(t *testing.T) {
-	runPipecatSmokeScript(t, "salon-concierge", nil, deadlineFixture, deadlineScript("bot", "build_state()"))
+	runPipecatSmokeScript(t, "salon-concierge-v3", nil, deadlineFixture, deadlineScript("bot", "build_state()"))
 }
 func deadlineScript(module, state string) string {
 	return `import os,json,asyncio,time

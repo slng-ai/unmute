@@ -247,7 +247,7 @@ caller is waiting through the second LLM round trip plus the speech after it.
 local:
   handler: tools/salon.py
 
-announce: Let me check.
+announce: Let me get that written down.
 ```
 
 Keep the line **shorter than the gap**. A long line runs into the answer and
@@ -255,6 +255,19 @@ breaks its own promise of a wait: "Okay, one sec." works where "One sec, let me
 pull up your details and see what we have" does not. Put it only on tools that
 fetch or push data, and never on two tools that fire in the same turn, or the
 caller hears two lines for one request.
+
+A task group's own `announce:` counts as one of those two. The salon ran one on
+the `book` group and another on the tool its first step calls, and on the second
+booking of a call, where verification is skipped, they landed back to back with a
+single model request between them: "Sure, let me get that sorted for you." then
+"Hmm, let me check the diary." One line per request. The hesitation the caller
+hears before the answer itself belongs in the prompt, written onto the front of
+the sentence that does the work, where it costs no speech and no request.
+
+Do not put one on a tool that can **refuse** the call. The line is spoken when
+the tool is called, not when it succeeds. The salon's booking tool refuses a save
+that arrives with `confirmed` false, and a text run produced "putting that
+through now" followed by a question asking the caller's permission.
 
 ## Rejected, with the reason
 

@@ -595,9 +595,10 @@ decision the author is making rather than an implementation detail.
   count of them.
 
 Full page: [Context Router](https://docs.slng.ai/context-router/). No shipped
-example binds to it today: both salon packages reach OpenAI directly, so an
-author who wants to see what the router is worth compiles one of them twice,
-once as it ships and once with the think binding pointed at the router.
+example binds to it today: `salon-concierge` reaches Google Vertex directly and
+`salon-concierge-single-prompt` reaches OpenAI directly, so an author who wants
+to see what the router is worth compiles one of them twice, once as it ships
+and once with the think binding pointed at the router.
 
 ## Three region settings
 

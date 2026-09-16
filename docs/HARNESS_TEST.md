@@ -52,14 +52,16 @@ The real carrier checks below are separate: run them only on reachable phone
 routes.
 
 First run this script with the manager answering, then with the manager
-declining or not answering. Wait for each response.
+declining or not answering. Wait for each response. The complaint specialist
+never verifies anyone before an escalation, so this needs no name or number:
 
 1. “I need help with a complaint.”
-2. “My name is Alex Test.”
-3. “My phone number is plus one, five five five, zero one zero.” Pause, then
-   say: “Eight eight four four.”
-4. After the complete identity readback, say: “Yes, that is correct.”
-5. “My haircut was uneven and I want to speak to a manager.”
+2. “My haircut was uneven and I want to speak to a manager.”
+
+Required action order: `to_complaints`, then `to_manager`, with no
+`find_or_create_customer` and no `record_complaint` call before it. A run fails
+if the agent asks for a name or phone number first: escalation is never gated
+on identifying the caller.
 
 An answered run needs observed two-way human audio. Carrier acceptance alone
 does not prove that the manager answered. An unavailable run must end without a
@@ -80,13 +82,12 @@ and on each reachable phone route:
 Required action order:
 
 ```text
+book
 verify_customer
 find_or_create_customer       exactly once
-to_booking
 manage_booking
-get_current_date
-check_availability
-to_complaints                 from the active booking task
+find_slots
+to_complaints                 from the active manage_booking task
 record_complaint              exactly once
 to_manager                    exactly once
 ```
@@ -101,8 +102,9 @@ before filling in release evidence.
 
 Restart the worker. Then run this compound-request script on both targets. The
 scripts above raise the second request while a step that can route it is active;
-this one asks for two things in one turn, so the second may still be owed when
-the apply step, which carries no handoff, takes over.
+this one asks for two things in one turn, so `manage_booking` hears both at
+once, and it holds `to_complaints` directly rather than needing to hand the
+request back through `unserved_request`.
 
 1. “I want to book a haircut tomorrow at three. My name is Robin Taylor.”
 2. “My number is five five five zero one zero.” Pause, then say: “Eight eight
@@ -114,15 +116,17 @@ the apply step, which carries no handoff, takes over.
 5. Only if the agent does not raise the complaint itself: “So what about my
    complaint?”
 
-Two outcomes pass. The confirmation step may leave for customer care on step 4,
-which saves no booking; or it may confirm, the apply step saves the booking and
-ends with its own finish, and the booking specialist raises the complaint on its
-own next turn. Either way `record_complaint` runs exactly once and the booking is
-saved zero or one time. A run fails when the agent answers in place with a line
-like “please contact the salon directly”: the apply step has no complaint route,
-so it must finish, name the request in its result, and let the specialist take
-it. Needing step 5 is a weak pass worth recording: the handback carried the
-request and the specialist ignored it.
+Two outcomes pass. `manage_booking` may call `to_complaints` directly on step
+4 without calling `save_booking` first, which saves no booking; or it may call
+`save_booking`, which ends the step by itself and saves the booking, and then
+move to customer care with the complaint, in the same response or its own next
+turn. Either way `record_complaint` runs exactly once and the booking is saved
+zero or one time. A run fails when the agent answers in place with a line like
+“please contact the salon directly”: `manage_booking`'s own instructions say to
+call `to_complaints` immediately and never to put a new complaint into
+`unserved_request` and expect its words to be passed on. Needing step 5 is a
+weak pass worth recording: the handoff carried the request and the specialist
+did not act on it.
 
 Record the result in the package's
 [release evidence table](../examples/salon-concierge/README.md#release-evidence).

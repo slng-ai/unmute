@@ -297,9 +297,12 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 		}},
 		{ir.ProviderPipecat, "bot.py", []string{
 			"class State:", "class ConciergeAgent(", "class ComplaintSpecialistAgent(",
-			"def _flow_tool_cancel_booking(", "def _flow_tool_check_availability(",
-			"def _flow_tool_create_booking(", "def _flow_tool_find_or_create_customer(",
-			"def _flow_tool_list_bookings(", "async def _prefetch(",
+			// One read and one write, since the five narrower booking tools were
+			// merged: find_slots answers "what do they hold" and "what is free"
+			// in one call, and save_booking is the only tool that changes a
+			// booking. Each merged-away name cost the model its own round trip.
+			"def _flow_tool_find_slots(", "def _flow_tool_save_booking(",
+			"def _flow_tool_find_or_create_customer(", "async def _prefetch(",
 			// The booking step runs inside the `book` group now, so the flow's
 			// symbols are named after the group rather than after the task.
 			"_book_active_step", "_book_results",
@@ -393,14 +396,30 @@ func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
 			t.Errorf("bot.py calls %s() with no arguments; the smoke stub expects kwargs, so update one or the other deliberately", name)
 		}
 	}
+	// The pre-fetch smokes drive salon-concierge-v3, which is where the shipped
+	// salon's tool-bearing pre-fetch went: the entry filled two variables no
+	// prompt in that package read, so it ran a lookup on every inbound call for
+	// nothing. v3 still runs one, and these are the lines its stub replaces.
+	v3 := emittedPipecatFor(t, "salon-concierge-v3")
 	for _, want := range []string{
 		"handler = tools.look_up_customer.look_up_customer",
 		"await asyncio.to_thread(handler, phone=state.customer_phone)",
 	} {
-		if !strings.Contains(emitted, want) {
-			t.Errorf("bot.py no longer emits %q, so the prefetch smoke stub is not exercised", want)
+		if !strings.Contains(v3, want) {
+			t.Errorf("salon-concierge-v3 bot.py no longer emits %q, so the prefetch smoke stub is not exercised", want)
 		}
 	}
+}
+
+// emittedPipecatFor generates one package for Pipecat and returns its bot.py.
+func emittedPipecatFor(t *testing.T, name string) string {
+	t.Helper()
+	agent := loadExample(t, name)
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatalf("%s no longer generates for pipecat: %v", name, err)
+	}
+	return artifactFile(t, artifact, "bot.py")
 }
 
 // TestSmokeStubbedNamesExistInTheListenerModule is the same contract for the

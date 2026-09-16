@@ -20,10 +20,10 @@ On this page:
 - [Define once, attach by name](#define-once-attach-by-name) - one definition, two lists
 - [Troubleshooting](#troubleshooting) - the refusals you will meet
 
-```yaml tools/check_availability.yaml expandable
+```yaml tools/find_slots.yaml expandable
 description: >-
-  List Sage and Stone slots for one service and date. Call only after customer
-  identification succeeds. This tool accepts only service and date.
+  List Sage and Stone slots for one service and date, and the caller's own
+  bookings. Call this before offering a time and before changing a booking.
 
 input:
   type: object
@@ -37,12 +37,9 @@ input:
     date:
       type: string
       description: Preferred date in YYYY-MM-DD form
-  required:
-    - service
-    - date
 
 local:
-  handler: tools/check_availability.py
+  handler: tools/find_slots.py
 ```
 
 The top of the file is the contract. `description` and `input` are everything
@@ -360,8 +357,8 @@ Every `tools:` entry in `agent.yaml` is a string name:
 
 ```yaml agent.yaml
 tools:
-  - check_availability
-  - cancel_booking
+  - check_slots
+  - cancel_appointment
 
 agents:
   appointment_desk:
@@ -369,8 +366,8 @@ agents:
     think: reasoning
     speak: voice
     tools:
-      - check_availability
-      - cancel_booking
+      - check_slots
+      - cancel_appointment
 ```
 
 For a task-scoped tool, attach the same loaded name to the task instead,
@@ -383,7 +380,7 @@ agents:
       - name: find_slot
         instructions: tasks/find-slot.md
         tools:
-          - check_availability
+          - check_slots
 ```
 
 The agent and task lists are visibility scopes. Attach a tool only where it is
@@ -402,14 +399,14 @@ variables and saves only the values needed later.
 Every tool file runs exactly one way, so both shapes are refused. Two blocks:
 
 ```text
-tools/check_availability.yaml:7: two execution blocks (local and webhook): a tool runs
+tools/check_slots.yaml:7: two execution blocks (local and webhook): a tool runs
   exactly one way
 ```
 
 None at all, where the message is also the list:
 
 ```text wrap
-tools/check_availability.yaml: no execution block: add one of webhook, local, mcp, builtin,
+tools/check_slots.yaml: no execution block: add one of webhook, local, mcp, builtin,
   client, provider_hosted, knowledge, slng
 ```
 
