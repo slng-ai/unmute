@@ -1744,7 +1744,7 @@ Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
 Pipecat runner session ID is also the Pipecat conversation ID and Langfuse
 session ID.
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
-{{if .NeedsMCP}}With Langfuse tracing enabled, Pipecat MCP calls emit finite `tool:<name>` spans with tool arguments and, when completed, the result.
+{{if .NeedsMCP}}With Langfuse tracing enabled, Pipecat MCP calls emit finite spans named after the tool, with its arguments and, when completed, the result.
 {{end}}
 
 Starting the worker or exporting a synthetic span proves connectivity only.

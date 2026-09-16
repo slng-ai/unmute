@@ -28,7 +28,12 @@ var (
 
 // skipDir names trees with no Go this rule governs: emitted artifacts, test
 // fixtures that are not compiled, and the checkout's own plumbing.
+// `.claude` holds Claude Code's worktrees, which are whole checkouts of this
+// repository. Walking them reported every colour in 22 copies of this package
+// as an offence in the one being tested, so the suite failed on a clean tree.
+// Each worktree walks from its own root and still checks itself.
 var skipDir = map[string]bool{
+	".claude":      true,
 	".git":         true,
 	"build":        true,
 	"node_modules": true,

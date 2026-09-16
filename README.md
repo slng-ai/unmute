@@ -265,19 +265,15 @@ One task out of an agent's `tasks:` list.
 - name: manage_booking
   instructions: tasks/booking.md
   tools:
-    - create_booking
-    - modify_booking
-    - cancel_booking
+    - find_slots
+    - save_booking
   finish:
-    - tool: create_booking
+    - tool: save_booking
       success:
-        - status: booked
-    - tool: modify_booking
-      success:
-        - status: modified
-    - tool: cancel_booking
-      success:
-        - status: cancelled
+        - status:
+            - booked
+            - moved
+            - cancelled
   assign:
     - appointment: result.appointment
   context:
