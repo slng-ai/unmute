@@ -395,11 +395,12 @@ Complete at least one user turn before reviewing the trace. A traced request
 contains `llm_node` and `llm_request` generation observations in addition to
 the session and agent spans.
 
-Each tool call is its own span, named `tool:<name>` after the tool that ran. The
-framework names all of them `function_tool` and carries the real name in an
-attribute, which makes every tool call in a trace look the same, so the name is
-put back on the way out. A task's structured result is the arguments of its
-`finish` call, on that call's span.
+Each tool call is its own observation, typed as a tool and named after the tool
+that ran. The framework names every span `function_tool` and carries the real
+name in a `gen_ai.tool.name` attribute, which Langfuse reads for the name, so
+the tool is what a trace lists. The Pipecat target sets the same attributes, so
+one call reads the same way on both. A task's structured result is the arguments
+of its `finish` call, on that call's span.
 
 Traces follow the Langfuse v4 data model. One call is one trace. Open it and
 the root observation holds the whole conversation, so the top of the trace reads
@@ -2549,6 +2550,16 @@ from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerPro
 from opentelemetry.util.types import AttributeValue
 
 
+# The livekit span that covers the whole call, and the root of its trace. Read
+# by name, the way the Pipecat target reads its own. It used to be the only
+# parentless span, so this used to match the first span with no parent, and
+# 1.8.1's loop monitor broke that: it files a parentless span on any
+# stall past 100ms, and a cold start produces one before the session does. The
+# first-parentless rule then latched onto the stall, every turn went into the
+# stall's trace, and the call's own root was left holding lifecycle spans and no
+# conversation, because the stall span had already ended.
+CALL_SPAN = "agent_session"
+
 # The livekit spans that mean a turn is underway. A name that is not here is
 # left alone, so a livekit-agents that renames them loses the turn grouping
 # rather than losing spans or misparenting them.
@@ -2590,9 +2601,10 @@ class CallTrace(SpanProcessor):
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
         span.set_attributes(self._attributes)
-        # livekit's session span covers the call and is the only parentless one,
-        # so the first span with no parent is the root of the call's trace.
-        if span.parent is None and self._call is None:
+        # The call's root, matched by name rather than by having no parent, so
+        # neither another parentless span nor livekit parenting the session
+        # under the job can move it. See CALL_SPAN above.
+        if span.name == CALL_SPAN and self._call is None:
             self._call = span
             self._call_context = trace.set_span_in_context(span)
 
@@ -2686,34 +2698,25 @@ def install_turn_spans(provider: TracerProvider, call: CallTrace) -> None:
     setattr(provider, "__unmute_turn_spans__", True)
 
 
-def _name_tool_spans(span: ReadableSpan) -> bool:
-    """Give a tool span the name of the tool that ran, and export everything.
+def _export_every_span(span: ReadableSpan) -> bool:
+    """Export the whole call, whatever the default filter would make of it.
 
-    livekit-agents starts every tool span as the literal "function_tool"
-    (voice/generation.py) and sets the tool's own name as an attribute inside
-    the span body. A trace view lists span names, so every tool call in a call
-    looks identical and which tool ran is only visible by opening each one. The
-    Pipecat target names the same span `tool:<name>`, so doing it here makes a
-    call read the same way on both targets.
+    The hook has to be set, and not for any filtering of our own: every span
+    here comes from livekit-agents or from this module, and neither is a scope
+    the Langfuse v4 default filter recognises, so leaving the default in place
+    drops the whole call before it reaches the exporter.
 
-    It has to happen at the end, because the end is the first moment the name
-    is known, and an ended span arrives here as a ReadableSpan with no
-    update_name(). So `_name` is the only seam there is. That is a private
-    attribute, and deliberately: the langfuse processor that calls this hook
-    reads the same `span._name` a few lines further down its own on_end, so the
-    attribute is load-bearing in this dependency whether we touch it or not. If
-    a release renames it, the assignment raises AttributeError, tool spans keep
-    livekit's generic name, and nothing else about the trace changes.
-
-    This is a filter hook, so its answer decides whether the span is exported
-    at all. It always exports.
+    This used to rename livekit's tool spans as well. livekit-agents starts
+    every one as the literal "function_tool" (voice/generation.py) and carries
+    the tool's own name in an attribute, so a trace view listed a row of
+    identical names. It no longer needs doing: 1.8.1 sets
+    gen_ai.operation.name=execute_tool and gen_ai.tool.name on that span, and
+    Langfuse v4 names the observation after gen_ai.tool.name, so the tool's own
+    name is what a reader sees. Writing a span name here would be overwritten
+    on ingestion, which is the one thing worse than not writing it: verified on
+    2026-09-16 by renaming the span locally, watching the write land, and
+    reading the tool's bare name back off a deployed call.
     """
-    tool = (span.attributes or {}).get("lk.function_tool.name")
-    if tool and span.name == "function_tool":
-        try:
-            span._name = f"tool:{tool}"
-        except AttributeError:
-            pass
     return True
 
 
@@ -2754,11 +2757,10 @@ def setup_langfuse(
         # without this header the spans arrive on the legacy ingestion path. The
         # Pipecat target sets the same header on its exporter.
         additional_headers={"x-langfuse-ingestion-version": "4"},
-        # The hook has to be set, and not only for the naming it does: every
-        # span here comes from livekit-agents or from this module, and neither
-        # is a scope the v4 default filter recognises, so leaving the default in
-        # place drops the whole call before it reaches the exporter.
-        should_export_span=_name_tool_spans,
+        # Setting this is what keeps the call: the v4 default filter recognises
+        # neither livekit-agents' scope nor this module's, so leaving the
+        # default in place drops the whole call before the exporter sees it.
+        should_export_span=_export_every_span,
     )
 
     async def flush_trace() -> None:

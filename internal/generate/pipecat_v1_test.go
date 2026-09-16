@@ -744,7 +744,16 @@ func TestV22PipecatToolCallsAreTraced(t *testing.T) {
 	for _, want := range []string{
 		"class TracedLLMWorker(LLMWorker):",
 		"start_as_current_span(",
-		`f"tool:{name}", context=parent`,
+		`name, context=parent`,
+		// The pair that makes this a tool call and not an unlabelled span.
+		// Langfuse v4 turns an observation carrying them into a TOOL named
+		// after gen_ai.tool.name, which is what livekit-agents sets, so one
+		// call reads the same way on both targets. Read off two real calls on
+		// 2026-09-16: the LiveKit tool observation was a TOOL named
+		// `create_booking`, the Pipecat one a plain span named
+		// `tool:create_booking`.
+		`span.set_attribute("gen_ai.operation.name", "execute_tool")`,
+		`span.set_attribute("gen_ai.tool.name", name)`,
 		`"langfuse.observation.input"`,
 		`"langfuse.observation.output"`,
 		`"tool.function_name"`,
@@ -753,6 +762,9 @@ func TestV22PipecatToolCallsAreTraced(t *testing.T) {
 		if !strings.Contains(tracing, want) {
 			t.Errorf("tracing.py missing %q", want)
 		}
+	}
+	if strings.Contains(tracing, `"tool:`) {
+		t.Error(`a tool span carries no name prefix: Langfuse names the observation from gen_ai.tool.name, so a "tool:" here only shows up where that mapping does not run`)
 	}
 	if !strings.Contains(bot, "class IntakeAgent(TracedLLMWorker):") {
 		t.Error("bot.py missing traced agent base")

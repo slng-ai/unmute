@@ -104,6 +104,8 @@ func TestLangfuseKeepsTheWholeCallInOneTrace(t *testing.T) {
 		forbid   []string
 	}{
 		{ir.ProviderLiveKit, []string{
+			`CALL_SPAN = "agent_session"`,
+			`if span.name == CALL_SPAN and self._call is None:`,
 			`TURN_SPANS = ("user_turn", "agent_turn")`,
 			// Inside the call's trace, not a new one.
 			`self._tracer.start_span("turn", context=self._call_context)`,
@@ -139,6 +141,15 @@ func TestLangfuseKeepsTheWholeCallInOneTrace(t *testing.T) {
 			if strings.Contains(tracing, forbid) {
 				t.Errorf("%s tracing.py splits the call into one trace per turn: %q", tc.provider, forbid)
 			}
+		}
+		// The call's root is picked by name. Picking the first span with no
+		// parent held until livekit-agents 1.8.1, whose loop monitor files a
+		// parentless `event_loop_blocked` span on any stall past 100ms: a cold
+		// start produces one before the session, and it took every turn into a
+		// second trace while the call's own root kept the lifecycle spans and
+		// no conversation. Seen on a real call on 2026-09-16.
+		if strings.Contains(tracing, "if span.parent is None") {
+			t.Errorf("%s tracing.py picks the call's root by parentage rather than by name", tc.provider)
 		}
 		// The root observation is where a reader opens the call, so it carries
 		// the conversation rather than being an envelope of lifecycle spans.

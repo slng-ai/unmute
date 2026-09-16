@@ -1041,11 +1041,12 @@ Complete at least one user turn before reviewing the trace. A traced request
 contains `llm_node` and `llm_request` generation observations in addition to
 the session and agent spans.
 
-Each tool call is its own span, named `tool:<name>` after the tool that ran. The
-framework names all of them `function_tool` and carries the real name in an
-attribute, which makes every tool call in a trace look the same, so the name is
-put back on the way out. A task's structured result is the arguments of its
-`finish` call, on that call's span.
+Each tool call is its own observation, typed as a tool and named after the tool
+that ran. The framework names every span `function_tool` and carries the real
+name in a `gen_ai.tool.name` attribute, which Langfuse reads for the name, so
+the tool is what a trace lists. The Pipecat target sets the same attributes, so
+one call reads the same way on both. A task's structured result is the arguments
+of its `finish` call, on that call's span.
 
 Traces follow the Langfuse v4 data model. One call is one trace. Open it and
 the root observation holds the whole conversation, so the top of the trace reads

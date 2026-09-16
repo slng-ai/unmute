@@ -1552,8 +1552,10 @@ async def main() -> None:
     spans = memory.get_finished_spans()
     conversation = next(span for span in spans if span.name == "conversation")
     turn = next(span for span in spans if span.name == "turn")
-    tool_call = next(span for span in spans if span.name == f"tool:{tool_probe['name']}")
-    cancelled_tool = next(span for span in spans if span.name == "tool:cancel_probe")
+    # The tool's own name, with no prefix, which is what the LiveKit target's
+    # tool observations read as: Langfuse names one from gen_ai.tool.name.
+    tool_call = next(span for span in spans if span.name == tool_probe["name"])
+    cancelled_tool = next(span for span in spans if span.name == "cancel_probe")
     requests = {span.name: span for span in spans if span.name in {"stt", "llm", "tts"}}
     assert requests.keys() == {"stt", "llm", "tts"}
     assert requests["stt"].attributes["gen_ai.request.model"] == "probe-stt"

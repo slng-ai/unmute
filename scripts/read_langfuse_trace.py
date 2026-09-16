@@ -403,6 +403,45 @@ def check_v4(spans: list[dict]) -> int:
         (s for s in spans if s.get("name") == "turn"),
         key=lambda s: s.get("startTime") or "",
     )
+    # Counting roots and traces cannot see a call whose turns sit in the trace
+    # but not under its root, because each half is well formed on its own. That
+    # is the shape a livekit call produced on 2026-09-16: a parentless span the
+    # loop monitor filed before the session took the root's place, the turns
+    # hung off it, and the call's own root kept the lifecycle spans and nothing
+    # else. So read the tree, not only the counts.
+    by_id = {str(s.get("id")): s for s in spans}
+
+    def ancestry(row: dict) -> set[str]:
+        """Every observation above this one, stopping on a cycle."""
+        chain: set[str] = set()
+        parent = row.get("parentObservationId")
+        while parent and str(parent) not in chain:
+            chain.add(str(parent))
+            parent = (by_id.get(str(parent)) or {}).get("parentObservationId")
+        return chain
+
+    if len(roots) == 1:
+        root_id = str(roots[0].get("id"))
+        root_name = str(roots[0].get("name"))
+        stray = [t for t in turns if root_id not in ancestry(t)]
+        if stray:
+            landed = sorted(
+                {
+                    str((by_id.get(str(t.get("parentObservationId"))) or {}).get("name"))
+                    for t in stray
+                }
+            )
+            problems.append(
+                f"{len(stray)} of {len(turns)} turn spans do not descend from the "
+                f"root {root_name!r}; they hang off {', '.join(landed)}. Every "
+                "count reads right and the call is still an empty envelope."
+            )
+        if not any(root_id in ancestry(s) for s in spans):
+            problems.append(
+                f"the root observation {root_name!r} has nothing under it, so "
+                "everything the call did landed somewhere else."
+            )
+
     unanswered = [t for t in turns[:-1] if has(t, "input") and not has(t, "output")]
     if unanswered:
         problems.append(
