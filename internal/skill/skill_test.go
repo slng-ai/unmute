@@ -356,13 +356,13 @@ func TestDestinationsResolvesAndDeduplicates(t *testing.T) {
 		want  []string
 		fails bool
 	}{
-		{name: "default is all", in: nil, want: []string{"canonical", "pointer"}},
-		{name: "all", in: []string{"all"}, want: []string{"canonical", "pointer"}},
-		{name: "claude is the pointer only", in: []string{"claude"}, want: []string{"pointer"}},
-		{name: "codex is the canonical only", in: []string{"codex"}, want: []string{"canonical"}},
-		{name: "three names, one directory", in: []string{"codex", "cursor", "copilot"}, want: []string{"canonical"}},
-		{name: "both kinds", in: []string{"claude", "codex"}, want: []string{"pointer", "canonical"}},
-		{name: "case and space tolerated", in: []string{" Codex "}, want: []string{"canonical"}},
+		{name: "default is all", in: nil, want: []string{"canonical", "pointer", "manifest canonical", "manifest pointer"}},
+		{name: "all", in: []string{"all"}, want: []string{"canonical", "pointer", "manifest canonical", "manifest pointer"}},
+		{name: "claude is the pointers only", in: []string{"claude"}, want: []string{"pointer", "manifest pointer"}},
+		{name: "codex is the canonicals only", in: []string{"codex"}, want: []string{"canonical", "manifest canonical"}},
+		{name: "three names, one pair of directories", in: []string{"codex", "cursor", "copilot"}, want: []string{"canonical", "manifest canonical"}},
+		{name: "both kinds", in: []string{"claude", "codex"}, want: []string{"pointer", "manifest pointer", "canonical", "manifest canonical"}},
+		{name: "case and space tolerated", in: []string{" Codex "}, want: []string{"canonical", "manifest canonical"}},
 		{name: "unknown fails", in: []string{"emacs"}, fails: true},
 		{name: "unknown fails even beside a known one", in: []string{"codex", "emacs"}, fails: true},
 	}
@@ -446,7 +446,7 @@ func TestVersionTokenIsSubstituted(t *testing.T) {
 func TestRealBundleInstalls(t *testing.T) {
 	project := t.TempDir()
 	b := New("test")
-	for _, dest := range []Destination{Canonical, Pointer} {
+	for _, dest := range All {
 		plan, err := b.Plan(project, dest, false)
 		if err != nil {
 			t.Fatal(err)
@@ -474,7 +474,7 @@ func TestRealBundleInstalls(t *testing.T) {
 
 func install(t *testing.T, b Bundle, project string) {
 	t.Helper()
-	for _, dest := range []Destination{Canonical, Pointer} {
+	for _, dest := range All {
 		plan, err := b.Plan(project, dest, false)
 		if err != nil {
 			t.Fatal(err)

@@ -57,8 +57,9 @@ Usage:
   unmute manifest create [name] [flags]
 
 Flags:
-      --editor   Edit YAML in VISUAL or EDITOR instead.
-  -h, --help     help for create
+      --editor        Edit YAML in VISUAL or EDITOR instead.
+      --file string   Save this YAML file as the manifest, with no prompts.
+  -h, --help          help for create
 
 $ unmute manifest edit --help
 Edit a saved manifest with guided setup.

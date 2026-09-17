@@ -36,20 +36,21 @@ func TestSkillBundleNamesRealCommands(t *testing.T) {
 	}
 }
 
-// bundleFiles reads both destinations' content out of the embedded bundle.
+// bundleFiles reads every destination's content out of the embedded bundle. All
+// of them, because a command named in a skill nobody checks is a command a user
+// runs and watches fail.
 func bundleFiles(t *testing.T) map[string][]byte {
 	t.Helper()
 	bundle := skill.New("test")
-	files, err := bundle.Files(skill.Canonical)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pointer, err := bundle.Files(skill.Pointer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, content := range pointer {
-		files["pointer/"+name] = content
+	files := map[string][]byte{}
+	for _, dest := range skill.All {
+		content, err := bundle.Files(dest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, body := range content {
+			files[dest.Name+"/"+name] = body
+		}
 	}
 	return files
 }

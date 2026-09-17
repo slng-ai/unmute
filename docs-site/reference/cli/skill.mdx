@@ -58,15 +58,19 @@ it is not YAML to paste into an existing one.
 Nothing is downloaded and no agent package is created.
 Commit the installed files so your team's assistants read the same workflow.
 
+Two skills are installed. `unmute` builds and maintains agent packages;
+`unmute-manifest` interviews you about your company's approved choices and saves
+the contract. Your assistant picks the one that matches what you ask for.
+
 | Assistant | Reads |
 |---|---|
-| Claude Code | `.claude/skills/unmute/` |
-| Codex | `.agents/skills/unmute/` |
-| Cursor | `.agents/skills/unmute/` |
-| GitHub Copilot | `.agents/skills/unmute/` |
+| Claude Code | `.claude/skills/unmute/` and `.claude/skills/unmute-manifest/` |
+| Codex | `.agents/skills/unmute/` and `.agents/skills/unmute-manifest/` |
+| Cursor | `.agents/skills/unmute/` and `.agents/skills/unmute-manifest/` |
+| GitHub Copilot | `.agents/skills/unmute/` and `.agents/skills/unmute-manifest/` |
 
-The shared instructions live in `.agents/skills/unmute/`.
-Claude's file points to them. The installer does not modify `AGENTS.md`,
+The shared instructions live under `.agents/skills/`.
+Claude's files point to them. The installer does not modify `AGENTS.md`,
 `.github/` or `.cursor/`.
 
 ## 2. Describe hotel-agent
@@ -151,7 +155,8 @@ unmute skill install --force
 ```
 
 `--force` replaces files; it does not merge your changes.
-To uninstall, remove `.agents/skills/unmute/` and `.claude/skills/unmute/`.
+To uninstall, remove the `unmute` and `unmute-manifest` directories under
+`.agents/skills/` and `.claude/skills/`.
 There is no uninstall subcommand.
 
 ### Command help

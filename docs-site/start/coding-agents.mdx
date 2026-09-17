@@ -44,6 +44,7 @@ unmute skill install
     references/deploy.md             written
     references/examples.md           written
     references/latency.md            written
+    references/manifests.md          written
     references/models.md             written
     references/orchestration.md      written
     references/package.md            written
@@ -55,8 +56,12 @@ unmute skill install
     references/workflow.md           written
   .claude/skills/unmute/
     SKILL.md                         written
+  .agents/skills/unmute-manifest/
+    SKILL.md                         written
+  .claude/skills/unmute-manifest/
+    SKILL.md                         written
 
-Installed the Unmute skill for claude, codex, copilot, cursor.
+Installed the Unmute skills for claude, codex, copilot, cursor.
 Commit these files so your team's assistants get them too.
 Next: ask your assistant to build a voice agent, in a sentence.
 ```
@@ -65,14 +70,18 @@ One command covers every assistant, because they read different directories
 but the same instructions. Commit both directories. Then anyone who clones the
 repository has an assistant that knows Unmute, with nothing to install.
 
+Two skills are installed. `unmute` builds and maintains agent packages, and
+`unmute-manifest` interviews you about your company's approved choices and saves
+the contract. Your assistant reads the descriptions and picks one.
+
 | Assistant | Reads |
 |---|---|
-| Claude Code | `.claude/skills/unmute/` |
-| Codex | `.agents/skills/unmute/` |
-| Cursor | `.agents/skills/unmute/` |
-| GitHub Copilot | `.agents/skills/unmute/` |
+| Claude Code | `.claude/skills/unmute/` and `.claude/skills/unmute-manifest/` |
+| Codex | `.agents/skills/unmute/` and `.agents/skills/unmute-manifest/` |
+| Cursor | `.agents/skills/unmute/` and `.agents/skills/unmute-manifest/` |
+| GitHub Copilot | `.agents/skills/unmute/` and `.agents/skills/unmute-manifest/` |
 
-`.claude/skills/unmute/SKILL.md` is a pointer at the full bundle, so the
+Each file under `.claude/skills/` is a pointer at the matching bundle, so the
 instructions exist once no matter how many assistants you set up. Two
 assistants in the same project is fine and normal.
 

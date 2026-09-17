@@ -31,7 +31,7 @@ func codingAgents(t *testing.T) string {
 // derived instead of remembered.
 func TestCodingAgentsPageNamesEveryAssistant(t *testing.T) {
 	page := codingAgents(t)
-	summary := "Installed the Unmute skill for " + strings.Join(Assistants(), ", ") + "."
+	summary := "Installed the Unmute skills for " + strings.Join(Assistants(), ", ") + "."
 
 	if !strings.Contains(page, summary) {
 		t.Errorf("%s does not quote the install summary %q; the assistants it shows and the ones the CLI supports have drifted apart", codingAgentsPage, summary)
@@ -45,20 +45,29 @@ func TestCodingAgentsPageNamesEveryAssistant(t *testing.T) {
 func TestCodingAgentsTableCoversEveryAssistant(t *testing.T) {
 	page := codingAgents(t)
 
-	row := regexp.MustCompile("(?m)^\\| ([A-Za-z][A-Za-z ]*) \\| `(\\.[a-z]+/skills/unmute/)` \\|$")
+	row := regexp.MustCompile("(?m)^\\| ([A-Za-z][A-Za-z ]*) \\|((?: `\\.[a-z]+/skills/unmute[a-z-]*/`(?: and)?)+) \\|$")
 	rows := row.FindAllStringSubmatch(page, -1)
 
 	if want := len(Assistants()); len(rows) != want {
 		t.Fatalf("%s lists %d assistants in its table, but the CLI supports %d; add or remove the row", codingAgentsPage, len(rows), want)
 	}
 
-	dirs := map[string]bool{
-		Canonical.Rel() + "/": true,
-		Pointer.Rel() + "/":   true,
+	// Both skills, because an assistant that reads one directory and not the
+	// other is an assistant that cannot do half the work.
+	dirs := map[string]bool{}
+	for _, dest := range All {
+		dirs[dest.Rel()+"/"] = true
 	}
+	named := regexp.MustCompile("`(\\.[a-z]+/skills/unmute[a-z-]*/)`")
 	for _, hit := range rows {
-		if !dirs[filepath.ToSlash(hit[2])] {
-			t.Errorf("%s says %s reads %q, which is not a directory the install writes", codingAgentsPage, hit[1], hit[2])
+		listed := named.FindAllStringSubmatch(hit[2], -1)
+		if len(listed) != 2 {
+			t.Errorf("%s gives %s %d directories; each assistant reads one directory per installed skill", codingAgentsPage, hit[1], len(listed))
+		}
+		for _, dir := range listed {
+			if !dirs[filepath.ToSlash(dir[1])] {
+				t.Errorf("%s says %s reads %q, which is not a directory the install writes", codingAgentsPage, hit[1], dir[1])
+			}
 		}
 	}
 }

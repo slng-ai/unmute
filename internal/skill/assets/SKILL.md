@@ -60,7 +60,7 @@ Run these steps in order:
 
 ## The build loop
 
-`unmute init <agent>` writes the starter package with no questions. A company contract reaches a package only when a person asks for one with `unmute init <agent> --from-manifest`, which is an interactive picker: you cannot create a governed package yourself, so ask the user to run it.
+`unmute init <agent>` writes the starter package with no questions. A company contract reaches a package only when a person asks for one with `unmute init <agent> --from-manifest`, which is an interactive picker: you cannot create a governed package yourself, so ask the user to run it. Asked to write the company rules themselves rather than an agent, use the `unmute-manifest` skill.
 A package holding a `manifest` file is company-governed. Read that file before choosing any bindings, and follow `references/manifests.md`.
 Choose exact approved model IDs when listed; provider-wide approval does not establish target or provider support. SLNG stays provider `slng` even when IDs name other model makers.
 Preserve the contract and its link. Explain conflicts instead of weakening company rules.
