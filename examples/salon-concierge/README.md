@@ -57,21 +57,25 @@ the package.
 | Name | Purpose |
 |---|---|
 | `OPENAI_API_KEY` | the knowledge embeddings at startup |
+| `GOOGLE_API_KEY` | the reasoning model, on Vertex AI |
 | `SLNG_API_KEY` | the voice and the transcription. One key for both |
 | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` | trace ingest. All three together, or startup fails |
 | `MANAGER_PHONE_NUMBER` | the transfer destination, in E.164. Needed only for a phone call |
 
-Both targets reason on `gpt-5.6-luna` with `reasoning_effort: none`, which is
-the model this package was qualified on: 12 out of 12 on multi-turn tool
-routing, measured against its own prompts and tools.
+Both targets reason on `gemini-3.1-flash-lite`, served by Vertex AI in `eu`,
+with `thinking_level: MINIMAL` so there is no thinking before the first token.
 
-Native Gemini 3.5 Flash-Lite held the slot for two days in September 2026 and
-came out after one live call lost 18.5 seconds to two `MALFORMED_FUNCTION_CALL`
-aborts, which is Gemini throwing away a turn whose tool call it emitted as plain
-text rather than as a structured part. Nothing in this package triggers it and
-Google has no fix, so the model left rather than the symptom being made cheaper.
-Screen a replacement on multi-turn tool routing before latency; latency and
-single-turn tool calls predict neither.
+Gemini 3.5 Flash-Lite held the slot for two days in September 2026 and came out
+after one live call lost 18.5 seconds to two `MALFORMED_FUNCTION_CALL` aborts,
+which is Gemini throwing away a turn whose tool call it emitted as plain text
+rather than as a structured part. 3.1 is a different model and has not shown
+that abort here.
+
+`gpt-5.6-luna` held the slot in between and stays commented out in `agent.yaml`
+next to the live binding, so going back is one edit. It is the model this
+package has a routing number for: 12 out of 12 on multi-turn tool routing,
+measured against its own prompts and tools. Screen any replacement the same way
+before you look at latency; latency and single-turn tool calls predict neither.
 
 The knowledge embeddings use OpenAI, and speech uses the SLNG gateways declared
 below.

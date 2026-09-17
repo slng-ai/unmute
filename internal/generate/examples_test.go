@@ -42,8 +42,8 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("target %q does not generate: %v", name, err)
 			}
-			if name == "livekit" && !strings.Contains(artifactFile(t, artifact, "agent.py"), `model="gpt-5.6-luna"`) {
-				t.Error("salon-concierge must reason on gpt-5.6-luna")
+			if name == "livekit" && !strings.Contains(artifactFile(t, artifact, "agent.py"), `model="gemini-3.1-flash-lite"`) {
+				t.Error("salon-concierge must reason on gemini-3.1-flash-lite")
 			}
 		})
 	}
@@ -82,21 +82,35 @@ func loadExample(t *testing.T, name string) *ir.Agent {
 
 func TestSalonConciergeFeatureContract(t *testing.T) {
 	resolved := loadExample(t, "salon-concierge")
-	// Keep both targets on gpt-5.6-luna with reasoning off.
+	// Keep both targets on native Gemini 3.1 Flash-Lite, on Vertex in eu, with
+	// no thinking before the first token.
 	//
-	// Native Gemini 3.5 Flash-Lite held this slot from 2026-09-14 to 2026-09-16
-	// and came out after one live call (trace 917975e9) lost 18.5 seconds to two
-	// `MALFORMED_FUNCTION_CALL` aborts, which is Gemini throwing away a turn
-	// whose tool call it emitted as plain text. Nothing in this package reaches
-	// it and Google has no fix, so the model left rather than the symptom being
-	// made cheaper. The emitted session caps LLM retries either way.
+	// Gemini 3.5 Flash-Lite held this slot from 2026-09-14 to 2026-09-16 and came
+	// out after one live call (trace 917975e9) lost 18.5 seconds to two
+	// `MALFORMED_FUNCTION_CALL` aborts, which is Gemini throwing away a turn whose
+	// tool call it emitted as plain text. 3.1 is a different model and has not
+	// shown that abort here, so the slot came back to Google on 2026-09-17. What
+	// it rests on is one local `unmute dev` session on livekit, 2026-09-16
+	// 16:41-16:45, which made 0 aborts at 0.75-0.78s ttft; no live phone call has
+	// run on 3.1 yet. The emitted session caps LLM retries either way.
+	//
+	// `gpt-5.6-luna` held the slot in between and stays commented out in the
+	// package next to the live binding, because it is the one model this package
+	// has 12-out-of-12 multi-turn tool routing for and going back is one edit.
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		reason := targetByProvider(t, resolved, provider).Models.Reason["reasoning"]
-		if reason.Provider != "openai" || reason.Model != "gpt-5.6-luna" || reason.Router() {
-			t.Errorf("%s reasoning must use gpt-5.6-luna: %#v", provider, reason)
+		if reason.Provider != "google" || reason.Model != "gemini-3.1-flash-lite" || reason.Router() {
+			t.Errorf("%s reasoning must use gemini-3.1-flash-lite: %#v", provider, reason)
 		}
-		if reason.Params["reasoning_effort"] != "none" {
-			t.Errorf("%s reasoning params = %#v, want reasoning_effort none", provider, reason.Params)
+		// Vertex in eu, not the global endpoint: where the turns are served is a
+		// decision, and losing it to a params edit should fail here and not in
+		// somebody's audit.
+		if reason.Params["vertexai"] != true || reason.Params["location"] != "eu" {
+			t.Errorf("%s reasoning params = %#v, want vertexai on location eu", provider, reason.Params)
+		}
+		thinking, _ := reason.Params["thinking_config"].(map[string]any)
+		if thinking["thinking_level"] != "MINIMAL" {
+			t.Errorf("%s reasoning params = %#v, want thinking_config.thinking_level MINIMAL", provider, reason.Params)
 		}
 		// No host pin and no prompt directive: this binding is on Google's own
 		// endpoint, which serves one implementation of the model.
