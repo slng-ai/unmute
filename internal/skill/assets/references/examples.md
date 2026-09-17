@@ -63,6 +63,15 @@ This is the ordinary case. You are in a user's project, they ran
 Say nothing to the user about a missing examples directory. It is not missing;
 it was never theirs. Telling them to go and find it wastes their time.
 
+## Templates the user can clone
+
+Finished agents live in a second repository,
+<https://github.com/slng-ai/unmute-templates>. One folder per agent, each a full
+package that validates and compiles. They are not on the user's disk either, so
+name the URL and never a local path. Offer one when the user wants a whole
+working agent to start from rather than a package you author for them, and send
+a template they wrote there as a pull request, not to the compiler repository.
+
 ## Shapes with no example
 
 Telephony, transfers, outbound, MCP and regional routing lost their focused
