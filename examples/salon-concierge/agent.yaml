@@ -22,24 +22,12 @@ agents:
           rest of the call. A change of date, time or service is not a phone
           correction and needs no verification.
         instructions: tasks/verify-customer.md
-        # Spoken as this step is entered, on both routes in, and only when the
-        # step actually runs: the group skips it once the number is confirmed,
-        # so nothing ever says "verified" on a call where nobody was. That is
-        # why the line is here and not on the group, whose own line fires on
-        # every entry and could be honest on neither half.
-        #
-        # Alternatives because a caller can enter verification twice in a call,
-        # by correcting their number after a booking, and the second identical
-        # sentence is what makes an agent sound like a recording.
         announce:
           - Let me verify you first.
           - First, let me get you verified.
           - One moment, let me pull your details up.
         tools:
           - find_or_create_customer
-        # One entry per tool, and the alternatives are a list under the field.
-        # Two entries naming one tool, or two pairs naming one field, are both
-        # silently reduced to the last one written.
         finish:
           - tool: find_or_create_customer
             success:
@@ -48,12 +36,6 @@ agents:
                   - created
         assign:
           - customer_phone: result.customer_phone
-          # What the concierge reads to know verification already happened. It
-          # exists because this is no longer a group step: `skip_when_confirmed:`
-          # decided that structurally and there is no equivalent for a plain
-          # task, so the decision moves into the owner's prompt and the owner
-          # needs something to read. Deliberately the status and not the number:
-          # the concierge must never hold a phone number it could speak.
           - customer_verified: result.customer_status
         context:
           history: messages
@@ -63,22 +45,6 @@ agents:
           The caller wants to create, move or cancel a booking. Includes a
           change to an appointment just made.
         instructions: tasks/booking.md
-        # Spoken as this step is entered, and it used to sit on `find_slots`
-        # instead. A tool's line is emitted inside the tool body, so it fires
-        # once per invocation: on the live call of 2026-09-16 (trace 917975e9)
-        # the model read the diary twice in one turn and the caller heard two
-        # announcements 0.8 seconds apart. A step's line fires once in `on_enter`
-        # whatever the step then does, so the repetition is not a rule the model
-        # has to follow, it is a shape it cannot break.
-        #
-        # It is also earlier. The step's line is spoken before the model has
-        # decided anything; the tool's was spoken after the request that chose
-        # the tool. Measured on the same trace, step entry ran at t=25.46 and the
-        # tool at t=26.10, so the caller hears this 0.64 seconds sooner.
-        #
-        # Alternatives because this fires once per booking, and a caller can
-        # book and then move it inside a minute. A live call played one sentence
-        # twice in forty-four seconds, which is what a recording sounds like.
         announce:
           - Let me double check what I have available.
           - Let me see what is free.
@@ -108,10 +74,6 @@ agents:
     instructions: agents/complaint-specialist.md
     think: reasoning
     speak: voice
-    # record_complaint sits here rather than behind a task of its own. Filing a
-    # complaint is one action, not a step that has to happen in an order, so a
-    # task around it cost a model round trip to enter and bought nothing. The
-    # specialist's own prompt gets the caller's agreement before calling it.
     tools:
       - record_complaint
       - look_up_refund_policy
@@ -149,33 +111,9 @@ shapes:
       - booking_id: Id
       - service: Literal["haircut", "hair-color", "blowout"]
       - date: Date
-      # The whole confirmation phrase, "Friday at 9:00 AM", composed by the
-      # tool. Three live calls on 2026-09-16 got a different part of it wrong,
-      # each time because the agent built the sentence from something other
-      # than this record: a Friday read off a date as "Thursday the 18th", a
-      # "09:00" read back as "09:00 AM", and a move saved at 09:00 confirmed as
-      # "3:00 PM", which was the time the caller had said two turns earlier.
-      # The record already knows the answer, so no prompt composes one.
       - spoken: string
       - time: Time
       - action: Literal["book", "move", "cancel"]
-
-# No `task_groups:` here, and there was one until 2026-09-16. A `book` group ran
-# verify_customer then manage_booking as two steps of one invocation, which is a
-# better shape than what replaced it: the group chained the steps itself, so the
-# owner spent no model request deciding to enter the second one.
-#
-# It came out because it does not run on Pipecat. On the live Pipecat call of
-# 2026-09-16 (trace 5a330c65) the group was entered, held the call for eleven
-# seconds, produced no model request and no audio at all, and the caller heard
-# only the greeting before asking "Hello?". Entering it a second time did the
-# same. The lowering compiles and validates; it just never speaks.
-#
-# Two plain tasks cost one extra model request on the booking turn, which is the
-# price of the example running on both targets. Verification is no longer
-# skipped by `skip_when_confirmed:`, which is a group-step field: the concierge
-# reads `customer_verified` and decides, which is what it did before the group
-# existed.
 
 variables:
   appointment:
@@ -232,10 +170,6 @@ variables:
       appears in no prompt but that step's own.
 
   customer_verified:
-    # Plain string rather than a Literal of the two statuses that can reach it.
-    # The step's `finish:` only fires on existing or created, so `invalid` never
-    # lands here, but the compiler checks the tool's declared output against the
-    # variable and not the gate in front of it, so a narrower type is refused.
     type: string
     default: ""
     description: >-
@@ -267,6 +201,7 @@ prefetch:
 
 secrets:
   - OPENAI_API_KEY
+  - GOOGLE_API_KEY
   - SLNG_API_KEY
   - LANGFUSE_SECRET_KEY
   - LANGFUSE_PUBLIC_KEY
@@ -293,24 +228,19 @@ knowledge:
 
 models:
   think:
-    # Back off native Gemini on 2026-09-16, after one live call (trace 917975e9)
-    # lost 18.5 seconds to two `MALFORMED_FUNCTION_CALL` aborts and the caller
-    # asked whether anybody was still there. That finish reason is a Gemini
-    # server-side abort: the model emits its tool call as plain text instead of
-    # a structured part, and the turn is thrown away. Nothing in this package
-    # reaches it. The one deterministic trigger anybody has bisected is a tool
-    # property named after a Python keyword, and none of ours is.
-    #
-    # The plugin then makes one abort cost nine seconds: MALFORMED is not in
-    # livekit-plugins-google's non-retryable list (llm.py:122-129 in 1.8.2), so
-    # the agents loop runs four attempts with 4.1 seconds of sleep between them.
-    # The emitted session now caps that at one retry, which is worth having on
-    # any provider, but a model that does not abort is worth more.
-    reasoning:
-      provider: openai
-      model: gpt-5.6-luna
-      params:
-        reasoning_effort: "none"
+    # reasoning:
+    #   provider: openai
+    #   model: gpt-5.6-luna
+    #   params:
+    #     reasoning_effort: "none"
+      reasoning:
+        provider: google
+        model: gemini-3.1-flash-lite
+        params:
+          vertexai: true
+          location: eu
+          thinking_config:
+            thinking_level: MINIMAL
   speak:
     voice:
       provider: slng
