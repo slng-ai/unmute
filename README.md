@@ -484,6 +484,37 @@ so a team shares one skill. The docs are also readable as
 time by adding `.md` to its URL. See
 [Coding agents](https://unmute.ai/start/coding-agents).
 
+## Templates
+
+Ready-made agents live in their own repository:
+[**slng-ai/unmute-templates**](https://github.com/slng-ai/unmute-templates).
+
+Each folder there is one finished agent you can run, copy and change. The
+repository README lists every template, what it shows, and which API keys it
+needs.
+
+```sh
+git clone https://github.com/slng-ai/unmute-templates
+cd unmute-templates
+
+unmute validate single-prompt              # check the files
+unmute compile single-prompt               # write the projects
+unmute dev single-prompt --target pipecat  # talk to it in your browser
+```
+
+Copy the folder you like, change the `name:` line in its `agent.yaml`, and it
+is yours.
+
+To add a template, open a pull request on
+[slng-ai/unmute-templates](https://github.com/slng-ai/unmute-templates), not
+here. A good one is one folder showing one idea, it validates and compiles, it
+carries a README saying what to listen for and which keys it needs, it adds a
+row to that repository's table, and it holds no secrets.
+[Templates](https://unmute.ai/start/templates) is the long version.
+
+Templates are agents to start from. Examples below are packages to read: one
+per feature of the compiler, held to every gate in this repository.
+
 ## Examples
 
 [`examples/`](examples/) holds four packages.
@@ -554,6 +585,8 @@ large. It is the fastest way to find out whether somebody is already on it.
 ## Resources
 
 - [Documentation](https://unmute.ai) covers everything above in order.
+- [Templates](https://github.com/slng-ai/unmute-templates) are ready-made
+  agents to clone, run and copy.
 - [How Unmute works](https://unmute.ai/start/how-unmute-works) is the
   four compiler stages between your package and the generated project.
 - [Configuration reference](https://unmute.ai/reference/agent-yaml) is

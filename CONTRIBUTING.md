@@ -27,6 +27,27 @@ for the caller to finish. We need to run your feature and hear it.
 
 Each one is explained below, then how to send the change.
 
+## Sending a template instead
+
+A template is a finished agent somebody else can clone and run. It adds no key
+and changes no behaviour, so the five things above do not apply to it.
+
+Templates live in their own repository:
+[**slng-ai/unmute-templates**](https://github.com/slng-ai/unmute-templates).
+Open your pull request there, not here. A good one carries five things:
+
+| | What |
+|---|---|
+| 1 | **One folder, one idea**, named after what it shows |
+| 2 | **It validates and compiles**: `unmute validate my-template` and `unmute compile my-template` |
+| 3 | **A README in the folder**: what the agent does, what to listen for, which keys it needs, the command that runs it |
+| 4 | **A row in that repository's README table**: the folder, what it shows, the keys it needs |
+| 5 | **No secrets in the files**: keys are read from the environment |
+
+If a template already shows your idea, improve that one rather than adding a
+second. And if your change turns out to need a new key after all, it is a
+compiler change, so it comes back here and takes the five things above.
+
 ## 1. Open an issue first
 
 **Check whether it already exists.** Search the
