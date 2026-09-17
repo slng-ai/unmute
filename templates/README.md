@@ -1,6 +1,6 @@
 # Templates
 
-Templates moved out of this repository. They live here:
+Templates have their own repository:
 
 ## [**github.com/slng-ai/unmute-templates**](https://github.com/slng-ai/unmute-templates)
 
