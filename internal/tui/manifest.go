@@ -20,11 +20,6 @@ type ManifestChoice struct {
 	Data []byte
 }
 
-// RunCreateFromManifest guides a new package through its saved contract first.
-func RunCreateFromManifest(in io.Reader, out io.Writer, accessible bool, path string, raw []byte) (Result, error) {
-	return RunCreateWithManifests(in, out, accessible, path, []ManifestChoice{{Data: raw}}, "", false)
-}
-
 // RunCreateWithManifests keeps the picker and editor in one console session.
 func RunCreateWithManifests(in io.Reader, out io.Writer, accessible bool, path string, choices []ManifestChoice, defaultName string, pick bool) (Result, error) {
 	runner := newRunner(in, out, accessible)

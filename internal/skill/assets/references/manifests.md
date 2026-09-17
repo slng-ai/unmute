@@ -16,7 +16,7 @@ On this page:
 
 ```sh
 unmute manifest create acme-corp
-unmute init my-agent
+unmute init my-agent --from-manifest
 ```
 
 `manifest create` opens a dedicated terminal editor. Choose a section, set its
@@ -41,33 +41,22 @@ IDs. Other rule lists also offer **Allow nothing**.
 Advanced holds region rules and named tool restrictions.
 
 The first saved manifest becomes the default. Later creations offer to change
-the default. Plain `unmute init` uses that default and guides the author through
-the allowed choices. No saved default means the ordinary creation flow.
+the default.
 
 ```sh
-unmute init another-agent --manifest acme-corp
 unmute init another-agent --from-manifest
 unmute manifest use acme-corp
 ```
 
-`--manifest <name>` selects a saved contract directly, even if the default is
-broken. `--from-manifest` opens a picker for this new agent only.
-Do not combine these flags. `manifest use` changes the default for future agents.
+`--from-manifest` opens a picker, with the default listed first, and then guides
+the choices the chosen contract allows. It is the only way a contract reaches a
+new package, and it needs a terminal: a coding assistant asks the user to run
+it. Plain `unmute init another-agent` writes the ordinary starter package and
+reads no saved manifest at all. `manifest use` changes which one the picker and
+the `unmute` console offer first.
 
-For a coding assistant, create an unfinished package without prompts:
-
-```sh
-unmute init my-agent --manifest acme-corp --draft
-```
-
-Both the agent name and `--manifest` are required. `--draft` cannot use the picker.
-The draft contains `agent.yaml`, `targets.yaml`, `instructions.md`, `.gitignore`,
-`.env.example` and an exact copy of the manifest. It chooses no models, targets
-or channels, and adds no tools, tracing or provider credentials.
-Validation and compilation refuse the draft until the agent is complete.
-
-Use the saved manifest name supplied by the user; ask if it is missing.
-Read the copied `manifest` before implementing the use case.
+A package holding a `manifest` file is governed by it.
+Read that copy before implementing the use case.
 Choose exact approved model IDs when listed. Provider-wide approval still
 requires checking target support and the provider's accepted model IDs.
 Keep `slng` as the service provider for SLNG models from different makers.
@@ -553,9 +542,10 @@ not add provider support or make an unsupported setting work.
 
 The creation console cannot collect custom model endpoint settings or a SLNG
 Context Router upstream. It excludes those model choices. If your contract
-allows only such bindings, use `--manifest <name> --draft` and complete the
-package by hand or with a coding assistant. Validation and compilation still
-enforce the same rules.
+allows only such bindings, create the package with plain `unmute init`, copy the
+saved manifest into it as `manifest`, name that file in `agent.yaml`, and write
+the bindings by hand or with a coding assistant. Validation and compilation
+still enforce the same rules.
 
 The contract checks declared settings, not arbitrary local tool code, the
 provider's actual processing location or tracing delivery. It is not signed

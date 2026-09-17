@@ -101,7 +101,11 @@ func TestManifestFailurePreservesExistingBuild(t *testing.T) {
 	}
 }
 
-func TestInitUsesSavedDefaultAndPickerDoesNotChangeIt(t *testing.T) {
+// A saved contract reaches a new package only when the author asks for one.
+// A default saved on this computer used to route every `init` into guided
+// setup, which is how a first agent became unbuildable without answering for
+// rules nobody had mentioned.
+func TestInitIgnoresTheSavedDefaultUnlessAsked(t *testing.T) {
 	store := manifest.Store{Root: t.TempDir()}
 	original := manifestStore
 	manifestStore = func() (manifest.Store, error) { return store, nil }
@@ -114,64 +118,62 @@ func TestInitUsesSavedDefaultAndPickerDoesNotChangeIt(t *testing.T) {
 	if _, err := store.Create("other", []byte(other)); err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct {
-		name, input, want string
-		named             bool
-		pick              bool
-	}{
-		{"default-agent", "7\n\n", contract, false, false},
-		{"other-agent", "2\n7\n\n", other, false, true},
-		{"named-agent", "7\n\n", other, true, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := filepath.Join(t.TempDir(), tc.name)
-			cmd := newRootCmd()
-			var out bytes.Buffer
-			cmd.SetOut(&out)
-			cmd.SetErr(&out)
-			cmd.SetIn(strings.NewReader(tc.input))
-			args := []string{"init", dir}
-			if tc.named {
-				args = append(args, "--manifest", "other")
-			}
-			if tc.pick {
-				args = append(args, "--from-manifest")
-			}
-			cmd.SetArgs(args)
-			if err := cmd.Execute(); err != nil {
-				t.Fatalf("init: %v\n%s", err, out.String())
-			}
-			got, err := os.ReadFile(filepath.Join(dir, "manifest"))
-			if err != nil || string(got) != tc.want {
-				t.Fatalf("manifest copy: %v, %q\n%s", err, got, out.String())
-			}
-			if _, stderr, err := runValidateCommand(t, dir); err != nil {
-				t.Fatalf("created agent is invalid: %v\n%s", err, stderr)
-			}
-		})
-	}
+	t.Run("plain-agent", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "plain-agent")
+		out, err := initManifestCommand(t, noInput{t}, "init", dir)
+		if err != nil {
+			t.Fatalf("init: %v\n%s", err, out)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "manifest")); !os.IsNotExist(err) {
+			t.Fatalf("the saved default reached a plain init: %v\n%s", err, out)
+		}
+		if _, stderr, err := runValidateCommand(t, dir); err != nil {
+			t.Fatalf("scaffold is invalid: %v\n%s", err, stderr)
+		}
+	})
+	t.Run("picked-agent", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "picked-agent")
+		// 2 picks `other`, which the picker lists after the default `acme`.
+		out, err := initManifestCommand(t, strings.NewReader("2\n7\n\n"), "init", dir, "--from-manifest")
+		if err != nil {
+			t.Fatalf("init: %v\n%s", err, out)
+		}
+		got, err := os.ReadFile(filepath.Join(dir, "manifest"))
+		if err != nil || string(got) != other {
+			t.Fatalf("manifest copy: %v, %q\n%s", err, got, out)
+		}
+		if _, stderr, err := runValidateCommand(t, dir); err != nil {
+			t.Fatalf("created agent is invalid: %v\n%s", err, stderr)
+		}
+	})
 	if saved, err := store.Default(); err != nil || saved.Name != "acme" {
 		t.Fatalf("picker changed the default: %v, %+v", err, saved)
 	}
 }
 
-func TestInitRefusesBrokenDefaultWithoutWriting(t *testing.T) {
+func TestBrokenDefaultStopsThePickerAndNotTheScaffold(t *testing.T) {
 	store := manifest.Store{Root: t.TempDir()}
 	original := manifestStore
 	manifestStore = func() (manifest.Store, error) { return store, nil }
 	t.Cleanup(func() { manifestStore = original })
+	if _, err := store.Create("acme", []byte("manifest: acme\nversion: 1\n")); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(store.Root, "default-manifest"), []byte("missing\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(t.TempDir(), "agent")
-	cmd := newRootCmd()
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{"init", dir})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "configured default") {
+	dir := filepath.Join(t.TempDir(), "picked-agent")
+	if _, err := initManifestCommand(t, noInput{t}, "init", dir, "--from-manifest"); err == nil || !strings.Contains(err.Error(), "configured default") {
 		t.Fatalf("broken default silently ignored: %v", err)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("broken default wrote destination: %v", err)
+	}
+	dir = filepath.Join(t.TempDir(), "plain-agent")
+	if out, err := initManifestCommand(t, noInput{t}, "init", dir); err != nil {
+		t.Fatalf("broken default stopped the scaffold: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "agent.yaml")); err != nil {
+		t.Fatalf("scaffold missing: %v", err)
 	}
 }

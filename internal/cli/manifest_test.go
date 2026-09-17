@@ -170,7 +170,8 @@ func TestGuidedManifestCreateEditAndCopies(t *testing.T) {
 		t.Fatalf("unexpected starter: %s", original.Data)
 	}
 	packageCopy := filepath.Join(t.TempDir(), "agent")
-	if out, err := run("1\n7\n\n", "init", packageCopy); err != nil {
+	// Picker, deployment target, Save, confirm.
+	if out, err := run("1\n1\n7\n\n", "init", packageCopy, "--from-manifest"); err != nil {
 		t.Fatalf("init: %v\n%s", err, out)
 	}
 	copied, err := os.ReadFile(filepath.Join(packageCopy, "manifest"))

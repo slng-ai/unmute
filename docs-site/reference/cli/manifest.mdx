@@ -10,7 +10,7 @@ On this page:
 
 - [Quickstart](#quickstart): save a contract and use it
 - [Create the contract](#1-create-the-contract): choose rules and save
-- [Build an agent](#2-build-an-agent-from-it): guided setup or a coding assistant
+- [Build an agent](#2-build-an-agent-from-it): the picker and guided setup
 - [Check the agent](#3-check-the-agent): validate and compile
 - [Advanced](#advanced): external editors, storage and command help
 - [Troubleshooting](#troubleshooting): common symptoms and fixes
@@ -22,14 +22,15 @@ Run these complete commands from the directory that will hold your agent:
 
 ```sh Terminal
 unmute manifest create acme-corp
-unmute init hotel-agent --manifest acme-corp
+unmute init hotel-agent --from-manifest
 unmute validate hotel-agent
 unmute compile hotel-agent
 ```
 
 The first command opens the manifest editor. Set the rules, then choose
-**Review and save → Save manifest**. The second opens guided agent setup
-using those rules. Finish and save the agent before running the checks.
+**Review and save → Save manifest**. The second lists the saved contracts,
+then opens guided agent setup using the one you pick. Finish and save the agent
+before running the checks.
 
 <Note>
   A manifest approves choices; it does not create models, tools or prompts.
@@ -82,24 +83,23 @@ Existing saved names are never overwritten by `create`.
 
 ## 2. Build an agent from it
 
-Choose one route for the same `hotel-agent` example:
+One flag attaches a contract to a new package:
 
-| Route | Command | Who completes the package |
-|---|---|---|
-| Name a saved contract | `unmute init hotel-agent --manifest acme-corp` | you, through guided setup |
-| Choose from saved contracts | `unmute init hotel-agent --from-manifest` | you, through a picker and guided setup |
-| Give the work to an assistant | `unmute init hotel-agent --manifest acme-corp --draft` | the coding assistant, by editing the draft |
+```sh Terminal
+unmute init hotel-agent --from-manifest
+```
 
-These commands are alternatives. Do not run them all against the same directory.
-`--manifest` selects directly, even if an unrelated default is broken.
-`--from-manifest` opens a picker and cannot be combined with `--manifest` or `--draft`.
+The picker lists the saved contracts, default first, and takes no name of its
+own: the name before the flag is the agent's. Guided setup then offers only
+what the chosen contract allows. Plain `unmute init hotel-agent` writes the
+ordinary starter package and reads no saved manifest.
 
-For the assistant route, install the [Unmute skill](/reference/cli/skill) and
-give it the use case and saved name `acme-corp`. It creates the draft, reads the
-copied rules, implements the agent, then validates and compiles it.
-A draft has no chosen models, targets or channels and is not yet runnable.
+The picker needs a terminal, so a coding assistant cannot create a governed
+package. Create it yourself, install the [Unmute skill](/reference/cli/skill),
+then give the assistant the use case and ask it to complete those files. It
+reads the copied rules, implements the agent, then validates and compiles it.
 
-Both routes copy the exact contract into `hotel-agent/manifest` and link it
+Creation copies the exact contract into `hotel-agent/manifest` and links it
 from `agent.yaml`. Commit both files. Validation then works on another computer
 or in CI without the saved library.
 
@@ -142,9 +142,10 @@ A save error keeps the draft open for correction or retry.
 unmute manifest use acme-corp
 ```
 
-Plain `unmute init` uses this default. The first saved manifest becomes the
-default automatically; later creations offer to change it.
-Direct selection with `--manifest` changes only the new agent.
+The `--from-manifest` picker lists this default first, and the `unmute` console
+uses it for a new agent. The first saved manifest becomes the default
+automatically; later creations offer to change it. Plain `unmute init <name>`
+reads no saved manifest, so the default never changes what it writes.
 `manifest use` requires a valid saved manifest and changes no existing package.
 
 ### Edit YAML in an external editor
@@ -239,11 +240,11 @@ Flags:
 | Symptom | Cause | Fix |
 |---|---|---|
 | Arrow keys do not reach Apply | a form uses Tab for focus | press Tab, then Enter on Apply |
-| `--from-manifest acme-corp` reports too many arguments | the flag opens a picker and takes no name | use `--manifest acme-corp` |
+| `--from-manifest acme-corp` reports too many arguments | the flag opens a picker and takes no name | write the agent name first: `unmute init hotel-agent --from-manifest` |
 | Creation reports an existing name | `create` protects saved contracts | use `manifest edit acme-corp` |
-| The saved default is invalid | default-based creation cannot use it | repair it with `manifest edit acme-corp --editor`, or select another valid contract with `--manifest` |
+| The saved default is invalid | the picker and the console read it before offering a choice | repair it with `manifest edit acme-corp --editor`, or point the default at a valid contract |
 | The old agent still has old rules | each agent keeps its own contract copy | review and replace its `manifest`, then validate and compile |
-| A draft fails validation | models, targets and channels are unfinished | complete it through the skill workflow before compiling |
+| A new package fails validation | models, targets and channels are unfinished | complete it through the skill workflow before compiling |
 
 ## Where to go next
 

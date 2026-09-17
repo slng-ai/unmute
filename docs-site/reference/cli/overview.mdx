@@ -55,13 +55,12 @@ with its own tool.
 | [`manifest edit`](/reference/cli/manifest) | edit a saved manifest with guided setup |
 | [`manifest use`](/reference/cli/manifest) | choose the default for future agents |
 
-`init` uses the saved default automatically. Add `--manifest <name>` for direct
-selection, or `--from-manifest` to open a picker for one new agent.
-For a coding assistant, `init <agent> --manifest <name> --draft` creates an
-unfinished package without prompts. The skill reads the copied rules, completes
-the use case, then validates and compiles it. Follow the
-[draft quickstart](/reference/cli/init#quickstart) for commands and a copyable
-assistant brief.
+A saved contract reaches a new package only when you ask for it:
+`init <agent> --from-manifest` opens a picker, then guides the choices that
+contract allows. Plain `init <agent>` writes the starter package and reads no
+saved manifest. `manifest use` sets which contract the picker and the `unmute`
+console offer first. See
+[initialization](/reference/cli/init#from-a-saved-manifest).
 
 ## Two commands off that path
 
