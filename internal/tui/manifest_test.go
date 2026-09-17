@@ -13,6 +13,12 @@ import (
 	"github.com/slng-ai/unmute/internal/spec"
 )
 
+// createFromContract drives creation under one saved contract: what
+// `unmute init <name> --from-manifest` does once the picker has chosen one.
+func createFromContract(in *strings.Reader, out *bytes.Buffer, path string, raw []byte) (Result, error) {
+	return RunCreateWithManifests(in, out, true, path, []ManifestChoice{{Data: raw}}, "", false)
+}
+
 const manifestTestContract = `# Preserve this comment.
 manifest: acme
 version: 1
@@ -54,7 +60,7 @@ tracing:
 
 func TestManifestCreateCopiesContractAndMaintainsIt(t *testing.T) {
 	var out bytes.Buffer
-	result, err := RunCreateFromManifest(strings.NewReader("cartesia-voice\n7\n\n"), &out, true, "agent", []byte(manifestTestContract))
+	result, err := createFromContract(strings.NewReader("cartesia-voice\n7\n\n"), &out, "agent", []byte(manifestTestContract))
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
@@ -117,7 +123,7 @@ func TestManifestCreateRefusesImpossibleTargetAndCanCancel(t *testing.T) {
 		{"manifest: acme\nversion: 1\ntargets:\n  allow: []\n", "", true},
 		{manifestTestContract, "cartesia-voice\n8\n", false},
 	} {
-		result, err := RunCreateFromManifest(strings.NewReader(tc.input), &bytes.Buffer{}, true, "agent", []byte(tc.raw))
+		result, err := createFromContract(strings.NewReader(tc.input), &bytes.Buffer{}, "agent", []byte(tc.raw))
 		if (err != nil) != tc.wantError {
 			t.Fatalf("error %v", err)
 		}
@@ -166,7 +172,7 @@ languages:
 func TestManifestTracingSurvivesMaintenance(t *testing.T) {
 	raw := strings.Replace(manifestTestContract, "tracing:\n  allow: []", "tracing:\n  allow:\n    - langfuse", 1)
 	var out bytes.Buffer
-	result, err := RunCreateFromManifest(strings.NewReader("cartesia-voice\n2\n7\n\n"), &out, true, "agent", []byte(raw))
+	result, err := createFromContract(strings.NewReader("cartesia-voice\n2\n7\n\n"), &out, "agent", []byte(raw))
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}

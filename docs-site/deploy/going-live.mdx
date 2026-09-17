@@ -30,10 +30,10 @@ unmute validate
 unmute compile
 ```
 
-With no saved organization manifest, named initialization creates a LiveKit
-package. Run `unmute init` without a name for the interactive target choices.
-A saved manifest guides creation through its allowed choices; see
-[initialization](/reference/cli/init#1-choose-the-contract).
+Named initialization creates a LiveKit package. Run `unmute init` without a
+name for the interactive target choices. Add `--from-manifest` to create the
+package under a saved organization manifest instead; see
+[initialization](/reference/cli/init#from-a-saved-manifest).
 
 Already have a package? Start inside it at `unmute validate`. To change its
 target, follow [Switching a package](/targets/overview#switching-a-package-to-another-target),

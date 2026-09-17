@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/slng-ai/unmute/internal/ir"
-	"github.com/slng-ai/unmute/internal/manifest"
 	"github.com/slng-ai/unmute/internal/scaffold"
 	"github.com/slng-ai/unmute/internal/style"
 	"github.com/slng-ai/unmute/internal/tui"
@@ -16,18 +15,13 @@ import (
 )
 
 func newInitCmd() *cobra.Command {
-	var fromManifest, draft bool
-	var manifestName string
+	var fromManifest bool
 	command := &cobra.Command{
 		Use:   "init [name]",
 		Short: "Scaffold a new v1 agent package.",
 		Args: func(cmd *cobra.Command, args []string) error {
-			explicit := cmd.Flags().Changed("manifest")
-			if cmd.Flags().Changed("from-manifest") && (explicit || cmd.Flags().Changed("draft")) {
-				return fmt.Errorf("--from-manifest opens a picker; use --manifest <name> for direct selection and --draft")
-			}
 			if fromManifest && len(args) > 1 {
-				return fmt.Errorf("--from-manifest opens a picker and takes no name; use `unmute init <agent> --manifest <name>`")
+				return fmt.Errorf("--from-manifest opens a picker and takes no name; the name before it is the agent's")
 			}
 			if err := cobra.MaximumNArgs(1)(cmd, args); err != nil {
 				return err
@@ -35,41 +29,23 @@ func newInitCmd() *cobra.Command {
 			if len(args) > 0 && strings.TrimSpace(args[0]) == "" {
 				return fmt.Errorf("agent name required")
 			}
-			if draft && (!explicit || len(args) == 0) {
-				return fmt.Errorf("--draft requires an agent name and --manifest <name>")
-			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := manifestStore()
-			if err != nil {
-				return err
-			}
-			var saved *manifest.Saved
-			if cmd.Flags().Changed("manifest") {
-				saved, err = store.Load(manifestName)
-			} else {
-				saved, err = store.Default()
-			}
-			if err != nil {
-				return err
-			}
-			if draft {
-				dir := args[0]
-				created, err := scaffold.WriteDraft(dir, saved.Data)
-				if err != nil {
-					return fmt.Errorf("init %s: %w", dir, err)
-				}
-				out := cmd.OutOrStdout()
-				printHeader(out, "init "+displayDir(dir))
-				u := style.For(out)
-				for _, path := range created {
-					fmt.Fprintln(out, u.Dim("created"), dimPath(u, path))
-				}
-				fmt.Fprintf(cmd.ErrOrStderr(), "Complete the draft's models, targets, channels and instructions, then run `unmute validate %s`.\n", dir)
-				return nil
-			}
+			// Only --from-manifest reads the saved manifests. A plain run writes
+			// the starter package, which is what it did before manifests existed:
+			// a default saved on this computer used to hijack every `init` into
+			// guided setup, so a first agent could not be created without
+			// answering for a contract the author had not asked for.
 			if fromManifest {
+				store, err := manifestStore()
+				if err != nil {
+					return err
+				}
+				saved, err := store.Default()
+				if err != nil {
+					return err
+				}
 				entries, err := store.List()
 				if err != nil {
 					return err
@@ -98,20 +74,6 @@ func newInitCmd() *cobra.Command {
 				}
 				return writeConsoleResult(cmd, result)
 			}
-			if saved != nil {
-				if cmd.InOrStdin() == os.Stdin && (!isTTY(os.Stdin) || !isTTY(cmd.OutOrStdout())) {
-					return fmt.Errorf("manifest initialization needs an interactive terminal")
-				}
-				path := ""
-				if len(args) > 0 {
-					path = args[0]
-				}
-				result, err := tui.RunCreateFromManifest(cmd.InOrStdin(), cmd.OutOrStdout(), cmd.InOrStdin() != os.Stdin, path, saved.Data)
-				if err != nil {
-					return fmt.Errorf("console: %w", err)
-				}
-				return writeConsoleResult(cmd, result)
-			}
 			if len(args) == 0 {
 				if cmd.InOrStdin() == os.Stdin && (!isTTY(os.Stdin) || !isTTY(cmd.OutOrStdout())) {
 					return fmt.Errorf("agent name required")
@@ -122,8 +84,6 @@ func newInitCmd() *cobra.Command {
 			return writeScaffold(cmd, dir, scaffold.Data{Name: filepath.Base(dir), Tools: scaffold.DefaultTools()})
 		},
 	}
-	command.Flags().StringVar(&manifestName, "manifest", "", "Use a saved organization manifest by name.")
-	command.Flags().BoolVar(&draft, "draft", false, "Write an unfinished package without prompts (requires name and --manifest).")
 	command.Flags().BoolVar(&fromManifest, "from-manifest", false, "Choose a saved organization manifest.")
 	return command
 }

@@ -25,16 +25,17 @@ If it is not, [create it first](/reference/cli/manifest).
 
 ```sh Terminal
 unmute skill install
+unmute init hotel-agent --from-manifest
 ```
 
-Give your coding assistant this complete request:
+The picker attaches the contract, so run it yourself: it needs a terminal and
+an assistant cannot answer it. Then give your coding assistant this complete
+request:
 
 ```text Prompt for your coding assistant
-Use the Unmute skill to build hotel-agent from the saved
-manifest acme-corp.
-Run this command:
-unmute init hotel-agent --manifest acme-corp --draft
-Then read hotel-agent/manifest before choosing any models,
+Use the Unmute skill to build the existing hotel-agent
+package, which carries the company manifest acme-corp.
+Read hotel-agent/manifest before choosing any models,
 targets or tools.
 
 Build a hotel information assistant that answers questions
@@ -76,14 +77,14 @@ Add the hotel's actual facts and available integrations as the conversation cont
 
 | Responsibility | What happens |
 |---|---|
-| CLI: `init --manifest acme-corp --draft` | copies the contract and writes an unfinished starting point without prompts |
+| You: `init hotel-agent --from-manifest` | picks the contract, copies it into the package and guides the allowed choices |
 | Assistant | reads the contract, chooses supported and approved bindings, writes prompts and implements the use case |
 | CLI: `validate` | checks the completed package against the contract and target rules |
 | CLI: `compile` | validates again and generates the target artifacts |
 
-The draft has no chosen models, targets or channels. It adds no tools,
-tracing or provider credentials. The assistant completes those settings only
-as the use case requires and the contract permits.
+Guided setup leaves the use case open: the prompts, tools and tracing are the
+assistant's work, and it adds them only as the use case requires and the
+contract permits.
 
 A provider is the service the agent connects to. SLNG can serve models from
 several makers while the provider stays `slng`. An exact allowlist limits model
@@ -199,10 +200,10 @@ Flags:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| The assistant opens guided setup | it is using an older workflow or omitted `--draft` | update the CLI, rerun `skill install` and give the quickstart prompt |
-| `acme-corp` cannot be loaded | the saved name is missing or its contract is invalid | create or repair it with `unmute manifest` before creating the draft |
+| The assistant tries to create the package | its installed skill is older than the CLI | update the CLI, rerun `skill install` and create the package yourself |
+| `acme-corp` cannot be loaded | the saved name is missing or its contract is invalid | create or repair it with `unmute manifest`, then create the package |
 | `hotel-agent` already exists | initialization protects existing packages | ask the assistant to inspect and complete the existing package |
-| The draft fails validation immediately | the draft intentionally leaves bindings unfinished | have the assistant complete it, then validate again |
+| The new package fails validation immediately | the use case is not implemented yet | have the assistant complete it, then validate again |
 | Skill refresh refuses a file | it changed locally after installation | review the changes; use `--force` only to replace them |
 | The agent compiles but has not been heard | compile checks and generates artifacts; it runs no conversation | use `unmute dev hotel-agent` for LiveKit or Pipecat, or test the deployed SLNG agent |
 

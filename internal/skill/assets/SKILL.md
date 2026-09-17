@@ -60,12 +60,10 @@ Run these steps in order:
 
 ## The build loop
 
-For a new company-governed package, use the user's saved manifest name; ask if absent. Never invent a contract.
-Run `unmute init <agent> --manifest <name> --draft`, then read the copied `manifest` before choosing any bindings.
-Follow `references/manifests.md` and the package, model, tool and orchestration references to complete the use case. The draft is unfinished and not runnable.
+`unmute init <agent>` writes the starter package with no questions. A company contract reaches a package only when a person asks for one with `unmute init <agent> --from-manifest`, which is an interactive picker: you cannot create a governed package yourself, so ask the user to run it.
+A package holding a `manifest` file is company-governed. Read that file before choosing any bindings, and follow `references/manifests.md`.
 Choose exact approved model IDs when listed; provider-wide approval does not establish target or provider support. SLNG stays provider `slng` even when IDs name other model makers.
 Preserve the contract and its link. Explain conflicts instead of weakening company rules.
-Human-guided setup uses `unmute init <agent> --manifest <name>`; `--from-manifest` opens the picker.
 Refresh this workflow with `unmute skill install` after updating the CLI; review local edits before using `--force`.
 
 For every change:

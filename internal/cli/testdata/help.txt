@@ -31,10 +31,8 @@ Usage:
   unmute init [name] [flags]
 
 Flags:
-      --draft             Write an unfinished package without prompts (requires name and --manifest).
-      --from-manifest     Choose a saved organization manifest.
-  -h, --help              help for init
-      --manifest string   Use a saved organization manifest by name.
+      --from-manifest   Choose a saved organization manifest.
+  -h, --help            help for init
 
 $ unmute manifest --help
 Save organization contracts on this computer.

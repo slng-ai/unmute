@@ -30,7 +30,7 @@ Both creation steps are interactive; finish and save each before continuing.
 
 ```sh Terminal — project folder
 unmute manifest create acme-corp
-unmute init hotel-agent --manifest acme-corp
+unmute init hotel-agent --from-manifest
 unmute validate hotel-agent
 unmute compile hotel-agent
 ```
@@ -39,9 +39,9 @@ Choose the company's approved settings in the manifest editor.
 Omitted rules add no restriction; a new manifest starts unrestricted.
 The agent setup then offers choices within the saved contract.
 
-For a coding assistant, use the [draft quickstart](/reference/cli/init#quickstart).
-It creates an unfinished package without prompts and includes a brief you can
-copy into your assistant.
+`--from-manifest` is what attaches a contract. Plain `unmute init hotel-agent`
+writes the ordinary starter package and reads no saved manifest, so a person
+creates the governed package and a coding assistant completes it.
 
 ## 1. Save the company rules
 
@@ -72,23 +72,23 @@ See [editor controls](/reference/cli/manifest) for the full workflow.
 
 ## 2. Create an agent from them
 
-Use the same saved name when creating the package. These are alternatives;
-choose one for a new directory.
+Create the package in a terminal, with the picker:
 
-| Who completes the package | Command |
-|---|---|
-| A person in guided setup | `unmute init hotel-agent --manifest acme-corp` |
-| A coding assistant editing files | `unmute init hotel-agent --manifest acme-corp --draft` |
+```sh Terminal — project folder
+unmute init hotel-agent --from-manifest
+```
 
-The draft selects no models, targets or channels. Install the
-[Unmute skill](/reference/cli/skill), then give the assistant the use case and
-ask it to complete the existing package under `hotel-agent/manifest`.
-The CLI copies the contract; the assistant writes the agent.
+The picker lists the saved contracts, default first. Guided setup then offers
+only what the chosen one allows, and it copies that file into the package as
+`manifest`.
+
+To hand the use case to a coding assistant, install the
+[Unmute skill](/reference/cli/skill), then ask the assistant to complete the
+package you created. You attach the contract; the assistant writes the agent.
 
 The skill reads company rules before choosing bindings or tools. It uses exact
 approved IDs when listed, preserves the contract, and explains conflicts
-instead of weakening rules. Use the [complete assistant brief](/reference/cli/init#quickstart)
-when handing it a draft.
+instead of weakening rules.
 
 ## 3. Check the package
 
@@ -100,7 +100,7 @@ unmute compile hotel-agent
 ```
 
 Validation checks the package's own contract. Compilation also enforces it.
-A draft fails these checks until its required settings are filled in.
+An unfinished package fails these checks until its required settings are there.
 Fix the agent's choices when they violate a rule; do not remove the rule to
 make the check pass.
 
@@ -482,9 +482,9 @@ The YAML format and `--editor` still support explicitly empty lists.
 
 ### Choose a different default
 
-The first saved manifest becomes the default. Later creations offer to change it.
-Plain `unmute init` uses that default and opens guided setup. Without a saved
-default, it uses the ordinary creation flow.
+The first saved manifest becomes the default. Later creations offer to change
+it. The default is the contract listed first in the `--from-manifest` picker,
+and the one the `unmute` console uses for a new agent.
 
 This complete command changes the default for future agents:
 
@@ -492,10 +492,9 @@ This complete command changes the default for future agents:
 unmute manifest use acme-corp
 ```
 
-Use `--manifest acme-corp` for one agent without changing the default.
-Use `--from-manifest` to open a picker instead; it takes no name.
-A broken default is an error unless you select a saved manifest directly.
-Draft creation always requires an explicit agent name and `--manifest`.
+Plain `unmute init <name>` reads no saved manifest, so a default never changes
+what it writes. A broken default is an error in the picker, which takes no
+manifest name of its own.
 
 ### Edit the saved source
 
@@ -536,9 +535,10 @@ not add provider support or make an unsupported setting work.
 
 The creation console cannot collect custom model endpoint settings or a SLNG
 Context Router upstream. It excludes those model choices. If your contract
-allows only such bindings, use `--manifest <name> --draft` and complete the
-package by hand or with a coding assistant. Validation and compilation still
-enforce the same rules.
+allows only such bindings, create the package with plain `unmute init`, copy the
+saved manifest into it as `manifest`, link it with `manifest: manifest` in
+`agent.yaml`, and write those bindings by hand or with a coding assistant.
+Validation and compilation still enforce the same rules.
 
 The contract checks declared settings, not arbitrary local tool code, the
 provider's actual processing location or tracing delivery. It is not signed
@@ -554,15 +554,15 @@ rules and prefetch limits are not part of this version.
 | A provider's models are all blocked | Its `allow` list is explicitly empty | Ask the contract owner to add approved IDs or choose Allow all models |
 | A copied agent still follows old rules | Each package keeps its own contract | Replace the copy with the approved revision, then validate and compile |
 | Validation says the manifest is missing or unlinked | The file and `agent.yaml` link do not match | Keep the root `manifest` file and `manifest: manifest` together |
-| A draft reports no targets selected | The assistant has not completed the package | Supply the use-case brief and have it fill the required settings |
-| A permitted provider is unavailable in guided setup | The console cannot collect its endpoint or router settings | Use `--manifest acme-corp --draft` and follow the provider's reference |
+| An unfinished package reports no targets selected | The assistant has not completed it | Supply the use-case brief and have it fill the required settings |
+| A permitted provider is unavailable in guided setup | The console cannot collect its endpoint or router settings | Write that binding by hand and follow the provider's reference |
 | A region warning remains after compilation | The declared location cannot be verified | Check the target's region support and the provider's configuration |
 
 ## Where to go next
 
 <CardGroup cols={2}>
   <Card title="Create the agent" icon="terminal" href="/reference/cli/init">
-    Hand a manifest-backed draft to your coding assistant.
+    Create a package under a saved contract.
   </Card>
   <Card title="Edit company rules" icon="file" href="/reference/cli/manifest">
     Navigate the editor, save changes and manage backups.

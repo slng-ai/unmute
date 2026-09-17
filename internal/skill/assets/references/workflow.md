@@ -7,7 +7,7 @@ Write, validate, read the error, fix, repeat. Then run it and listen.
 | Command | What it does |
 |---|---|
 | `unmute init <name>` | scaffold a new package |
-| `unmute init <agent> --manifest <name> --draft` | create an unfinished package from a saved contract without prompts |
+| `unmute init <name> --from-manifest` | pick a saved contract, then create the package under it |
 | `unmute manifest create [name]` | create a reusable manifest with guided setup |
 | `unmute manifest edit <name>` | edit a saved manifest with guided setup |
 | `unmute manifest use <name>` | select the default manifest for future agents |
@@ -74,40 +74,7 @@ Review local changes before using `--force`.
 
 ## Start with init
 
-When a saved default manifest exists, `init` uses it and guides the author
-through the allowed choices. `unmute init my-agent --manifest acme-corp` selects
-a saved manifest directly. `unmute init my-agent --from-manifest` opens the
-saved-manifest picker instead. These are alternative flags; do not combine them. The chosen file is copied into the package;
-validation and compilation need no computer config. Read
-[Manifest](manifests.md) for creation, storage, updates and the rules.
-
-For a coding assistant, use the noninteractive draft flow:
-
-```sh
-unmute init my-agent --manifest acme-corp --draft
-```
-
-Use the user's saved manifest name; ask if it was not supplied. Both names are
-required, and `--draft` cannot be combined with `--from-manifest`.
-Explicit selection ignores the default, even if that default is broken.
-
-The draft writes `agent.yaml`, `targets.yaml`, `instructions.md`, `.gitignore`,
-`.env.example` and an exact `manifest` copy. It sets the package name and a
-starter agent's prompt link. Models, targets and channels remain unconfigured;
-it adds no tools, tracing or provider credentials. The draft is not runnable.
-
-Read the copied contract before choosing bindings or implementing the brief.
-Use the package, model, tool and orchestration references to complete the files.
-Keep `slng` as the provider for SLNG models, even when their IDs name other makers.
-Select exact listed model IDs; provider-wide permission still requires checking
-that the target and provider support the chosen model.
-Preserve the contract and its link. Explain a conflicting requirement rather
-than weakening the company rules.
-Run `unmute validate my-agent`, fix errors, then `unmute compile my-agent`.
-Validation and compilation refuse an incomplete draft; neither success proves
-that runtime or audio testing has happened.
-
-With no saved default, the ordinary scaffold works as below.
+`unmute init` asks no questions and writes the same starter package every time.
 
 ```sh
 unmute init my-agent
@@ -125,6 +92,14 @@ second target later, by hand, when the package needs one.
 
 `unmute init` refuses to write into a directory that already exists and is not
 empty. That is deliberate, not a bug to route around.
+
+A company contract is added by a person: `unmute init my-agent --from-manifest`
+opens a picker and then guides the choices the contract allows. It needs a
+terminal, so ask the user to run it rather than trying to create a governed
+package yourself. The chosen file is copied into the package as `manifest`, and
+validation and compilation read that copy: they need nothing saved on the
+computer. When a package holds one, read it before choosing bindings, and read
+[Manifest](manifests.md) for the rules.
 
 ## Validate, every time
 
