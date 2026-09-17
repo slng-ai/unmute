@@ -79,7 +79,7 @@ func runSkillInstall(cmd *cobra.Command, agents []string, dir string, force bool
 		reportPlan(cmd, plan)
 	}
 
-	fmt.Fprintf(out, "\nInstalled the Unmute skill for %s.\n", strings.Join(installedFor(agents), ", "))
+	fmt.Fprintf(out, "\nInstalled the Unmute skills for %s.\n", strings.Join(installedFor(agents), ", "))
 	fmt.Fprintln(out, "Commit these files so your team's assistants get them too.")
 	fmt.Fprintln(out, "Next: ask your assistant to build a voice agent, in a sentence.")
 	return nil

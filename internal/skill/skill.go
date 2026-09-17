@@ -51,28 +51,45 @@ func New(version string) Bundle {
 // Destination is one directory a bundle lands in. There are two and they are
 // fixed: an install that writes anywhere else is a bug, not a feature.
 type Destination struct {
-	Name string // "canonical" or "pointer", used in errors and tests
+	Name string // "canonical" or "manifest pointer", used in errors and tests
 
 	dir  []string // path elements under the project root
 	root string   // subtree of the embedded FS this destination takes
-	skip string   // embedded subtree that belongs to another destination
 }
 
-// The two destinations. Path elements rather than a literal string, because
-// Windows is a supported platform and filepath.Join owns the separator.
+// The four destinations: two skills, each in the place Claude Code reads and
+// the place everybody else reads. Path elements rather than a literal string,
+// because Windows is a supported platform and filepath.Join owns the separator.
+//
+// A destination whose root contains another's takes everything but that one,
+// which is computed in Files rather than listed here: the canonical bundle is
+// `assets` minus the three subtrees below it, and listing those by hand is how
+// a new skill quietly ships inside the old one.
 var (
 	Canonical = Destination{
 		Name: "canonical",
 		dir:  []string{".agents", "skills", "unmute"},
 		root: "assets",
-		skip: "assets/pointer",
 	}
 	Pointer = Destination{
 		Name: "pointer",
 		dir:  []string{".claude", "skills", "unmute"},
 		root: "assets/pointer",
 	}
+	ManifestCanonical = Destination{
+		Name: "manifest canonical",
+		dir:  []string{".agents", "skills", "unmute-manifest"},
+		root: "assets/manifest-skill",
+	}
+	ManifestPointer = Destination{
+		Name: "manifest pointer",
+		dir:  []string{".claude", "skills", "unmute-manifest"},
+		root: "assets/manifest-pointer",
+	}
 )
+
+// All is every destination, in install order.
+var All = []Destination{Canonical, Pointer, ManifestCanonical, ManifestPointer}
 
 // Dir returns this destination's directory under the given project root.
 func (d Destination) Dir(project string) string {
@@ -86,11 +103,11 @@ func (d Destination) Rel() string { return path.Join(d.dir...) }
 // Assistants maps the --agent names onto destinations. Several names share a
 // destination, which is why the resolver deduplicates rather than writing twice.
 var assistants = map[string][]Destination{
-	"claude":  {Pointer},
-	"codex":   {Canonical},
-	"cursor":  {Canonical},
-	"copilot": {Canonical},
-	"all":     {Canonical, Pointer},
+	"claude":  {Pointer, ManifestPointer},
+	"codex":   {Canonical, ManifestCanonical},
+	"cursor":  {Canonical, ManifestCanonical},
+	"copilot": {Canonical, ManifestCanonical},
+	"all":     All,
 }
 
 // AssistantNames lists every accepted --agent value, sorted, for help text and
@@ -364,13 +381,19 @@ func (b Bundle) Apply(plan DestinationPlan) (err error) {
 // read the bundle's content rather than installing it.
 func (b Bundle) Files(dest Destination) (map[string][]byte, error) {
 	out := map[string][]byte{}
+	// A bundle without this subtree has no files for it. The shipped bundle
+	// carries all four, and TestRealBundleInstalls fails on an empty one, so
+	// this only lets a test fixture hold the destinations it cares about.
+	if _, err := fs.Stat(b.FS, dest.root); errors.Is(err, fs.ErrNotExist) {
+		return out, nil
+	}
 	err := fs.WalkDir(b.FS, dest.root, func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
-			if dest.skip != "" && name == dest.skip {
-				return fs.SkipDir
+			if name != dest.root && slices.ContainsFunc(All, func(other Destination) bool { return other.root == name }) {
+				return fs.SkipDir // another destination's subtree
 			}
 			return nil
 		}

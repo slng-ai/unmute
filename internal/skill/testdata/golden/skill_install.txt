@@ -14,5 +14,9 @@
 .agents/skills/unmute/references/transfers.md
 .agents/skills/unmute/references/variables.md
 .agents/skills/unmute/references/workflow.md
+.agents/skills/unmute-manifest/.unmute-manifest.json
+.agents/skills/unmute-manifest/SKILL.md
 .claude/skills/unmute/.unmute-manifest.json
 .claude/skills/unmute/SKILL.md
+.claude/skills/unmute-manifest/.unmute-manifest.json
+.claude/skills/unmute-manifest/SKILL.md

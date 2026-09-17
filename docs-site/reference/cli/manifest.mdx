@@ -148,6 +148,20 @@ automatically; later creations offer to change it. Plain `unmute init <name>`
 reads no saved manifest, so the default never changes what it writes.
 `manifest use` requires a valid saved manifest and changes no existing package.
 
+### Save a written file
+
+`--file` stores a manifest you already wrote, with no prompts and no terminal:
+
+```sh Terminal
+unmute manifest create acme-corp --file manifest-draft.yaml
+```
+
+It validates before saving, refuses an unknown key or a bad value with its line
+and column, and writes nothing when it refuses. This is how a coding assistant
+saves a contract it drafted with you: install the skill, ask it to write the
+manifest, read the file, then run this command. The first saved manifest becomes
+the default; a later one leaves the default alone.
+
 ### Edit YAML in an external editor
 
 Use this alternative when you prefer YAML or need to repair an invalid saved file:
@@ -208,8 +222,9 @@ Usage:
   unmute manifest create [name] [flags]
 
 Flags:
-      --editor   Edit YAML in VISUAL or EDITOR instead.
-  -h, --help     help for create
+      --editor        Edit YAML in VISUAL or EDITOR instead.
+      --file string   Save this YAML file as the manifest, with no prompts.
+  -h, --help          help for create
 ```
 
 ```text Terminal — unmute manifest edit --help

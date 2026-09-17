@@ -28,10 +28,22 @@ func newManifestCmd() *cobra.Command {
 			use, short, args = "edit <name>", "Edit a saved manifest with guided setup.", cobra.ExactArgs(1)
 		}
 		var external bool
+		var file string
 		child := &cobra.Command{Use: use, Short: short, Args: args, RunE: func(cmd *cobra.Command, args []string) error {
+			if file != "" {
+				if external {
+					return fmt.Errorf("--file writes the manifest already; drop --editor")
+				}
+				return saveManifestFile(cmd, args, file)
+			}
 			return runManifest(cmd, args, editing, external)
 		}}
 		child.Flags().BoolVar(&external, "editor", false, "Edit YAML in VISUAL or EDITOR instead.")
+		if !editing {
+			// A written manifest needs no terminal, which is what lets a coding
+			// assistant save the contract it drafted with somebody.
+			child.Flags().StringVar(&file, "file", "", "Save this YAML file as the manifest, with no prompts.")
+		}
 		cmd.AddCommand(child)
 	}
 	cmd.AddCommand(&cobra.Command{Use: "use <name>", Short: "Choose the default manifest for new agents.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
@@ -47,6 +59,45 @@ func newManifestCmd() *cobra.Command {
 		return nil
 	}})
 	return cmd
+}
+
+// saveManifestFile stores an authored YAML file under a local name. It asks
+// nothing: the file is the answer to every question guided setup would put, and
+// a refusal names the line that has to change. The first saved manifest becomes
+// the default, which is what `manifest create` does interactively; a later one
+// leaves the default alone rather than prompting where nobody can answer.
+func saveManifestFile(cmd *cobra.Command, args []string, file string) error {
+	out := cmd.OutOrStdout()
+	printHeader(out, "manifest create")
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+		return fmt.Errorf("--file needs a name: `unmute manifest create <name> --file %s`", file)
+	}
+	name := args[0]
+	store, err := manifestStore()
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", file, err)
+	}
+	previous, err := store.Default()
+	if err != nil {
+		return err
+	}
+	path, err := store.Create(name, data)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "created %s\n", path)
+	if previous != nil {
+		return nil
+	}
+	if err := store.Use(name); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "default manifest %s\n", name)
+	return nil
 }
 
 func runManifest(cmd *cobra.Command, args []string, editing, external bool) error {

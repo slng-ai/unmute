@@ -1209,7 +1209,7 @@ func beginnerPath(t *testing.T) map[string]string {
 		out["unmute init/"+filepath.ToSlash(rel)] = string(content)
 	}
 
-	for _, form := range []Destination{Canonical, Pointer} {
+	for _, form := range All {
 		files, err := New("test").Files(form)
 		if err != nil {
 			t.Fatal(err)

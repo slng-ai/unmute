@@ -24,7 +24,7 @@ var goldenPath = filepath.Join("testdata", "golden", "skill_install.txt")
 func TestInstalledTreeMatchesGolden(t *testing.T) {
 	project := t.TempDir()
 	bundle := New("test")
-	for _, dest := range []Destination{Canonical, Pointer} {
+	for _, dest := range All {
 		plan, err := bundle.Plan(project, dest, false)
 		if err != nil {
 			t.Fatal(err)
