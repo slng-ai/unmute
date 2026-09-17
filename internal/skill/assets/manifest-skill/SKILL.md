@@ -61,8 +61,10 @@ with the line and column, and it writes nothing when it refuses, so fix the
 draft and run it again. The first saved manifest becomes the default; a later
 one leaves the default alone, and `unmute manifest use <name>` changes it.
 
-Delete the draft file afterwards, or tell the user it is still there. The saved
-copy is the one that counts.
+Delete the draft file once the command reports `created`. The saved copy is the
+one every later command reads, and a draft left in the project is a second copy
+of company policy that nothing keeps in step with it. Keep it only if the user
+asks, and then say where it is.
 
 ## What happens next
 
