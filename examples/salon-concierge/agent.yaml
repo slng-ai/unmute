@@ -228,19 +228,21 @@ knowledge:
 
 models:
   think:
+    # The other qualified binding. Swap the two blocks to go back; the README
+    # says what each one was measured on.
     # reasoning:
     #   provider: openai
     #   model: gpt-5.6-luna
     #   params:
     #     reasoning_effort: "none"
-      reasoning:
-        provider: google
-        model: gemini-3.1-flash-lite
-        params:
-          vertexai: true
-          location: eu
-          thinking_config:
-            thinking_level: MINIMAL
+    reasoning:
+      provider: google
+      model: gemini-3.1-flash-lite
+      params:
+        vertexai: true
+        location: eu
+        thinking_config:
+          thinking_level: MINIMAL
   speak:
     voice:
       provider: slng
