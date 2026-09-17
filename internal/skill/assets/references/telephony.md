@@ -157,6 +157,140 @@ and each compiles to its own `build/<target>/`.
 Transport, carrier, and destinations are refused on a target and the refusal
 names the new home.
 
+## Inbound on LiveKit SIP, step by step
+
+This is the route people get stuck on, so write it out rather than summarising
+it. Four pieces, and only the first is Unmute's:
+
+| # | Piece | Lives in | If it is missing |
+|---|---|---|---|
+| 1 | the phone channel and the connection | the package | a browser-only agent, nothing to route a call to |
+| 2 | the deployed agent | LiveKit Cloud | the rule names an agent that never joins, so the phone rings forever |
+| 3 | the origination URL on the carrier trunk | the carrier | the call stops at the carrier |
+| 4 | the inbound trunk and the dispatch rule | the LiveKit project | LiveKit refuses the call, or opens a room with nobody in it |
+
+**Pass `--project` on every `lk` command.** `lk` has a default project, marked
+with `*` in `lk project list`, and it is often not the one the agent deploys to.
+A command without `--project` writes to that default and reports success. This is
+the single most common way to end up with correct records in the wrong account.
+
+### 1 and 2: compile, then deploy
+
+```sh
+unmute validate <pkg> --target livekit
+unmute compile <pkg> --target livekit
+cd <pkg>/build/livekit
+lk --project "<project>" agent create --region "<region>" --secrets-file .env
+```
+
+Later changes use `lk --project "<project>" agent deploy .`, which updates the
+agent in `livekit.toml` rather than creating a second one. Pass
+`--secrets-file .env` whenever the declared name set changes: the generated agent
+checks its whole list the moment a SIP caller arrives, so a missing name fails
+the call and not the build.
+
+### 3: the carrier
+
+The origination URL is the forwarding address that hands the call to LiveKit. On
+LiveKit Cloud it is the project ID with `p_` stripped, in front of
+`.sip.livekit.cloud`. It is **not** the `LIVEKIT_URL` subdomain; the two strings
+are unrelated.
+
+```sh
+LK_SIP_URI=$(lk project list --json | jq -r --arg n "<project>" \
+  '.[] | select(.Name==$n) | "sip:\(.ProjectId | sub("^p_";"")).sip.livekit.cloud;transport=tcp"')
+
+twilio api:trunking:v1:trunks:origination-urls:create \
+  --trunk-sid "<TK...>" --friendly-name "LiveKit SIP" \
+  --sip-url "$LK_SIP_URI" --weight 1 --priority 1 --enabled
+```
+
+Keep the project listing piped through `jq`: the raw `--json` output also holds
+project API keys.
+
+**The number has to be attached to that trunk, and it is attached from inside the
+trunk.** In the console: open the trunk, go to its **Numbers** tab, click **Add a
+Number** (some accounts say Add an Existing Number), tick the number, save. Not
+from the number's own page, which is where people look first. Check it with
+`twilio api:trunking:v1:trunks:phone-numbers:list --trunk-sid "<TK...>"`.
+
+A number attached to a SIP trunk ignores its own voice configuration, silently,
+so it cannot also serve a webhook or a TwiML Bin. One route per number.
+
+*Self-hosted LiveKit:* there is no project SIP URI. Point origination at the
+public SIP signalling address of the LiveKit SIP service they deployed.
+
+### 4: the two LiveKit records
+
+`unmute compile` writes `sip-inbound-trunk.json` and `sip-dispatch-rule.json`
+into `build/livekit/`. Those are the inputs, and they carry fields the `lk` flags
+cannot express. Never edit `build/`: change the package and compile again.
+
+Each file holds exactly one `${...}` placeholder: the phone number in the trunk
+input, the trunk ID in the rule. Substitute and pipe:
+
+```sh
+cd <pkg>/build/livekit
+
+TRUNK=$(sed "s|\${[A-Z0-9_]*}|<+1...>|g" sip-inbound-trunk.json |
+  lk --project "<project>" sip inbound create - 2>&1 | grep -o 'ST_[A-Za-z0-9]*' | head -1)
+
+sed "s|\${[A-Z0-9_]*}|$TRUNK|g" sip-dispatch-rule.json |
+  lk --project "<project>" sip dispatch create -
+```
+
+Stop if the first command prints no ID: a dispatch rule with no trunk ID matches
+every trunk in the project.
+
+**Never offer the `lk` flags instead of the JSON.** Two flag sets look
+equivalent and are not:
+
+- `sip dispatch create --individual` has no flag for `roomConfig.agents`, so it
+  makes a rule with an empty Agents column. The room opens, nothing joins it, and
+  the caller hears ringing forever.
+- `sip inbound create --auth-user/--auth-pass` makes a trunk that challenges
+  incoming INVITEs for a SIP password. Carrier origination sends none, because it
+  identifies itself by source IP, so every call is rejected. The generated JSON
+  sets no authentication, which is correct here. To restrict inbound, use
+  `allowedAddresses` with the carrier's signalling IP ranges, never digest auth.
+
+Check both records:
+
+```sh
+lk --project "<project>" sip inbound list      # Authentication column empty
+lk --project "<project>" sip dispatch list     # Agents column names the agent
+```
+
+There is no setup script. Earlier builds emitted a `telephony-setup.sh`; it
+called bare `lk`, which takes no project flag, so it could create both records in
+the wrong account and report success. Never tell anyone to run it.
+
+### Which parts to redo, when
+
+| What changed | Redo |
+|---|---|
+| prompt, tools or model | 1, 2 |
+| a new phone number | `SIP_FROM_NUMBER` in `.env`, then 1, 2, 3, 4 |
+| a new LiveKit project | all four: SIP URI, trunk and rule are all per project |
+| the agent's name | 1, 2, then the dispatch rule, which names the agent as plain text |
+
+### When they say it does not work
+
+The symptom is rarely near the cause.
+
+| What they see | What it is | Fix |
+|---|---|---|
+| carrier call log says failed, 0 seconds, 0 cost | the inbound trunk has `authUsername` set | recreate the trunk from the generated JSON, which sets no auth |
+| records in an account nobody expected | a bare `lk` command used the default project | always pass `--project`, delete the strays, create them again |
+| the phone rings forever, nobody answers | the rule's Agents column is empty, or the named agent is not deployed | recreate the rule from the JSON, check `lk agent list` |
+| nothing in the carrier call log at all | no origination URL, or the number is not on the trunk | part 3, especially the Numbers tab |
+| everything looks right, still nothing | the number is on a SIP trunk, so its voice configuration is ignored | one route per number |
+| the deploy worked, behaviour is the old one | deployed from a branch without the SIP changes | deploy from the branch that has them |
+
+Taking it down: delete the dispatch rule before the trunk, because the rule
+points at the trunk. Removing the carrier's origination URL alone stops calls
+reaching the agent and leaves the number and trunk intact.
+
 ## There is no local phone rehearsal
 
 `unmute dev` gives a browser session, nothing more. It covers the prompt, the
@@ -203,6 +337,10 @@ What the operator does by hand:
 | put the values in the environment variables the connection names |
 | enable any account permission the route needs, for example dial-out on a Daily domain |
 | paste the markup, attach the number, or configure the trunk, as the generated runbook says |
+| on LiveKit `sip`, create the inbound trunk and the dispatch rule with `lk`, from the JSON files compile wrote |
+
+**Unmute never creates a LiveKit SIP record either.** It writes the two JSON
+inputs and nothing else runs `lk`. There is no setup script to point anyone at.
 
 The generated `build/<target>/README.md` carries the exact carrier steps for
 that route and that carrier. Point the user at it rather than repeating a

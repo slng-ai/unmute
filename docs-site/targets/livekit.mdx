@@ -35,11 +35,13 @@ my-agent/build/livekit/
 └── compile-report.json   # what the compiler decided
 ```
 
-A target with an inbound SIP route writes three more files.
-`sip-inbound-trunk.json` and `sip-dispatch-rule.json` are the records that
-create the inbound trunk and the dispatch rule, which sends calls on your
-number to this agent. `telephony-setup.sh` creates both. [Inbound
-calls](/telephony/inbound-calls) covers them.
+A target with an inbound SIP route writes two more files.
+`sip-inbound-trunk.json` and `sip-dispatch-rule.json` are the inputs for the two
+records a call needs: the inbound trunk that claims your number, and the dispatch
+rule that sends its calls to this agent. You create both with `lk sip inbound
+create` and `lk sip dispatch create`. [LiveKit over
+Twilio](/telephony/livekit-twilio#4-create-the-two-livekit-records) has the
+commands.
 
 ## Target fields
 
@@ -135,8 +137,7 @@ The worker registers under the package's
 [`name:`](/reference/agent-yaml#name) joined to the target it was compiled for,
 so `name: acme-support` on a target called `livekit` registers
 `acme-support-livekit`. A SIP dispatch rule matches a worker by that string, and
-the emitted `sip-dispatch-rule.json` and `telephony-setup.sh` both name the same
-one.
+the emitted `sip-dispatch-rule.json` carries it.
 
 Renaming the package changes the worker name. Follow the
 [rename steps](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule) to

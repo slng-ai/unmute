@@ -664,15 +664,17 @@ A dispatch rule matches a worker by that exact string, and this project's
 you already created pointing at the old worker, so inbound calls ring and
 nothing answers.
 
-Re-running `telephony-setup.sh` does **not** fix that. It reuses any rule that
-already names your trunk rather than replacing it, which is what makes it safe
-to run twice. Delete the stale rule first, then run it:
+No deploy updates the rule. Delete the stale one and create it again from the
+recompiled `sip-dispatch-rule.json`, with the trunk ID you already have:
 
 ```sh
-lk sip dispatch list   # find the rule whose agent is the old name
-lk sip dispatch delete <SDR_...>
-bash telephony-setup.sh
+lk --project "$LK_PROJECT" sip dispatch list    # find the rule with the old name
+lk --project "$LK_PROJECT" sip dispatch delete <SDR_...>
+sed "s|\${UNMUTE_SIP_TRUNK_ID}|<ST_...>|g" sip-dispatch-rule.json |
+  lk --project "$LK_PROJECT" sip dispatch create -
 ```
+
+The number is unrouted between the delete and the create.
 {{else}}
 A LiveKit SIP dispatch rule matches a worker by that exact string, so renaming
 the package means recreating any rule that names the old one.
@@ -865,7 +867,7 @@ the call. The agent looks for it in three places:
    }
    ```
 
-   Register the trunk with `telephony-setup.sh` as usual and the attribute
+   Create the inbound trunk from that file as usual and the attribute
    `coval.simulation_id` appears on the caller. These attributes arrive after the
    job starts, so the agent keeps watching for them rather than reading once.
 2. **The agent's dispatch metadata**, for a browser or app call. See the token
@@ -1114,13 +1116,23 @@ call is one LiveKit room, and the join token dispatches the worker into it.
 
 Your carrier's SIP trunk carries the phone calls and LiveKit runs this agent, on
 the `livekit/sip/{{.Telephony.Carrier}}` route. Setting it up is {{if .HasColdTransfer}}six{{else}}five{{end}} actions in
-your carrier's account{{if .Telephony.HasInbound}}, then one command here{{end}}. The carrier part is yours to do:
+your carrier's account{{if .Telephony.HasInbound}}, then two commands here{{end}}. The carrier part is yours to do:
 nobody but you can sign in to your carrier account, so every step is written out
 below.
 
 You need two tools: `lk`, the LiveKit CLI, authenticated against this project
 (`lk cloud auth`), and `jq`. Nothing else.
+{{if .Telephony.HasInbound}}
+Pass `--project` on every `lk` command below. `lk` has a default project, and it
+is often not the one this agent deploys to. A command without `--project` reads
+that default, writes your records into the wrong account, and reports success.
+Set the name once:
 
+```sh
+lk project list                    # the default is the row marked with *
+LK_PROJECT="<the project this agent deploys to>"
+```
+{{end}}
 ### Required configuration and credentials
 
 Set these values in `.env` or your deployment secret store:
@@ -1217,10 +1229,18 @@ one names the console path, and the CLI equivalent where Twilio has one.
    *Self-hosted LiveKit:* there is no project SIP URI. Point origination at the
    public SIP signaling address of the LiveKit SIP service you deployed instead.
    Every other step on this page is the same.
-5. **Attach the number to the trunk.** The trunk's Numbers tab, Add an existing
-   number. The number you attach is the value of
+5. **Attach the number to the trunk.** This one is easy to miss, because you do
+   it from inside the trunk and not from the number. Open the trunk, go to its
+   **Numbers** tab, click **Add a Number** (some accounts label it Add an
+   Existing Number), tick your number in the list, and save. The trunk's Numbers
+   tab should then list it. The number you attach is the value of
    `{{.Telephony.FromNumberEnv}}`. CLI: `twilio api trunking v1 trunks
    phone-numbers create --trunk-sid <trunk-sid> --phone-number-sid <number-sid>`.
+
+   A number can serve one route at a time. Attaching it to a trunk makes the
+   number ignore its own Voice configuration, with no warning anywhere, so it
+   cannot also answer through a webhook or a TwiML Bin. Write down what its Voice
+   configuration was first, so you can put it back.
 {{- if .HasColdTransfer}}
 6. **Turn transfer on, because this agent hands calls to a person.** On the same
    trunk, under Features: set Call Transfer (SIP REFER) to Enabled,
@@ -1259,7 +1279,7 @@ TRUNK_DOMAIN="{{.Project}}-trunk.pstn.twilio.com"
 SIP_USERNAME="{{.Project}}-agent"
 read -rsp "SIP password: " SIP_PASSWORD; echo
 
-# The number you already own, read from .env exactly as telephony-setup.sh reads it.
+# The number you already own, read out of .env.
 NUMBER=$(sed -n 's/^{{.Telephony.FromNumberEnv}}=//p' ./.env | head -1 | tr -d "\r\"'")
 
 # Steps 1 and 2: the trunk, then its SID looked up by the domain you just chose.
@@ -1342,8 +1362,10 @@ carrier's own paths.
 
    *Self-hosted LiveKit:* there is no project SIP URI. Point origination at the
    public SIP signaling address of the LiveKit SIP service you deployed instead.
-5. That phone number attached to that trunk. Its value is
-   `{{.Telephony.FromNumberEnv}}`.
+5. That phone number attached to that trunk, which is usually done from inside
+   the trunk rather than from the number. Its value is
+   `{{.Telephony.FromNumberEnv}}`. A number attached to a trunk ignores its own
+   voice configuration, so it serves this route and no other.
 {{- if .HasColdTransfer}}
 6. Transfer enabled on the trunk, including transfers out to the phone network,
    because this agent hands callers to a person.
@@ -1352,17 +1374,10 @@ carrier's own paths.
 {{- if .Telephony.HasInbound}}
 ### At LiveKit
 
-One command, run from this directory with `.env` filled in:
-
-```sh
-bash telephony-setup.sh
-```
-
-It creates the two records an incoming call needs, and it finds them by your
-phone number, so there is no ID to copy anywhere:
+Two records, and an incoming call needs both:
 
 - the inbound trunk, which claims your number for this LiveKit project;
-- the dispatch rule, which routes calls on that number to this agent, one
+- the dispatch rule, which routes calls on that trunk to this agent, one
   `call-*` room per caller.
 
 Only incoming calls need records like these. A call arrives with no request of
@@ -1370,14 +1385,57 @@ yours for configuration to travel with, so the platform has to already know
 which project owns the number and where the caller goes. Placing a call is the
 opposite: your own code starts it, so the trunk settings ride along.
 
-Run the command again any time. Whatever already exists is reused, and it says
-which. Two failures it can report: your number is already claimed by a trunk
-this project cannot see, which means someone else owns it; or `lk` is not
-authenticated, which `lk cloud auth` fixes.
+Both are created from the JSON files next to this README. Run this from this
+directory, with `.env` filled in and `LK_PROJECT` set:
 
-Earlier builds of this project also needed `LIVEKIT_SIP_INBOUND_TRUNK` in the
-environment. That variable is retired and nothing reads it, so delete it from
-`.env` and from your platform secrets.
+```sh
+# Your number, read out of .env.
+NUMBER=$(sed -n 's/^{{.Telephony.FromNumberEnv}}=//p' ./.env | head -1 | tr -d "\r\"'")
+
+# 1. The inbound trunk. It prints the new record, and the ID starts with ST_.
+TRUNK=$(sed "s|\${{"{"}}{{.Telephony.FromNumberEnv}}}|$NUMBER|g" sip-inbound-trunk.json |
+  lk --project "$LK_PROJECT" sip inbound create - 2>&1 | grep -o 'ST_[A-Za-z0-9]*' | head -1)
+echo "inbound trunk: $TRUNK"
+
+# 2. The dispatch rule, scoped to that one trunk. Stop here if $TRUNK is empty.
+sed "s|\${{"{"}}UNMUTE_SIP_TRUNK_ID}|$TRUNK|g" sip-dispatch-rule.json |
+  lk --project "$LK_PROJECT" sip dispatch create -
+```
+
+If the first command printed no ID, fix that before running the second. A
+dispatch rule with no trunk ID in it matches every trunk in the project, other
+people's included.
+
+Check both, and read the two columns that go wrong:
+
+```sh
+lk --project "$LK_PROJECT" sip inbound list     # Authentication is empty
+lk --project "$LK_PROJECT" sip dispatch list    # Agents names this agent
+```
+
+**Create these from the JSON, not from the `lk` flags.** Two flag sets look like
+they do the same job and do not:
+
+- `sip dispatch create --individual` has no flag for the agent, so it makes a
+  rule with an empty Agents column. The room opens, nothing joins it, and the
+  caller hears ringing until the platform gives up.
+- `sip inbound create --auth-user/--auth-pass` makes a trunk that asks incoming
+  calls for a SIP password. Carrier origination does not send one, it identifies
+  itself by source IP, so LiveKit rejects every call. The JSON sets no
+  authentication, which is what this route wants. To restrict inbound anyway,
+  put the carrier's signalling IP ranges in `allowedAddresses` on the trunk.
+
+Both records are per project. A second LiveKit project needs its own pair, and
+so does a new phone number.
+
+Earlier builds of this project shipped a `telephony-setup.sh` that ran the two
+commands for you. It is gone: it called `lk` with no project, so it could write
+both records into whichever account your CLI happened to default to and still
+say it had succeeded. Delete it from any build directory you still have.
+
+Earlier builds also needed `LIVEKIT_SIP_INBOUND_TRUNK` in the environment.
+That variable is retired and nothing reads it, so delete it from `.env` and
+from your platform secrets.
 {{- end}}
 {{- if .Telephony.HasInbound}}
 
@@ -1391,8 +1449,8 @@ directory:
    easy to miss are attaching your number to it and, for a cold transfer, the
    transfer toggles. A number that is not on the trunk never reaches LiveKit, no
    matter how right the origination URI is.
-2. **LiveKit records**: `bash telephony-setup.sh`, then run it again and expect
-   every line to say reused.
+2. **LiveKit records**: the two commands above, then `lk --project "$LK_PROJECT"
+   sip dispatch list` and check the Agents column names this agent.
 3. **The agent**: `lk agent deploy` from this directory (or `lk agent create` the
    first time, see Deploy above), then `lk agent update-secrets --secrets-file .env
    --overwrite` if you changed `.env`. Check `lk agent status`.
@@ -1404,9 +1462,35 @@ directory:
    below. Check the top of the log too: that is where a bad secret name shows up.
 
 If the call rings and drops with no agent, work backwards: does
-`lk sip inbound list` show a trunk claiming your number, does `lk sip dispatch list`
-show a rule for it naming `{{.AgentName}}`, and does `lk agent status` show the
-agent up. Each of those is one of the three steps above.
+`lk --project "$LK_PROJECT" sip inbound list` show a trunk claiming your number,
+does `lk --project "$LK_PROJECT" sip dispatch list` show a rule for it naming
+`{{.AgentName}}`, and does `lk agent status` show the agent up. Each of those is
+one of the three steps above.
+
+### If the call does not arrive
+
+The symptom is what you see; the cause is rarely next to it.
+
+| What you see | What it is | What to do |
+|---|---|---|
+| the carrier call log says failed, 0 seconds, 0 cost | the inbound trunk asks for a SIP password, and carrier origination sends none | delete the trunk and create it again from the JSON, which sets no authentication |
+| the records are in an account nobody expected | an `lk` command ran without `--project` | delete the strays, set `LK_PROJECT`, create them again |
+| the phone rings and rings and nobody answers | the dispatch rule's Agents column is empty, or the agent it names is not deployed | create the rule again from the JSON, and check `lk agent status` |
+| nothing in the carrier call log at all | no origination URI on the trunk, or the number is not attached to it | the carrier steps above, especially the Numbers tab |
+| everything looks right and the call still fails | the number is attached to a SIP trunk, so it ignores its own voice configuration and cannot also serve a webhook | one route per number; use a second number for the other route |
+| the deploy worked but the agent behaves like the old one | deployed from a branch without these changes | deploy from the branch that has them |
+
+### Taking it down
+
+Order matters, because the dispatch rule points at the trunk:
+
+```sh
+lk --project "$LK_PROJECT" sip dispatch delete <SDR_...>
+lk --project "$LK_PROJECT" sip inbound delete <ST_...>
+```
+
+Removing the origination URI at your carrier is enough on its own to stop calls
+reaching the agent, and it leaves the number and the trunk alone.
 {{- end}}
 {{- if or .HasColdTransfer .HasWarmTransfer}}
 

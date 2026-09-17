@@ -773,8 +773,9 @@ func buildLiveKitSIPTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liv
 	// No trunk name of either direction. Both dial-out paths carry the carrier's
 	// trunk settings inline, from the four names the Connection already declares
 	// (SCHEMA N33, 2026-08-12). Inbound still needs its two platform records, but
-	// the emitted telephony-setup.sh resolves them by phone number, so no
-	// environment name carries the ID (SCHEMA N36, 2026-08-12).
+	// the operator creates them by hand from the emitted JSON and reads the trunk
+	// ID off `lk sip inbound create`, so no environment name carries the ID
+	// (SCHEMA N36, 2026-08-12).
 	return telephony, nil
 }
 

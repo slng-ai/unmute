@@ -268,12 +268,21 @@ before relying on worker placement for strict locality.
 
 ### Telephony needs two more records
 
-For an inbound SIP route, the generated `telephony-setup.sh` creates the
-LiveKit trunk and dispatch rule. Run it from `build/livekit/` after deploying,
-with the matching project selected. It needs `lk`, `jq`, and the route values
-in `.env`; these local script inputs are separate from Cloud secret storage.
-Follow [LiveKit carrier setup](/telephony/livekit-twilio#create-the-livekit-records)
-for the full sequence.
+An inbound SIP route needs a LiveKit inbound trunk and a dispatch rule. You
+create both after deploying, with two commands run from `build/livekit/`:
+
+```sh
+TRUNK=$(sed "s|\${SIP_FROM_NUMBER}|$NUMBER|g" sip-inbound-trunk.json |
+  lk --project "<project-name>" sip inbound create - 2>&1 | grep -o 'ST_[A-Za-z0-9]*' | head -1)
+sed "s|\${UNMUTE_SIP_TRUNK_ID}|$TRUNK|g" sip-dispatch-rule.json |
+  lk --project "<project-name>" sip dispatch create -
+```
+
+Name the project on both. `lk` has a default project, and a command without
+`--project` writes the records into it and reports success. The two JSON files
+come from `unmute compile`, and they carry fields the `lk` flags cannot express.
+[Create the two LiveKit records](/telephony/livekit-twilio#4-create-the-two-livekit-records)
+has the full sequence, including which flags to avoid and why.
 
 ### Renaming the agent breaks that rule
 
@@ -282,14 +291,15 @@ directory, `deploy` still updates the resource ID in the preserved config.
 Renaming the target changes the build directory too: recover the existing
 agent config there with `lk agent config --id` before updating.
 
-An existing SIP dispatch rule keeps its old name. The setup script reuses that rule, so rerunning it
-alone does not fix the route.
+An existing SIP dispatch rule keeps the old agent name, and no deploy updates
+it.
 
 Deploy the new worker and confirm its dispatch name with `lk agent list`.
-Then list the rules with `lk sip dispatch list`, remove the stale rule with
-`lk sip dispatch delete <rule-id>`, and rerun `bash telephony-setup.sh`.
-The number is unrouted between deletion and recreation. Verify the rule names
-the new worker, then make a test call.
+Then list the rules with `lk --project "<project-name>" sip dispatch list`, and
+remove the stale one with `lk --project "<project-name>" sip dispatch delete
+<rule-id>`. Create the rule again from `sip-dispatch-rule.json` with the same
+trunk ID, using the command above. The number is unrouted between the delete and
+the create. Check that the rule names the new worker, then make a test call.
 
 For the `connector` route, redeploy the bridge from the new build: its
 `AGENT_NAME` also carries the dispatch name.

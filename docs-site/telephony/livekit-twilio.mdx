@@ -1,150 +1,131 @@
 ---
 title: "LiveKit over Twilio"
-description: "The sip route end to end: the trunk on the Twilio side, the two records LiveKit needs, and what a rename breaks."
+description: "A caller dials your Twilio number and your agent picks up. This is the four steps that make that happen, in the order you do them."
 sidebarTitle: "LiveKit route"
 ---
 
-This is the `sip` transport with the `twilio` carrier. Your number is attached
-to a Twilio Elastic SIP Trunk that points at LiveKit SIP. LiveKit accepts the
-call because a record in your project claims that number, a second record
-dispatches it to your agent, and the agent answers in a room of its own.
+This is the `sip` transport with the `twilio` carrier. A call on it takes four
+hops:
 
 ```text
-caller -> your Twilio number -> Elastic SIP Trunk -> LiveKit SIP -> dispatch rule -> your agent
+caller -> Twilio number -> Elastic SIP Trunk -> LiveKit SIP
+       -> inbound trunk -> dispatch rule -> your agent
 ```
 
-This route is SIP. It shares nothing with the Pipecat Twilio route except the
-account the number lives in. It is also the route with the most capability:
-cold transfer, warm transfer, voicemail detection, and seven of the eight call
-facts a [pre-fetch](/build/prefetch) can read before the greeting, every one
-but `stream_id`. The two Pipecat Twilio routes grant a smaller set; see [Where
-it works](/build/prefetch#where-it-works) for the full grid.
+Each hop breaks on its own, and three of the four live outside your package.
+Unmute writes the code for the route. It never signs in to Twilio, and it never
+creates a LiveKit record, so steps 3 and 4 are yours to run every time.
 
-<Note>
-  Your own `build/livekit/README.md` is the authority for your build. It names
-  your agent, your number's variable, and the two commands below with your
-  values filled in. This page is the same route with the reasons attached.
-</Note>
+| Step | What it is | Where it lives | If it is missing |
+|---|---|---|---|
+| 1 | a phone channel and a connection | your package | a browser-only agent, with nothing to route a call to |
+| 2 | the deployed agent | LiveKit Cloud | the rule names an agent that never joins, so the phone rings forever |
+| 3 | the origination URL on the trunk | Twilio | the call stops at Twilio, because nothing forwards it |
+| 4 | the inbound trunk and the dispatch rule | your LiveKit project | LiveKit refuses the call, or opens a room with nobody in it |
 
 On this page:
 
-- [Two things are called a trunk](#two-things-are-called-a-trunk) - which trunk does what, on which side
-- [Set up the trunk in Twilio Console](#set-up-the-trunk-in-twilio-console) - the five console steps, and every key the connection takes
-- [Deploy the agent first](#deploy-the-agent-first) - why the agent comes before the records
-- [Create the LiveKit records](#create-the-livekit-records) - the generated script, and what it makes
-- [Call the number](#call-the-number) - the real call
-- [What a rename breaks](#what-a-rename-breaks) - the one change that silently unwires the route
-- [One number, one route](#one-number-one-route) - swapping a number, or buying a second
-- [If the call does not arrive](#if-the-call-does-not-arrive) - four failures and how to tell them apart
+- [Before you start](#before-you-start) - the tools, and the values you look up once
+- [Two things are called a trunk](#two-things-are-called-a-trunk) - which trunk does what
+- [1. Write the route into the package](#1-write-the-route-into-the-package) - the channel, the connection, and every key it takes
+- [2. Deploy the agent](#2-deploy-the-agent) - why the agent comes before the records
+- [3. Set up the trunk in Twilio](#3-set-up-the-trunk-in-twilio) - the five console steps, including the number
+- [4. Create the two LiveKit records](#4-create-the-two-livekit-records) - two commands, from the generated JSON
+- [Call the number](#call-the-number) - the real call, and the only proof there is
+- [Take it down](#take-it-down) - stop the calls, or remove the route
+- [What to redo, and when](#what-to-redo-and-when) - which steps a change costs you
+- [If the call does not arrive](#if-the-call-does-not-arrive) - the failures, and what each one really is
 - [The other LiveKit route: the connector](#the-other-livekit-route-the-connector) - Twilio without a trunk
+- [Where to go next](#where-to-go-next)
+
+<Note>
+  Your own `build/livekit/README.md` is the authority for your build. It names
+  your agent, your number's variable, and the same commands with your values
+  filled in. This page is the same route with the reasons attached.
+</Note>
+
+## Before you start
+
+You need three things on your machine: the
+[LiveKit CLI](https://docs.livekit.io/reference/developer-tools/livekit-cli/)
+(`lk`), the [Twilio CLI](https://www.twilio.com/docs/twilio-cli/getting-started/install)
+(`twilio`), and `jq`. Sign in to both once, with `lk cloud auth` and
+`twilio login`.
+
+Then look up three values. Every command below uses one of them:
+
+```sh
+LK_PROJECT="<project name>"   # lk project list
+NUMBER="+15551234567"         # E.164, and the same value as SIP_FROM_NUMBER
+TRUNK_SID="TK..."             # twilio api:trunking:v1:trunks:list
+```
+
+You never type your agent's name. The generated `sip-dispatch-rule.json`
+carries it.
+
+<Warning>
+  Pass `--project "$LK_PROJECT"` on every `lk` command. `lk` has a default
+  project, marked with `*` in `lk project list`, and it is often not the project
+  your agent deploys to. A command without `--project` writes to that default,
+  and reports success. That is the most common way to end up with working
+  records in the wrong account.
+</Warning>
 
 ## Two things are called a trunk
 
-The setup below creates one trunk in Twilio and one in LiveKit, and they do
-different jobs:
+This route needs one trunk in Twilio and one in LiveKit. They do different jobs,
+and having one is not having the other:
 
 | Trunk | Lives in | Created by | Does what |
 |---|---|---|---|
-| Elastic SIP Trunk | your Twilio account | you, in the console | carries the call between Twilio and LiveKit |
-| Inbound trunk | your LiveKit project | `telephony-setup.sh` in your build | tells LiveKit that your number belongs to this project |
+| Elastic SIP Trunk | your Twilio account | you, in the Twilio console | carries the call between Twilio and LiveKit |
+| inbound trunk | your LiveKit project | you, with `lk sip inbound create` | tells LiveKit your number belongs to this project |
 
-Finishing the Twilio side is half the job. LiveKit rejects a call whose number
-no inbound trunk claims, so the generated script has to run too.
+LiveKit refuses a call whose number no inbound trunk claims, however right the
+Twilio side is. So finishing the Twilio side is only half the job.
 
-The Twilio trunk itself has two sides, on two tabs that sound similar and do
+The Twilio trunk itself has two sides, on two tabs that sound alike and do
 opposite things:
 
 | Tab | Direction | What it is for |
 |---|---|---|
 | **Termination** | out of Twilio | your agent dialing out: outbound calls and warm transfers |
-| **Origination** | into LiveKit | inbound calls reaching LiveKit SIP |
+| **Origination** | into LiveKit | incoming calls reaching LiveKit SIP |
 
-An inbound-only agent still declares all four SIP names, because the route
-requires them whichever direction it uses, and a cold transfer needs the trunk
-even though the caller only ever rang in.
+An inbound-only agent still fills all four SIP values, because the route wants
+them whichever direction it uses. A cold transfer needs the trunk too, even
+though the caller only ever rang in.
 
-## Set up the trunk in Twilio Console
+## 1. Write the route into the package
 
-Configure the trunk in the Twilio Console. Unmute does not create or attach
-carrier resources.
-[Twilio's step-by-step guide](https://www.twilio.com/en-us/blog/elastic-sip-trunking-step-by-step-setup)
-shows the same Console screens.
+Three files. The channel says the agent answers the phone, the connection says
+how the call arrives, and the target picks that connection.
 
-<Steps>
-  <Step title="Open the trunk">
-    In Twilio Console, go to **Elastic SIP Trunking**, **Manage**, **Trunks**.
-    Open the trunk used by LiveKit, or create one if none exists. Do not change a
-    shared trunk that is serving another route.
+```yaml agent.yaml
+channels:
+  web:
+    kind: realtime_audio
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: false
 
-    A new trunk starts with every feature off, so none of the steps below are
-    inherited from a trunk you set up before.
-  </Step>
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  peak_starts_per_second: 1
+  avg_session_duration: 5m
 
-  <Step title="Set termination and authentication">
-    On **Termination**, choose a unique Termination SIP URI ending in
-    `pstn.twilio.com`. Under **Authentication**, select or create a Credential
-    List with a username and password. Save the trunk.
+secrets:
+  - SIP_TRUNK_HOSTNAME
+  - SIP_AUTH_USERNAME
+  - SIP_AUTH_PASSWORD
+  - SIP_FROM_NUMBER
+```
 
-    This is the dial-out side. Its domain and credential become three of your
-    four SIP values.
-  </Step>
-
-  <Step title="Point origination at LiveKit">
-    On **Origination**, select **Add new Origination URI**. Paste your project's
-    SIP address and append `;transport=tcp`, for example
-    `sip:abc123def.sip.livekit.cloud;transport=tcp`. Keep it enabled, then add and
-    save it.
-
-    The host is your LiveKit project id without its `p_` prefix. Read the id from
-    `lk project list`:
-
-    ```sh
-    lk project list
-    ```
-
-    A project whose id is `p_abc123def` has the SIP address
-    `abc123def.sip.livekit.cloud`. Do not derive this value from `LIVEKIT_URL` or
-    from the project's own subdomain: the two are usually different strings, and a
-    wrong host here gives you a number that rings and never connects.
-  </Step>
-
-  <Step title="Attach the phone number">
-    First record the number's current Voice routing so you can restore it later.
-    On the trunk's **Numbers** tab, choose **Associate a Number with this Trunk**,
-    select your voice-capable number, choose this SIP trunk for Voice, and save.
-    A number attached to a trunk ignores its normal voice webhook.
-
-    You can do the same from the number's own page: **Phone Numbers**, the number,
-    **Configuration details**, then pick **SIP Trunk** as the handler and select
-    this trunk.
-  </Step>
-
-  <Step title="Allow calls to transfer">
-    In the trunk's **General settings**, enable **Call Transfer (SIP REFER)** and
-    tick **Enable PSTN Transfer**. Then set **Caller ID for Transfer Target**, and
-    read [which caller ID to present](/telephony/twilio#caller-id-for-a-transfer-target)
-    before you choose, because the wrong value here fails every transfer with no
-    useful error. Save the trunk.
-  </Step>
-</Steps>
-
-<Tip>
-  If your number and trunk live in a Twilio Region such as Ireland, the console
-  and the API show you only that region. [Twilio Regions](/telephony/twilio#if-your-trunk-is-in-a-twilio-region)
-  says what changes.
-</Tip>
-
-### Copy the four SIP values
-
-| Connection key | The value | Where it is |
-|---|---|---|
-| `sip_address` | the complete domain ending in `pstn.twilio.com` | the trunk's **Termination** tab |
-| `sip_username` | the username in the trunk's credential list | Termination, **Authentication**, Credential Lists |
-| `sip_password` | that credential's password | the same credential list |
-| `from_number` | the attached number in E.164 form | the trunk's **Numbers** tab |
-
-The connection file names the environment variables that will hold them, never
-the values:
+A telephony channel makes `capacity.peak_starts_per_second` required, so add it
+in the same edit. [Phone calls](/telephony/overview#every-key-capacity-takes)
+has the rest of the `capacity:` keys.
 
 ```yaml connections/twilio_sip.yaml
 transport: sip
@@ -156,9 +137,24 @@ environment:
   from_number: SIP_FROM_NUMBER
 ```
 
-The names are plain SIP names rather than Twilio ones because the generated code
-can dial through any SIP carrier with them. Put the four values in `.env`, and
-list the four names under `secrets:` in `agent.yaml`.
+```yaml targets.yaml
+targets:
+  livekit:
+    provider: livekit
+    version: "1.8.1"
+    connection: twilio_sip
+```
+
+Then compile:
+
+```sh
+unmute validate my-agent --target livekit
+unmute compile my-agent --target livekit
+```
+
+Compiling writes `sip-inbound-trunk.json` and `sip-dispatch-rule.json` into
+`build/livekit/`. Those two files are what step 4 sends to LiveKit. Never edit
+anything under `build/`: change the package and compile again.
 
 ### Every key this connection takes
 
@@ -171,7 +167,7 @@ Two scalars and four names. Nothing else belongs in the file.
 
 <ParamField path="carrier" type="twilio | telnyx | plivo" required>
   The carrier account behind the trunk. This page is `twilio`, and the other
-  two take the same four names because they are standard SIP names.
+  two take the same four names, because they are standard SIP names.
 </ParamField>
 
 <ParamField path="environment.sip_address" type="environment variable name" required>
@@ -187,123 +183,293 @@ Two scalars and four names. Nothing else belongs in the file.
 </ParamField>
 
 <ParamField path="environment.from_number" type="environment variable name" required>
-  Holds the attached number in E.164 form. The generated setup script reads
-  this one line to find your number.
+  Holds the attached number in E.164 form. It has to be the number you attach to
+  the trunk in step 3.
 </ParamField>
 
-Every value is a **name**, never a value, and each name is UPPER_SNAKE. An
-`account_sid` or an `auth_token` here is refused: those belong to the routes
-that call Twilio's REST API, and this one authenticates to the trunk.
+Every value here is a **name**, never a value, and each name is UPPER_SNAKE. An
+`account_sid` or an `auth_token` is refused: those belong to the routes that call
+Twilio's REST API, and this one signs in to a trunk instead.
 
-## Deploy the agent first
+Put the four values in `.env`.
+[Get your Twilio details](/telephony/twilio#the-four-sip-values-the-livekit-sip-route)
+says which console field fills which name.
+
+## 2. Deploy the agent
 
 ```sh
-unmute compile my-agent
 cd my-agent/build/livekit
-lk agent create --region eu-central --secrets-file .env
+lk --project "$LK_PROJECT" agent create --region "<region>" --secrets-file .env
+lk --project "$LK_PROJECT" agent list
 ```
 
-[LiveKit Cloud](/deploy/livekit-cloud) walks the deploy. It comes before the
-LiveKit records because the <Tooltip tip="A LiveKit setting that sends calls on a trunk to your agent, one room per caller.">dispatch rule</Tooltip> names the agent, and a rule that names
-an agent nobody has registered sends the call nowhere.
+[LiveKit Cloud](/deploy/livekit-cloud) walks the deploy in full. Use `create`
+once, then `lk --project "$LK_PROJECT" agent deploy .` for every later change.
+`deploy` updates the agent named in `livekit.toml`, and `Version` and
+`Deployed At` in `agent list` both change when it worked.
 
-## Create the LiveKit records
+The agent comes before the LiveKit records because the
+<Tooltip tip="A LiveKit setting that sends calls on a trunk to your agent, one room per caller.">dispatch rule</Tooltip> names it. A rule that names an agent nobody deployed
+opens a room and leaves the caller listening to ringing.
 
-Setting up the trunk in Twilio gets the call as far as LiveKit. LiveKit then
-rejects it, because nothing in your project claims that number yet. Two records
-fix that, and your build generates both along with the script that creates them:
+Pass `--secrets-file .env` whenever the list of names changes. The four `SIP_*`
+names are new to a package that had no phone route, and the generated agent
+checks its whole declared list the moment a SIP caller arrives. A missing name
+fails the call, not the build.
 
-```sh
-cd build/livekit
-bash telephony-setup.sh
-```
+<Tip>
+  The image builds on LiveKit's side, over several minutes, with little output.
+  Ctrl-C aborts it with `context canceled` and leaves the previous version
+  running.
+</Tip>
+
+## 3. Set up the trunk in Twilio
+
+Twilio owns the number and answers the phone network. The origination URL is the
+forwarding address that hands the call to LiveKit. Unmute creates none of this.
+[Twilio's own guide](https://www.twilio.com/en-us/blog/elastic-sip-trunking-step-by-step-setup)
+shows the same console screens.
+
+<Steps>
+  <Step title="Open or create the trunk">
+    In the Twilio Console, go to **Elastic SIP Trunking**, **Manage**,
+    **Trunks**. Open the trunk you want to use, or create one. Do not change a
+    shared trunk that is already serving another route.
+
+    A new trunk starts with every feature off, so nothing below is inherited
+    from a trunk you set up before.
+  </Step>
+
+  <Step title="Set termination and authentication">
+    On the **Termination** tab, choose a Termination SIP URI ending in
+    `pstn.twilio.com`. Under **Authentication**, select or create a Credential
+    List with a username and password. Save the trunk.
+
+    This is the dial-out side. Its domain and credential are three of your four
+    SIP values.
+  </Step>
+
+  <Step title="Point origination at LiveKit">
+    Your project's SIP address is the project ID with `p_` removed, in front of
+    `.sip.livekit.cloud`. Read it with `jq`, because the raw `--json` listing
+    also holds your project API keys:
+
+    ```sh
+    LK_SIP_URI=$(lk project list --json | jq -r --arg n "$LK_PROJECT" \
+      '.[] | select(.Name==$n) | "sip:\(.ProjectId | sub("^p_";"")).sip.livekit.cloud;transport=tcp"')
+    echo "$LK_SIP_URI"
+    ```
+
+    Add it to the trunk:
+
+    ```sh
+    twilio api:trunking:v1:trunks:origination-urls:create \
+      --trunk-sid "$TRUNK_SID" \
+      --friendly-name "LiveKit SIP" \
+      --sip-url "$LK_SIP_URI" \
+      --weight 1 --priority 1 --enabled
+    ```
+
+    In the console the same thing is the **Origination** tab, **Add new
+    Origination URI**, with priority and weight at 1 and **Enabled** ticked.
+
+    Do not build this address from `LIVEKIT_URL`. The project URL subdomain and
+    the SIP subdomain are different strings, and a wrong host here gives you a
+    number that rings and never connects.
+
+    *Self-hosted LiveKit:* there is no project SIP address. Point origination at
+    the public SIP signalling address of the LiveKit SIP service you deployed.
+  </Step>
+
+  <Step title="Attach the number to the trunk">
+    This is the step people miss, because you do it from inside the trunk and
+    not from the number.
+
+    Open the trunk, go to its **Numbers** tab, and click **Add a Number**. Some
+    accounts label the button **Add an Existing Number**. Tick your number in
+    the list and save. The **Numbers** tab should then show it.
+
+    Check it from the CLI:
+
+    ```sh
+    twilio api:trunking:v1:trunks:phone-numbers:list --trunk-sid "$TRUNK_SID"
+    ```
+
+    Write down the number's old Voice configuration first. A number attached to
+    a trunk ignores its own Voice configuration, silently, so it cannot also
+    serve a webhook or a TwiML Bin.
+  </Step>
+
+  <Step title="Allow calls to transfer">
+    Skip this one if your agent never hands a caller to a person.
+
+    In the trunk's **General settings**, turn on **Call Transfer (SIP REFER)**
+    and tick **Enable PSTN Transfer**. Then set **Caller ID for Transfer
+    Target**. Read [which caller ID to
+    present](/telephony/twilio#caller-id-for-a-transfer-target) before you
+    choose: the wrong value fails every transfer with no useful error. Save the
+    trunk.
+  </Step>
+</Steps>
+
+<Tip>
+  If your number and trunk live in a Twilio Region such as Ireland, the console
+  and the API show you that region only. [Twilio
+  Regions](/telephony/twilio#if-your-trunk-is-in-a-twilio-region) says what
+  changes.
+</Tip>
+
+## 4. Create the two LiveKit records
+
+Twilio now forwards the call, and LiveKit rejects it, because nothing in your
+project claims that number yet. Two records fix that:
 
 | Record | What it does |
 |---|---|
-| inbound trunk | claims your phone number for this LiveKit project |
-| dispatch rule | sends calls on that trunk to your agent, one room per caller |
+| inbound trunk | claims your number for this LiveKit project |
+| dispatch rule | sends that trunk's calls to your agent, one room per caller |
 
-Three things about the script are worth knowing:
-
-- **It needs `lk` and `jq` on your PATH.** It checks for both and names the
-  missing one before it creates anything.
-- **It reads your number, never your secrets.** It takes `SIP_FROM_NUMBER` from
-  the environment, or reads that one line out of `.env` as text. It never
-  sources the file.
-- **Running it again is safe.** It finds both records by your phone number
-  rather than by an id, so nothing has to be copied anywhere, and whatever
-  already exists is reused. Each line it prints ends in `(created)` or
-  `(reused)`.
-
-Check what it made:
+Create both from the generated JSON, from your build directory:
 
 ```sh
-lk sip inbound list
-lk sip dispatch list
+cd my-agent/build/livekit
+
+# The inbound trunk. The ID it prints starts with ST_.
+TRUNK=$(sed "s|\${SIP_FROM_NUMBER}|$NUMBER|g" sip-inbound-trunk.json |
+  lk --project "$LK_PROJECT" sip inbound create - 2>&1 | grep -o 'ST_[A-Za-z0-9]*' | head -1)
+echo "inbound trunk: $TRUNK"
+
+# The dispatch rule, scoped to that one trunk. Stop here if $TRUNK is empty.
+sed "s|\${UNMUTE_SIP_TRUNK_ID}|$TRUNK|g" sip-dispatch-rule.json |
+  lk --project "$LK_PROJECT" sip dispatch create -
 ```
 
-A number that no inbound trunk lists is a number LiveKit will not answer for.
+If the first command printed no ID, fix that before running the second. A
+dispatch rule with no trunk ID in it matches every trunk in the project.
+
+Then check both:
+
+```sh
+lk --project "$LK_PROJECT" sip inbound list      # Authentication column empty
+lk --project "$LK_PROJECT" sip dispatch list     # Agents column names your agent
+```
+
+### Use the JSON, not the lk flags
+
+Two flag sets look like they do the same job and do not.
+
+- **`sip dispatch create --individual`** has no flag for the agent, so it makes
+  a rule with an empty Agents column. The room opens, nothing joins it, and the
+  caller hears ringing until LiveKit gives up.
+- **`sip inbound create --auth-user/--auth-pass`** makes a trunk that asks
+  incoming calls for a SIP password. Twilio origination sends none, because it
+  identifies itself by source IP, so LiveKit rejects every call. The generated
+  JSON sets no authentication, which is what this route wants.
+
+To limit who can call in, put Twilio's signalling IP ranges in
+`allowedAddresses` on the trunk. Never use digest authentication here, because
+Twilio will not answer it.
+
+Both records belong to one project and one number. A new project needs its own
+pair, and so does a new number.
 
 ## Call the number
 
-Call it. The agent answers and greets you. Speak, and it replies.
+Call it from a phone. The agent answers and greets you. Speak, and it replies.
 
-## What a rename breaks
+That call is the only proof of the phone path. [`unmute dev`](/dev/overview) is a
+browser session, and it stops exactly where the phone leg starts. There is no
+local SIP rehearsal. Watch the call arrive with:
 
-An ordinary redeploy leaves all of this alone: the trunk, the rule, and the
-number keep working. Renaming the agent does not. The dispatch rule names the
-worker as a string, the package's `name:` joined to the target, and no deploy
-updates it. The number then rings and nothing answers, while the agent reports
-healthy: it was never dispatched. Running the script again does not repair it,
-because the script reuses the rule that already names your trunk.
-[Renaming the agent breaks that rule](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule)
-walks the swap.
+```sh
+lk --project "$LK_PROJECT" agent logs
+```
 
-## One number, one route
+## Take it down
 
-A number attached to a SIP trunk ignores its voice configuration, so it cannot
-also point at the TwiML Bin the Pipecat route uses. Take the number off the
-trunk to test that route, and put it back to test this one. If you want both
-routes live at once, [give each one its own
-number](/telephony/twilio#give-each-route-its-own-number). Two numbers cost less
-attention than swapping one.
+To stop calls reaching the agent and keep everything else, remove the origination
+URL. The number and both trunks stay as they are:
+
+```sh
+twilio api:trunking:v1:trunks:origination-urls:list --trunk-sid "$TRUNK_SID"
+twilio api:trunking:v1:trunks:origination-urls:remove \
+  --trunk-sid "$TRUNK_SID" --sid "<OU...>"
+```
+
+To remove the LiveKit records, delete the rule first, because it points at the
+trunk:
+
+```sh
+lk --project "$LK_PROJECT" sip dispatch list     # find the SDR_ id
+lk --project "$LK_PROJECT" sip dispatch delete "<SDR_...>"
+lk --project "$LK_PROJECT" sip inbound delete "<ST_...>"
+```
+
+To take telephony out of the package: drop the `phone` channel from `agent.yaml`,
+drop `connection:` from `targets.yaml`, delete `connections/twilio_sip.yaml`, and
+compile again. Remove the four `SIP_*` names from `secrets:` too, or the agent
+will demand values nothing uses.
+
+## What to redo, and when
+
+| What changed | Steps to redo |
+|---|---|
+| prompt, tools or model | 1 and 2 |
+| a new phone number | `SIP_FROM_NUMBER` in `.env`, then 1, 2, 3 and 4 |
+| a new LiveKit project | all four: the SIP address, the trunk and the rule are all per project |
+| the agent's name | 1, 2, then the dispatch rule in step 4, which names the agent |
+
+An ordinary redeploy leaves the trunk, the rule and the number alone. Renaming
+the agent does not. The dispatch rule holds the agent name as plain text, and no
+deploy updates it. The number then rings while the agent reports healthy,
+because nothing ever dispatched it. [Renaming the agent breaks that
+rule](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule) walks the swap.
 
 ## If the call does not arrive
 
+The symptom is what you see. The cause is rarely next to it.
+
+| What you see | What it is | What to do |
+|---|---|---|
+| Twilio call log: `failed`, 0 seconds, 0 cost, direction `trunking-originating` | the inbound trunk asks for a SIP password, and Twilio origination sends none | delete the trunk and create it again from the generated JSON |
+| the records are in an account nobody expected | an `lk` command ran without `--project` | delete the strays, set `LK_PROJECT`, create them again |
+| the phone rings forever and nobody answers | the dispatch rule's Agents column is empty, or the agent it names is not deployed | recreate the rule from the JSON, then check `lk agent list` |
+| nothing in the Twilio call log at all | no origination URL on the trunk, or the number is not attached to it | step 3, especially the **Numbers** tab |
+| everything looks right and the call still fails | the number is on a SIP trunk, so it ignores its own voice configuration | one route per number; use a second number for the other route |
+| the deploy worked and the agent behaves like the old one | deployed from a branch without the SIP changes | deploy from the branch that has them |
+
+Two more worth knowing:
+
+- **`.env` is not in git.** It follows neither a branch nor a worktree, so each
+  checkout needs its own copy. Everything in it is uploaded by `--secrets-file
+  .env`, so keep it to the names you declared.
+- **A trunk's name changes nothing.** A trunk you inherited from an old demo
+  works fine once it claims the right number and asks for no inbound password.
+  Renaming it is cosmetic. The authentication setting is not.
+
 <AccordionGroup>
-  <Accordion title="the call rings and drops with no agent">
-    Work backwards: does `lk sip inbound list` show a trunk claiming your
-    number, does `lk sip dispatch list` show a rule for it naming this agent,
-    and does `lk agent status` show the agent up. A missing trunk or rule means
-    [the setup script](#create-the-livekit-records) has not run.
-  </Accordion>
   <Accordion title="the call rings and rings, and nobody ever answers">
-    A LiveKit SIP call is answered when something in the room publishes audio,
-    so a job that dies before the agent starts speaking leaves the caller
-    listening to ringing until LiveKit gives up three minutes later.
+    A LiveKit SIP call is answered when something in the room publishes audio.
+    So a job that dies before the agent speaks leaves the caller listening to
+    ringing until LiveKit gives up.
 
     The usual cause is a secret that is declared but not deployed. The generated
-    agent checks its phone environment the moment it sees a SIP caller, so a
-    missing name fails the job there, on a real call only, and never in the
-    browser dev loop. Compare the two lists:
+    agent checks its phone environment the moment a SIP caller arrives, so a
+    missing name fails the job there, on a real call only. Compare the two
+    lists:
 
     ```sh
-    lk agent secrets
+    lk --project "$LK_PROJECT" agent secrets
     cat build/livekit/.env.example
     ```
 
     Every name in the second belongs in the first. Add what is missing to
-    `.env`, then `lk agent update-secrets --secrets-file .env`, which restarts
-    the agent.
-  </Accordion>
-  <Accordion title="the number never reaches LiveKit at all">
-    Check the trunk's **Origination** tab. The URI must be your project's SIP
-    address with `;transport=tcp`, and that host is your LiveKit project id
-    without its `p_` prefix, not the subdomain in `LIVEKIT_URL`.
+    `.env`, then run `lk --project "$LK_PROJECT" agent update-secrets
+    --secrets-file .env`, which restarts the agent.
   </Accordion>
   <Accordion title="a transfer fails at once with 486 Busy Here">
-    The trunk is presenting a caller ID the destination's carrier rejects.
-    [Caller ID for a transfer target](/telephony/twilio#caller-id-for-a-transfer-target)
+    The trunk is presenting a caller ID the other carrier rejects. [Caller ID
+    for a transfer target](/telephony/twilio#caller-id-for-a-transfer-target)
     has the two settings and how to tell them apart in Twilio's call log.
   </Accordion>
 </AccordionGroup>
@@ -312,9 +478,9 @@ attention than swapping one.
 
 LiveKit also reaches Twilio without a trunk. On the `connector` transport, a
 generated bridge speaks Twilio Media Streams over a WebSocket and joins the call
-into a LiveKit room, where the same agent worker answers. The number's voice
-webhook points at `POST /telephony/inbound` on the bridge, so the connection
-file names the account trio instead of the four SIP values:
+into a LiveKit room, where the same agent answers. The number's voice webhook
+points at `POST /telephony/inbound` on the bridge, so the connection file names
+the account trio instead of the four SIP values:
 
 ```yaml connections/twilio_connector.yaml
 transport: connector
@@ -351,13 +517,12 @@ environment:
 What changes:
 
 - **You host the bridge.** One container runs the agent worker and the bridge
-  web server, reachable at the HTTPS origin you put in `UNMUTE_PUBLIC_URL`, and
-  it connects out to a LiveKit Server you run. There is no SIP trunk and no
-  Redis.
+  web server, reachable at the HTTPS origin you put in `UNMUTE_PUBLIC_URL`. It
+  connects out to a LiveKit Server you run. There is no SIP trunk and no Redis.
 - **No transfers.** A transfer needs a SIP participant and an outbound trunk,
-  and this route has neither, so a cold or warm transfer is refused at
-  validation. Inbound, outbound and hangup work.
-- **One more call fact.** The bridge supplies everything the SIP route does
+  and this route has neither, so validation refuses a cold or warm transfer.
+  Inbound, outbound and hangup work.
+- **One more call fact.** The bridge supplies everything the SIP route does,
   plus `stream_id`.
 
 The emitted `build/livekit/README.md` for a connector target carries the
@@ -366,8 +531,14 @@ endpoint, the variables, and how to scale it.
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
+    Which console value fills which name, on every Twilio route.
+  </Card>
   <Card title="Transfers on this route" icon="phone-forwarded" href="/transfers/livekit">
-    Cold and warm transfer over the trunk you just configured.
+    Cold and warm transfer over the trunk you just set up.
+  </Card>
+  <Card title="Go live on LiveKit Cloud" icon="cloud-arrow-up" href="/deploy/livekit-cloud">
+    The deploy in step 2, in full.
   </Card>
   <Card title="Pipecat over Twilio" icon="phone" href="/telephony/pipecat-twilio">
     The `cloud-websocket` route end to end.

@@ -991,23 +991,27 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 // tells a call apart from any other room on the same server.
 const sipCallRoomPrefix = "call-"
 
-// livekitSIPProvisioning is the operator's one telephony command and the two
-// records it feeds: the inbound trunk and the dispatch rule an unsolicited call
-// needs to find the agent. The script resolves the trunk by phone number and
-// substitutes the JSON itself, so no record ID is ever transcribed, and it names
-// both files by path, which is why all three are emitted together or not at all.
+// livekitSIPProvisioning is the two records an unsolicited call needs to find
+// the agent: the inbound trunk that claims the number for this project, and the
+// dispatch rule that sends that trunk's calls to this worker. They are inputs to
+// `lk sip inbound create` and `lk sip dispatch create`, which the runbook spells
+// out with the project named on every command.
+//
+// There is no setup script any more. The one this compiler used to emit shelled
+// out to bare `lk`, which has no way to name a project, so on a machine whose
+// default project was not the deploy target it created both records in the wrong
+// account and said it had succeeded. Its reuse check was "does any rule name this
+// trunk", so a rule with an empty agent list counted as a hit and it exited
+// having fixed nothing. Two commands a reader can see are a better contract than
+// a script that hides which account it wrote to (2026-09-17).
 //
 // Shapes re-verified 2026-08-12 with the LiveKit docs
 // (docs.livekit.io/telephony/start/sip-trunk-setup): an inbound trunk is a name
 // plus its numbers, and a dispatch rule is a name plus a rule, with
 // dispatchRuleIndividual and roomPrefix for one room per caller. A rule with no
 // trunk list matches every trunk in the project, which is why trunk_ids is always
-// written and the script refuses to create a rule without a resolved ID.
+// written and always carries the substitution token.
 func livekitSIPProvisioning(data livekitData) ([]File, error) {
-	script, err := renderLiveKitV1("telephony-setup.sh", data)
-	if err != nil {
-		return nil, err
-	}
 	encode := func(path string, value any) (File, error) {
 		content, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
@@ -1034,8 +1038,8 @@ func livekitSIPProvisioning(data livekitData) ([]File, error) {
 	}
 	dispatch := map[string]any{
 		"name": data.Project + " inbound",
-		// Substituted by telephony-setup.sh, not by the environment: no variable
-		// of this name is ever set or read anywhere.
+		// Substituted by the operator's own `sed` at provisioning time, not by the
+		// environment: no variable of this name is ever set or read anywhere.
 		"trunk_ids": []string{"${UNMUTE_SIP_TRUNK_ID}"},
 		"rule": map[string]any{
 			"dispatchRuleIndividual": map[string]any{"roomPrefix": sipCallRoomPrefix},
@@ -1053,7 +1057,7 @@ func livekitSIPProvisioning(data livekitData) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []File{{Path: "telephony-setup.sh", Content: script}, trunk, rule}, nil
+	return []File{trunk, rule}, nil
 }
 
 func renderLiveKitV1(name string, data livekitData) ([]byte, error) {

@@ -253,8 +253,8 @@ func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10,
 	if got := strings.Join(plan.LocalEnvironment, ","); got != "LIVEKIT_API_KEY,LIVEKIT_API_SECRET,LIVEKIT_URL,REDIS_URL" {
 		t.Fatalf("LiveKit SIP locally supplied environment = %s", got)
 	}
-	// No environment name carries a trunk ID: the emitted telephony-setup.sh
-	// resolves the inbound records by phone number (SCHEMA N36).
+	// No environment name carries a trunk ID: the operator reads it off
+	// `lk sip inbound create` when creating the inbound records (SCHEMA N36).
 	if got := strings.Join(plan.RequiredEnvironment, ","); strings.Contains(got, "TRUNK") {
 		t.Fatalf("LiveKit SIP required environment still carries a trunk ID: %s", got)
 	}

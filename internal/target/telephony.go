@@ -179,9 +179,9 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		// four names the Connection declares (SCHEMA N33, 2026-08-12). Inbound
 		// does need its two platform records, because an unsolicited call arrives
 		// with no request of ours for configuration to travel with, but the
-		// emitted telephony-setup.sh resolves them by phone number at
-		// provisioning time, so no environment name carries the ID (SCHEMA N36,
-		// 2026-08-12).
+		// operator creates them with `lk sip inbound create` and `lk sip dispatch
+		// create` and reads the trunk ID back off the first command, so no
+		// environment name carries the ID (SCHEMA N36, 2026-08-12).
 		route.RuntimeEnvironment = []TelephonyEnvironmentRule{
 			{Name: "LIVEKIT_API_KEY"},
 			{Name: "LIVEKIT_API_SECRET"},
@@ -193,7 +193,8 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 			"get LIVEKIT_URL and the API key pair from the LiveKit Cloud project settings, or from a self-hosted LiveKit Server configuration; a self-hosted deployment configures LiveKit Server and LiveKit SIP with the same Redis deployment",
 			"point the carrier's origination URI at the LiveKit project SIP URI with transport=tcp (the LiveKit Cloud project settings page, or lk project list --json with the p_ prefix dropped from ProjectId); for a self-hosted deployment, deploy LiveKit SIP with public SIP signaling and RTP ports and point origination at that public SIP endpoint instead",
 			"get the selected carrier SIP address, username, password, and phone number from its SIP trunking console; these four reach the deployed agent's dial-out path directly, so no outbound trunk is registered",
-			"for inbound calls only, run bash telephony-setup.sh from the build directory: it resolves the inbound trunk by phone number and creates the trunk and dispatch rule, so no record ID is ever copied by hand",
+			"attach the phone number to that carrier trunk from inside the trunk, not from the number (in Twilio: the trunk's Numbers tab, Add a Number); a number attached to a SIP trunk ignores its own voice configuration silently, so it serves this route and no other",
+			"for inbound calls only, create the two LiveKit records from the emitted JSON with lk --project <name> sip inbound create - and lk --project <name> sip dispatch create -, naming the project on every command; the trunk ID the first command prints is what the dispatch rule's ${UNMUTE_SIP_TRUNK_ID} token is replaced with",
 		}
 		routes[key] = route
 	}
