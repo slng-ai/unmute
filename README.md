@@ -510,7 +510,7 @@ To add a template, open a pull request on
 here. A good one is one folder showing one idea, it validates and compiles, it
 carries a README saying what to listen for and which keys it needs, it adds a
 row to that repository's table, and it holds no secrets.
-[Templates](https://unmute.ai/start/templates) is the long version.
+[CONTRIBUTING.md](CONTRIBUTING.md) is the long version.
 
 Templates are agents to start from. Examples below are packages to read: one
 per feature of the compiler, held to every gate in this repository.

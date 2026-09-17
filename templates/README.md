@@ -30,8 +30,8 @@ here. A good template is one folder showing one idea. It validates and
 compiles, it carries a README saying what to listen for and which keys it
 needs, it adds a row to that repository's table, and it holds no secrets.
 
-[Templates](https://unmute.ai/start/templates) is the long version, and
-[CONTRIBUTING.md](../CONTRIBUTING.md) covers changes to Unmute itself.
+[CONTRIBUTING.md](../CONTRIBUTING.md) is the long version, and it also covers
+changes to Unmute itself, which are a different job with a longer checklist.
 
 ## Why this folder is still here
 
