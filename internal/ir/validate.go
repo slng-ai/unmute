@@ -420,11 +420,11 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			// value to go.
 			case ToolWebhook, ToolLocal, ToolSlngHosted:
 			case ToolBuiltin:
-				// send_sms is the one builtin with a setting a package pins: the
-				// sender number, which the platform wants on the attachment.
-				// validateBuiltinTool holds it to that one key.
-				if tool.Builtin != "send_sms" {
-					errors = add(errors, fmt.Sprintf("tool %q inject is legal for webhook, local and slng execution, and on builtin send_sms for its sender: builtin %q takes no argument", name, tool.Builtin))
+				// A builtin's inject: is a setting, not an argument, so only a
+				// capability that declares settings has anywhere to put one.
+				// validateBuiltinTool holds each to the keys it declares.
+				if prebuilt, known := targetcap.LookupPrebuilt(tool.Builtin); !known || len(prebuilt.Config) == 0 {
+					errors = add(errors, fmt.Sprintf("tool %q inject is legal for webhook, local and slng execution, and on a builtin for its own settings: builtin %q has none", name, tool.Builtin))
 				}
 			default:
 				errors = add(errors, fmt.Sprintf("tool %q inject is legal for webhook, local and slng execution only", name))
@@ -440,9 +440,16 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			// A hosted tool has one too: it runs somewhere, and how long it
 			// takes is exactly what an author cannot control, which is the case
 			// this field was added for.
-			case ToolWebhook, ToolLocal, ToolKnowledge, ToolSlngHosted:
+			//
+			// A builtin joins them because a curated capability is an attachment
+			// like any other and carries the same
+			// execution_policy.pre_action_message. Which targets can speak before
+			// one is a per-target question, answered where the execution kind is
+			// lowered: a code target builds the builtin from its own SDK and has
+			// no seam in front of it.
+			case ToolWebhook, ToolLocal, ToolKnowledge, ToolSlngHosted, ToolBuiltin:
 			default:
-				errors = add(errors, fmt.Sprintf("tool %q announce is legal for webhook, local, knowledge and slng execution only", name))
+				errors = add(errors, fmt.Sprintf("tool %q announce is legal for webhook, local, knowledge, slng and builtin execution only", name))
 			}
 			// Fixed sentence, same rule as the transfer announcement: a
 			// rendered line would need the variable set to be in scope at the
@@ -1333,8 +1340,24 @@ func validateBuiltinTool(name string, tool Tool, errors *[]string) {
 	if tool.Effect != ToolEffect(prebuilt.Effect) {
 		*errors = add(*errors, fmt.Sprintf("tool %q builtin %q fixes effect to %s, cannot be %q", name, tool.Builtin, prebuilt.Effect, tool.Effect))
 	}
+	validatePrebuiltConfig(name, tool, prebuilt, errors)
 	if tool.Builtin == "send_sms" {
 		validateSendSmsSender(name, tool, errors)
+	}
+}
+
+// validatePrebuiltConfig holds a builtin's `inject:` to the settings that
+// capability declares. A key it does not is refused naming the ones it does,
+// because the attachment's config is a tagged union and an unknown member is a
+// 422 at the push with no field named.
+func validatePrebuiltConfig(name string, tool Tool, prebuilt targetcap.Prebuilt, errors *[]string) {
+	if len(prebuilt.Config) == 0 {
+		return
+	}
+	for _, key := range sortedKeys(tool.Inject) {
+		if !slices.Contains(prebuilt.Config, key) {
+			*errors = add(*errors, fmt.Sprintf("tool %q builtin %s takes no setting %q: it takes %s", name, tool.Builtin, key, strings.Join(prebuilt.Config, ", ")))
+		}
 	}
 }
 
@@ -2179,6 +2202,12 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 			// than emitting a tool with no body behind it.
 			if targetcap.EmitsProject(provider) && tool.Builtin != "end_call" {
 				row.Errors = add(row.Errors, fmt.Sprintf("%s target hosts only the end_call prebuilt: %q is a capability SLNG curates, so compile this package to slng, or drop tools/%s.yaml", provider, tool.Builtin, name))
+			}
+			// A code target builds the prebuilt from its own SDK, which gives the
+			// driver nowhere to speak before it runs. slng attaches it and the
+			// attachment carries the sentence like any other.
+			if targetcap.EmitsProject(provider) && len(tool.Announce) > 0 {
+				row.Errors = add(row.Errors, fmt.Sprintf("%s target cannot announce builtin %q: it is built from the SDK and there is no seam in front of it, so drop the `announce:` from tools/%s.yaml, or compile to slng which carries it on the attachment", provider, tool.Builtin, name))
 			}
 		case ToolKnowledge:
 			applyCapability(caps, targetcap.FieldToolKnowledge, provider, row)

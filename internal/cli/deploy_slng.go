@@ -103,6 +103,13 @@ func deployResolution(
 	// It reads the builtins too, so a scope collision on one name is caught.
 	report.Findings = append(report.Findings,
 		duplicateHostedFindings(deployment.Resolution.Tools, deployment.Resolution.Builtins)...)
+	// One name held at two scopes is not a collision between two references, so
+	// the refusal above does not see it. It is one reference and a choice nobody
+	// was told about.
+	report.Notes = append(report.Notes,
+		scopeNotes(deployment.Resolution.Tools, resources.Tools)...)
+	report.Notes = append(report.Notes,
+		scopeNotes(deployment.Resolution.Builtins, resources.Tools)...)
 
 	records, selections, mcpFindings := resolveMCP(runner, cache, artifact.Requires, resources, !dryRun)
 	deployment.Resolution.Servers, deployment.Resolution.MCP = records, selections

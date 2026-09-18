@@ -329,7 +329,8 @@ to cover.
   <Accordion title="The rules">
     | Rule | What happens if you break it |
     |---|---|
-    | legal on `webhook:`, `local:` and `knowledge:` only | refused by tool name; an `mcp:` file is refused at load, with the line number |
+    | legal on `webhook:`, `local:`, `knowledge:`, `slng:` and `builtin:` | refused by tool name; an `mcp:` file is refused at load, with the line number |
+    | on a `builtin:`, the `slng` target only | refused by name on a code target, which builds the prebuilt from its own SDK and has no seam in front of it |
     | a fixed sentence, no `{{variables}}` | refused by tool name |
     | a blank value reads as absent | nothing is spoken and nothing is emitted |
     | on Pipecat, list the tool on an agent, not on a task | refused by name, telling you to move it |

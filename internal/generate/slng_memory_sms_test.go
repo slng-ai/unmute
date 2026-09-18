@@ -58,6 +58,94 @@ func TestSlngWritesTheSendSmsSenderAsAConfigOverride(t *testing.T) {
 	}
 }
 
+// GATE. A curated capability's own setting reaches the attachment's config, and
+// the union tag goes with it.
+//
+// Live organisation, 2026-09-17: `current_datetime` ships
+// `{"type": "current_datetime", "timezone": "UTC"}`, the record belongs to no
+// organisation (`organisation_id: null`), and a package could pin nothing on it.
+// A dental agent in San Francisco was told the date was tomorrow from four in
+// the afternoon. The tag is what makes the body a union member: a create infers
+// it from the tool's type and an update PATCH cannot, so an untagged body
+// deploys once and 422s on every push after it.
+func TestSlngWritesACuratedCapabilitySettingAsAConfigOverride(t *testing.T) {
+	_, files := compileSlng(t, "slng_memory_sms")
+	body := slngBodyOf(t, files)
+	var clock map[string]any
+	for _, raw := range body["tool_refs"].([]any) {
+		if ref := raw.(map[string]any); ref["tool"] == "current_datetime" {
+			clock = ref
+		}
+	}
+	if clock == nil {
+		t.Fatal("no current_datetime reference in the body")
+	}
+	config, _ := clock["config_overrides"].(map[string]any)
+	if config["type"] != "current_datetime" || config["timezone"] != "America/Los_Angeles" {
+		t.Errorf("config_overrides = %v, want the union tag and the pinned zone", clock["config_overrides"])
+	}
+	if arguments, _ := clock["argument_overrides"].(map[string]any); len(arguments) != 0 {
+		t.Errorf("argument_overrides = %v, want empty: a curated capability publishes no argument schema", arguments)
+	}
+}
+
+// GATE. Every kind of tool can speak before it runs, a builtin included.
+//
+// On slng a curated capability is an attachment like any other and carries the
+// same execution_policy.pre_action_message, so refusing `announce:` on a
+// `builtin:` file was a gap in this compiler stated as a limit of the platform.
+// A code target still refuses it, because it builds the prebuilt from its own
+// SDK and has no seam in front of it; that refusal is beside this one in
+// internal/ir/validate.go.
+func TestSlngAnnouncesEveryKindOfToolIncludingABuiltin(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "slng_memory_sms"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"current_datetime", "end_call", "send_sms"} {
+		tool := pkg.Tools[name]
+		tool.Announce = []string{"One moment."}
+		pkg.Tools[name] = tool
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tgt := targetByProvider(t, agent, ir.ProviderSlng)
+	if report, _ := ir.Validate(agent, []ir.Target{tgt}, targetcap.Default()); len(report.PerTarget[0].Errors) > 0 {
+		t.Fatalf("announce on a builtin was refused on slng: %v", report.PerTarget[0].Errors)
+	}
+	for name, line := range SlngAuthoredAnnouncements(agent) {
+		if line == "" {
+			t.Errorf("tool %q carries no announcement for the deploy preview to compare", name)
+		}
+	}
+	for _, name := range []string{"current_datetime", "end_call", "send_sms"} {
+		if SlngAuthoredAnnouncements(agent)[name] != "One moment." {
+			t.Errorf("tool %q lost its announcement: %q", name, SlngAuthoredAnnouncements(agent)[name])
+		}
+	}
+
+	// A tool that ends the conversation waits for its own sentence, and nothing
+	// else does. end_call hangs up the moment it runs, so a goodbye spoken
+	// alongside it is cut off mid-word; every other announcement covers a wait,
+	// and waiting for one would add the silence it exists to fill.
+	_, files := compileSlng(t, "slng_memory_sms")
+	body := slngBodyOf(t, files)
+	for _, raw := range body["tool_refs"].([]any) {
+		ref := raw.(map[string]any)
+		policy, _ := ref["execution_policy"].(map[string]any)
+		if policy == nil {
+			continue
+		}
+		pre := policy["pre_action_message"].(map[string]any)
+		want := ref["tool"] == "end_call"
+		if pre["wait"] != want {
+			t.Errorf("tool %v pre_action_message.wait = %v, want %v", ref["tool"], pre["wait"], want)
+		}
+	}
+}
+
 func TestSlngSendSmsNeedsTheTwilioVaultEntries(t *testing.T) {
 	artifact, files := compileSlng(t, "slng_memory_sms")
 	got := names(artifact.Requires.Secrets)

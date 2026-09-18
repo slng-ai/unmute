@@ -1,25 +1,27 @@
 ---
 title: "Prebuilt tools"
-description: "The tools the runtime already has: a closed registry with one entry today."
+description: "The capabilities the platform already has: a closed registry of four, and the settings you can pin on each."
 ---
 
-Some tools need no code from you because both runtimes already have them. You
-select one by id.
+Some tools need no code from you because the platform already has them. You
+select one by id, and you can pin the settings it takes.
 
-Reach for a prebuilt when the capability already exists in the runtime, so
-writing your own would just duplicate it. Today that is ending the call. For
-anything else, write a [webhook](/build/tools/webhook), a
-[Python handler](/build/tools/python), or point at an
-[MCP server](/build/tools/mcp).
+Reach for a prebuilt when the capability already exists, so writing your own
+would just duplicate it. That is hanging up, reading the clock, sending a text
+message, and reading the caller's number. For anything else, write a
+[webhook](/build/tools/webhook), a [Python handler](/build/tools/python), or
+point at an [MCP server](/build/tools/mcp).
 
 On this page:
 
 - [The block](#the-block) - two keys
-- [The registry, in full](#the-registry-in-full) - two ids, and it is closed
+- [The registry, in full](#the-registry-in-full) - four ids, and it is closed
+- [Settings](#settings) - what `inject:` pins on each capability
 - [What the registry decides for you](#what-the-registry-decides-for-you) - effect, parameters, description
+- [Speaking before it runs](#speaking-before-it-runs) - `announce:` on a prebuilt
 - [Turning it on](#turning-it-on) - the same two lists
 - [Advanced](#advanced) - resolving on SLNG
-- [Troubleshooting](#troubleshooting) - two refusals by name
+- [Troubleshooting](#troubleshooting) - the refusals by name
 
 ```yaml tools/end_call.yaml
 description: "End the call when the caller is finished or says goodbye."
@@ -33,8 +35,9 @@ run.
 ## The block
 
 <ParamField path="id" type="string" required>
-  Accepts `end_call` or `send_sms` from the registry below. No id is inferred. `send_sms`
-  is SLNG only.
+  Accepts `end_call`, `send_sms`, `current_datetime` or `user_phone_number` from the
+  registry below. No id is inferred. `end_call` compiles on every target; the other three
+  are SLNG only.
 </ParamField>
 
 <ParamField path="instructions" type="string">
@@ -45,18 +48,27 @@ run.
 
 ## The registry, in full
 
-| id | Effect | Default description |
-|---|---|---|
-| `end_call` | `ends_conversation` | End the call when the caller is finished or says goodbye. |
-| `send_sms` | `returns_data` | Send a text message to a phone number the caller has given and confirmed. |
+| id | Effect | Settings it takes | Default description |
+|---|---|---|---|
+| `end_call` | `ends_conversation` | none | End the call when the caller is finished or says goodbye. |
+| `send_sms` | `returns_data` | `from_number` | Send a text message to a phone number the caller has given and confirmed. |
+| `current_datetime` | `returns_data` | `timezone` | Read the current date and time. |
+| `user_phone_number` | `returns_data` | none | Read the number the caller is calling from. |
 
-Two rows. The registry is **closed**: you cannot add to it from a package, and
+Four rows. The registry is **closed**: you cannot add to it from a package, and
 there is no plugin seam. Adding a prebuilt means a row in the compiler plus a
 lowering for each target, which is a change to Unmute, not to your agent.
 
-`end_call` compiles on every target. `send_sms` is a capability SLNG curates
-and compiles on the `slng` target only; a code target refuses it by name. It
-takes one setting from the package, the sender:
+`end_call` compiles on every target. The other three are capabilities SLNG
+curates and compile on the `slng` target only; a code target refuses them by
+name.
+
+A capability's **settings** are written with `inject:`. On a builtin that block
+is the tool's own configuration, not an argument, because a curated capability
+publishes no argument schema for one to go in. The model never sees a pinned
+value either way.
+
+`send_sms` takes one setting, the sender:
 
 ```yaml tools/send_sms.yaml
 description: Send a text message to the guest's confirmed mobile number.
@@ -76,10 +88,92 @@ and `TWILIO_AUTH_TOKEN`, so `unmute deploy` checks both. Pair it with a
 [`source: conversation` variable](/reference/variables#sources) so the number
 the caller confirmed is recorded on the call.
 
-So read this page as a list of two things that exist, not as a catalog to
-browse. If what you want is neither, it is a
+`current_datetime` takes one setting, an IANA zone name:
+
+```yaml tools/current_datetime.yaml
+description: Read the clock. Call it once at the start of the call, before any day or time is discussed.
+
+builtin:
+  id: current_datetime
+
+inject:
+  - timezone: "America/Los_Angeles"
+
+effect: returns_data
+```
+
+**Write the zone whenever your agent is not in UTC.** The curated tool defaults
+to UTC and belongs to no organisation, so it cannot be changed on the platform.
+An agent without the setting is told the wrong date for part of every day. A
+zone name survives daylight saving; an offset written into the prompt does not.
+
+`user_phone_number` takes no settings. The platform knows the number from the
+call leg.
+
+So read this page as a list of four things that exist, not as a catalog to
+browse. If what you want is none of them, it is a
 [webhook](/build/tools/webhook), a [Python handler](/build/tools/python), or an
 [MCP server](/build/tools/mcp).
+
+## Settings
+
+A prebuilt's settings are written with `inject:`, a list whose every item holds
+one key. On a prebuilt that block is the capability's own configuration, not an
+argument the model could supply, because a curated capability publishes no
+argument schema. The model never sees a pinned value.
+
+```yaml tools/current_datetime.yaml
+description: Read the clock. Call it once at the start of the call, before any day or time is discussed.
+builtin:
+  id: current_datetime
+inject:
+  - timezone: "America/Los_Angeles"
+effect: returns_data
+```
+
+A key the capability does not declare is refused, naming the ones it does:
+
+```text
+tool "current_datetime" builtin current_datetime takes no setting "zone": it takes timezone
+```
+
+### `current_datetime`
+
+<ParamField path="timezone" type="string">
+  An IANA zone name, such as `America/Los_Angeles` or `Europe/Madrid`. Omit it and the
+  agent reads the clock in UTC.
+</ParamField>
+
+**Write the zone whenever your agent is not in UTC.** The curated tool defaults
+to UTC and belongs to no organisation, so it cannot be changed on the platform.
+An agent without the setting is told the wrong date for part of every day. A
+zone name survives daylight saving; an offset written into the prompt does not.
+
+Keep the clock a tool rather than copying its answer into a variable. A variable
+is fixed when the session starts and the tool is not, so on a long call the model
+ends up with two answers and trusts the one already in its prompt.
+
+### `send_sms`
+
+<ParamField path="from_number" type="string" required>
+  The sender, as a literal number in international format starting with a plus sign, such
+  as `+447700900123`. A template reference is refused: SLNG requires a literal here.
+</ParamField>
+
+It is the only key `send_sms` takes. The model supplies the recipient and the
+body itself, and SLNG reads the Twilio credentials from your vault under
+`TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`, which `unmute deploy` checks. Pair
+it with a [`source: conversation` variable](/reference/variables#sources) so the
+number the caller confirmed is recorded on the call.
+
+### `end_call` and `user_phone_number`
+
+Neither takes a setting. `user_phone_number` reads the number from the call leg.
+
+`end_call` has settings on the platform, a goodbye line and whether to wait for
+it, that a package cannot declare. Use [`announce:`](#speaking-before-it-runs)
+for a goodbye instead. A goodbye set by hand in the dashboard is removed by the
+next push, and `unmute deploy --dry-run` says so before it happens.
 
 ## What the registry decides for you
 
@@ -140,6 +234,31 @@ builtin:
 It does not change the tool's id, parameters, or fixed
 `ends_conversation` effect.
 
+## Speaking before it runs
+
+On the `slng` target a prebuilt is an attachment like any other, so it can speak
+a fixed line as it starts:
+
+```yaml tools/end_call.yaml
+description: End the call when the caller is finished or says goodbye.
+builtin:
+  id: end_call
+announce: Thanks for calling, goodbye.
+```
+
+<ParamField path="announce" type="string">
+  One fixed sentence the agent speaks as the tool starts. A list is refused here: an
+  attachment carries a single pre-action message. No `{{variables}}`.
+</ParamField>
+
+A tool whose effect is `ends_conversation` waits for its own sentence to finish,
+because the hangup would otherwise cut it off mid-word. Every other announcement
+runs alongside the tool, which is the point of it: a sentence so a slow call is
+not silence.
+
+A code target refuses `announce:` on a prebuilt. It builds the capability from
+its own SDK and has no seam in front of it, and the refusal says so.
+
 ## Turning it on
 
 The same two lists as any other tool:
@@ -161,14 +280,25 @@ tools:
 
 ### Resolving on SLNG
 
-SLNG already offers `end_call` as one of its own curated capabilities, so
-`unmute deploy`'s preflight check has to match your reference against it
-before pushing. It matches by the tool **file's** name, `tools/end_call.yaml`,
-never by the `builtin.id` you selected inside it.
+SLNG offers every one of these as a curated capability, so `unmute deploy`'s
+preflight check has to match your reference against it before pushing. It
+matches by the tool **file's** name, `tools/end_call.yaml`, never by the
+`builtin.id` you selected inside it.
 
-That is fine as written here, because the file is named `end_call` too. It
-stops being fine the moment you rename the file to describe what it does rather
-than the capability it selects.
+So **name the file after the id**. `unmute validate` refuses the mismatch on
+the `slng` target and says which file to rename:
+
+```text
+slng target: tool "hang_up" selects builtin "end_call", and this target attaches a builtin
+  by the tool file's own name: rename tools/hang_up.yaml to tools/end_call.yaml
+```
+
+A code target lowers the builtin to a function and does not care what the file
+is called, which is why this is not a rule everywhere.
+
+A name can also be held twice. SLNG publishes `end_call` to everybody and your
+organisation can hold its own copy; `unmute deploy` attaches yours and names
+both in its output, so you can see which one is running.
 
 ## Troubleshooting
 

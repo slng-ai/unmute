@@ -62,10 +62,10 @@ also the list of what you could have written.
 | `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
 | `input` | yes, except on `builtin:`, `mcp:` and `knowledge:` | everywhere else |
 | `output` | no | everywhere except `builtin:`, `mcp:` and `knowledge:`, but see below |
-| `inject` | no | `webhook:`, `local:` and `slng:` only |
+| `inject` | no | `webhook:`, `local:` and `slng:`, and `builtin:` for a capability's own settings |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` and `knowledge:` |
-| `announce` | no | `webhook:`, `local:`, `knowledge:` and `slng:` only |
+| `announce` | no | everywhere except `mcp:`; on a `builtin:`, the `slng` target only |
 
 An `mcp:` file is the block and nothing else, because the server owns each
 tool's contract. A `builtin:` file needs no `description` or `input`, because
@@ -551,26 +551,57 @@ builtin:
   instructions: Thank the caller briefly, then end the call.
 ```
 
-**The registry is closed and has two rows.**
+**The registry is closed and has four rows.**
 
-Builtin ids: `end_call`, `send_sms`. `send_sms` is SLNG's curated text message
-and compiles on the `slng` target only: write `inject:` with one `from_number`,
-a literal number in international format starting with a plus sign, and nothing
-else; the model supplies the recipient and the body, and SLNG reads
-`TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` from the vault by itself, which
-`unmute deploy` checks. Pair it with a `source: conversation` variable so the
-confirmed number is recorded on the call. `builtin.instructions` is optional and tells the model
-what to do as the prebuilt runs without changing its fixed behavior.
+Builtin ids: `current_datetime`, `end_call`, `send_sms`, `user_phone_number`.
+`end_call` compiles on every target. The other three are capabilities SLNG
+curates and compile on the `slng` target only.
+`builtin.instructions` is optional and tells the model what to do as the
+prebuilt runs without changing its fixed behavior.
 
-| id | Effect | Default description |
-|---|---|---|
-| `end_call` | `ends_conversation` | End the call when the caller is finished or says goodbye. |
-| `send_sms` | `returns_data` | Send a text message to a phone number the caller has given and confirmed. |
+| id | Effect | Settings it takes | Default description |
+|---|---|---|---|
+| `end_call` | `ends_conversation` | none | End the call when the caller is finished or says goodbye. |
+| `send_sms` | `returns_data` | `from_number` | Send a text message to a phone number the caller has given and confirmed. |
+| `current_datetime` | `returns_data` | `timezone` | Read the current date and time. |
+| `user_phone_number` | `returns_data` | none | Read the number the caller is calling from. |
+
+**The file has to be named after the id it selects.** `slng` attaches a builtin
+by the tool file's own name, so `tools/hang_up.yaml` declaring
+`builtin: {id: end_call}` asks the platform for a tool called `hang_up`, which
+nobody has. Validate refuses it and says which file to rename.
+
+A capability's **settings** are written with `inject:`, which on a builtin is
+the tool's own configuration and not an argument. A curated capability
+publishes no argument schema, so there is nowhere else for a pinned value to go,
+and the model never sees one either way.
+
+`send_sms` takes one `from_number`, a literal number in international format
+starting with a plus sign, and nothing else; the model supplies the recipient
+and the body, and SLNG reads `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` from
+the vault by itself, which `unmute deploy` checks. Pair it with a
+`source: conversation` variable so the confirmed number is recorded on the call.
+
+`current_datetime` takes one `timezone`, an IANA zone name. **Write it.** The
+curated tool defaults to UTC and belongs to no organisation, so it cannot be
+changed on the platform, and an agent that is not in UTC is told the wrong date
+for part of every day:
+
+```yaml tools/current_datetime.yaml
+description: Read the clock. Call it once at the start of the call, before any day or time is discussed.
+builtin:
+  id: current_datetime
+inject:
+  - timezone: "America/Los_Angeles"
+effect: returns_data
+```
+
+A zone survives daylight saving. An offset written into the prompt does not.
 
 There is no plugin seam, and you cannot add to it from a package. Do not invent
 a builtin id: an unknown one is refused by name.
 
-If what the user wants is not `end_call`, it is usually a webhook, a Python
+If what the user wants is not in that table, it is usually a webhook, a Python
 handler, or an MCP server. **One thing it is not is a tool at all:** handing the
 caller to a person is an entry under `escalations:` at the top level of
 `agent.yaml`, not a file in `tools/`. See `transfers.md`, and check there first,
@@ -662,6 +693,12 @@ announce:
 The `slng` target takes one line, because an attachment carries a single
 pre-action message. A list there is refused by `unmute validate`, with the
 line, rather than quietly narrowed to the first entry.
+
+**On `slng`, a `builtin:` takes one too.** A curated capability is an
+attachment like any other, so `tools/current_datetime.yaml` can speak before it
+reads the clock and `tools/end_call.yaml` can say goodbye before hanging up. A
+code target refuses it by name: it builds the prebuilt from its own SDK and has
+no seam in front of it.
 
 If the package instructions already tell the agent to say it is checking
 something, remove that instruction when you add `announce:`. Otherwise the model

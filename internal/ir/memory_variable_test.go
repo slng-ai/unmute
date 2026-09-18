@@ -127,15 +127,16 @@ func TestCodeTargetsRefuseSendSmsByName(t *testing.T) {
 	}
 }
 
-// The build-time inject rule opens for send_sms alone. end_call keeps refusing
-// an inject, and the message now names the one builtin that takes one.
+// The build-time inject rule opens for the builtins that declare settings of
+// their own. end_call declares none and keeps refusing an inject, and the
+// message says that rather than naming a rule.
 func TestBuildRefusesInjectOnEndCall(t *testing.T) {
 	pkg := loadSlngCore(t)
 	tool := pkg.Tools["end_call"]
 	tool.Inject = []packagespec.Pair{{Key: "from_number", Value: "+447700900123"}}
 	pkg.Tools["end_call"] = tool
 	_, err := Build(pkg)
-	if err == nil || !strings.Contains(err.Error(), "on builtin send_sms for its sender") {
-		t.Fatalf("inject on end_call must be refused naming send_sms as the exception, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), `on a builtin for its own settings, which "end_call" has none of`) {
+		t.Fatalf("inject on end_call must be refused saying it has no settings, got: %v", err)
 	}
 }

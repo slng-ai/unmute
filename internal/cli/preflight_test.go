@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -929,7 +930,7 @@ func TestMCPVaultNeedsComeFromTheHostedServer(t *testing.T) {
 // can have its own. Without the scope filter a `slng:` reference and a
 // `builtin:` reference would resolve to the same record and one of the two
 // would attach the wrong thing.
-func TestEligibleToolsSeparatesTheOrganisationsOwnFromTheCurated(t *testing.T) {
+func TestEligibleToolsPrefersTheOrganisationsOwnOverTheCurated(t *testing.T) {
 	var catalogue []slngAccountTool
 	fixture(t, "tool_list_scoped.json", &catalogue)
 
@@ -941,9 +942,11 @@ func TestEligibleToolsSeparatesTheOrganisationsOwnFromTheCurated(t *testing.T) {
 	if got := eligibleTools("ambiguous_tool", catalogue); len(got) != 2 {
 		t.Errorf("ambiguous_tool resolves to %d records, want the 2 the account holds", len(got))
 	}
-	// A curated-only name is not eligible for a `slng:` reference at all.
-	if got := eligibleTools("user_phone_number", catalogue); len(got) != 0 {
-		t.Errorf("a curated-only name is eligible for a hosted reference: %+v", got)
+	// A curated-only name has no organisation record to prefer, so the global
+	// one is what a reference attaches. This is the fallback that was missing:
+	// `current_datetime` exists at global scope and nowhere else.
+	if got := eligibleTools("user_phone_number", catalogue); len(got) != 1 || got[0].Scope == "organisation" {
+		t.Errorf("a curated-only name resolves to %+v, want the global record", got)
 	}
 }
 
@@ -1108,16 +1111,19 @@ func TestMCPHealthIsThePlatformsOwnWord(t *testing.T) {
 	}
 }
 
-// GATE. A `slng:` reference to a curated capability is refused as the wrong
-// kind, and a curated name never appears in an "it has" list.
+// GATE. A `slng:` reference to a curated capability resolves like any other.
 //
-// Live organisation, 2026-09-09: `slng: user_phone_number` was refused with
-// "this organisation has no tool of this name (it has ..., `user_phone_number`,
-// ...)". The resolver rightly attaches only the organisation's own `code` and
-// `api_request` tools, but the list it printed was the whole listing, so the
-// sentence named the missing tool as present. Only `end_call` is reachable from
-// a package, as `builtin: end_call`; the rest are attached in the dashboard.
-func TestHostedReferenceToACuratedNameSaysSo(t *testing.T) {
+// Live organisation, 2026-09-17: `slng: current_datetime` was refused with "is a
+// capability SLNG curates, which a `slng:` reference cannot attach", advising the
+// dashboard instead. The same compiled body pushed with `voiceai agents push`
+// attached it without complaint, so the refusal was unmute's and not the
+// platform's, and the advice was worse than the refusal: a push replaces rather
+// than merges, so a capability attached by hand is detached by the next deploy.
+//
+// A curated name also belongs in an "it has" list, which is the older half of
+// this gate: 2026-09-09, `user_phone_number` was called absent by a sentence
+// that named it as present.
+func TestHostedReferenceToACuratedNameResolves(t *testing.T) {
 	resources := account()
 	resources.Tools = append(resources.Tools,
 		slngAccountTool{ID: "t1", Name: "check_order", Scope: "organisation", ToolType: "code", LatestVersion: 1},
@@ -1126,31 +1132,19 @@ func TestHostedReferenceToACuratedNameSaysSo(t *testing.T) {
 	requirement := need("user_phone_number")
 	requirement.Source = "user_phone_number"
 
-	cases := []struct {
-		name  string
-		found finding
-	}{
-		{"resolve", resolveHosted(nil, nil, generate.Requirements{Hosted: []generate.Requirement{requirement}}, resources)[0].finding},
-		{"compare", compareHosted(requirement, resources.Tools, true)},
+	if got := eligibleTools("user_phone_number", resources.Tools); len(got) != 1 || got[0].ID != "g1" {
+		t.Errorf("a curated name resolves to %+v, want the global record", got)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.found.State != wrongKind {
-				t.Errorf("state %v, want wrongKind: %s", tc.found.State, tc.found.Detail)
-			}
-			for _, want := range []string{"curated", "`builtin: end_call`", "dashboard"} {
-				if !strings.Contains(tc.found.Detail, want) {
-					t.Errorf("detail lacks %q: %s", want, tc.found.Detail)
-				}
-			}
-			if strings.Contains(tc.found.Detail, "it has") {
-				t.Errorf("a curated name is refused for what it is, not listed as absent: %s", tc.found.Detail)
-			}
-		})
+	found := compareHosted(requirement, resources.Tools, true)
+	if found.State != satisfied {
+		t.Errorf("state %v, want satisfied: %s", found.State, found.Detail)
+	}
+	if !slices.Contains(hostedNames(resources.Tools), "user_phone_number") {
+		t.Error("a curated name is missing from the names a reference could resolve")
 	}
 
 	// The other half: a name nobody has still gets the list, and the list holds
-	// only what a `slng:` reference can attach.
+	// every name a `slng:` reference could resolve, curated ones included.
 	unknown := need("refund")
 	unknown.Source = "refund"
 	for _, tc := range []struct {
@@ -1164,8 +1158,10 @@ func TestHostedReferenceToACuratedNameSaysSo(t *testing.T) {
 			if tc.found.State != absent {
 				t.Errorf("state %v, want absent: %s", tc.found.State, tc.found.Detail)
 			}
-			if !strings.Contains(tc.found.Detail, "(it has `check_order`)") {
-				t.Errorf("the list should hold only the organisation's own code and api_request tools: %s", tc.found.Detail)
+			for _, want := range []string{"`check_order`", "`user_phone_number`"} {
+				if !strings.Contains(tc.found.Detail, want) {
+					t.Errorf("the list should name every tool a reference could resolve, and lacks %s: %s", want, tc.found.Detail)
+				}
 			}
 		})
 	}

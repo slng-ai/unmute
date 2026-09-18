@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"regexp"
@@ -198,6 +199,29 @@ func validateSlngTool(name string, tool Tool, row *TargetValidation) {
 	if instead, reserved := targetcap.SlngReservedToolNames[name]; reserved && !isOwningBuiltin {
 		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
 			"tool %q uses a name SLNG keeps for one of its own capabilities: use %s, or rename this tool", name, instead))
+	}
+	// The other half of the same fact, and slng-only because only this target
+	// attaches by name. The emitted reference is the tool file's own name and
+	// not the id it selects — slng_v1_build.go writes {"tool": <file name>} —
+	// so tools/hang_up.yaml declaring `builtin: {id: end_call}` reaches SLNG
+	// asking for a tool nobody has. A code target lowers the builtin to a
+	// function and the file's name is free, which is why this is not a rule
+	// everywhere.
+	if tool.Execution == ToolBuiltin && tool.Builtin != "" && tool.Builtin != name {
+		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+			"tool %q selects builtin %q, and this target attaches a builtin by the tool file's own name: rename tools/%s.yaml to tools/%s.yaml", name, tool.Builtin, name, tool.Builtin))
+	}
+	// A `slng:` reference to a curated capability attaches fine, and a value
+	// pinned on one does not: the reference's `inject:` becomes
+	// argument_overrides, and a curated capability publishes an empty argument
+	// schema, so the setting reaches the platform as an argument of a tool that
+	// takes none. `builtin:` is the spelling that writes it as config.
+	if tool.Execution == ToolSlngHosted && len(tool.Inject) > 0 {
+		hosted := cmp.Or(tool.HostedName, name)
+		if prebuilt, known := targetcap.LookupPrebuilt(hosted); known && len(prebuilt.Config) > 0 {
+			row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+				"tool %q pins a setting on `slng: %s`, a capability SLNG curates, whose settings are not arguments: write `builtin: {id: %s}` instead, which sends them as the attachment's own configuration", name, hosted, hosted))
+		}
 	}
 	// `webhook:` has no execution Field constant of its own, so its slng
 	// refusal lives here rather than in the capability table: webhook is the

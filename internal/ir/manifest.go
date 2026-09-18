@@ -47,15 +47,29 @@ func ValidateManifest(agent *Agent) (errors, warnings []string) {
 			}
 		}
 		if rows != nil {
-			allowed := []string{}
-			for _, row := range rows {
-				if row.Provider == binding.Provider {
-					allowed = row.Allow
-					break
+			// A manifest matches its model rules by provider, so an entry that
+			// declares none matches no row, and the empty allow list that used to
+			// leave refused every model with `(provider ); allowed: []` — a
+			// sentence that names neither the entry's provider nor the manifest's.
+			// Say what is missing instead. `provider:` is optional in general, and
+			// only a manifest makes it load-bearing.
+			if binding.Provider == "" {
+				errors = append(errors, fmt.Sprintf("%s.model: %q declares no provider:, and manifest %q matches its models.%s rules by provider: write the provider this model is served by",
+					path, modelID, m.Name, role))
+			} else {
+				allowed := []string{}
+				for _, row := range rows {
+					if row.Provider == binding.Provider {
+						allowed = row.Allow
+						break
+					}
 				}
-			}
-			if allowed != nil {
-				check(path+".model", modelID, "models."+role+" (provider "+binding.Provider+")", &packagespec.ManifestAllow{Allow: allowed})
+				// nil is a matched row with no allow: key at all, which approves the
+				// whole provider. An empty slice is deny-all, and so is no matching
+				// row.
+				if allowed != nil {
+					check(path+".model", modelID, "models."+role+" (provider "+binding.Provider+")", &packagespec.ManifestAllow{Allow: allowed})
+				}
 			}
 		}
 		if m.Languages != nil && (model.Kind == KindListen || model.Kind == KindSpeak) {

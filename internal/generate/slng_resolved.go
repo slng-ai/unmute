@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/slng-ai/unmute/internal/ir"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // The temporary body a guarded push consumes.
@@ -124,8 +125,8 @@ func SlngInjectedArguments(agent *ir.Agent) map[string]map[string]any {
 }
 
 // SlngAuthoredConfig is each package tool file's config override, keyed by the
-// tool file's own name. Today that is one shape: a builtin send_sms's sender,
-// which `inject: from_number` pins and the driver writes as the attachment's
+// tool file's own name: a builtin's `inject:`, which pins one of the settings
+// that capability declares and which the driver writes as the attachment's
 // config_overrides. It exists for the same reason SlngAuthoredAnnouncements
 // does: a preview cannot compare a setting it was never given, and without it
 // the deploy report told an author that writing their own sender would delete
@@ -133,8 +134,15 @@ func SlngInjectedArguments(agent *ir.Agent) map[string]map[string]any {
 func SlngAuthoredConfig(agent *ir.Agent) map[string]map[string]any {
 	out := map[string]map[string]any{}
 	for name, tool := range agent.Tools {
-		if tool.Execution == ir.ToolBuiltin && tool.Builtin == "send_sms" && len(tool.Inject) > 0 {
-			out[name] = slngSendSmsConfig(tool)
+		if tool.Execution != ir.ToolBuiltin || len(tool.Inject) == 0 {
+			continue
+		}
+		prebuilt, known := targetcap.LookupPrebuilt(tool.Builtin)
+		if !known {
+			continue
+		}
+		if config := slngPrebuiltConfig(prebuilt, tool); config != nil {
+			out[name] = config
 		}
 	}
 	return out

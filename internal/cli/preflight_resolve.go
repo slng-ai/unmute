@@ -70,22 +70,64 @@ type resolution struct {
 	Servers map[string]slngMCPRecord
 }
 
-// eligibleTools are the records of one name this account owns and could attach.
+// eligibleTools are the records of one name this account could attach.
 //
-// Scope, and only organisation scope. A curated capability appears in the same
-// listing under an ordinary name, and `tool_list.json` holds `end_call` at both
-// scopes at once: without this filter, `slng: end_call` and `builtin: end_call`
-// would resolve to the same record and one of the two would be attaching the
-// wrong thing. `builtin:` is how a curated capability is reached, and it keeps
-// its own name-based check.
+// The organisation's own records when it has any, and the globally curated ones
+// otherwise. A name can be held at both scopes at once — this organisation holds
+// `end_call` as global v1 and as its own v3 — and the organisation's is the one
+// its dashboard attaches, which is the same rule resolveBuiltins keeps.
+//
+// The fallback is the half that was missing. A capability SLNG curates and the
+// organisation has never copied, `current_datetime` among them, exists only at
+// global scope, so an organisation-only filter found nothing and the reference
+// was refused as a capability no package could attach. It resolves and attaches
+// like any other tool; both reads it needs answer for it.
 func eligibleTools(name string, catalogue []slngAccountTool) []slngAccountTool {
-	var found []slngAccountTool
+	var owned, curated []slngAccountTool
 	for _, tool := range catalogue {
-		if tool.Name == name && tool.Scope == "organisation" {
-			found = append(found, tool)
+		switch {
+		case tool.Name != name:
+		case tool.Scope == "organisation":
+			owned = append(owned, tool)
+		default:
+			curated = append(curated, tool)
 		}
 	}
-	return found
+	if len(owned) > 0 {
+		return owned
+	}
+	return curated
+}
+
+// scopeNotes names every reference whose name this account holds twice.
+//
+// Both resolvers prefer the organisation's record over the globally curated one
+// of the same name, which is right, and until now was silent. `voiceai agents
+// push` on its own prefers the other, so the same package attached `end_call`
+// v3 through `unmute deploy` and v1 through a bare push, and nothing said the
+// name was ambiguous at all. This does not block: the choice is correct, it was
+// only invisible.
+func scopeNotes(resolved []resolvedTool, catalogue []slngAccountTool) []string {
+	var notes []string
+	for _, reference := range resolved {
+		if reference.ToolID == "" {
+			continue
+		}
+		var others []string
+		for _, tool := range catalogue {
+			if tool.Name == reference.Requirement.Name && tool.ID != reference.ToolID {
+				others = append(others, fmt.Sprintf("%s at %s scope", tool.ID, tool.Scope))
+			}
+		}
+		if len(others) == 0 {
+			continue
+		}
+		sort.Strings(others)
+		notes = append(notes, fmt.Sprintf(
+			"this organisation holds %q more than once: %s was attached, and %s was not. Rename one of them in the SLNG dashboard if the wrong one is running",
+			reference.Requirement.Name, reference.ToolID, strings.Join(others, " and ")))
+	}
+	return notes
 }
 
 // resolveHosted turns each hosted reference into a checked published version.
@@ -132,15 +174,6 @@ func resolveOneHosted(
 
 	candidates := eligibleTools(requirement.Name, resources.Tools)
 	switch {
-	case len(candidates) == 0 && slices.ContainsFunc(resources.Tools, func(tool slngAccountTool) bool {
-		return tool.Name == requirement.Name && !attachableByReference(tool)
-	}):
-		// The name is in the listing, as a capability SLNG curates. Calling it
-		// absent and then listing it as present is what this used to do.
-		found.State = wrongKind
-		found.Detail = curatedHostedDetail(requirement.Name)
-		out.finding = found
-		return out
 	case len(candidates) == 0:
 		found.State = absent
 		found.NearMiss = nearMiss(requirement.Name, catalogue)
@@ -182,12 +215,9 @@ func resolveOneHosted(
 		out.finding = found
 		return out
 	}
-	if identity.Source == "curated" {
-		found.State = wrongKind
-		found.Detail = curatedHostedDetail(requirement.Name)
-		out.finding = found
-		return out
-	}
+	// A curated record carries no organisation, so the account comparison below
+	// has nothing to compare and correctly lets it through: `identity.Source ==
+	// "curated"` used to refuse it here, which was the last of the three gates.
 	if account := resources.Account.Account.OrgID; account != "" && identity.OrganisationID != "" && identity.OrganisationID != account {
 		// The listing and the record disagree about whose tool this is. Reading
 		// on would validate a contract belonging to another organisation.

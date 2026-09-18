@@ -164,6 +164,33 @@ func TestSlngRefusesReservedToolNamesButNotTheBuiltinThatOwnsOne(t *testing.T) {
 	wantSlngError(t, row, `tool "get_current_datetime" uses a name SLNG keeps`, "current_datetime")
 }
 
+// GATE. A builtin selected from a file with another name is refused here, not at
+// the push.
+//
+// slng_v1_build.go emits {"tool": <file name>}, so tools/hang_up.yaml declaring
+// `builtin: {id: end_call}` asks SLNG for a tool called hang_up. It compiles
+// clean, the account has no such tool, and the push fails. A code target lowers
+// the builtin to a function of that name and is right to accept it, which is why
+// this refusal is slng's and not everyone's.
+func TestSlngRefusesABuiltinUnderAnotherFilesName(t *testing.T) {
+	agent := slngAgent(t)
+	builtin := agent.Tools["end_call"]
+	delete(agent.Tools, "end_call")
+	agent.Tools["hang_up"] = builtin
+	entry := agent.Agents["support"]
+	for i, name := range entry.Tools {
+		if name == "end_call" {
+			entry.Tools[i] = "hang_up"
+		}
+	}
+	agent.Agents["support"] = entry
+
+	row := validateSlng(t, agent)
+	wantSlngError(t, row,
+		`tool "hang_up" selects builtin "end_call"`,
+		"rename tools/hang_up.yaml to tools/end_call.yaml")
+}
+
 // GATE. The slng target refuses to author a tool, and each refusal says how to
 // get one onto the platform instead.
 //

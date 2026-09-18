@@ -224,11 +224,6 @@ func compareHosted(requirement generate.Requirement, accountTools []slngAccountT
 		if tool.Name != requirement.Name {
 			continue
 		}
-		if !attachableByReference(tool) {
-			found.State = wrongKind
-			found.Detail = curatedHostedDetail(requirement.Name)
-			return found
-		}
 		// The version comparison costs nothing extra: this listing carries
 		// latest_version, so one read answers both "does the name exist" and
 		// "has it moved". A read per hosted tool on every deploy was the
@@ -261,33 +256,24 @@ func compareHosted(requirement generate.Requirement, accountTools []slngAccountT
 	return found
 }
 
-// attachableByReference says whether a `slng:` reference can attach this
-// listing entry. Only a `code` or an `api_request` tool: everything else in the
-// listing is a capability SLNG curates, which appears under an ordinary name
-// and a `tool_type` of its own, the same rule `internal/ir/hosted.go` holds a
-// committed mirror to.
-func attachableByReference(tool slngAccountTool) bool {
-	return tool.ToolType == "code" || tool.ToolType == "api_request"
-}
-
 // hostedNames are the names a `slng:` reference could resolve, for an "it has"
-// list. Built from the whole listing, the list named a curated capability as
-// present in the same sentence that called it missing.
+// list. Every name in the listing, because every one of them is attachable.
+//
+// A `tool_type` used to gate this, to `code` and `api_request` only, and a
+// capability SLNG curates was refused by name with advice to attach it in the
+// dashboard instead. Both halves were wrong. The platform attaches a curated
+// capability by reference like any other tool — `voiceai agents push` of the
+// same compiled body resolves `current_datetime` without complaint — and a
+// capability attached by hand is detached again by the next push, because a
+// push replaces rather than merges. `internal/ir/validate_slng.go` still
+// refuses a package tool *named* after a reserved capability
+// (target.SlngReservedToolNames), which is the collision that rule was for.
 func hostedNames(catalogue []slngAccountTool) []string {
 	var names []string
 	for _, tool := range catalogue {
-		if attachableByReference(tool) {
-			names = append(names, tool.Name)
-		}
+		names = append(names, tool.Name)
 	}
 	return names
-}
-
-// curatedHostedDetail is the refusal for a `slng:` reference to a capability
-// SLNG curates. Only `end_call` has a package spelling; the rest are attached
-// to the agent in the dashboard (target.SlngReservedToolNames says the same).
-func curatedHostedDetail(name string) string {
-	return fmt.Sprintf("`%s` is a capability SLNG curates, which a `slng:` reference cannot attach: only `end_call` is reachable from a package, as `builtin: end_call`, and every other curated capability is attached to the agent in the SLNG dashboard", name)
 }
 
 func compareMCPServer(requirement generate.Requirement, servers []slngMCPServer, names []string, wasChecked bool) finding {
@@ -500,8 +486,9 @@ func joinNames(names []string) string {
 // the author has to act on to stderr, so the exit code matches what was printed.
 // It returns an error when the run must stop, which the caller wraps.
 func renderPreflight(out, errOut io.Writer, name string, report preflightReport) error {
-	// Advisories the account printed alongside its data. Relayed as prose,
-	// because that is what they are.
+	// Advisories: the account's own, printed alongside its data, and this run's
+	// own where a resolution made a choice the author could not see it make.
+	// Relayed as prose, because that is what they are.
 	for _, note := range report.Notes {
 		notef(errOut, "%s: %s\n", name, note)
 	}

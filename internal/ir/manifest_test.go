@@ -172,6 +172,40 @@ func TestManifestEmptyAllowlistsRefuseUnknownValues(t *testing.T) {
 	}
 }
 
+// GATE. An entry with no `provider:` says so, rather than failing against an
+// empty allow list.
+//
+// Live organisation, 2026-09-17. The `hotel-concierge` example writes its Gemini
+// think entries with no provider, and copying that shape into a package carrying
+// a manifest produced `models.reasoning.model: "gemini/google/..." violates
+// manifest "fillmore-fillings" models.think (provider ); allowed: []` — a
+// sentence naming neither the provider nor anything to allow. A manifest matches
+// its rules by provider, so an omitted one matches nothing and denies everything.
+func TestManifestSaysWhenAModelDeclaresNoProvider(t *testing.T) {
+	manifest, err := packagespec.ParseManifest([]byte("manifest: acme\nversion: 1\nmodels:\n  think:\n    - provider: google\n      allow: [gemini/google/gemini-3.1-flash-lite:latest]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := &Agent{Manifest: manifest, Models: map[string]ModelDef{
+		"reasoning": {Kind: KindThink, Model: "gemini/google/gemini-3.1-flash-lite:latest"},
+	}}
+	errs, _ := ValidateManifest(agent)
+	joined := strings.Join(errs, "\n")
+	for _, want := range []string{"declares no provider:", "matches its models.think rules by provider"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("refusal lacks %q: %v", want, errs)
+		}
+	}
+	if strings.Contains(joined, "allowed: []") {
+		t.Errorf("an omitted provider is still reported as an empty allow list: %v", errs)
+	}
+	// The same model passes once the entry names the provider the manifest does.
+	agent.Models["reasoning"] = ModelDef{Kind: KindThink, Provider: "google", Model: "gemini/google/gemini-3.1-flash-lite:latest"}
+	if errs, _ = ValidateManifest(agent); len(errs) != 0 {
+		t.Errorf("an allowed model with its provider written out is refused: %v", errs)
+	}
+}
+
 func TestManifestProviderWideApprovalKeepsOtherRestrictions(t *testing.T) {
 	for _, role := range []string{"listen", "speak", "think"} {
 		for _, allow := range []string{"", "      allow: []\n", "      allow: [approved]\n"} {

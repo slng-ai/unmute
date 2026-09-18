@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // UnservedResultField is the one result field the drivers add themselves. Every
@@ -152,6 +153,22 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 			}
 			return fmt.Errorf("%s: %s references {{%s}}, which is not a declared variable", where, site, ref)
 		}
+		// A value the model records during the call is never substituted into a
+		// prompt. SLNG emits it as a runtime variable and fills it with its own
+		// set_runtime_variables capability; it appears in neither
+		// template_defaults nor template_variable_options, and a prompt naming it
+		// is rejected at dispatch. The refusal that arrives is
+		// `AGENT_VALIDATION_FAILED`, HTTP 422, naming no field at all, which took
+		// sixteen pushes and a byte-level diff to place. It is refused here, where
+		// the file and the line are known.
+		//
+		// Not in validate_slng.go, although only slng emits one: `source:
+		// conversation` is denied outright on the code targets
+		// (targetcap.FieldVariableConversation), so there is no target where such
+		// a placeholder is right and this is not over-reach.
+		if variable.Source == VariableSourceConversation {
+			return fmt.Errorf("%s: %s references {{%s}}, a value the model records during the call, which no prompt receives: describe the value in the variable's description: and name it in prose here instead", where, site, ref)
+		}
 		if requireNow && !hasSessionStartValue(agent, root, variable) && !slices.Contains(alsoAllowed, root) {
 			return fmt.Errorf("%s: %s references {{%s}}, which has no value when the prompt is built; give it source: call_start, a system source, or a default", where, site, ref)
 		}
@@ -225,13 +242,17 @@ func checkInject(pkg *packagespec.Package) error {
 			// argument_overrides on the attachment.
 			case "webhook", "local", "slng":
 			case "builtin":
-				// send_sms is the one builtin with a setting a package pins: the
-				// sender, which the slng driver writes to the attachment's config
-				// override. Validate holds it to that one key and to a literal
-				// E.164 number; here only the kind is decided.
-				if raw.Builtin == nil || raw.Builtin.ID != "send_sms" {
-					return fmt.Errorf("%s: tool %q is a builtin tool; inject is legal on webhook, local and slng tools, and on builtin send_sms for its sender",
-						pkg.Location(file, "inject:"), name)
+				// A builtin's inject: is its own setting, which the slng driver
+				// writes to the attachment's config override, not an argument.
+				// Only the capabilities that declare settings have one to pin;
+				// validate holds each to the keys it declares and to their shape.
+				var id string
+				if raw.Builtin != nil {
+					id = raw.Builtin.ID
+				}
+				if prebuilt, known := targetcap.LookupPrebuilt(id); !known || len(prebuilt.Config) == 0 {
+					return fmt.Errorf("%s: tool %q is a builtin tool; inject is legal on webhook, local and slng tools, and on a builtin for its own settings, which %q has none of",
+						pkg.Location(file, "inject:"), name, id)
 				}
 			default:
 				// An mcp tool's arguments are assembled by the MCP client from the

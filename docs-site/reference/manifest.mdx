@@ -291,6 +291,18 @@ The YAML format and `--editor` still support explicitly empty lists.
   Provider names are strings, not a fixed manifest enum.
 </ParamField>
 
+**A manifest matches by provider, so every governed model entry has to write
+one.** `provider:` is optional in `agent.yaml` in general, and a model id that
+already carries its vendor reads fine without it. Under a manifest it is
+load-bearing: an entry with no provider matches no rule, so nothing is allowed
+and validate says so.
+
+```text
+models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no provider:,
+  and manifest "acme-corp" matches its models.think rules by provider: write the provider
+  this model is served by
+```
+
 <ParamField path="models.think[].allow" type="string[]">
   Omit this field to allow all current and future models from this provider.
   Other providers remain forbidden unless listed for the role.
