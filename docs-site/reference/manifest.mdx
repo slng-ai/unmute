@@ -80,7 +80,7 @@ unmute init hotel-agent --from-manifest
 
 The picker lists the saved contracts, default first. Guided setup then offers
 only what the chosen one allows, and it copies that file into the package as
-`manifest`.
+`manifest.yaml`.
 
 To hand the use case to a coding assistant, install the
 [Unmute skill](/reference/cli/skill), then ask the assistant to complete the
@@ -110,13 +110,13 @@ follow the [deployment workflow](/reference/cli/deploy).
 
 ## What an agent carries
 
-Initialization copies the selected file to `hotel-agent/manifest`, preserving
+Initialization copies the selected file to `hotel-agent/manifest.yaml`, preserving
 its exact bytes. It also writes this link in `agent.yaml`.
 If attaching a contract by hand, merge this single field into the existing
 package; it is not a complete `agent.yaml`:
 
 ```yaml agent.yaml
-manifest: manifest
+manifest: manifest.yaml
 ```
 
 Commit both files. Validation and compilation work on another computer or in CI
@@ -124,7 +124,7 @@ without the saved library. Changing the library or its default never updates
 an existing package automatically.
 
 A root manifest requires its link. A link requires that file. Only the literal
-link `manifest: manifest` is supported; no parent paths or remote URLs.
+link `manifest: manifest.yaml` is supported; no parent paths or remote URLs.
 Packages with neither file nor link continue to work without a company contract.
 
 ## Example manifest
@@ -132,7 +132,7 @@ Packages with neither file nor link continue to work without a company contract.
 This is a complete contract file, not an agent package. Use it as a starting
 point for company review; replace the example approvals with your own.
 
-```yaml manifest
+```yaml manifest.yaml
 manifest: acme-corp
 version: 1
 
@@ -499,7 +499,7 @@ manifest name of its own.
 ### Edit the saved source
 
 Saved contracts live under the operating system's user config directory at
-`unmute/manifests/<name>/manifest`. The CLI prints the path after saving.
+`unmute/manifests/<name>/manifest.yaml`. The CLI prints the path after saving.
 This complete command reopens the example contract:
 
 ```sh Terminal — edit the saved contract
@@ -516,8 +516,8 @@ invalid saved file. See [external editor setup](/reference/cli/manifest).
 ### Update an existing agent's contract
 
 When the contract owner approves a new revision, replace the package's
-`manifest` with that approved file, then validate and compile again.
-Keep its `manifest: manifest` link. Neither editing the library nor changing
+`manifest.yaml` with that approved file, then validate and compile again.
+Keep its `manifest: manifest.yaml` link. Neither editing the library nor changing
 the default performs this replacement for you.
 
 ## Validation and limits
@@ -536,7 +536,7 @@ not add provider support or make an unsupported setting work.
 The creation console cannot collect custom model endpoint settings or a SLNG
 Context Router upstream. It excludes those model choices. If your contract
 allows only such bindings, create the package with plain `unmute init`, copy the
-saved manifest into it as `manifest`, link it with `manifest: manifest` in
+saved manifest into it as `manifest.yaml`, link it with `manifest: manifest.yaml` in
 `agent.yaml`, and write those bindings by hand or with a coding assistant.
 Validation and compilation still enforce the same rules.
 
@@ -553,7 +553,7 @@ rules and prefetch limits are not part of this version.
 | An agent violates a model rule | Its provider or model ID is not approved for that role | Choose an approved pair; keep `slng` for SLNG-served models |
 | A provider's models are all blocked | Its `allow` list is explicitly empty | Ask the contract owner to add approved IDs or choose Allow all models |
 | A copied agent still follows old rules | Each package keeps its own contract | Replace the copy with the approved revision, then validate and compile |
-| Validation says the manifest is missing or unlinked | The file and `agent.yaml` link do not match | Keep the root `manifest` file and `manifest: manifest` together |
+| Validation says the manifest is missing or unlinked | The file and `agent.yaml` link do not match | Keep the root `manifest.yaml` file and `manifest: manifest.yaml` together |
 | An unfinished package reports no targets selected | The assistant has not completed it | Supply the use-case brief and have it fill the required settings |
 | A permitted provider is unavailable in guided setup | The console cannot collect its endpoint or router settings | Write that binding by hand and follow the provider's reference |
 | A region warning remains after compilation | The declared location cannot be verified | Check the target's region support and the provider's configuration |

@@ -90,7 +90,7 @@ func TestFromManifestCopiesTheContractAndCancelWritesNothing(t *testing.T) {
 			t.Fatalf("%v\n%s", err, out)
 		}
 		if save {
-			b, err := os.ReadFile(filepath.Join(dir, "manifest"))
+			b, err := os.ReadFile(filepath.Join(dir, "manifest.yaml"))
 			if err != nil || !bytes.Equal(b, raw) {
 				t.Fatal("wrong contract")
 			}

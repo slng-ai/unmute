@@ -75,7 +75,7 @@ unmute init hotel-agent --from-manifest
 ```
 
 That picker is interactive, so the user runs it. It copies the contract into
-the package as `manifest` and guides the choices the contract allows. From
+the package as `manifest.yaml` and guides the choices the contract allows. From
 there the `unmute` skill takes over: it reads the copied file and builds the
 agent inside those rules.
 

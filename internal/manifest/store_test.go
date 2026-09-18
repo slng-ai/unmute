@@ -44,7 +44,7 @@ func TestSavedManifests(t *testing.T) {
 	if err != nil || len(list) != 2 {
 		t.Fatalf("list: %v %v", list, err)
 	}
-	if err := os.Remove(filepath.Join(s.Root, "manifests", "second", "manifest")); err != nil {
+	if err := os.Remove(filepath.Join(s.Root, "manifests", "second", "manifest.yaml")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Default(); err == nil {
@@ -52,6 +52,32 @@ func TestSavedManifests(t *testing.T) {
 	}
 	if err := s.Use("missing"); err == nil {
 		t.Fatal("accepted missing manifest")
+	}
+}
+
+// A library saved before the file gained its extension still loads and still
+// edits, so an upgrade never loses somebody's saved contracts.
+func TestSavedManifestKeepsReadingTheExtensionlessFile(t *testing.T) {
+	s := Store{Root: t.TempDir()}
+	dir := filepath.Join(s.Root, "manifests", "acme")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(dir, "manifest")
+	if err := os.WriteFile(legacy, []byte("manifest: Acme\nversion: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.Load("acme")
+	if err != nil || saved.Path != legacy {
+		t.Fatalf("load = %v %v", saved, err)
+	}
+	path, _, err := s.Update("acme", []byte("manifest: Acme\nversion: 2\n"))
+	if err != nil || path != legacy {
+		t.Fatalf("update = %q %v", path, err)
+	}
+	// A new name never picks up the old spelling.
+	if path, err := s.Create("beta", []byte("manifest: Beta\nversion: 1\n")); err != nil || filepath.Base(path) != "manifest.yaml" {
+		t.Fatalf("create = %q %v", path, err)
 	}
 }
 

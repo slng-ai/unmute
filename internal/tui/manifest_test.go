@@ -79,7 +79,7 @@ func TestManifestCreateCopiesContractAndMaintainsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pkg.Agent.Manifest != "manifest" || string(pkg.ManifestBytes) != manifestTestContract {
+	if pkg.Agent.Manifest != "manifest.yaml" || string(pkg.ManifestBytes) != manifestTestContract {
 		t.Fatal("contract changed")
 	}
 	maintained, err := loadMaintained(root)
@@ -94,7 +94,7 @@ func TestManifestCreateCopiesContractAndMaintainsIt(t *testing.T) {
 	if err := validateMaintained(candidate); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(candidate, "manifest"))
+	raw, err := os.ReadFile(filepath.Join(candidate, "manifest.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

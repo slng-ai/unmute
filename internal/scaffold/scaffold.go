@@ -1013,7 +1013,7 @@ func Write(dir string, d Data) ([]string, error) {
 		return nil, fmt.Errorf("scaffold: %w", err)
 	}
 	if len(d.Manifest) > 0 {
-		path := filepath.Join(dir, "manifest")
+		path := filepath.Join(dir, spec.ManifestFileName)
 		if err := os.WriteFile(path, d.Manifest, 0o644); err != nil {
 			return nil, fmt.Errorf("scaffold manifest: %w", err)
 		}

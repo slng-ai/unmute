@@ -186,7 +186,7 @@ func runManifest(cmd *cobra.Command, args []string, editing, external bool) erro
 	}
 	err = manifestui.Run(cmd.InOrStdin(), cmd.OutOrStdout(), cmd.InOrStdin() != os.Stdin || os.Getenv("TERM") == "dumb", manifestui.Options{
 		Name: name, Rules: initial, Editing: editing, HasDefault: previous != nil,
-		Destination: func(name string) string { return filepath.Join(store.Root, "manifests", name, "manifest") },
+		Destination: func(name string) string { path, _ := store.Path(name); return path },
 		ValidateName: func(name string) error {
 			if created {
 				return nil

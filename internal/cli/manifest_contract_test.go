@@ -30,7 +30,7 @@ func TestDocumentedManifestCompilesWithoutComputerConfig(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, rest, ok := strings.Cut(string(page), "```yaml manifest\n")
+			_, rest, ok := strings.Cut(string(page), "```yaml manifest.yaml\n")
 			if !ok {
 				t.Fatal("no manifest example")
 			}
@@ -84,11 +84,11 @@ func TestManifestFailurePreservesExistingBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(agentPath, append([]byte("manifest: manifest\n"), agent...), 0o644); err != nil {
+	if err := os.WriteFile(agentPath, append([]byte("manifest: manifest.yaml\n"), agent...), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// A violation on the unselected Pipecat target must block LiveKit output too.
-	if err := os.WriteFile(filepath.Join(dir, "manifest"), []byte("manifest: acme-corp\nversion: 1\ntargets:\n  allow:\n    - livekit\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte("manifest: acme-corp\nversion: 1\ntargets:\n  allow:\n    - livekit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stdout, stderr, err := runCompileCommand(t, dir, "--target", "livekit")
@@ -124,7 +124,7 @@ func TestInitIgnoresTheSavedDefaultUnlessAsked(t *testing.T) {
 		if err != nil {
 			t.Fatalf("init: %v\n%s", err, out)
 		}
-		if _, err := os.Stat(filepath.Join(dir, "manifest")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(dir, "manifest.yaml")); !os.IsNotExist(err) {
 			t.Fatalf("the saved default reached a plain init: %v\n%s", err, out)
 		}
 		if _, stderr, err := runValidateCommand(t, dir); err != nil {
@@ -138,7 +138,7 @@ func TestInitIgnoresTheSavedDefaultUnlessAsked(t *testing.T) {
 		if err != nil {
 			t.Fatalf("init: %v\n%s", err, out)
 		}
-		got, err := os.ReadFile(filepath.Join(dir, "manifest"))
+		got, err := os.ReadFile(filepath.Join(dir, "manifest.yaml"))
 		if err != nil || string(got) != other {
 			t.Fatalf("manifest copy: %v, %q\n%s", err, got, out)
 		}
