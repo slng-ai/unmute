@@ -97,7 +97,7 @@ func TestAnnounceAlternativesLowerToTheHelperAndOneLineDoesNot(t *testing.T) {
 				// twice in one turn spoke twice (trace 917975e9).
 				`"delegate:verify_customer",`,
 				`"delegate:manage_booking",`,
-				`"Let me double check what I have available.",`,
+				`"Let me have a look at the diary.",`,
 			} {
 				if !strings.Contains(py, want) {
 					t.Errorf("the alternatives package is missing %q", want)

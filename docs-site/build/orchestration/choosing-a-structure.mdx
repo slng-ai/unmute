@@ -197,9 +197,12 @@ moves the caller to `complaint_specialist`, who alone holds `record_complaint`
 and alone reads the refund knowledge base through `look_up_refund_policy`.
 Recording a complaint is one action, not an ordered step, so it sits directly
 on the specialist rather than behind a task. `to_concierge` carries the
-reverse direction. The specialist does not list `verify_customer`: only the
-concierge verifies, and every tool that needs the number refuses while it is
-unconfirmed.
+reverse direction. The specialist does name `verify_customer`, as a bare
+`- verify_customer`: the definition stays on the concierge, because a task name
+is one name across the package. It needs the step in reach because
+`record_complaint` injects `customer_phone` and is refused while the caller has
+not agreed to it, and a caller who opens with a complaint has never been near
+the booking flow.
 
 What is left over goes to a person. A caller who asks for a manager reaches
 `to_manager`, a cold transfer, not any of the four shapes above. Both agents

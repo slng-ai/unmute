@@ -759,13 +759,14 @@ rather than one list with a kind field.
 One package in the unmute repository shows these shapes working together:
 `examples/salon-concierge`. Two agents hand the caller over, in both
 directions. The concierge defines two tasks, `verify_customer` and
-`manage_booking`. The complaint specialist defines no tasks at all:
+`manage_booking`. The complaint specialist defines no tasks of its own:
 `record_complaint` sits directly on it as a tool, because filing a complaint
-is one action rather than a step that has to happen in order. The specialist
-does not list `verify_customer`: only the concierge verifies, because a task
-within reach beats a prompt rule telling the model not to run it. Every tool
-that needs the caller's number refuses while it is unconfirmed, and
-`to_concierge` is the way back. Both tasks end on their own tool through
+is one action rather than a step that has to happen in order. It does name
+`verify_customer`, as a bare `- verify_customer` reusing the concierge's
+definition, because `record_complaint` injects the caller's number and is
+refused while the caller has not agreed to it. A task within reach beats a
+prompt rule, so the prompt asks for the step at the point it is needed rather
+than forbidding it. `to_concierge` is the way back. Both tasks end on their own tool through
 `finish:`.
 
 The same package carries the task group, `book`: `verify_customer` with
