@@ -12,9 +12,11 @@ On this page:
 - [Write speech, not text](#write-speech-not-text) - the voice reads your formatting
 - [Never write a specimen value](#never-write-a-specimen-value) - the worst failure here
 - [Say the format, do not show it](#say-the-format-do-not-show-it) - put it in the type
+- [Saying a value and confirming one](#saying-a-value-and-confirming-one) - two different lines
 - [Name only the values this prompt needs](#name-only-the-values-this-prompt-needs) - every placeholder is a grant
 - [Set the spoken language in every role](#set-the-spoken-language-in-every-role) - each prompt that can speak
 - [Avoid repeated waiting lines](#avoid-repeated-waiting-lines) - one `announce:` per wait
+- [Give every realism rule a budget](#give-every-realism-rule-a-budget) - how often, not just how
 - [Tell the model to vary](#tell-the-model-to-vary-and-it-will) - openers callers notice
 - [Keep the rules load bearing](#keep-the-rules-load-bearing) - prompt rule, or code guard
 
@@ -97,6 +99,27 @@ Say the format once, in the type. A prompt that repeats it can drift from the
 validator, and then the two tell the model different things.
 </Note>
 
+## Saying a value and confirming one
+
+Ordinary speech carries a value once. Confirming it is the moment the caller
+has to hear every character. Those are two lines, and a prompt that writes one
+of them gets one shape used for both.
+
+```md instructions.md
+Say an email address the ordinary way, all one piece, when you first mention
+it. When you read one back to confirm it, delimit the part before the at sign
+so each character is heard on its own, then say the at sign and the domain as
+ordinary words. Say a reference number normally, and confirm it in the groups
+it is written in. Wait for a yes before acting on a confirmed value, and
+confirm it again after any correction.
+```
+
+The rule is delimiting, not spelling. Never write "spell it letter by letter":
+that makes the model do its own preprocessing, and it loses to the voice's.
+`A B C` is the instruction. A phone number is the exception: it stays in its
+written form even when it is confirmed, because commas inside a run of digits
+break it.
+
 ## Name only the values this prompt needs
 
 Saved values reach a prompt only through placeholders you write. Keep those
@@ -149,6 +172,26 @@ line cover the wait and avoid another "let me check" before or after it.
 
 Check adjacent steps as well. A tool announcement followed by a task
 announcement can sound like repetition even when each is short.
+
+## Give every realism rule a budget
+
+Filler words, restarts and hesitations make an agent sound human in the right
+quantity, and obviously synthetic in any other. A rule that says how to do one
+and not how often gets it on every turn.
+
+So write the frequency into the rule, and show plain speech as the good line:
+
+```md instructions.md
+Most turns carry no filler at all. Plain, direct speech is the default, and
+several turns in a row without any is right. At most one filler in a turn,
+never two in a sentence, and never a run like "yeah, um, so". Once or twice in
+a whole call, a better phrasing can land mid sentence: drop the first one and
+carry on, without apologising. Every other turn comes out whole.
+```
+
+An example outweighs the sentence under it. A prompt showing "Yeah, um, so, I
+can do that." as the good line produces that opener nearly every turn, whatever
+a caveat below it says. Demote the stacked form to the bad example instead.
 
 ## Tell the model to vary, and it will
 

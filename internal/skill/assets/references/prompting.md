@@ -136,6 +136,29 @@ the example was the only number in front of it. That is also how a `confirm:`
 value leaks. The compiler refuses `{{a_confirmed_value}}` in every prompt but
 its confirming step's, and a hardcoded number walks straight past that refusal.
 
+#### Saying a value, and confirming one, are two different lines
+
+Ordinary speech carries a value once. Confirming it is the moment the caller has
+to hear every character, and the two need separate instructions or the agent
+picks one shape and uses it for both.
+
+```markdown
+- Say an email address the ordinary way, all one piece, when you first mention
+  it. When you read one back to confirm it, delimit the part before the at sign
+  so each character is heard on its own, then say the at sign and the domain as
+  ordinary words.
+- Say a reference number normally. When you confirm it, say it in the groups it
+  is written in.
+- Wait for a yes before you act on a confirmed value, and confirm it again after
+  any correction.
+```
+
+The rule is delimiting, not spelling: never write "spell it letter by letter" in
+a prompt, because that phrasing produces a model doing its own preprocessing and
+losing to the speech engine's. `A B C` is the instruction. A phone number is the
+exception noted above: it stays in its conventional written form even when it is
+confirmed.
+
 ### Conversational flow
 
 ```markdown
@@ -159,7 +182,16 @@ General behaviour goes in the prompt. Per tool prose goes in the tool's own
 - Say what happened. If something fails, say so once, offer a next step, or ask
   what they want to do.
 - Summarize structured results. Do not read identifiers out loud.
+- A waiting line plays by itself while a tool runs. Never say your own version
+  of it first, and never spend a turn saying you are about to do something.
+- Do not open the turn after one with "Okay", "Right" or "Lovely". It has
+  already been acknowledged. Carry straight on with what happened.
 ```
+
+**Those last two lines are only right when the tool declares an `announce:`.**
+Write them when it does, and delete them when it does not, or the agent goes
+silent through a wait the caller can hear. They belong here rather than with the
+realism rules, and they are why a filler never gets a turn of its own.
 
 **Name a tool by what it does, not by its name.** Writing "call
 `check_slots`" in the prompt lets the model say that string, and the
@@ -231,22 +263,39 @@ Rules tell the agent what to do. Examples tell it how to sound, and examples do
 most of the work, because a model imitates a pattern it can see far more
 reliably than it follows an abstract instruction.
 
+**Which is why every technique below needs a frequency budget and not just a
+form.** A technique shown without one is applied on every turn, and a caveat in
+prose does not save it: the model reads the example, not the paragraph under it.
+Write the budget into the rule and show the plain version as the good one.
+Stacked realism is the single most obviously synthetic thing a voice agent does.
+
 ### Filler words and pauses
 
 ```markdown
 # Pauses and filler words
 
-After a standalone "um", follow it with "so".
+Most of your turns carry no filler at all. Plain, direct speech is the default,
+and it already sounds like somebody who does this job all day.
+
+- At most one filler word in a turn, and none in most of them. Never two in a
+  sentence, and never a run like "yeah, um, so".
+- Several turns in a row with no filler is right, not a mistake.
+- Use one only where a real person would hesitate: you are about to ask for
+  something slightly personal, or the caller has changed their mind and you are
+  catching up.
 
 Examples:
-- Bad: "I can definitely handle that for you."
-- Good: "Yeah, um, so, I can do that."
-- Bad: "Let me check that for you."
-- Good: "Hmm, let me check that for you."
+- Bad: "Yeah, um, so, I can get that in the diary."
+- Good: "I can get that in the diary."
+- Bad: "Um, and, so, what is the best email for you?"
+- Good: "And what is the best email for you?"
+- Good, now and then: "Right, which day were you thinking?"
 ```
 
-The point is to make filler available, not to sprinkle it everywhere. Too much
-sounds as fake as none.
+Budget first, form second. The old version of this block said to follow every
+"um" with "so" and showed "Yeah, um, so, I can do that." as the good line, which
+is not filler made available: it is filler made compulsory and stacked, and the
+agent opened nearly every turn with it.
 
 **A filler rides on a turn that also does its job.** A turn that is only "let me
 have a look" costs a whole round trip, tells the caller nothing, and is the same
@@ -258,13 +307,21 @@ examples, or you get the polite version of asking the caller to hold.
 ```markdown
 # Self-corrections
 
+Once or twice in a whole call, not more. Every other turn comes out whole.
+
 When a better phrasing comes to you mid sentence, drop the first one and start
 again. Do not apologize for it.
 
 Examples:
-- Bad: "Let me check the order number first."
-- Good: "I can pull that up, well, actually, let me check the order number first."
+- The normal case: "Let me check the order number first."
+- Once in a call: "I can pull that up, well, actually, let me check the order
+  number first."
 ```
+
+Give this one a cap, and show the whole sentence as the normal case rather than
+as a wrong answer. A clean sentence is not a defect, so labelling it Bad teaches
+the model that finishing a thought is a mistake and you get an agent that
+restarts itself every turn.
 
 The "do not apologize" rule matters. An apologetic restart draws attention to
 itself and sounds stilted.
@@ -304,16 +361,21 @@ Steady and warm, not syrupy.
 ```markdown
 # Phrase variation
 
-Do not open two turns in a row with the same word. Rotate.
+Do not open two turns in a row with the same word. Rotate, and open some turns
+with no opener at all.
 
 Examples:
-- Turn 1: "Yeah, um, so, I can do that."
-- Turn 2: "Mhm, let me pull that up."
-- Turn 3: "Okay, one sec."
-- Turn 4: "Right, here's what I'm seeing."
+- "That works."
+- "And what is the best email for you?"
+- "Okay, got it."
+- "Right, one thing left."
+- "Perfect."
 ```
 
-Show four or five openers. Show one and the model anchors on it.
+Show four or five openers. Show one and the model anchors on it. Keep the
+examples clean: an opener shown here with filler stacked on it teaches the
+stacked form twice, once in each section, and that is what the budget above is
+for.
 
 ### One example is a template, not an example
 
@@ -481,6 +543,21 @@ know what moved cannot review it.
 
 "It sounds fine" is not a check. Small changes to a prompt, a tool description,
 or a model version flip behaviour in ways nobody predicts.
+
+### For a fixed flow, write the target transcript first
+
+Before any prompt, ask the user to write the call out the way they want to hear
+it: every turn, in order, including where a waiting line lands. Then derive the
+flow and the realism sections from it.
+
+It is the fastest way to fix a padded agent, and it surfaces things a prose
+brief hides: which step runs first, two facts sharing a turn that should be two
+turns, a value that needs confirming back, and a tool with no waiting line on a
+wait the caller will notice.
+
+**A target transcript outranks every template on this page.** Where the two
+disagree, the transcript is what the user wants to hear, and these templates are
+a starting point for somebody who has not written one.
 
 ### Write the five scenarios
 
