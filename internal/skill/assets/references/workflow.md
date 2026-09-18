@@ -96,7 +96,7 @@ empty. That is deliberate, not a bug to route around.
 A company contract is added by a person: `unmute init my-agent --from-manifest`
 opens a picker and then guides the choices the contract allows. It needs a
 terminal, so ask the user to run it rather than trying to create a governed
-package yourself. The chosen file is copied into the package as `manifest`, and
+package yourself. The chosen file is copied into the package as `manifest.yaml`, and
 validation and compilation read that copy: they need nothing saved on the
 computer. When a package holds one, read it before choosing bindings, and read
 [Manifest](manifests.md) for the rules.

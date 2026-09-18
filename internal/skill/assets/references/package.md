@@ -7,7 +7,7 @@ What an author writes, file by file. This is the surface you work in.
 | File | Required | What it holds |
 |---|---|---|
 | `agent.yaml` | yes | the agent: models, prompts, tools, conversation, channels |
-| `manifest` | when linked | the company rules copied into this package; see [manifests](manifests.md) |
+| `manifest.yaml` | when linked | the company rules copied into this package; see [manifests](manifests.md) |
 | an instructions file | yes | the prompt, in Markdown, named by each agent |
 | `targets.yaml` | yes | where it runs, and the framework version pinned |
 | `tools/<name>.yaml` | no | one file per tool |
@@ -89,7 +89,7 @@ That is the shape `unmute init <name>` scaffolds, and it runs in a browser.
 | Key | Required | What it is |
 |---|---|---|
 | `version` | yes | the schema version, `1` |
-| `manifest` | when a root manifest exists | the literal `manifest`, linking the company contract |
+| `manifest` | when a root manifest exists | the literal `manifest.yaml`, linking the company contract |
 | `name` | yes | what the deployed agent is called |
 | `entry_agent` | yes | which agent answers |
 | `models` | yes | the model palette, grouped by kind |

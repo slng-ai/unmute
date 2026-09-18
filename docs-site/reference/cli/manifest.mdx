@@ -99,14 +99,14 @@ package. Create it yourself, install the [Unmute skill](/reference/cli/skill),
 then give the assistant the use case and ask it to complete those files. It
 reads the copied rules, implements the agent, then validates and compiles it.
 
-Creation copies the exact contract into `hotel-agent/manifest` and links it
+Creation copies the exact contract into `hotel-agent/manifest.yaml` and links it
 from `agent.yaml`. Commit both files. Validation then works on another computer
 or in CI without the saved library.
 
 ## 3. Check the agent
 
 After completing `hotel-agent`, run the validation and compilation commands
-from the quickstart. Both read `hotel-agent/manifest`, not the saved library.
+from the quickstart. Both read `hotel-agent/manifest.yaml`, not the saved library.
 Fix the agent when it violates a company rule; do not weaken the contract.
 
 A successful compile does not test a conversation. Use the [browser loop](/dev/overview)
@@ -131,7 +131,7 @@ Unchanged edits preserve the original bytes and create no backup.
 A save error keeps the draft open for correction or retry.
 
 <Note>
-  Editing `acme-corp` does not change `hotel-agent/manifest` or any existing
+  Editing `acme-corp` does not change `hotel-agent/manifest.yaml` or any existing
   package. See [updating a package contract](/reference/manifest#update-an-existing-agents-contract)
   before replacing its copy.
 </Note>
@@ -182,7 +182,7 @@ Successful replacements use the same backup protection as the terminal editor.
 ### Storage and terminal support
 
 Saved files live under the user config directory at
-`unmute/manifests/<name>/manifest`; `unmute/default-manifest` holds the default name.
+`unmute/manifests/<name>/manifest.yaml`; `unmute/default-manifest` holds the default name.
 Names use letters, digits, hyphens and underscores. Omitting a name from
 `manifest create` prompts for one.
 
@@ -258,7 +258,7 @@ Flags:
 | `--from-manifest acme-corp` reports too many arguments | the flag opens a picker and takes no name | write the agent name first: `unmute init hotel-agent --from-manifest` |
 | Creation reports an existing name | `create` protects saved contracts | use `manifest edit acme-corp` |
 | The saved default is invalid | the picker and the console read it before offering a choice | repair it with `manifest edit acme-corp --editor`, or point the default at a valid contract |
-| The old agent still has old rules | each agent keeps its own contract copy | review and replace its `manifest`, then validate and compile |
+| The old agent still has old rules | each agent keeps its own contract copy | review and replace its `manifest.yaml`, then validate and compile |
 | A new package fails validation | models, targets and channels are unfinished | complete it through the skill workflow before compiling |
 
 ## Where to go next

@@ -201,14 +201,26 @@ func manifestFields(value reflect.Value, path string) error {
 	}
 	return nil
 }
+
+// ManifestFileName is the company contract's name in a package root. It carries
+// the extension because the file is YAML and an editor decides how to colour it
+// from the name alone.
+const ManifestFileName = "manifest.yaml"
+
 func (p *Package) readManifest() error {
-	if p.Agent.Manifest != "" && p.Agent.Manifest != "manifest" {
-		return fmt.Errorf("agent.yaml: manifest must link to the package-root file with manifest: manifest")
+	// A package created before the extension holds a bare `manifest`. Refuse it
+	// by name rather than read past it: a contract that stops being enforced
+	// without saying so is worse than any error.
+	if _, err := readWithin(p.Root, "manifest"); err == nil {
+		return fmt.Errorf("manifest: rename this file to %s and link it with manifest: %s in agent.yaml", ManifestFileName, ManifestFileName)
 	}
-	data, err := readWithin(p.Root, "manifest")
+	if p.Agent.Manifest != "" && p.Agent.Manifest != ManifestFileName {
+		return fmt.Errorf("agent.yaml: manifest must link to the package-root file with manifest: %s", ManifestFileName)
+	}
+	data, err := readWithin(p.Root, ManifestFileName)
 	if p.Agent.Manifest == "" {
 		if err == nil {
-			return fmt.Errorf("agent.yaml: a manifest exists; link it with manifest: manifest")
+			return fmt.Errorf("agent.yaml: a manifest exists; link it with manifest: %s", ManifestFileName)
 		}
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
@@ -223,7 +235,7 @@ func (p *Package) readManifest() error {
 		return err
 	}
 	p.ManifestBytes = data
-	p.files["manifest"] = data
+	p.files[ManifestFileName] = data
 	return nil
 }
 

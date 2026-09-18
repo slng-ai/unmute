@@ -60,9 +60,9 @@ func TestLoadManifestLink(t *testing.T) {
 		file       bool
 		want       string
 	}{
-		{"legacy", "", false, ""}, {"linked", "manifest", true, ""},
-		{"unlinked", "", true, "link it"}, {"missing", "manifest", false, "manifest"},
-		{"elsewhere", "../manifest", true, "package-root"},
+		{"legacy", "", false, ""}, {"linked", "manifest.yaml", true, ""},
+		{"unlinked", "", true, "link it"}, {"missing", "manifest.yaml", false, "manifest.yaml"},
+		{"elsewhere", "../manifest.yaml", true, "package-root"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -77,7 +77,7 @@ func TestLoadManifestLink(t *testing.T) {
 				}
 			}
 			if tc.file {
-				if err := os.WriteFile(filepath.Join(dir, "manifest"), data, 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), data, 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -95,6 +95,31 @@ func TestLoadManifestLink(t *testing.T) {
 				t.Fatal("manifest copy or identity lost")
 			}
 		})
+	}
+}
+
+// A package written before the contract gained its extension is refused by name
+// whatever agent.yaml links, so its rules can never stop being enforced quietly.
+func TestLoadRefusesTheExtensionlessManifest(t *testing.T) {
+	for _, link := range []string{"", "manifest", "manifest.yaml"} {
+		dir := t.TempDir()
+		agent := "version: 1\nmodels: {}\nagents: {}\nchannels: {}\n"
+		if link != "" {
+			agent += "manifest: " + link + "\n"
+		}
+		files := map[string][]byte{
+			"agent.yaml":   []byte(agent),
+			"targets.yaml": []byte("targets: {}\n"),
+			"manifest":     []byte("manifest: acme-corp\nversion: 1\n"),
+		}
+		for name, contents := range files {
+			if err := os.WriteFile(filepath.Join(dir, name), contents, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "rename this file to manifest.yaml") {
+			t.Fatalf("link %q: error = %v", link, err)
+		}
 	}
 }
 

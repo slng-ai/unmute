@@ -55,7 +55,7 @@ it. Plain `unmute init another-agent` writes the ordinary starter package and
 reads no saved manifest at all. `manifest use` changes which one the picker and
 the `unmute` console offer first.
 
-A package holding a `manifest` file is governed by it.
+A package holding a `manifest.yaml` file is governed by it.
 Read that copy before implementing the use case.
 Choose exact approved model IDs when listed. Provider-wide approval still
 requires checking target support and the provider's accepted model IDs.
@@ -68,7 +68,7 @@ Run `unmute skill install` after updating the CLI to refresh the bundled workflo
 Review local skill edits before using `--force` to replace them.
 
 Saved files live in the operating system's user config directory, under
-`unmute/manifests/<name>/manifest`. `unmute/default-manifest` holds the default
+`unmute/manifests/<name>/manifest.yaml`. `unmute/default-manifest` holds the default
 name. Create prints the saved path. Use the same terminal editor for later changes:
 
 ```sh
@@ -88,27 +88,27 @@ repair an invalid saved file.
 
 ## What an agent carries
 
-Initialization copies the chosen file into the new package as `manifest` and
+Initialization copies the chosen file into the new package as `manifest.yaml` and
 links it from `agent.yaml`:
 
 ```yaml
-manifest: manifest
+manifest: manifest.yaml
 ```
 
 Commit both files. Validation and compilation read the package's copy, so they
 work on another computer and in CI without the local library. Changing the
 saved default or editing the saved source does not change existing packages.
-To update one, replace its `manifest`, then run `unmute validate` and
+To update one, replace its `manifest.yaml`, then run `unmute validate` and
 `unmute compile`. Do not remove a rule to make an agent pass without the
 author's instruction to change the company contract.
 
 A root manifest requires its link. A link requires that file. Only the literal
-link `manifest: manifest` is supported; no parent paths or remote URLs. Packages
+link `manifest: manifest.yaml` is supported; no parent paths or remote URLs. Packages
 with neither file nor link continue to work without a company contract.
 
 ## Example manifest
 
-```yaml manifest
+```yaml manifest.yaml
 manifest: acme-corp
 version: 1
 
@@ -543,7 +543,7 @@ not add provider support or make an unsupported setting work.
 The creation console cannot collect custom model endpoint settings or a SLNG
 Context Router upstream. It excludes those model choices. If your contract
 allows only such bindings, create the package with plain `unmute init`, copy the
-saved manifest into it as `manifest`, name that file in `agent.yaml`, and write
+saved manifest into it as `manifest.yaml`, name that file in `agent.yaml`, and write
 the bindings by hand or with a coding assistant. Validation and compilation
 still enforce the same rules.
 

@@ -174,7 +174,7 @@ func TestGuidedManifestCreateEditAndCopies(t *testing.T) {
 	if out, err := run("1\n1\n7\n\n", "init", packageCopy, "--from-manifest"); err != nil {
 		t.Fatalf("init: %v\n%s", err, out)
 	}
-	copied, err := os.ReadFile(filepath.Join(packageCopy, "manifest"))
+	copied, err := os.ReadFile(filepath.Join(packageCopy, "manifest.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestGuidedManifestCreateEditAndCopies(t *testing.T) {
 	if err != nil || !bytes.Equal(backup, original.Data) {
 		t.Fatal("backup is not exact")
 	}
-	kept, err := os.ReadFile(filepath.Join(packageCopy, "manifest"))
+	kept, err := os.ReadFile(filepath.Join(packageCopy, "manifest.yaml"))
 	if err != nil || !bytes.Equal(kept, copied) {
 		t.Fatal("editing changed package copy")
 	}

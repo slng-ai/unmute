@@ -19,12 +19,26 @@ type Saved struct {
 	Rules      *spec.Manifest
 }
 
+// savedPath names the file inside a saved manifest's directory. A library saved
+// before the extension holds a bare `manifest`, so reads fall back to it and
+// those contracts keep loading; everything this package writes gets the new
+// name. An edit stays on whichever file is already there, because a rename
+// would leave two spellings of one contract side by side.
+func savedPath(dir string) string {
+	if _, err := os.Stat(filepath.Join(dir, spec.ManifestFileName)); err != nil {
+		if _, err := os.Stat(filepath.Join(dir, "manifest")); err == nil {
+			return filepath.Join(dir, "manifest")
+		}
+	}
+	return filepath.Join(dir, spec.ManifestFileName)
+}
+
 // Path resolves a local name without parsing the file, so an editor can repair it.
 func (s Store) Path(name string) (string, error) {
 	if err := ValidateName(name); err != nil {
 		return "", err
 	}
-	return filepath.Join(s.Root, "manifests", name, "manifest"), nil
+	return savedPath(filepath.Join(s.Root, "manifests", name)), nil
 }
 
 // Update keeps the exact previous bytes before replacing a saved manifest.
@@ -88,7 +102,7 @@ func (s Store) Load(name string) (*Saved, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(s.Root, "manifests", name, "manifest")
+	path := savedPath(filepath.Join(s.Root, "manifests", name))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest %s: %w", name, err)
@@ -152,7 +166,7 @@ func (s Store) Create(name string, data []byte) (string, error) {
 	if err := os.Mkdir(dir, 0700); err != nil {
 		return "", fmt.Errorf("create manifest %s (existing names cannot be overwritten): %w", name, err)
 	}
-	path := filepath.Join(dir, "manifest")
+	path := filepath.Join(dir, spec.ManifestFileName)
 	if err := atomicWrite(path, data); err != nil {
 		_ = os.RemoveAll(dir)
 		return "", err
