@@ -10,6 +10,15 @@ type Prebuilt struct {
 	ID                 string
 	DefaultDescription string
 	Effect             string // "ends_conversation" | "returns_data"
+	// Config are the capability's own settings a package may pin, written with
+	// `inject:` and lowered to the attachment's config_overrides rather than its
+	// argument_overrides. Empty for a capability that takes none.
+	//
+	// The distinction is the platform's, not a style: a curated capability has
+	// no argument schema of its own — `current_datetime` publishes `{}` — so a
+	// value pinned on one has nowhere else to go, and the model never sees it
+	// either way.
+	Config []string
 }
 
 // prebuilts is the closed registry. Adding a prebuilt is one row here plus a
@@ -30,6 +39,27 @@ var prebuilts = map[string]Prebuilt{
 	"send_sms": {
 		ID:                 "send_sms",
 		DefaultDescription: "Send a text message to a phone number the caller has given and confirmed.",
+		Effect:             "returns_data",
+		Config:             []string{"from_number"},
+	},
+	// current_datetime is SLNG's curated clock. It publishes an empty argument
+	// schema and reads its zone from the attachment's config, defaulting to UTC,
+	// which is wrong for every agent that is not in it: a package in San
+	// Francisco was told the date was already tomorrow from four in the
+	// afternoon. The zone cannot be fixed on the tool, because the curated
+	// record belongs to no organisation (`organisation_id: null`), so pinning it
+	// on the attachment is the only route a package has.
+	"current_datetime": {
+		ID:                 "current_datetime",
+		DefaultDescription: "Read the current date and time.",
+		Effect:             "returns_data",
+		Config:             []string{"timezone"},
+	},
+	// user_phone_number is the caller's own number, which the platform knows
+	// from the call leg. It takes no settings and no arguments.
+	"user_phone_number": {
+		ID:                 "user_phone_number",
+		DefaultDescription: "Read the number the caller is calling from.",
 		Effect:             "returns_data",
 	},
 }

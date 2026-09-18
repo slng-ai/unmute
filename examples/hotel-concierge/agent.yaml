@@ -20,6 +20,10 @@ models:
   think:
     reasoning:
       description: answers the guest
+      # Written out, although the model id already carries the vendor. A
+      # manifest matches its model rules by provider, so an entry with no
+      # provider matches no rule and every model it names is refused.
+      provider: google
       model: gemini/google/gemini-3.1-flash-lite:latest
       # One fallback model. SLNG tries it when the primary fails to answer.
       # Named here, defined below, and emitted as the platform's own
@@ -28,6 +32,7 @@ models:
         - backup
     backup:
       description: takes over when the primary model fails
+      provider: google
       model: gemini/google/gemini-2.5-flash:latest
   # Both speech models are written whole, vendor and model joined, and both are
   # ones SLNG serves in the eu region. The `slng/deepgram/...-en` ids the

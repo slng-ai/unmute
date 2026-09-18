@@ -252,7 +252,20 @@ including its fields.
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
 | omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so write the prompt to read whole while it is still empty, or give it a `default:` |
-| `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only. It becomes one of the agent's runtime variables, filled through SLNG's own `set_runtime_variables` tool and returned on the call record under `memory_variables`. It takes no `default:` and needs a `description:`, which the model reads. On `livekit` and `pipecat` a step's `assign:` records such a value instead |
+| `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only. It becomes one of the agent's runtime variables, filled through SLNG's own `set_runtime_variables` tool and returned on the call record under `memory_variables`. It takes no `default:` and needs a `description:`, which the model reads. It takes no `{{placeholder}}` in any prompt or the greeting. On `livekit` and `pipecat` a step's `assign:` records such a value instead |
+
+A value the model records during the call reaches no prompt. It has no value
+when the prompt is built, and SLNG rejects a prompt that names one:
+
+```text
+agent.yaml:41: conversation.greeting.text references {{caller_email}}, a value the model
+  records during the call, which no prompt receives: describe the value in the variable's
+  description: and name it in prose here instead
+```
+
+That is how one is meant to work. Put the detail in `description:`, which the
+model reads as it fills the value, and refer to the thing in prose instead of
+with a placeholder.
 | `session_id` | the phone adapter | LiveKit `sip` or `connector` |
 | `call_id` | the phone adapter | LiveKit `sip` or `connector`, and both Pipecat Twilio routes |
 | `stream_id` | the phone adapter | LiveKit `connector`, and Pipecat `cloud-websocket` |

@@ -17,6 +17,7 @@ agents:
     think: reasoning
     speak: voice
     tools:
+      - current_datetime
       - send_sms
       - end_call
 
@@ -49,6 +50,7 @@ variables:
     description: The caller's mobile number, recorded after the caller confirmed it.
 
 tools:
+  - current_datetime
   - send_sms
   - end_call
 

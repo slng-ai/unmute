@@ -114,6 +114,24 @@ func TestBuildResolvesAPlaceholderPath(t *testing.T) {
 			want: "references {{custmer.status}}, which is not a declared variable",
 		},
 		{
+			// GATE. A value the model records during the call reaches SLNG as a
+			// runtime variable, which is in neither template list, so a prompt
+			// naming it is refused at dispatch with a 422 that names no field.
+			// Live organisation, 2026-09-17: sixteen pushes and a byte-level diff
+			// against a working package to place it. Refused here, with the file
+			// and the line.
+			name: "a value the model records during the call reaches no prompt",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Variables["caller_email"] = packagespec.Variable{
+					Type:        "string",
+					Source:      "conversation",
+					Description: "The caller's email address, read back and agreed before it is recorded.",
+				}
+				pkg.Markdown["instructions.md"] += "\nSend the invite to {{caller_email}}.\n"
+			},
+			want: "references {{caller_email}}, a value the model records during the call, which no prompt receives: describe the value in the variable's description: and name it in prose here instead",
+		},
+		{
 			name: "a placeholder carries no logic",
 			mutate: func(pkg *packagespec.Package) {
 				pkg.Markdown["instructions.md"] += "\n{{last_appointment.scheduled_date | upper}}\n"

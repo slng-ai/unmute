@@ -244,7 +244,23 @@ Refused, each with its line:
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
 | omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so write the prompt to read whole while it is still empty, or give it a `default:` |
-| `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only: it becomes a runtime variable the platform's `set_runtime_variables` tool fills, returned on the call record as `memory_variables`. No `default:`, and a `description:` is required because the model reads it. Refused on `livekit` and `pipecat`, where a step's `assign:` does this job |
+| `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only: it becomes a runtime variable the platform's `set_runtime_variables` tool fills, returned on the call record as `memory_variables`. No `default:`, and a `description:` is required because the model reads it. **No `{{placeholder}}` either, in any prompt or the greeting.** Refused on `livekit` and `pipecat`, where a step's `assign:` does this job |
+
+**A value the model records reaches no prompt.** It has no value when the prompt
+is built, and SLNG rejects a prompt that names one, so writing `{{caller_email}}`
+for a `source: conversation` variable is refused:
+
+```text
+agent.yaml:41: conversation.greeting.text references {{caller_email}}, a value the model
+  records during the call, which no prompt receives: describe the value in the variable's
+  description: and name it in prose here instead
+```
+
+That is the whole way one works: put the detail in `description:`, which the
+model reads when it fills the value, and refer to the thing in prose ("the email
+address you read back") rather than with a placeholder. `examples/hotel-concierge`
+is the shape — one runtime variable never written into its prompt, beside four
+template variables that are.
 | `session_id`, `carrier`, `connection` | the phone adapter | LiveKit `sip` or `connector` only |
 | `call_id`, `direction` | the phone adapter | LiveKit `sip` or `connector`, and both Pipecat Twilio routes |
 | `stream_id` | the phone adapter | LiveKit `connector`, and Pipecat `cloud-websocket` |

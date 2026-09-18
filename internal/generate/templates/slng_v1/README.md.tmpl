@@ -150,7 +150,8 @@ organisation already holds. Nothing here is yours to edit by hand.
 
 **A curated capability is no exception.** A builtin such as `end_call` needs
 nothing *created*, and its `tool_id` still has to be filled in, which the push
-does.
+does. A setting the package pinned with `inject:` rides the attachment as
+`config_overrides`, so it is this agent's and does not change the shared tool.
 {{if .Builtins}}
 This package's curated references: {{range $i, $name := .Builtins}}{{if $i}}, {{end}}`{{$name}}`{{end}}.
 {{end}}

@@ -45,18 +45,27 @@ run.
 
 ## The registry, in full
 
-| id | Effect | Default description |
-|---|---|---|
-| `end_call` | `ends_conversation` | End the call when the caller is finished or says goodbye. |
-| `send_sms` | `returns_data` | Send a text message to a phone number the caller has given and confirmed. |
+| id | Effect | Settings it takes | Default description |
+|---|---|---|---|
+| `end_call` | `ends_conversation` | none | End the call when the caller is finished or says goodbye. |
+| `send_sms` | `returns_data` | `from_number` | Send a text message to a phone number the caller has given and confirmed. |
+| `current_datetime` | `returns_data` | `timezone` | Read the current date and time. |
+| `user_phone_number` | `returns_data` | none | Read the number the caller is calling from. |
 
-Two rows. The registry is **closed**: you cannot add to it from a package, and
+Four rows. The registry is **closed**: you cannot add to it from a package, and
 there is no plugin seam. Adding a prebuilt means a row in the compiler plus a
 lowering for each target, which is a change to Unmute, not to your agent.
 
-`end_call` compiles on every target. `send_sms` is a capability SLNG curates
-and compiles on the `slng` target only; a code target refuses it by name. It
-takes one setting from the package, the sender:
+`end_call` compiles on every target. The other three are capabilities SLNG
+curates and compile on the `slng` target only; a code target refuses them by
+name.
+
+A capability's **settings** are written with `inject:`. On a builtin that block
+is the tool's own configuration, not an argument, because a curated capability
+publishes no argument schema for one to go in. The model never sees a pinned
+value either way.
+
+`send_sms` takes one setting, the sender:
 
 ```yaml tools/send_sms.yaml
 description: Send a text message to the guest's confirmed mobile number.
@@ -76,8 +85,30 @@ and `TWILIO_AUTH_TOKEN`, so `unmute deploy` checks both. Pair it with a
 [`source: conversation` variable](/reference/variables#sources) so the number
 the caller confirmed is recorded on the call.
 
-So read this page as a list of two things that exist, not as a catalog to
-browse. If what you want is neither, it is a
+`current_datetime` takes one setting, an IANA zone name:
+
+```yaml tools/current_datetime.yaml
+description: Read the clock. Call it once at the start of the call, before any day or time is discussed.
+
+builtin:
+  id: current_datetime
+
+inject:
+  - timezone: "America/Los_Angeles"
+
+effect: returns_data
+```
+
+**Write the zone whenever your agent is not in UTC.** The curated tool defaults
+to UTC and belongs to no organisation, so it cannot be changed on the platform.
+An agent without the setting is told the wrong date for part of every day. A
+zone name survives daylight saving; an offset written into the prompt does not.
+
+`user_phone_number` takes no settings. The platform knows the number from the
+call leg.
+
+So read this page as a list of four things that exist, not as a catalog to
+browse. If what you want is none of them, it is a
 [webhook](/build/tools/webhook), a [Python handler](/build/tools/python), or an
 [MCP server](/build/tools/mcp).
 
@@ -161,14 +192,25 @@ tools:
 
 ### Resolving on SLNG
 
-SLNG already offers `end_call` as one of its own curated capabilities, so
-`unmute deploy`'s preflight check has to match your reference against it
-before pushing. It matches by the tool **file's** name, `tools/end_call.yaml`,
-never by the `builtin.id` you selected inside it.
+SLNG offers every one of these as a curated capability, so `unmute deploy`'s
+preflight check has to match your reference against it before pushing. It
+matches by the tool **file's** name, `tools/end_call.yaml`, never by the
+`builtin.id` you selected inside it.
 
-That is fine as written here, because the file is named `end_call` too. It
-stops being fine the moment you rename the file to describe what it does rather
-than the capability it selects.
+So **name the file after the id**. `unmute validate` refuses the mismatch on
+the `slng` target and says which file to rename:
+
+```text
+slng target: tool "hang_up" selects builtin "end_call", and this target attaches a builtin
+  by the tool file's own name: rename tools/hang_up.yaml to tools/end_call.yaml
+```
+
+A code target lowers the builtin to a function and does not care what the file
+is called, which is why this is not a rule everywhere.
+
+A name can also be held twice. SLNG publishes `end_call` to everybody and your
+organisation can hold its own copy; `unmute deploy` attaches yours and names
+both in its output, so you can see which one is running.
 
 ## Troubleshooting
 

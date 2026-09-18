@@ -626,7 +626,16 @@ func TestPreviewComparesTheSenderItWouldWrite(t *testing.T) {
 			onAgent: map[string]any{"type": "send_sms", "from_number": sender}, declared: proposed,
 			wantNot: "config_overrides"},
 		{name: "only the package has one", onAgent: nil, declared: proposed,
-			want: "config_overrides.from_number, the sender this package's `inject:` pins, which the agent does not have now"},
+			want: "config_overrides.from_number, which this package's `inject:` pins and the agent does not have now"},
+		// The generalisation this comparison needed. current_datetime's zone is a
+		// setting like the sender, and the live record carries `prompt: null`
+		// beside it: a key nobody has set is not something a replacement removes,
+		// and naming it is a line about nothing.
+		{name: "a zone the package pins, beside a setting nobody set",
+			onAgent:  map[string]any{"type": "current_datetime", "timezone": "UTC", "prompt": nil},
+			declared: map[string]map[string]any{"search_places_text": {"type": "current_datetime", "timezone": "America/Los_Angeles"}},
+			want:     `config_overrides.timezone, from "UTC" to this package's ` + "`inject:`",
+			wantNot:  "config_overrides.prompt"},
 		{name: "both, and they differ",
 			onAgent: map[string]any{"type": "send_sms", "from_number": "+447700900999"}, declared: proposed,
 			want: `config_overrides.from_number, from "+447700900999" to this package's ` + "`inject:`"},

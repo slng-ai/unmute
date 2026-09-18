@@ -2096,7 +2096,11 @@ func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
 		{"local", ToolLocal, false},
 		{"knowledge", ToolKnowledge, false},
 		{"slng", ToolSlngHosted, false},
-		{"builtin", ToolBuiltin, true},
+		// A builtin is an attachment on slng and carries the same pre-action
+		// message. Whether a target can speak before one is a per-target
+		// question, held by TestSlngAnnouncesEveryKindOfToolIncludingABuiltin
+		// and by the code-target refusal beside it.
+		{"builtin", ToolBuiltin, false},
 		{"client", ToolClient, true},
 		{"provider_hosted", ToolProviderHosted, true},
 	} {
@@ -2127,7 +2131,7 @@ func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
 			agent.Tools["lookup_customer"] = tool
 			report, _ := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
 			joined := strings.Join(report.PerTarget[0].Errors, "\n")
-			const want = `tool "lookup_customer" announce is legal for webhook, local, knowledge and slng execution only`
+			const want = `tool "lookup_customer" announce is legal for webhook, local, knowledge, slng and builtin execution only`
 			if got := strings.Contains(joined, want); got != tc.wantError {
 				t.Errorf("announce refused = %v, want %v: %#v", got, tc.wantError, report.PerTarget[0].Errors)
 			}

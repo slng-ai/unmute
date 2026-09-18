@@ -197,6 +197,17 @@ A **provider** is the service the agent connects to. A **model maker** creates
 the model that service offers. For models served through SLNG, keep the
 provider as `slng`, even when their IDs name Deepgram, Cartesia or Soniox.
 
+**A manifest matches by provider, so every governed model entry in `agent.yaml`
+has to write one.** `provider:` is optional in general, and a model id carrying
+its own vendor reads fine without it, but under a manifest an entry with no
+provider matches no rule and nothing is allowed. Validate says so by name:
+
+```text
+models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no provider:,
+  and manifest "acme" matches its models.think rules by provider: write the provider
+  this model is served by
+```
+
 Each role can allow several providers, and each provider can allow several
 models. **Add provider** opens the service picker, then offers **Allow all models**
 or **Add model ID**. Adding a model opens the input directly.

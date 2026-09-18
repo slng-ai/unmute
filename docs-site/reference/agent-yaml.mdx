@@ -1136,13 +1136,30 @@ all illegal on one, because the server describes its own tools.
   URL-based transport choice; a URL ending in `/mcp` selects streamable HTTP.
 </ParamField>
 
-Builtin ids: `end_call`, `send_sms`. `end_call` compiles on every target.
-`send_sms` is a capability SLNG curates, so it compiles on the `slng` target
-only. It takes one setting from the package: `inject:` with a single
-`from_number`. That is the sender, as a literal number in international format
-starting with a plus sign. The model supplies the recipient and the body
-itself, and SLNG reads the Twilio credentials from your vault under
-`TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`, which `unmute deploy` checks.
+Builtin ids: `current_datetime`, `end_call`, `send_sms`, `user_phone_number`.
+`end_call` compiles on every target. The other three are capabilities SLNG
+curates, so they compile on the `slng` target only.
+
+The file has to be named after the id it selects, because `slng` attaches a
+builtin by the tool file's own name.
+
+On a builtin, `inject:` pins the capability's own settings rather than an
+argument, because a curated capability publishes no argument schema. The model
+never sees one either way.
+
+`send_sms` takes a single `from_number`: the sender, as a literal number in
+international format starting with a plus sign. The model supplies the
+recipient and the body itself, and SLNG reads the Twilio credentials from your
+vault under `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`, which `unmute deploy`
+checks.
+
+`current_datetime` takes a single `timezone`, an IANA zone name such as
+`America/Los_Angeles`. Write it whenever the agent is not in UTC. The curated
+tool defaults to UTC and belongs to no organisation, so it cannot be changed on
+the platform. An agent without it is told the wrong date for part of every day.
+A zone survives daylight saving; an offset written into the prompt does not.
+
+`user_phone_number` takes no settings.
 
 `webhook.auth`:
 

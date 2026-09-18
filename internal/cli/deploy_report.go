@@ -309,22 +309,35 @@ func attachmentChanges(attached slngLiveTool, reference resolvedTool, proposed p
 	case !declaresConfig && len(attached.ConfigOverrides) > 0:
 		changes = append(changes, "config_overrides, this attachment's own settings for the tool, which the agent has now and this package cannot declare, so a replacement removes them")
 	case declaresConfig:
-		// The one config a package declares is a send_sms sender. Compare that
-		// field and say so; any other key the agent holds is one this package
-		// cannot write back.
-		want, _ := proposedConfig["from_number"].(string)
-		have, _ := attached.ConfigOverrides["from_number"].(string)
-		switch have {
-		case want:
-		case "":
-			changes = append(changes, "config_overrides.from_number, the sender this package's `inject:` pins, which the agent does not have now")
-		default:
-			changes = append(changes, fmt.Sprintf("config_overrides.from_number, from %q to this package's `inject:`", have))
+		// Compare every setting this package pins, and only then say what is left
+		// over. Keyed off what the package declares rather than a field name:
+		// hardcoding `from_number` told an author that pinning a timezone would
+		// delete the timezone they had just written, which is the same defect
+		// this comparison exists to prevent, one capability later.
+		for _, key := range sortedMapKeys(proposedConfig) {
+			if key == "type" {
+				// The union tag, which the platform derives itself.
+				continue
+			}
+			want, have := proposedConfig[key], attached.ConfigOverrides[key]
+			switch {
+			case sameArgument(have, want):
+			case have == nil:
+				changes = append(changes, fmt.Sprintf("config_overrides.%s, which this package's `inject:` pins and the agent does not have now", key))
+			default:
+				changes = append(changes, fmt.Sprintf("config_overrides.%s, from %s to this package's `inject:`", key, settingValue(have)))
+			}
 		}
 		for _, key := range sortedMapKeys(attached.ConfigOverrides) {
-			if key != "from_number" && key != "type" {
-				changes = append(changes, fmt.Sprintf("config_overrides.%s, which the agent has now and this package cannot declare, so a replacement removes it", key))
+			if _, pinned := proposedConfig[key]; pinned || key == "type" {
+				continue
 			}
+			if attached.ConfigOverrides[key] == nil {
+				// A setting the capability carries and nobody has set. Naming it
+				// as something a replacement removes is a line about nothing.
+				continue
+			}
+			changes = append(changes, fmt.Sprintf("config_overrides.%s, which the agent has now and this package cannot declare, so a replacement removes it", key))
 		}
 	}
 	for _, key := range sortedMapKeys(attached.Arguments) {
@@ -348,6 +361,15 @@ func attachmentChanges(attached slngLiveTool, reference resolvedTool, proposed p
 // sameArgument compares two override values through JSON, so an int read from
 // YAML and a float64 read from the platform's JSON are not reported as a
 // difference nobody made.
+// settingValue renders a live setting for a preview line: quoted when it is
+// text, so a sender or a zone reads as the value it is, and plain otherwise.
+func settingValue(value any) string {
+	if text, ok := value.(string); ok {
+		return fmt.Sprintf("%q", text)
+	}
+	return fmt.Sprint(value)
+}
+
 func sameArgument(live, want any) bool {
 	encode := func(value any) string {
 		raw, err := json.Marshal(value)

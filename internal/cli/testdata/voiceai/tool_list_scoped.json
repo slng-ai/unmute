@@ -66,6 +66,17 @@
     "arg_schema": null
   },
   {
+    "id": "88888888-8888-8888-8888-888888888888",
+    "name": "user_phone_number",
+    "tool_type": "user_phone_number",
+    "description": "A capability SLNG curates and this organisation has never copied.",
+    "last_run_status": null,
+    "scope": "global",
+    "latest_version": 1,
+    "config_valid": true,
+    "arg_schema": null
+  },
+  {
     "id": "77777777-7777-7777-7777-777777777777",
     "name": "never_published",
     "tool_type": "code",

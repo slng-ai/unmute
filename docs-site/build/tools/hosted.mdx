@@ -259,12 +259,18 @@ package reaches it once it exists there.
 | You want | Write |
 |---|---|
 | a tool SLNG already hosts, with code or a request configuration | `slng:` |
-| a capability SLNG curates, like ending the call | `builtin:` |
+| a capability SLNG curates, like ending the call or reading the clock | `builtin:` |
 | tools from an MCP server your organisation registered | `mcp:` |
 | your own Python, running inside a livekit or pipecat project | `local:` |
 | an HTTP endpoint you host | `webhook:` |
 
 The last two are the two that no longer reach slng.
+
+A curated capability resolves either way: `slng: current_datetime` attaches it
+by name, and so does `builtin: {id: current_datetime}`. Reach for `builtin:`
+whenever the capability takes a setting of its own, because `inject:` under a
+`slng:` block is an argument and a curated capability publishes no argument
+schema to put one in. See [prebuilt tools](/build/tools/prebuilt).
 
 ## Advanced
 

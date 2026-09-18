@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/slng-ai/unmute/internal/ir"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // The package-to-agent-body mapping. Field detail and the file each fact was
@@ -496,24 +497,49 @@ func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []
 			}}
 		}
 		ref.Arguments = slngArguments(tool.Inject)
-		// send_sms is the one builtin with a setting the package pins. SLNG wants
-		// the sender on the attachment's config override, not among the
-		// arguments (agent_runtime_compiler.py:1489-1492), and the model supplies
-		// recipient and body itself, so the arguments stay empty.
-		if tool.Execution == ir.ToolBuiltin && tool.Builtin == "send_sms" {
-			ref.Config = slngSendSmsConfig(tool)
-			ref.Arguments = slngArguments{}
+		// A builtin's `inject:` is the capability's own setting, and SLNG wants it
+		// on the attachment's config override rather than among the arguments
+		// (agent_runtime_compiler.py:1489-1492): send_sms's sender, which the
+		// model must not choose, and current_datetime's zone, which it has no
+		// argument for at all. Either way the arguments stay empty, because a
+		// curated capability publishes no argument schema to put one in.
+		if tool.Execution == ir.ToolBuiltin {
+			if prebuilt, known := targetcap.LookupPrebuilt(tool.Builtin); known && len(prebuilt.Config) > 0 {
+				ref.Config = slngPrebuiltConfig(prebuilt, tool)
+				ref.Arguments = slngArguments{}
+			}
 		}
 		refs = append(refs, ref)
 	}
 	return refs, mcpRefs, nil
 }
 
-// slngSendSmsConfig is SendSmsOverrides (shared_tool_contract.py): the union
-// tag and the sender. validate has already held from_number to a literal E.164
-// number, so this reads it and nothing more.
-func slngSendSmsConfig(tool ir.Tool) map[string]any {
-	return map[string]any{"type": "send_sms", "from_number": tool.Inject["from_number"]}
+// slngPrebuiltConfig is one member of ToolConfigOverrides
+// (shared_tool_contract.py): the union tag, then each setting the capability
+// declares that the package pinned with `inject:`.
+//
+// The tag is what makes this a union member rather than a bag of keys, and it
+// is why a setting cannot simply be forwarded: a create infers the tag from the
+// tool's type, an update PATCH cannot, so an untagged body deploys once and 422s
+// on every push after it.
+//
+// validate has already held each key to the registry and, for send_sms, its
+// sender to a literal E.164 number, so this reads what is there and nothing
+// more.
+func slngPrebuiltConfig(prebuilt targetcap.Prebuilt, tool ir.Tool) map[string]any {
+	config := map[string]any{"type": prebuilt.ID}
+	for _, key := range prebuilt.Config {
+		if value, ok := tool.Inject[key]; ok {
+			config[key] = value
+		}
+	}
+	if len(config) == 1 {
+		// Nothing was pinned, so the package is making no claim about this
+		// capability's settings and an override saying only its own type would
+		// overwrite the platform's defaults with a blank.
+		return nil
+	}
+	return config
 }
 
 // mcpServerName is the platform's name for the server a tool reads.

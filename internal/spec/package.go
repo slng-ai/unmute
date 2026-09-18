@@ -71,8 +71,17 @@ type Package struct {
 }
 
 // Location returns the first source line containing token in a package file.
+//
+// files holds the YAML; a prompt is markdown and lives in Markdown, so without
+// the fallback every refusal about a placeholder in instructions.md or a task
+// prompt named the file and no line, which is the half of the message a reader
+// actually navigates by.
 func (p *Package) Location(file, token string) string {
-	for i, line := range strings.Split(string(p.files[file]), "\n") {
+	source, ok := p.files[file]
+	if !ok {
+		source = []byte(p.Markdown[file])
+	}
+	for i, line := range strings.Split(string(source), "\n") {
 		if strings.Contains(line, token) {
 			return fmt.Sprintf("%s:%d", file, i+1)
 		}
