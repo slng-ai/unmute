@@ -7,7 +7,8 @@ ships.
 
 A **slng** target is the other shape: SLNG hosts the agent, so there is no
 container and no platform step. `unmute deploy <dir>` validates, compiles and
-pushes it in one command. See `references/package.md`, "The slng target".
+pushes it in one command, and the whole of that push is the **`unmute-deploy`
+skill**, not this page.
 
 ## What the compiler emits, what the operator provides
 
@@ -145,132 +146,17 @@ agent. Present them as a starting point and tell the user to measure.
   attach. Per route and per carrier, and the part no compiler can do. The
   generated runbook has them.
 
-## Deploying to SLNG: what is checked before anything is written
+## Pushing to SLNG is a different skill
 
-`unmute deploy` asks the organisation what it already has, resolves each
-hosted reference to a published tool, checks it, compares the result with
-what the package needs, and reports every gap in one pass **before** it
-pushes the agent. A dry run changes no live state. A real deploy may first
-refresh MCP discovery or fill a Vault entry with consent; the report names
-those changes even if a later check fails. Build/report files are disposable.
+Everything about the slng target's push lives in the **`unmute-deploy` skill**:
+what `unmute deploy` checks before it writes anything, every refusal and what it
+means, what a push replaces and what it leaves alone, the guarded push flags, and
+what to do when somebody says the push did not land. Open
+`.agents/skills/unmute-deploy/SKILL.md`, or run `unmute skill install` if it is
+not there.
 
-**A real push needs a `voiceai` release that supports a checked, resolved
-attachment, verified with 0.1.18.** `unmute deploy` checks for that support first: an older
-`voiceai` is refused with upgrade guidance, naming the install command,
-rather than falling back to a push that resolves and attaches whatever is
-newest without having checked it. Tell the user this if their run refuses
-early, naming `--require-resolved`. `unmute validate` and `unmute compile`
-are unaffected either way, neither one reads the account at all.
-
-Six things are checked, and knowing which is which is the difference between
-a useful package and one that fails at the push:
-
-| Checked | Not checked |
-|---|---|
-| every `builtin:` tool, by the **tool file's own name** | a control, because the compiled body carries no reference to one |
-| every `slng:` reference, against the organisation's tools and the latest published version | a `local:` or `webhook:` tool: refused before this step is reached, because unmute creates no tool on this target at all |
-| every `inject:` argument on a `slng:` reference, against that version's published parameters | |
-| every MCP server named by an `mcp:` tool, and every tool listed under `mcp.tools` | |
-| every vault secret and variable, including one a hosted tool or MCP server needs that nothing in the package declares | |
-| two tool files resolving to the same hosted tool, refused before anything is staged and naming both | |
-
-**Two severities for a hosted reference, and telling them apart matters.** A
-name the organisation does not have at all stops the run: unmute creates no
-tool, so there is nothing else to try. A committed mirror pinned to a version
-the organisation has since moved past only warns, because the agent calls the
-organisation's latest published version either way, checked fresh on every
-run; a package with no mirror has nothing to compare and gets no warning
-either way. An injected argument that does not fit the published parameters
-stops the run, naming the tool, the argument, the version checked and the
-file that supplied it.
-
-**Three things stop an `inject:` value, and none of them is "the value is
-wrong".** The parameter is not declared, so an attachment has nowhere to bind
-it. The parameter's type is not settled to a single scalar, so the platform
-will not pin it: a parameter that could be a string or an integer, that
-declares no type, or that holds an object or a list. Or a constraint sits at
-the root of the published schema, where checking one supplied value against a
-rule written for the whole call would reject the arguments the model fills in.
-Tell the user to leave that argument to the model, and never tell them the
-destination has to be text: SLNG stores a variable's value as text and converts
-it into the parameter's declared type when the call starts, so an integer
-parameter takes a variable whose stored value reads as a number.
-
-"Settled to a single scalar" is read the way SLNG reads it, which is by
-narrowing rather than by first answer: a parameter declaring two types and then
-constraining itself to one of them under `allOf` is settled, and one declaring
-no type at all but constrained to an integer is settled too. A parameter whose
-declared type and its own constraints have no type in common is refused for
-having nothing to pin, which reads differently from having too much.
-
-**A dry run previews, and says what it cannot prove.** `--dry-run` names the
-old and proposed published versions and whether the description or parameters
-changed, and it names what a replacement would remove: an attachment setting
-only the dashboard could have added, such as a description, a `call_start`
-trigger, the arguments a system-invoked attachment carries, or an attachment's
-own configuration of a curated capability. The sentence the agent speaks before
-a tool runs is **not** on that list, because a package declares it with
-`announce:`: the preview compares the two and says nothing when they match, so
-never tell a user that deploying will delete an announcement their own tool file
-declares. Never tell a user that a schema comparison proves a tool's behaviour
-is unchanged: it proves only that the contract is, or is not, the same shape.
-A dry run changes no live state, no authored file and no mirror.
-
-**The builtin name rule matters when you write a package.** A `builtin:` tool's
-emitted reference carries the *file's* name, not the id it selects. So
-`tools/hang_up.yaml` declaring `builtin: {id: end_call}` compiles clean, emits a
-reference to `hang_up`, and fails at the push because the organisation's curated
-tool is called `end_call`. **Name the file after the capability**, unless the
-`slng:` scalar names the platform tool explicitly, which is what actually gets
-checked either way.
-
-SLNG lists its curated capabilities as ordinary tools, which is why this check
-can be positive rather than a guess. The names, read 2026-08-31: `end_call`,
-`transfer_call`, `voicemail_detection`, `current_datetime`, `user_phone_number`,
-`send_sms`.
-
-**Never suggest creating a tool, an MCP server or a trunk from the CLI.** There
-is no command for any of them. They are created in the SLNG dashboard, and
-`unmute deploy` says so when one is missing. The one resource unmute writes is a
-vault entry, and it offers that during a deploy.
-
-**Never suggest passing a secret value on a command line.** `voiceai secret
-create` has no `--value` flag on purpose: argv lands in shell history and is
-visible in `ps`. The value is prompted for with the input masked, or piped on
-stdin.
-
-`unmute resources` lists the tools, MCP servers and phone numbers an
-organisation offers, in the exact spelling a package must use. Suggest it
-before writing a `builtin:`, `slng:` or `mcp:` name from memory.
-
-## After a deploy, on a phone
-
-For SLNG inbound phone calls, a required injected session input needs a valid
-default: inbound dispatch has no web-session `arguments` payload. Otherwise
-SLNG refuses trunk attachment with `AGENT_RUNTIME_COMPILATION_FAILED`. Leave
-tool arguments that the caller supplies to the model instead. The
-`examples/hotel-concierge` package requires no session inputs.
-
-Telephony is verified on a deployed agent against a real carrier. There is no
-local stand-in, and `unmute dev` is the browser loop only.
-
-`unmute deploy` reports attached numbers after a successful push; it does not
-verify carrier routing. Configure the number to send inbound calls to SLNG
-using [SLNG Telephony setup](https://docs.slng.ai/dashboard/telephony). A number
-still pointing at Twilio Dev Phone or another webhook will not reach the agent.
-If no new SLNG call appears, inspect carrier logs and SIP delivery first.
-When none does and an inbound trunk is free, it offers to attach one, which is a
-single-field PATCH on the agent and happens only when an operator picks a number
-at a terminal. A run with no terminal never attaches.
-
-Do not put a trunk, a number or a `connection:` in a package for the slng
-target: the compiler refuses it, the package stays portable, and attaching is an
-operator's choice at deploy time. Creating a trunk and buying a number stay in
-the SLNG dashboard.
-
-`unmute deploy --call <e164>` places one outbound call from the agent, which
-rings a real phone and costs a real call, so it happens only when it is asked
-for.
+Nothing on this page applies to it. There is no container, no `.env` to fill, no
+runbook to follow and no sizing to estimate, because SLNG runs the agent.
 
 ## Route report
 

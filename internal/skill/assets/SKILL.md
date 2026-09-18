@@ -27,7 +27,7 @@ Open the first matching reference; load another only when needed.
 | `references/latency.md` | the brief is make it faster, it feels slow, or optimize the agent |
 | `references/telephony.md` | answering or placing a phone call |
 | `references/transfers.md` | sending a phone caller to a person |
-| `references/deploy.md` | moving a checked package into production |
+| `references/deploy.md` | hosting a compiled livekit or pipecat project; an slng push is the `unmute-deploy` skill |
 | `references/examples.md` | starting from the closest working package |
 
 ## Choose the structure before files
@@ -72,7 +72,7 @@ For every change:
 2. Run `unmute validate`; read the exact error and fix the package, not the refusal.
 3. Run `unmute compile` when validation is clean.
 4. Run `unmute dev` and talk to the agent.
-5. For a slng target only, `unmute deploy` pushes it. Run `unmute deploy --dry-run` first: a push replaces the live agent rather than merging with it.
+5. For a slng target only, the `unmute-deploy` skill pushes it: a push replaces the live agent rather than merging with it.
 
 Repeat validation until clean. If commands cannot run, give the exact package
 path and commands and ask for their output. If audio cannot be heard, run the

@@ -92,6 +92,7 @@ Read this before adding a rule, and when a gate fails.
 | every emitted task prompt names its finish call and an escape, every finish takes the reserved `unserved_request`, and the owner is told to read it | `internal/generate/task_prompt_test.go`, `internal/ir/validate_test.go` |
 | the skill's tool kinds, vendors, providers and doc pointers match the code | `internal/skill/agreement_test.go` |
 | every command and flag the skill names exists | `internal/cli/skill_bundle_test.go` |
+| the `unmute-deploy` skill's list of what a push overwrites is the compiled body's own field set, both ways. A push replaces rather than merges, so that list is the answer to "will I lose my dashboard settings", and a field added to `slngBody` starts overwriting something the skill still says is safe | `internal/generate/slng_push_fields_test.go` (`TestDeploySkillListsEveryFieldAPushReplaces`) |
 | the docs-site CLI pages quote each command's `Usage:` line, not just its flags | `internal/cli/help_capture_test.go` |
 | a receiving agent's opening turn withholds its own handoffs, and no emitted tool carries the on-enter flag | `internal/generate/livekit_v1_test.go` |
 | an authored `endpointing_delay` reaches the floor on both targets and never the ceiling, and a package that authors nothing still emits the balanced floor and ceiling rather than inheriting a framework default | `internal/generate/endpointing_delay_test.go`, `internal/ir/validate_test.go` |

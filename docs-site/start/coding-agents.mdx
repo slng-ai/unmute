@@ -60,6 +60,11 @@ unmute skill install
     SKILL.md                         written
   .claude/skills/unmute-manifest/
     SKILL.md                         written
+  .agents/skills/unmute-deploy/
+    SKILL.md                         written
+    references/slng-push.md          written
+  .claude/skills/unmute-deploy/
+    SKILL.md                         written
 
 Installed the Unmute skills for claude, codex, copilot, cursor.
 Commit these files so your team's assistants get them too.
@@ -67,19 +72,21 @@ Next: ask your assistant to build a voice agent, in a sentence.
 ```
 
 One command covers every assistant, because they read different directories
-but the same instructions. Commit both directories. Then anyone who clones the
+but the same instructions. Commit `.agents/` and `.claude/`. Then anyone who clones the
 repository has an assistant that knows Unmute, with nothing to install.
 
-Two skills are installed. `unmute` builds and maintains agent packages, and
-`unmute-manifest` interviews you about your company's approved choices and saves
-the contract. Your assistant reads the descriptions and picks one.
+Three skills are installed, because they are three jobs. `unmute` builds and
+maintains agent packages. `unmute-manifest` interviews you about your company's
+approved choices and saves the contract. `unmute-deploy` pushes a finished
+package to SLNG and reads back what landed. Your assistant reads the
+descriptions and picks one.
 
 | Assistant | Reads |
 |---|---|
-| Claude Code | `.claude/skills/unmute/` and `.claude/skills/unmute-manifest/` |
-| Codex | `.agents/skills/unmute/` and `.agents/skills/unmute-manifest/` |
-| Cursor | `.agents/skills/unmute/` and `.agents/skills/unmute-manifest/` |
-| GitHub Copilot | `.agents/skills/unmute/` and `.agents/skills/unmute-manifest/` |
+| Claude Code | `.claude/skills/unmute/`, `.claude/skills/unmute-manifest/` and `.claude/skills/unmute-deploy/` |
+| Codex | `.agents/skills/unmute/`, `.agents/skills/unmute-manifest/` and `.agents/skills/unmute-deploy/` |
+| Cursor | `.agents/skills/unmute/`, `.agents/skills/unmute-manifest/` and `.agents/skills/unmute-deploy/` |
+| GitHub Copilot | `.agents/skills/unmute/`, `.agents/skills/unmute-manifest/` and `.agents/skills/unmute-deploy/` |
 
 Each file under `.claude/skills/` is a pointer at the matching bundle, so the
 instructions exist once no matter how many assistants you set up. Two
@@ -87,7 +94,7 @@ assistants in the same project is fine and normal.
 
 <Tip>
   The skill ships inside the binary. Installing it downloads nothing and works
-  offline. It writes only the two directories above, so if your assistant
+  offline. It writes only the directories above, so if your assistant
   cannot run shell commands, run the command yourself in a terminal and the
   result is exactly the same.
 </Tip>

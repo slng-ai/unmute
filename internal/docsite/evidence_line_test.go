@@ -8,10 +8,14 @@ import (
 	"testing"
 )
 
-// skillRefs is the shipped skill's reference set. It quotes the same CLI output
-// the docs site does, and a coding agent reads it the way a person reads a page,
-// so it is held to the same rule.
-const skillRefs = "../../internal/skill/assets/references"
+// skillRefs is the whole shipped bundle, every skill in it. It quotes the same
+// CLI output the docs site does, and a coding agent reads it the way a person
+// reads a page, so it is held to the same rule.
+//
+// This used to name `assets/references` alone, which is one skill's reference
+// directory. A second skill's files then sat outside every gate here, which is
+// the failure mode the rule exists to stop, so the root is the bundle now.
+const skillRefs = "../../internal/skill/assets"
 
 // TestNoVerifiedDateInQuotedCLIOutput keeps a maintainer's provenance out of the
 // surfaces a reader lands on.
