@@ -3,7 +3,7 @@
 # go test ./internal/generate -run TestPackagesWritingNoNewKeyEmitTheSameBytes -update-compat
 examples/customer-intake livekit = 9032e158e58c912c38f963d7b2afe18f363e22ed370a28449b6a41e1aafdd1d3
 examples/customer-intake pipecat = 9fddfb33d591702abfe78f6cf09644a390961a586ffa3cdd6d8849a7cfd008ee
-examples/salon-concierge-single-prompt livekit = 62529207a37b571bb788783767de9ceded1f25d76f61e00d77a528aaf828b57a
+examples/salon-concierge-single-prompt livekit = 9daf67726b01c9c066db745d319790fc4f2de74191986ab4f135b2dc023c8886
 examples/salon-concierge-single-prompt pipecat = df1e29f2be6365b61f55a75efefc1e5e36e1c3104d7d8fc4c220c3383d66f7d7
 testdata/daily_carrier pipecat = 7228e6bc64a376343d6b5a8face5e5a66d89c7453dcb1595af374929d64f318f
 testdata/history_core livekit = 171bea9f7c42c8cab61407ed85f9311bf10cc746275e754a9a2eefc0d2a006f0
@@ -29,5 +29,5 @@ testdata/typed_inputs livekit = 233b15d944c39071308297fad7a12883020ec1f13098063e
 testdata/typed_inputs pipecat = b497edda1e59a1f4fc0ece555ff3741099ec833de39bd0e142d3875a4c6b6d83
 testdata/typed_state livekit = 88cfd0641ec29aca7e5510ec34bbb937c57d17ec5020aa9b29578b40596f28fa
 testdata/typed_state pipecat = e6af46fecaf98847ecfae872622b8a3870538bbfbd85526452e0dafe47fa0712
-voice-agents-tests/salon-concierge-v2 livekit = 6f558a87b9b0b286f37ff76d37bcf1c48cca7589bdab4f6e6b9b8db0b63e2fa3
+voice-agents-tests/salon-concierge-v2 livekit = 1d1c1378c69b1a6d024527c9479eb74936edd0bdfc94c8d4a4c34e52392daf29
 voice-agents-tests/salon-concierge-v2 pipecat = 6c29964fe650eaca9a7cc8dcc5bddec6c44301fb4001aa385c388d25427639f5

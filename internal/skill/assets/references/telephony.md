@@ -191,22 +191,20 @@ the call and not the build.
 
 ### 3: the carrier
 
-The origination URL is the forwarding address that hands the call to LiveKit. On
-LiveKit Cloud it is the project ID with `p_` stripped, in front of
-`.sip.livekit.cloud`. It is **not** the `LIVEKIT_URL` subdomain; the two strings
-are unrelated.
+The origination URL is the forwarding address that hands the call to LiveKit.
+Read the project ID off `lk project list`, drop the `p_` prefix, and put the rest
+in front of `.sip.livekit.cloud`. So `p_abc123def` gives
+`sip:abc123def.sip.livekit.cloud;transport=tcp`. It is **not** the `LIVEKIT_URL`
+subdomain; the two strings are unrelated.
+
+Give them the address to paste, never a pipeline that derives it:
 
 ```sh
-LK_SIP_URI=$(lk project list --json | jq -r --arg n "<project>" \
-  '.[] | select(.Name==$n) | "sip:\(.ProjectId | sub("^p_";"")).sip.livekit.cloud;transport=tcp"')
-
 twilio api:trunking:v1:trunks:origination-urls:create \
   --trunk-sid "<TK...>" --friendly-name "LiveKit SIP" \
-  --sip-url "$LK_SIP_URI" --weight 1 --priority 1 --enabled
+  --sip-url "sip:abc123def.sip.livekit.cloud;transport=tcp" \
+  --weight 1 --priority 1 --enabled
 ```
-
-Keep the project listing piped through `jq`: the raw `--json` output also holds
-project API keys.
 
 **The number has to be attached to that trunk, and it is attached from inside the
 trunk.** In the console: open the trunk, go to its **Numbers** tab, click **Add a
@@ -227,20 +225,18 @@ into `build/livekit/`. Those are the inputs, and they carry fields the `lk` flag
 cannot express. Never edit `build/`: change the package and compile again.
 
 Each file holds exactly one `${...}` placeholder: the phone number in the trunk
-input, the trunk ID in the rule. Substitute and pipe:
+input, the trunk ID in the rule. Both commands take the file as an argument, so
+tell the author to edit the placeholder and run the command. Do not hand them a
+`sed` pipeline.
 
-```sh
-cd <pkg>/build/livekit
+1. In `sip-inbound-trunk.json`, replace the placeholder with the number in E.164
+   form, then `lk --project "<project>" sip inbound create sip-inbound-trunk.json`.
+2. Copy the `ST_` ID it prints into `sip-dispatch-rule.json` in place of its
+   placeholder, then
+   `lk --project "<project>" sip dispatch create sip-dispatch-rule.json`.
 
-TRUNK=$(sed "s|\${[A-Z0-9_]*}|<+1...>|g" sip-inbound-trunk.json |
-  lk --project "<project>" sip inbound create - 2>&1 | grep -o 'ST_[A-Za-z0-9]*' | head -1)
-
-sed "s|\${[A-Z0-9_]*}|$TRUNK|g" sip-dispatch-rule.json |
-  lk --project "<project>" sip dispatch create -
-```
-
-Stop if the first command prints no ID: a dispatch rule with no trunk ID matches
-every trunk in the project.
+Stop if the first command prints no ID: a rule with the placeholder still in it
+matches every trunk in the project. Compiling again rewrites both files.
 
 **Never offer the `lk` flags instead of the JSON.** Two flag sets look
 equivalent and are not:

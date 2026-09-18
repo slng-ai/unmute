@@ -153,8 +153,9 @@ unmute compile my-agent --target livekit
 ```
 
 Compiling writes `sip-inbound-trunk.json` and `sip-dispatch-rule.json` into
-`build/livekit/`. Those two files are what step 4 sends to LiveKit. Never edit
-anything under `build/`: change the package and compile again.
+`build/livekit/`. Those two files are what step 4 sends to LiveKit, and they are
+the only thing under `build/` you fill in by hand. For everything else, change
+the package and compile again.
 
 ### Every key this connection takes
 
@@ -250,28 +251,31 @@ shows the same console screens.
   </Step>
 
   <Step title="Point origination at LiveKit">
-    Your project's SIP address is the project ID with `p_` removed, in front of
-    `.sip.livekit.cloud`. Read it with `jq`, because the raw `--json` listing
-    also holds your project API keys:
+    First write down your project's SIP address. It comes from the project ID:
 
     ```sh
-    LK_SIP_URI=$(lk project list --json | jq -r --arg n "$LK_PROJECT" \
-      '.[] | select(.Name==$n) | "sip:\(.ProjectId | sub("^p_";"")).sip.livekit.cloud;transport=tcp"')
-    echo "$LK_SIP_URI"
+    lk project list
     ```
 
-    Add it to the trunk:
+    Take the ID of the project your agent deploys to. It starts with `p_`. Drop
+    the `p_`, put the rest in front of `.sip.livekit.cloud`, and add
+    `;transport=tcp`:
+
+    | Project ID | SIP address |
+    |---|---|
+    | `p_abc123def` | `sip:abc123def.sip.livekit.cloud;transport=tcp` |
+
+    Then add that address to the trunk. In the console: the **Origination** tab,
+    **Add new Origination URI**, paste it, leave priority and weight at 1, tick
+    **Enabled**, save. From the CLI:
 
     ```sh
     twilio api:trunking:v1:trunks:origination-urls:create \
       --trunk-sid "$TRUNK_SID" \
       --friendly-name "LiveKit SIP" \
-      --sip-url "$LK_SIP_URI" \
+      --sip-url "sip:abc123def.sip.livekit.cloud;transport=tcp" \
       --weight 1 --priority 1 --enabled
     ```
-
-    In the console the same thing is the **Origination** tab, **Add new
-    Origination URI**, with priority and weight at 1 and **Enabled** ticked.
 
     Do not build this address from `LIVEKIT_URL`. The project URL subdomain and
     the SIP subdomain are different strings, and a wrong host here gives you a
@@ -329,23 +333,35 @@ project claims that number yet. Two records fix that:
 | inbound trunk | claims your number for this LiveKit project |
 | dispatch rule | sends that trunk's calls to your agent, one room per caller |
 
-Create both from the generated JSON, from your build directory:
+Both are created from the JSON that compiling wrote into `build/livekit/`. Each
+file holds one placeholder you fill in by hand.
+
+**The inbound trunk.** Open `sip-inbound-trunk.json` and put your number in
+place of `${SIP_FROM_NUMBER}`, so the line reads:
+
+```json
+"numbers": ["+15551234567"]
+```
+
+Then create it:
 
 ```sh
 cd my-agent/build/livekit
-
-# The inbound trunk. The ID it prints starts with ST_.
-TRUNK=$(sed "s|\${SIP_FROM_NUMBER}|$NUMBER|g" sip-inbound-trunk.json |
-  lk --project "$LK_PROJECT" sip inbound create - 2>&1 | grep -o 'ST_[A-Za-z0-9]*' | head -1)
-echo "inbound trunk: $TRUNK"
-
-# The dispatch rule, scoped to that one trunk. Stop here if $TRUNK is empty.
-sed "s|\${UNMUTE_SIP_TRUNK_ID}|$TRUNK|g" sip-dispatch-rule.json |
-  lk --project "$LK_PROJECT" sip dispatch create -
+lk --project "$LK_PROJECT" sip inbound create sip-inbound-trunk.json
 ```
 
-If the first command printed no ID, fix that before running the second. A
-dispatch rule with no trunk ID in it matches every trunk in the project.
+It prints the record it made. Copy the ID, the one starting with `ST_`.
+
+**The dispatch rule.** Open `sip-dispatch-rule.json` and put that ID in place of
+`${UNMUTE_SIP_TRUNK_ID}`. The rest of the file, your agent's name and the room
+prefix, is already filled in. Then:
+
+```sh
+lk --project "$LK_PROJECT" sip dispatch create sip-dispatch-rule.json
+```
+
+If the first command printed no `ST_` ID, fix that before running the second. A
+rule with the placeholder still in it matches every trunk in the project.
 
 Then check both:
 
@@ -353,6 +369,9 @@ Then check both:
 lk --project "$LK_PROJECT" sip inbound list      # Authentication column empty
 lk --project "$LK_PROJECT" sip dispatch list     # Agents column names your agent
 ```
+
+Compiling again rewrites both files, so keep a copy of the filled-in versions if
+you want them.
 
 ### Use the JSON, not the lk flags
 

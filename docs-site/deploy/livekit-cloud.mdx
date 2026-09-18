@@ -269,13 +269,18 @@ before relying on worker placement for strict locality.
 ### Telephony needs two more records
 
 An inbound SIP route needs a LiveKit inbound trunk and a dispatch rule. You
-create both after deploying, with two commands run from `build/livekit/`:
+create both after deploying, from `build/livekit/`. Put your number into
+`sip-inbound-trunk.json` where it says `${SIP_FROM_NUMBER}`, then:
 
 ```sh
-TRUNK=$(sed "s|\${SIP_FROM_NUMBER}|$NUMBER|g" sip-inbound-trunk.json |
-  lk --project "<project-name>" sip inbound create - 2>&1 | grep -o 'ST_[A-Za-z0-9]*' | head -1)
-sed "s|\${UNMUTE_SIP_TRUNK_ID}|$TRUNK|g" sip-dispatch-rule.json |
-  lk --project "<project-name>" sip dispatch create -
+lk --project "<project-name>" sip inbound create sip-inbound-trunk.json
+```
+
+Copy the `ST_` ID it prints into `sip-dispatch-rule.json` where it says
+`${UNMUTE_SIP_TRUNK_ID}`, then:
+
+```sh
+lk --project "<project-name>" sip dispatch create sip-dispatch-rule.json
 ```
 
 Name the project on both. `lk` has a default project, and a command without

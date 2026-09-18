@@ -194,7 +194,7 @@ func TestTelephonySetupRunbookHoldsItsContract(t *testing.T) {
 		"Credential List",
 		"`SIP_TRUNK_HOSTNAME`; there is no second address",
 		";transport=tcp",
-		"lk project list --json",
+		"lk project list",
 		// FR-003a: the one step that differs when LiveKit is self-hosted.
 		"*Self-hosted LiveKit:*",
 		"Call Transfer (SIP REFER)",
@@ -203,9 +203,11 @@ func TestTelephonySetupRunbookHoldsItsContract(t *testing.T) {
 		// carrier-side value without opening the console. Verified against
 		// twilio-cli 6.2.4 and lk 2.18.2 on 2026-08-12.
 		"### Get your origination URI",
-		"drop the `p_` prefix",
-		"sip:\\(.ProjectId | sub(\"^p_\";\"\")).sip.livekit.cloud;transport=tcp",
-		"cannot be guessed from `LIVEKIT_URL`",
+		// The address is read off `lk project list` and typed, not derived by a
+		// shell pipeline: a worked example is what a reader copies.
+		"Drop the `p_` prefix",
+		"| `p_abc123def` | `sip:abc123def.sip.livekit.cloud;transport=tcp` |",
+		"Do not build this from `LIVEKIT_URL`",
 		"twilio api:trunking:v1:trunks:create",
 		"twilio api:trunking:v1:trunks:origination-urls:create",
 		"twilio api:core:sip:credential-lists:credentials:create",
@@ -230,8 +232,8 @@ func TestTelephonySetupRunbookHoldsItsContract(t *testing.T) {
 		// because `lk` reads its own default when no project is named and that
 		// default is frequently not the one the agent deploys to.
 		"### At LiveKit",
-		`lk --project "$LK_PROJECT" sip inbound create -`,
-		`lk --project "$LK_PROJECT" sip dispatch create -`,
+		`lk --project "$LK_PROJECT" sip inbound create sip-inbound-trunk.json`,
+		`lk --project "$LK_PROJECT" sip dispatch create sip-dispatch-rule.json`,
 		"lk cloud auth",
 		// The two flag sets that look equivalent and are not: one makes a rule
 		// with no agent, the other makes a trunk that rejects every carrier call.
@@ -260,6 +262,24 @@ func TestTelephonySetupRunbookHoldsItsContract(t *testing.T) {
 	}
 	if strings.Contains(runbook, "envsubst") {
 		t.Error("the runbook still tells the operator to run envsubst")
+	}
+	// A command in the runbook has to do something. The two sections a reader
+	// follows on the main path name a value to copy; they never derive one with a
+	// shell pipeline, because that asks the reader to trust an incantation
+	// instead of understanding what the value is. Both the project SIP address
+	// and the trunk ID were a `jq` and a `grep -o | head -1` once, and both are
+	// values you can read off a listing and type.
+	//
+	// The optional "same steps as commands" block is out of scope: it is a
+	// labelled, scripted alternative to the console, and the SIDs it looks up
+	// exist only in the carrier's API.
+	for _, part := range []string{"### Get your origination URI", "### At LiveKit"} {
+		body := section(t, readme, part)
+		for _, plumbing := range []string{"jq", "grep -o", "sed -n", "$(", "envsubst"} {
+			if strings.Contains(body, plumbing) {
+				t.Errorf("%s derives a value with %q; name the value to copy instead", part, plumbing)
+			}
+		}
 	}
 	for _, part := range []string{"### At your carrier (Twilio)", "### At LiveKit", "### What transfers need"} {
 		for _, dash := range []string{"—", "–"} {

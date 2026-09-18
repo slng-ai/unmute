@@ -664,14 +664,13 @@ A dispatch rule matches a worker by that exact string, and this project's
 you already created pointing at the old worker, so inbound calls ring and
 nothing answers.
 
-No deploy updates the rule. Delete the stale one and create it again from the
-recompiled `sip-dispatch-rule.json`, with the trunk ID you already have:
+No deploy updates the rule. Compile again, put your trunk ID back into the fresh
+`sip-dispatch-rule.json`, then swap the rule:
 
 ```sh
 lk --project "$LK_PROJECT" sip dispatch list    # find the rule with the old name
 lk --project "$LK_PROJECT" sip dispatch delete <SDR_...>
-sed "s|\${UNMUTE_SIP_TRUNK_ID}|<ST_...>|g" sip-dispatch-rule.json |
-  lk --project "$LK_PROJECT" sip dispatch create -
+lk --project "$LK_PROJECT" sip dispatch create sip-dispatch-rule.json
 ```
 
 The number is unrouted between the delete and the create.
@@ -1120,8 +1119,9 @@ your carrier's account{{if .Telephony.HasInbound}}, then two commands here{{end}
 nobody but you can sign in to your carrier account, so every step is written out
 below.
 
-You need two tools: `lk`, the LiveKit CLI, authenticated against this project
-(`lk cloud auth`), and `jq`. Nothing else.
+You need one tool: `lk`, the LiveKit CLI, authenticated against this project
+(`lk cloud auth`). The optional scripted version of the carrier steps also wants
+the Twilio CLI and `jq`, and says so where it appears.
 {{if .Telephony.HasInbound}}
 Pass `--project` on every `lk` command below. `lk` has a default project, and it
 is often not the one this agent deploys to. A command without `--project` reads
@@ -1165,34 +1165,31 @@ settings with no phone involved.
 
 ### Get your origination URI
 
-Both parts below need one value: the SIP address your carrier hands incoming calls
-to. On LiveKit Cloud it is built from your **project ID**, not from your project
-URL: drop the `p_` prefix from the ID and put the rest in front of
-`.sip.livekit.cloud`. The two subdomains are different strings, so guessing from
-`LIVEKIT_URL` gives an address that rings nowhere.
-
-Run this to print every project you have configured, each with its SIP URI:
+Both parts below need one value: the SIP address your carrier hands incoming
+calls to. On LiveKit Cloud it is built from your **project ID**:
 
 ```sh
-lk project list --json |
-  jq -r '.[] | "\(.Name)  \(.URL)  ->  sip:\(.ProjectId | sub("^p_";"")).sip.livekit.cloud;transport=tcp"'
+lk project list
 ```
 
-Take the line for the project this agent deploys to, and use the third column.
-`lk project list` on its own marks the default project with `*`. Look at how
-little the URL column and the SIP column have in common: that is why the SIP
-address cannot be guessed from `LIVEKIT_URL`.
+Take the ID of the project this agent deploys to. It starts with `p_`.
+Drop the `p_` prefix, put the rest in front of `.sip.livekit.cloud`,
+and add `;transport=tcp`:
 
-Keep that output piped through `jq`. The raw `--json` listing also contains your
-project API key and secret, so it is not something to paste anywhere.
+| Project ID | SIP address |
+|---|---|
+| `p_abc123def` | `sip:abc123def.sip.livekit.cloud;transport=tcp` |
 
-To use it in the commands below, set it once by project name:
+**Do not build this from `LIVEKIT_URL`.** The project URL subdomain and the SIP
+subdomain are different strings, so an address taken from the URL rings nowhere.
+
+`lk project list` marks your CLI's default project with `*`, and that is often
+not the one this agent deploys to. Set both values once, and every command below
+uses them:
 
 ```sh
-LK_PROJECT="<the name from that list>"
-LK_SIP_URI=$(lk project list --json | jq -r --arg n "$LK_PROJECT" \
-  '.[] | select(.Name==$n) | "sip:\(.ProjectId | sub("^p_";"")).sip.livekit.cloud;transport=tcp"' | head -1)
-echo "$LK_SIP_URI"
+LK_PROJECT="<the project this agent deploys to>"
+LK_SIP_URI="sip:<that project id, without the p_>.sip.livekit.cloud;transport=tcp"
 ```
 
 *Self-hosted LiveKit:* there is no project SIP URI. The address is the public SIP
@@ -1279,8 +1276,9 @@ TRUNK_DOMAIN="{{.Project}}-trunk.pstn.twilio.com"
 SIP_USERNAME="{{.Project}}-agent"
 read -rsp "SIP password: " SIP_PASSWORD; echo
 
-# The number you already own, read out of .env.
-NUMBER=$(sed -n 's/^{{.Telephony.FromNumberEnv}}=//p' ./.env | head -1 | tr -d "\r\"'")
+# The number you already own, in E.164 form. Same value as
+# {{.Telephony.FromNumberEnv}} in .env.
+NUMBER="+15551234567"
 
 # Steps 1 and 2: the trunk, then its SID looked up by the domain you just chose.
 # Already have a trunk? Skip the create and list what you have instead:
@@ -1385,26 +1383,38 @@ yours for configuration to travel with, so the platform has to already know
 which project owns the number and where the caller goes. Placing a call is the
 opposite: your own code starts it, so the trunk settings ride along.
 
-Both are created from the JSON files next to this README. Run this from this
-directory, with `.env` filled in and `LK_PROJECT` set:
+Both are created from the JSON files next to this README. Each holds one
+placeholder you fill in by hand.
 
-```sh
-# Your number, read out of .env.
-NUMBER=$(sed -n 's/^{{.Telephony.FromNumberEnv}}=//p' ./.env | head -1 | tr -d "\r\"'")
+**The inbound trunk.** Open `sip-inbound-trunk.json` and replace
+`${{"{"}}{{.Telephony.FromNumberEnv}}}` with your number in E.164 form, so the line reads:
 
-# 1. The inbound trunk. It prints the new record, and the ID starts with ST_.
-TRUNK=$(sed "s|\${{"{"}}{{.Telephony.FromNumberEnv}}}|$NUMBER|g" sip-inbound-trunk.json |
-  lk --project "$LK_PROJECT" sip inbound create - 2>&1 | grep -o 'ST_[A-Za-z0-9]*' | head -1)
-echo "inbound trunk: $TRUNK"
-
-# 2. The dispatch rule, scoped to that one trunk. Stop here if $TRUNK is empty.
-sed "s|\${{"{"}}UNMUTE_SIP_TRUNK_ID}|$TRUNK|g" sip-dispatch-rule.json |
-  lk --project "$LK_PROJECT" sip dispatch create -
+```json
+"numbers": ["+15551234567"]
 ```
 
-If the first command printed no ID, fix that before running the second. A
-dispatch rule with no trunk ID in it matches every trunk in the project, other
+Then create it:
+
+```sh
+lk --project "$LK_PROJECT" sip inbound create sip-inbound-trunk.json
+```
+
+It prints the record it made. Copy the ID, the one starting with `ST_`.
+
+**The dispatch rule.** Open `sip-dispatch-rule.json` and replace
+`${{"{"}}UNMUTE_SIP_TRUNK_ID}` with that ID. The rest of the file, the agent name
+and the room prefix, is already filled in for you. Then:
+
+```sh
+lk --project "$LK_PROJECT" sip dispatch create sip-dispatch-rule.json
+```
+
+If the first command printed no `ST_` ID, fix that before running the second. A
+rule with the placeholder still in it matches every trunk in the project, other
 people's included.
+
+Compiling again rewrites both files, so keep a copy of the filled-in versions if
+you want them.
 
 Check both, and read the two columns that go wrong:
 
