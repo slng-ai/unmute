@@ -57,14 +57,20 @@ type Destination struct {
 	root string   // subtree of the embedded FS this destination takes
 }
 
-// The four destinations: two skills, each in the place Claude Code reads and
+// The six destinations: three skills, each in the place Claude Code reads and
 // the place everybody else reads. Path elements rather than a literal string,
 // because Windows is a supported platform and filepath.Join owns the separator.
 //
 // A destination whose root contains another's takes everything but that one,
 // which is computed in Files rather than listed here: the canonical bundle is
-// `assets` minus the three subtrees below it, and listing those by hand is how
-// a new skill quietly ships inside the old one.
+// `assets` minus the subtrees below it, and listing those by hand is how a new
+// skill quietly ships inside the old one.
+//
+// Three skills because they are three jobs, done at three times. `unmute`
+// builds a package. `unmute-manifest` writes the company contract a package is
+// held to. `unmute-deploy` pushes a finished package to SLNG, which is often a
+// different person on a different day, and a reference file inside the build
+// skill only loads once the build skill has already matched.
 var (
 	Canonical = Destination{
 		Name: "canonical",
@@ -86,10 +92,26 @@ var (
 		dir:  []string{".claude", "skills", "unmute-manifest"},
 		root: "assets/manifest-pointer",
 	}
+	DeployCanonical = Destination{
+		Name: "deploy canonical",
+		dir:  []string{".agents", "skills", "unmute-deploy"},
+		root: "assets/deploy-skill",
+	}
+	DeployPointer = Destination{
+		Name: "deploy pointer",
+		dir:  []string{".claude", "skills", "unmute-deploy"},
+		root: "assets/deploy-pointer",
+	}
 )
 
 // All is every destination, in install order.
-var All = []Destination{Canonical, Pointer, ManifestCanonical, ManifestPointer}
+var All = []Destination{Canonical, Pointer, ManifestCanonical, ManifestPointer, DeployCanonical, DeployPointer}
+
+// Skills is how many skills the install writes. Every skill has exactly two
+// destinations, the canonical copy and the pointer beside it, so the count is
+// derived rather than typed: a page that lists one directory per skill per
+// assistant is checked against this, and a fourth skill needs no test edited.
+func Skills() int { return len(All) / 2 }
 
 // Dir returns this destination's directory under the given project root.
 func (d Destination) Dir(project string) string {
@@ -103,10 +125,10 @@ func (d Destination) Rel() string { return path.Join(d.dir...) }
 // Assistants maps the --agent names onto destinations. Several names share a
 // destination, which is why the resolver deduplicates rather than writing twice.
 var assistants = map[string][]Destination{
-	"claude":  {Pointer, ManifestPointer},
-	"codex":   {Canonical, ManifestCanonical},
-	"cursor":  {Canonical, ManifestCanonical},
-	"copilot": {Canonical, ManifestCanonical},
+	"claude":  {Pointer, ManifestPointer, DeployPointer},
+	"codex":   {Canonical, ManifestCanonical, DeployCanonical},
+	"cursor":  {Canonical, ManifestCanonical, DeployCanonical},
+	"copilot": {Canonical, ManifestCanonical, DeployCanonical},
 	"all":     All,
 }
 

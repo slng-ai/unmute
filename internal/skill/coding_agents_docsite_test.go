@@ -45,15 +45,17 @@ func TestCodingAgentsPageNamesEveryAssistant(t *testing.T) {
 func TestCodingAgentsTableCoversEveryAssistant(t *testing.T) {
 	page := codingAgents(t)
 
-	row := regexp.MustCompile("(?m)^\\| ([A-Za-z][A-Za-z ]*) \\|((?: `\\.[a-z]+/skills/unmute[a-z-]*/`(?: and)?)+) \\|$")
+	row := regexp.MustCompile("(?m)^\\| ([A-Za-z][A-Za-z ]*) \\|((?: `\\.[a-z]+/skills/unmute[a-z-]*/`[,]?(?: and)?)+) \\|$")
 	rows := row.FindAllStringSubmatch(page, -1)
 
 	if want := len(Assistants()); len(rows) != want {
 		t.Fatalf("%s lists %d assistants in its table, but the CLI supports %d; add or remove the row", codingAgentsPage, len(rows), want)
 	}
 
-	// Both skills, because an assistant that reads one directory and not the
-	// other is an assistant that cannot do half the work.
+	// Every skill, because an assistant that reads one directory and not the
+	// next is an assistant that cannot do part of the work. The count comes
+	// from Skills() rather than a literal, so a fourth skill fails the page
+	// and not this test.
 	dirs := map[string]bool{}
 	for _, dest := range All {
 		dirs[dest.Rel()+"/"] = true
@@ -61,8 +63,8 @@ func TestCodingAgentsTableCoversEveryAssistant(t *testing.T) {
 	named := regexp.MustCompile("`(\\.[a-z]+/skills/unmute[a-z-]*/)`")
 	for _, hit := range rows {
 		listed := named.FindAllStringSubmatch(hit[2], -1)
-		if len(listed) != 2 {
-			t.Errorf("%s gives %s %d directories; each assistant reads one directory per installed skill", codingAgentsPage, hit[1], len(listed))
+		if len(listed) != Skills() {
+			t.Errorf("%s gives %s %d directories, want %d; each assistant reads one directory per installed skill", codingAgentsPage, hit[1], len(listed), Skills())
 		}
 		for _, dir := range listed {
 			if !dirs[filepath.ToSlash(dir[1])] {

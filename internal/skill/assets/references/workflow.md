@@ -14,7 +14,7 @@ Write, validate, read the error, fix, repeat. Then run it and listen.
 | `unmute validate [dir]` | load, build, and check against every declared target |
 | `unmute compile [dir]` | validate, then write `build/<target>/` for each code target |
 | `unmute dev [dir]` | compile, run locally, and let you talk to the agent |
-| `unmute deploy [dir]` | validate, compile, and push a slng target to SLNG |
+| `unmute deploy [dir]` | validate, compile, and push a slng target to SLNG. The push is the `unmute-deploy` skill |
 | `unmute pull [dir]` | fetch each SLNG-hosted tool's definition into the package |
 | `unmute skill install` | write this skill into a project |
 

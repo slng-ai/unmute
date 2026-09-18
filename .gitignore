@@ -33,9 +33,12 @@ dist/
 __pycache__/
 .codex/worktrees/
 
-# Skills installed locally by `npx skills add`, which writes into the checkout.
-# Each machine installs its own; nothing tracked may depend on them.
+# Skills installed locally by `npx skills add` or `unmute skill install`, which
+# write into the checkout. Each machine installs its own; nothing tracked may
+# depend on them. This repository is where the unmute skills are authored, so a
+# committed copy of its own install output is a second copy that rots.
 /.agents/
+/.claude/skills/
 
 .firecrawl
 bin/

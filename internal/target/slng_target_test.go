@@ -26,7 +26,9 @@ func TestSlngPushCommandsAgree(t *testing.T) {
 		"the emitted runbook":  filepath.Join(root, "internal", "generate", "templates", "slng_v1", "README.md.tmpl"),
 		"the example README":   filepath.Join(root, "examples", "hotel-concierge", "README.md"),
 		"the deployment guide": filepath.Join(root, "docs-site", "deploy", "slng.mdx"),
-		"the shipped skill":    filepath.Join(root, "internal", "skill", "assets", "references", "package.md"),
+		// The push moved out of the build skill into its own, so this is the
+		// unmute-deploy skill's reference rather than references/package.md.
+		"the shipped skill": filepath.Join(root, "internal", "skill", "assets", "deploy-skill", "references", "slng-push.md"),
 	}
 	// A selected profile changes authentication, not the command or its arguments.
 	profileFlag := regexp.MustCompile(`voiceai --profile \S+ `)
@@ -136,6 +138,8 @@ func TestEveryVoiceaiCommandNamedExists(t *testing.T) {
 		filepath.Join(root, "docs-site", "targets", "slng.mdx"),
 		filepath.Join(root, "docs-site", "deploy", "slng.mdx"),
 		filepath.Join(root, "internal", "skill", "assets", "references", "package.md"),
+		filepath.Join(root, "internal", "skill", "assets", "deploy-skill", "SKILL.md"),
+		filepath.Join(root, "internal", "skill", "assets", "deploy-skill", "references", "slng-push.md"),
 	}
 	// A word, then optionally a second, skipping any leading root flag so that
 	// `voiceai --profile work whoami` is read as `whoami`.

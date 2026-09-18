@@ -58,16 +58,17 @@ it is not YAML to paste into an existing one.
 Nothing is downloaded and no agent package is created.
 Commit the installed files so your team's assistants read the same workflow.
 
-Two skills are installed. `unmute` builds and maintains agent packages;
+Three skills are installed. `unmute` builds and maintains agent packages;
 `unmute-manifest` interviews you about your company's approved choices and saves
-the contract. Your assistant picks the one that matches what you ask for.
+the contract; `unmute-deploy` pushes a finished package to SLNG and reads back
+what landed. Your assistant picks the one that matches what you ask for.
 
 | Assistant | Reads |
 |---|---|
-| Claude Code | `.claude/skills/unmute/` and `.claude/skills/unmute-manifest/` |
-| Codex | `.agents/skills/unmute/` and `.agents/skills/unmute-manifest/` |
-| Cursor | `.agents/skills/unmute/` and `.agents/skills/unmute-manifest/` |
-| GitHub Copilot | `.agents/skills/unmute/` and `.agents/skills/unmute-manifest/` |
+| Claude Code | `.claude/skills/unmute/`, `.claude/skills/unmute-manifest/` and `.claude/skills/unmute-deploy/` |
+| Codex | `.agents/skills/unmute/`, `.agents/skills/unmute-manifest/` and `.agents/skills/unmute-deploy/` |
+| Cursor | `.agents/skills/unmute/`, `.agents/skills/unmute-manifest/` and `.agents/skills/unmute-deploy/` |
+| GitHub Copilot | `.agents/skills/unmute/`, `.agents/skills/unmute-manifest/` and `.agents/skills/unmute-deploy/` |
 
 The shared instructions live under `.agents/skills/`.
 Claude's files point to them. The installer does not modify `AGENTS.md`,

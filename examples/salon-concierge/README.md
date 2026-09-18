@@ -117,11 +117,19 @@ costs one model request whatever the task does, and that request speaks no
 words, so a task wrapped around a single action is a silence the caller pays
 for.
 
-**One agent verifies.** `verify_customer` is on the concierge and nowhere else.
-A task within reach beats a prompt rule, so the task is not listed on the
-specialist, however plainly its prompt says not to verify again. Every tool
-that needs the number refuses while it is unconfirmed, so the gate is still
-there, and `to_concierge` is the way back to the agent that verifies.
+**One verification step, named by both agents.** `verify_customer` is defined
+once, on the concierge, and customer care names it as a bare
+`- verify_customer`. It has to be in reach there, because `record_complaint`
+injects `customer_phone` and is refused while the caller has not agreed to it,
+and a caller who opens with a complaint has never been near the booking flow.
+
+It was the concierge's alone until September 2026, with `to_concierge` as the
+way back to the agent that verifies. That return never worked: the concierge has
+no rule for a complaint handed back, so it escalated to the manager instead, and
+when the transfer failed it told the caller to ring the salon. A task within
+reach beats a prompt rule, so the specialist's prompt now asks for the step
+instead of forbidding it, and asks for it last: identify only once the complaint
+is about to be written down.
 
 **One agent asks for agreement.** The specialist says the complaint back and
 asks once, then calls `record_complaint` with what was agreed. The tool speaks

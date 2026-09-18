@@ -15,17 +15,28 @@ agents:
     tasks:
       - name: verify_customer
         when: >-
-          Run this before the booking step whenever `customer_verified` is
-          empty, and run it on its own when the caller explicitly corrects their
-          phone number. Never run it twice for one booking: once
-          `customer_verified` names a status, the caller is verified for the
-          rest of the call. A change of date, time or service is not a phone
-          correction and needs no verification.
+          Run this when `customer_verified` is empty and what you do next needs
+          the caller identified: the booking step, or writing a complaint down.
+          Run it on its own when the caller explicitly corrects their phone
+          number. Never run it twice for one call: once `customer_verified`
+          names a status, the caller is verified for the rest of the call. A
+          change of date, time or service is not a phone correction and needs no
+          verification.
         instructions: tasks/verify-customer.md
+        # Spoken as the step is entered, so it covers the lookup's latency. Short
+        # and about the caller, not about the process: "let me verify you first"
+        # is a system describing itself.
+        #
+        # None of these may promise the lookup. The step has to read the number
+        # back and get a yes *before* it calls the tool, and a line saying "I'll
+        # look you up" is the model's own last sentence when it decides what to
+        # do next: on a text run that wording it went straight to the lookup and
+        # skipped the readback. These name the check instead, which is also what
+        # the next sentence out of the step actually is.
         announce:
-          - Let me verify you first.
-          - First, let me get you verified.
-          - One moment, let me pull your details up.
+          - Let me confirm who I'm speaking to.
+          - One second, let me check who I've got.
+          - Right, let me make sure I have you.
         tools:
           - find_or_create_customer
         finish:
@@ -45,10 +56,13 @@ agents:
           The caller wants to create, move or cancel a booking. Includes a
           change to an appointment just made.
         instructions: tasks/booking.md
+        # "Double check" implied a check that had already happened, on the first
+        # look of the call. These say the same thing in fewer words and none of
+        # them claims a second look.
         announce:
-          - Let me double check what I have available.
-          - Let me see what is free.
-          - Right, let me have a look at the diary.
+          - Let me have a look at the diary.
+          - One second, I'll check the diary.
+          - Right, let me see what's free.
         tools:
           - find_slots
           - save_booking
@@ -78,6 +92,12 @@ agents:
       - record_complaint
       - look_up_refund_policy
       - end_call
+    # A bare name: the definition stays on the concierge, one name across the
+    # package. Customer care needs it in reach because `record_complaint`
+    # injects `customer_phone` and is refused while the caller has not agreed to
+    # it, and a caller who opens with a complaint has never been near booking.
+    tasks:
+      - verify_customer
     handoffs:
       - to_concierge
     escalations:

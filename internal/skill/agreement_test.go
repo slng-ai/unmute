@@ -1022,25 +1022,30 @@ func TestEntryDocumentBudget(t *testing.T) {
 	}
 }
 
-// TestNoOrphanReferences holds both halves of the routing table: every reference
-// on disk is reachable from SKILL.md, and every reference SKILL.md names exists.
+// TestNoOrphanReferences holds both halves of the routing table, for every
+// canonical skill: each reference on disk is reachable from that skill's
+// SKILL.md, and each reference its SKILL.md names exists.
 func TestNoOrphanReferences(t *testing.T) {
-	entry := bundleFile(t, "SKILL.md")
-
-	for _, name := range referenceNames(t) {
-		if !strings.Contains(entry, name) {
-			t.Errorf("%s is in the bundle but SKILL.md never names it: an assistant will never open it", name)
-		}
-	}
-
 	named := regexp.MustCompile("`(references/[a-z0-9-]+\\.md)`")
-	files, err := New("test").Files(Canonical)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, hit := range named.FindAllStringSubmatch(entry, -1) {
-		if _, ok := files[hit[1]]; !ok {
-			t.Errorf("SKILL.md routes to %s, which the bundle does not carry", hit[1])
+	for _, dest := range []Destination{Canonical, ManifestCanonical, DeployCanonical} {
+		files, err := New("test").Files(dest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry := string(files["SKILL.md"])
+
+		for name := range files {
+			if !strings.HasPrefix(name, "references/") {
+				continue
+			}
+			if !strings.Contains(entry, name) {
+				t.Errorf("%s/%s is in the bundle but its SKILL.md never names it: an assistant will never open it", dest.Rel(), name)
+			}
+		}
+		for _, hit := range named.FindAllStringSubmatch(entry, -1) {
+			if _, ok := files[hit[1]]; !ok {
+				t.Errorf("%s/SKILL.md routes to %s, which that bundle does not carry", dest.Rel(), hit[1])
+			}
 		}
 	}
 }
@@ -1081,33 +1086,51 @@ func frontmatterValue(content, field string) string {
 // skill is seen at all. name, description, and metadata are the intersection
 // every supported assistant accepts; anything outside that set errors on at
 // least one of them.
+// Every skill, in canonical and pointer form: a skill nobody held to this is a
+// skill that ships invisible to one assistant.
 func TestFrontmatterIsThePortableSet(t *testing.T) {
-	canonical := bundleFile(t, "SKILL.md")
+	want := []string{"name", "description", "metadata"}
+	for _, pair := range []struct{ canonical, pointer Destination }{
+		{Canonical, Pointer},
+		{ManifestCanonical, ManifestPointer},
+		{DeployCanonical, DeployPointer},
+	} {
+		canonical := destinationFile(t, pair.canonical, "SKILL.md")
+		pointer := destinationFile(t, pair.pointer, "SKILL.md")
 
-	pointerFiles, err := New("test").Files(Pointer)
+		for _, file := range []struct {
+			label   string
+			content string
+		}{{pair.canonical.Rel(), canonical}, {pair.pointer.Rel(), pointer}} {
+			got := frontmatterKeys(t, file.content)
+			if strings.Join(got, ",") != strings.Join(want, ",") {
+				t.Errorf("%s/SKILL.md frontmatter is %v, want exactly %v: anything else errors on at least one assistant", file.label, got, want)
+			}
+		}
+
+		// The description is the activation trigger, so the pointer has to carry
+		// the same one. A pointer that never activates is a pointer nobody
+		// follows.
+		for _, field := range []string{"name", "description"} {
+			if a, b := frontmatterValue(canonical, field), frontmatterValue(pointer, field); a != b {
+				t.Errorf("%s: the pointer's %s does not match the canonical one:\n  canonical: %s\n  pointer:   %s", pair.canonical.Rel(), field, a, b)
+			}
+		}
+	}
+}
+
+// destinationFile reads one file out of any destination's bundle.
+func destinationFile(t *testing.T, dest Destination, name string) string {
+	t.Helper()
+	files, err := New("test").Files(dest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pointer := string(pointerFiles["SKILL.md"])
-
-	want := []string{"name", "description", "metadata"}
-	for _, file := range []struct {
-		label   string
-		content string
-	}{{"SKILL.md", canonical}, {"pointer/SKILL.md", pointer}} {
-		got := frontmatterKeys(t, file.content)
-		if strings.Join(got, ",") != strings.Join(want, ",") {
-			t.Errorf("%s frontmatter is %v, want exactly %v: anything else errors on at least one assistant", file.label, got, want)
-		}
+	content, ok := files[name]
+	if !ok {
+		t.Fatalf("%s has no %s", dest.Rel(), name)
 	}
-
-	// The description is the activation trigger, so the pointer has to carry the
-	// same one. A pointer that never activates is a pointer nobody follows.
-	for _, field := range []string{"name", "description"} {
-		if a, b := frontmatterValue(canonical, field), frontmatterValue(pointer, field); a != b {
-			t.Errorf("the pointer's %s does not match the canonical one:\n  canonical: %s\n  pointer:   %s", field, a, b)
-		}
-	}
+	return string(content)
 }
 
 // TestNoSecretsInTheBundle holds the repository's hardest rule. The bundle
@@ -1129,16 +1152,17 @@ func TestNoSecretsInTheBundle(t *testing.T) {
 	// a quoted refusal showing it being rejected.
 	phone := regexp.MustCompile(`\+[1-9][0-9]{9,14}`)
 
-	files, err := New("test").Files(Canonical)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pointerFiles, err := New("test").Files(Pointer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, content := range pointerFiles {
-		files["pointer/"+name] = content
+	// Every destination, not one skill's: a credential is a credential wherever
+	// in the bundle it sits.
+	files := map[string][]byte{}
+	for _, dest := range All {
+		found, err := New("test").Files(dest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, content := range found {
+			files[dest.Rel()+"/"+name] = content
+		}
 	}
 
 	for name, raw := range files {
