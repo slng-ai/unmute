@@ -141,9 +141,9 @@ Each route has its own page from here, because the carrier steps differ
 completely:
 
 - **`livekit`**: deploy with `lk agent create`, set up the Elastic SIP Trunk,
-  then run the generated script that creates the two LiveKit records. All three
-  are required. [LiveKit over Twilio](/telephony/livekit-twilio) is that route
-  end to end.
+  then create the two LiveKit records with `lk sip inbound create` and `lk sip
+  dispatch create`. All three are required. [LiveKit over
+  Twilio](/telephony/livekit-twilio) is that route end to end.
 - **`pipecat`**: set the secret set, deploy with a warm instance, then paste the
   generated markup into a TwiML Bin and point the number at it.
   [Pipecat over Twilio](/telephony/pipecat-twilio) is that route end to end.

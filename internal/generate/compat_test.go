@@ -86,8 +86,15 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 //     flow on the caller's own words still sitting above the result, and read
 //     the diary twice more.
 //
-// Both are named in the pull request that ships them. A regeneration without
-// that treatment is the thing this test exists to stop.
+// And once more on 2026-09-17, for one: the LiveKit SIP runbook stopped shipping
+// a `telephony-setup.sh` and now prints the two `lk` commands that create the
+// inbound records, each naming its project. The script called bare `lk`, which
+// takes no project flag, so on a machine defaulting to another account it wrote
+// both records there and reported success. That reaches every package on an
+// inbound SIP route, whichever keys it writes.
+//
+// Each is named in the pull request that ships it. A regeneration without that
+// treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {
 	packages := compatPackages(t)
 	if len(packages) == 0 {

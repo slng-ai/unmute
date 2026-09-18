@@ -85,9 +85,10 @@ func TestPipecatDailyCarrierRouteRow(t *testing.T) {
 // outbound, N36 for inbound). Dialling out carries the carrier's trunk settings
 // inline with every call. Inbound cannot work that way, because an unsolicited
 // call arrives with no request of ours for configuration to travel with, so it
-// keeps its two platform records, but the emitted telephony-setup.sh resolves
-// them by phone number at provisioning time. An environment name that carried an
-// ID is the thing this feature retired, so the table must never grow one back.
+// keeps its two platform records, but the operator creates those with
+// `lk sip inbound create` and reads the trunk ID straight off that command. An
+// environment name that carried an ID is the thing this feature retired, so the
+// table must never grow one back.
 func TestTelephonyRuntimeEnvironmentCarriesNoTrunkIDs(t *testing.T) {
 	for key, route := range TelephonyRoutes() {
 		for _, rule := range route.RuntimeEnvironment {

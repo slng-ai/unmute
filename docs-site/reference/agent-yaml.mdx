@@ -250,8 +250,8 @@ second, so after changing `name:`:
   id in the preserved `livekit.toml` and re-registers the worker under the new
   name. The **SIP dispatch rule** is what breaks: it still names the old worker,
   so inbound calls ring and nothing answers. Delete it
-  (`lk sip dispatch delete <id>`) and re-run `telephony-setup.sh`, which skips
-  the step while a rule for that trunk still exists.
+  (`lk sip dispatch delete <id>`) and create it again from
+  `sip-dispatch-rule.json`, which carries the new name after you compile.
 
 There is no way to keep the old bare name. An agent deployed as `livekit` was
 named after the target, and the new name always carries the package half, so the

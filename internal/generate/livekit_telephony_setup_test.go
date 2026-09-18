@@ -11,9 +11,9 @@ import (
 	"github.com/slng-ai/unmute/internal/spec"
 )
 
-// Telephony setup is one runbook in the README and one emitted script. None of
-// it can be proven by a live call in CI, so the operator-facing behaviour is
-// pinned here.
+// Telephony setup is one runbook in the README and two record inputs next to it.
+// None of it can be proven by a live call in CI, so the operator-facing
+// behaviour is pinned here.
 
 // livekitSIPFixture builds a LiveKit SIP package on one carrier. inbound and
 // outbound are the phone channel's directions; cold selects safe_core's own cold
@@ -93,40 +93,19 @@ func section(t *testing.T, readme, heading string) string {
 	return strings.Join(lines[start:], "\n")
 }
 
-// FR-004, and the script contract's own test list.
-func TestTelephonySetupScriptHoldsItsContract(t *testing.T) {
+// FR-004: the two record inputs, and the fact that nothing shells out to `lk`
+// on the author's behalf any more.
+//
+// The retired script is why this is a contract and not a preference. It called
+// bare `lk`, which reads the CLI's default project and takes no flag to override
+// it, so on a machine whose default was another account it created both records
+// in the wrong project and printed success. Its reuse check asked only whether
+// some rule named the trunk, so a rule with an empty agent list counted as a hit
+// and a re-run fixed nothing.
+func TestTelephonyRecordInputsHoldTheirContract(t *testing.T) {
 	artifact := generateSIPFixture(t, "twilio", true, true, true)
-	script := artifactFile(t, artifact, "telephony-setup.sh")
-	for _, want := range []string{
-		"set -euo pipefail",
-		"command -v lk",
-		"command -v jq",
-		"lk sip inbound list --json",
-		"lk sip dispatch list --json",
-		`number_env="SIP_FROM_NUMBER"`,
-		// The guard: no dispatch rule is ever created without a resolved trunk.
-		`[ -n "$trunk" ] ||`,
-		"(created)",
-		"(reused)",
-	} {
-		if !strings.Contains(script, want) {
-			t.Errorf("telephony-setup.sh is missing %q", want)
-		}
-	}
-	// set -x would print the phone number and every command; sourcing the env
-	// file would read every secret in it and die on one non-identifier line.
-	for _, forbidden := range []string{"set -x", "source ", ". ./.env", "envsubst"} {
-		if strings.Contains(script, forbidden) {
-			t.Errorf("telephony-setup.sh contains %q", forbidden)
-		}
-	}
-	// The only substitution token in the script is the dispatch rule's trunk ID.
-	// The phone number reaches sed through a shell variable, never a token.
-	tokens := regexp.MustCompile(`\$\{([A-Z][A-Z0-9_]*)\}`).FindAllStringSubmatch(script, -1)
-	for _, token := range tokens {
-		if token[1] != "UNMUTE_SIP_TRUNK_ID" {
-			t.Errorf("telephony-setup.sh substitutes unexpected token %q", token[1])
-		}
+	if artifactHasFile(artifact, "telephony-setup.sh") {
+		t.Error("the build still ships a setup script; the runbook's own commands are the contract")
 	}
 	dispatch := artifactFile(t, artifact, "sip-dispatch-rule.json")
 	if !strings.Contains(dispatch, `"${UNMUTE_SIP_TRUNK_ID}"`) {
@@ -137,18 +116,39 @@ func TestTelephonySetupScriptHoldsItsContract(t *testing.T) {
 	if strings.Contains(dispatch, `"trunk_ids": []`) || !strings.Contains(dispatch, `"trunk_ids"`) {
 		t.Error("sip-dispatch-rule.json has an empty or missing trunk_ids")
 	}
+	trunk := artifactFile(t, artifact, "sip-inbound-trunk.json")
+	if !strings.Contains(trunk, `"${SIP_FROM_NUMBER}"`) {
+		t.Error("sip-inbound-trunk.json does not carry the phone-number token the runbook substitutes")
+	}
+	// Digest auth on the inbound trunk rejects every carrier call, because
+	// origination identifies itself by source IP and sends no credentials.
+	for _, forbidden := range []string{"authUsername", "authPassword", "auth_username", "auth_password"} {
+		if strings.Contains(trunk, forbidden) {
+			t.Errorf("sip-inbound-trunk.json sets %q; carrier origination sends no credentials", forbidden)
+		}
+	}
+	// The two tokens the runbook substitutes are the only ones in either file,
+	// so nothing else has to be looked up by hand.
+	token := regexp.MustCompile(`\$\{([A-Z][A-Z0-9_]*)\}`)
+	for path, content := range map[string]string{"sip-inbound-trunk.json": trunk, "sip-dispatch-rule.json": dispatch} {
+		for _, found := range token.FindAllStringSubmatch(content, -1) {
+			if found[1] != "UNMUTE_SIP_TRUNK_ID" && found[1] != "SIP_FROM_NUMBER" {
+				t.Errorf("%s carries an unexpected token %q", path, found[1])
+			}
+		}
+	}
 }
 
-// The script provisions inbound records, so a package that only places calls
-// must not receive it. Nor must the connector route, which accepts inbound calls
-// but has no SIP trunk of any kind to claim a number on.
-func TestTelephonySetupScriptOnlyForInboundSIPRoutes(t *testing.T) {
+// The records are inbound, so a package that only places calls must not receive
+// them. Nor must the connector route, which accepts inbound calls but has no SIP
+// trunk of any kind to claim a number on.
+func TestTelephonyRecordInputsOnlyForInboundSIPRoutes(t *testing.T) {
 	outboundOnly := generateSIPFixture(t, "twilio", false, true, true)
-	if artifactHasFile(outboundOnly, "telephony-setup.sh") {
-		t.Error("outbound-only package got a provisioning script for records it never needs")
-	}
 	if artifactHasFile(outboundOnly, "sip-inbound-trunk.json") {
 		t.Error("outbound-only package got an inbound trunk input")
+	}
+	if artifactHasFile(outboundOnly, "sip-dispatch-rule.json") {
+		t.Error("outbound-only package got a dispatch rule input")
 	}
 	if readme := artifactFile(t, outboundOnly, "README.md"); strings.Contains(readme, "### At LiveKit") {
 		t.Error("outbound-only README tells the operator to create inbound records")
@@ -183,7 +183,7 @@ func TestTelephonySetupRunbookHoldsItsContract(t *testing.T) {
 	for _, want := range []string{
 		// The whole cost, stated up front (SC-003).
 		"six actions in",
-		"then one command here",
+		"then two commands here",
 		// Prerequisites, and nothing else.
 		"`lk`, the LiveKit CLI",
 		"`jq`",
@@ -194,7 +194,7 @@ func TestTelephonySetupRunbookHoldsItsContract(t *testing.T) {
 		"Credential List",
 		"`SIP_TRUNK_HOSTNAME`; there is no second address",
 		";transport=tcp",
-		"lk project list --json",
+		"lk project list",
 		// FR-003a: the one step that differs when LiveKit is self-hosted.
 		"*Self-hosted LiveKit:*",
 		"Call Transfer (SIP REFER)",
@@ -203,14 +203,20 @@ func TestTelephonySetupRunbookHoldsItsContract(t *testing.T) {
 		// carrier-side value without opening the console. Verified against
 		// twilio-cli 6.2.4 and lk 2.18.2 on 2026-08-12.
 		"### Get your origination URI",
-		"drop the `p_` prefix",
-		"sip:\\(.ProjectId | sub(\"^p_\";\"\")).sip.livekit.cloud;transport=tcp",
-		"cannot be guessed from `LIVEKIT_URL`",
+		// The address is read off `lk project list` and typed, not derived by a
+		// shell pipeline: a worked example is what a reader copies.
+		"Drop the `p_` prefix",
+		"| `p_abc123def` | `sip:abc123def.sip.livekit.cloud;transport=tcp` |",
+		"Do not build this from `LIVEKIT_URL`",
 		"twilio api:trunking:v1:trunks:create",
 		"twilio api:trunking:v1:trunks:origination-urls:create",
 		"twilio api:core:sip:credential-lists:credentials:create",
 		"twilio api:trunking:v1:trunks:credential-lists:create",
 		"twilio api:trunking:v1:trunks:phone-numbers:create",
+		// The step an author gets stuck on: the number is attached from inside
+		// the trunk, on a tab, not from the number's own page.
+		"**Numbers** tab",
+		"**Add a Number**",
 		// from-transferor, not from-transferee. Measured on a live call
 		// 2026-08-26: a UK trunk presenting the caller's Spanish number to a
 		// Spanish carrier had every transfer refused as it was offered, seen as
@@ -222,10 +228,21 @@ func TestTelephonySetupRunbookHoldsItsContract(t *testing.T) {
 		"#### Check the carrier side",
 		// The password is typed at a prompt, never written into the block or a file.
 		"read -rsp \"SIP password: \" SIP_PASSWORD",
-		// Part two, LiveKit.
+		// Part two, LiveKit. Two explicit commands, each naming the project,
+		// because `lk` reads its own default when no project is named and that
+		// default is frequently not the one the agent deploys to.
 		"### At LiveKit",
-		"bash telephony-setup.sh",
+		`lk --project "$LK_PROJECT" sip inbound create sip-inbound-trunk.json`,
+		`lk --project "$LK_PROJECT" sip dispatch create sip-dispatch-rule.json`,
 		"lk cloud auth",
+		// The two flag sets that look equivalent and are not: one makes a rule
+		// with no agent, the other makes a trunk that rejects every carrier call.
+		"--individual",
+		"--auth-user/--auth-pass",
+		// The symptom table, and how to undo the two records.
+		"### If the call does not arrive",
+		"### Taking it down",
+		"sip dispatch delete",
 		// There is no local phone half any more. What the runbook has to say
 		// instead is where verification happens, and why here is not it.
 		"### Verifying it",
@@ -245,6 +262,24 @@ func TestTelephonySetupRunbookHoldsItsContract(t *testing.T) {
 	}
 	if strings.Contains(runbook, "envsubst") {
 		t.Error("the runbook still tells the operator to run envsubst")
+	}
+	// A command in the runbook has to do something. The two sections a reader
+	// follows on the main path name a value to copy; they never derive one with a
+	// shell pipeline, because that asks the reader to trust an incantation
+	// instead of understanding what the value is. Both the project SIP address
+	// and the trunk ID were a `jq` and a `grep -o | head -1` once, and both are
+	// values you can read off a listing and type.
+	//
+	// The optional "same steps as commands" block is out of scope: it is a
+	// labelled, scripted alternative to the console, and the SIDs it looks up
+	// exist only in the carrier's API.
+	for _, part := range []string{"### Get your origination URI", "### At LiveKit"} {
+		body := section(t, readme, part)
+		for _, plumbing := range []string{"jq", "grep -o", "sed -n", "$(", "envsubst"} {
+			if strings.Contains(body, plumbing) {
+				t.Errorf("%s derives a value with %q; name the value to copy instead", part, plumbing)
+			}
+		}
 	}
 	for _, part := range []string{"### At your carrier (Twilio)", "### At LiveKit", "### What transfers need"} {
 		for _, dash := range []string{"—", "–"} {
@@ -299,17 +334,13 @@ func TestTelephonySetupCarrierSeamHoldsForASecondCarrier(t *testing.T) {
 	if got, want := section(t, telnyxReadme, "### At LiveKit"), section(t, twilio, "### At LiveKit"); got != want {
 		t.Errorf("the At LiveKit part differs by carrier:\n%s\nwant:\n%s", got, want)
 	}
-	script := artifactFile(t, telnyx, "telephony-setup.sh")
 	for _, carrier := range []string{"twilio", "telnyx", "plivo", "exotel"} {
 		if strings.Contains(strings.ToLower(section(t, telnyxReadme, "### At LiveKit")), carrier) {
 			t.Errorf("the At LiveKit part names the carrier %q", carrier)
 		}
-		if strings.Contains(strings.ToLower(script), carrier) {
-			t.Errorf("telephony-setup.sh names the carrier %q", carrier)
-		}
 	}
 	// Same artifact set: adding a carrier adds instructions, not files.
-	for _, path := range []string{"telephony-setup.sh", "sip-inbound-trunk.json", "sip-dispatch-rule.json"} {
+	for _, path := range []string{"sip-inbound-trunk.json", "sip-dispatch-rule.json"} {
 		if !artifactHasFile(telnyx, path) {
 			t.Errorf("telnyx package is missing %s", path)
 		}
