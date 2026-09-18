@@ -57,8 +57,10 @@ which reads differently from having too much.
 and proposed published versions and whether the description or parameters
 changed, and it names what a replacement would remove: an attachment setting only
 the dashboard could have added, such as a description, a `call_start` trigger,
-the arguments a system-invoked attachment carries, or an attachment's own
-configuration of a curated capability. The sentence the agent speaks before a
+the arguments a system-invoked attachment carries, or a setting of a curated
+capability that the package does not pin. A setting the package **does** pin is
+compared rather than called lost, so pinning a timezone never reads as deleting
+one. The sentence the agent speaks before a
 tool runs is **not** on that list, because a package declares it with `announce:`:
 the preview compares the two and says nothing when they match, so never tell a
 user that deploying will delete an announcement their own tool file declares.
@@ -66,23 +68,85 @@ Never tell a user that a schema comparison proves a tool's behaviour is
 unchanged: it proves only that the contract is, or is not, the same shape. A dry
 run changes no live state, no authored file and no mirror.
 
-## The builtin name rule, which is the one false refusal
+## A curated capability attaches from the package
+
+SLNG lists its curated capabilities as ordinary tools, so a package reaches one
+by name and the push attaches it like any other. Both spellings resolve:
+
+```yaml tools/current_datetime.yaml
+builtin:
+  id: current_datetime
+```
+
+```yaml tools/current_datetime.yaml
+slng: current_datetime
+```
+
+The names, read 2026-08-31: `end_call`, `transfer_call`, `voicemail_detection`,
+`current_datetime`, `user_phone_number`, `send_sms`. Four of them are in the
+`builtin:` registry today; `.agents/skills/unmute/references/tools.md` has the
+table, with the settings each one takes.
+
+**Use `builtin:` when the capability takes a setting.** A setting is written with
+`inject:` and reaches the attachment's configuration only through that block.
+Under `slng:` an `inject:` becomes an *argument*, and a curated capability
+publishes an empty argument schema, so validate refuses that combination and
+names the `builtin:` spelling to use instead.
+
+**Never tell a user to attach one in the dashboard instead.** A push replaces
+rather than merges, so an attachment made by hand is detached again by the next
+deploy. Attaching from the package is the only version that survives. A refusal
+here is a filename or a manifest bucket, both below, and never the platform
+declining.
+
+### The builtin name rule
 
 A `builtin:` tool's emitted reference carries the **file's** name, not the id it
-selects. So `tools/hang_up.yaml` declaring `builtin: {id: end_call}` compiles
-clean, emits a reference to `hang_up`, and fails at the push because the
-organisation's curated tool is called `end_call`. The refusal reads like a
-missing capability and is really a filename.
+selects. So `tools/hang_up.yaml` declaring `builtin: {id: end_call}` asks the
+organisation for a tool called `hang_up`, which nobody has.
 
-**Name the file after the capability**, unless the `slng:` scalar names the
-platform tool explicitly, which is what actually gets checked either way. Fixing
-the filename is the fix; pushing by hand around the refusal leaves the next
-person the same trap.
+`unmute validate` refuses it on the slng target and names the rename, so it no
+longer reaches a push:
 
-SLNG lists its curated capabilities as ordinary tools, which is why this check
-can be positive rather than a guess. The names, read 2026-08-31: `end_call`,
-`transfer_call`, `voicemail_detection`, `current_datetime`, `user_phone_number`,
-`send_sms`.
+```text
+slng target: tool "hang_up" selects builtin "end_call", and this target attaches a builtin
+  by the tool file's own name: rename tools/hang_up.yaml to tools/end_call.yaml
+```
+
+**Name the file after the capability.** A code target lowers the builtin to a
+function and does not care what the file is called, which is why this refusal is
+slng's alone.
+
+### One name, held twice
+
+SLNG publishes a capability to everybody and an organisation can hold its own
+copy of the same name. `unmute deploy` prefers the organisation's, which is what
+the dashboard attaches, and names both so the choice is visible:
+
+```text
+note: slng: this organisation holds "end_call" more than once: fd25f5c5-… was attached,
+  and 952eb6b1-… at global scope was not. Rename one of them in the SLNG dashboard if the
+  wrong one is running
+```
+
+A bare `voiceai agents push` prefers the other one, which is how a single package
+has attached `end_call` v3 through `unmute deploy` and v1 through a direct push.
+Read the note out when it appears.
+
+### A governed model writes its provider
+
+A manifest matches its model rules by provider, so an entry that declares none
+matches no rule and every model it names is refused:
+
+```text
+models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no provider:,
+  and manifest "acme" matches its models.think rules by provider: write the provider this
+  model is served by
+```
+
+`provider:` is optional in general, and a model id carrying its own vendor reads
+fine without it. Under a manifest it is load-bearing. Write it on every governed
+entry, fallbacks included.
 
 ## A manifest bucket follows the keyword, not the tool's nature
 
@@ -165,6 +229,48 @@ of the same package.
 A model string SLNG does not have enabled for agents is rejected at push with
 `AGENT_MODEL_UNAVAILABLE`, naming the field. Unmute cannot check this: the list
 is per organisation.
+
+### The 422 that names no field
+
+```text
+HTTP 422 · Voice agent config is invalid. Fix the highlighted fields and try again.
+  · AGENT_VALIDATION_FAILED
+```
+
+No field is named, in the CLI output or in `deploy-report.json`, and there is no
+verbose flag. The cause, every time it has been seen: a `{{placeholder}}` in the
+prompt or the greeting naming a variable declared `source: conversation`.
+
+`unmute validate` refuses it now, with the file and the line, so it should not
+reach a push:
+
+```text
+agent.yaml:41: conversation.greeting.text references {{caller_email}}, a value the model
+  records during the call, which no prompt receives: describe the value in the variable's
+  description: and name it in prose here instead
+```
+
+A value the model records mid-call is emitted as a runtime variable and lands in
+neither `template_defaults` nor `template_variable_options`, so a prompt naming
+one references a template variable that does not exist. A variable with a
+`default:` is a template variable and belongs in a prompt or greeting freely.
+`.agents/skills/unmute/references/variables.md` has both.
+
+If a 422 arrives anyway, diff the emitted `agent.json` against one that deploys.
+Do not bisect by deleting parts of the package: isolating this once took sixteen
+pushes.
+
+### A refused push is not a no-op
+
+The agent body is validated after tool attachment has begun, so a 422 can leave
+attachments the agent never received:
+
+```text
+this push had already started writing, so some tools above exist on SLNG.
+```
+
+`deploy-report.json` records `"outcome": "partial"`. Say so, rather than implying
+nothing happened.
 
 **Never suggest creating a tool, an MCP server or a trunk from the CLI.** There is
 no command for any of them. They are created in the SLNG dashboard, and

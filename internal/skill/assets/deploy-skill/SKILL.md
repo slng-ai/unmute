@@ -30,10 +30,15 @@ voiceai agents get <id> --json             # what actually landed
 ```
 
 `unmute deploy .` does compile and push in one command, and it is the right
-command for most packages. Go the long way when `unmute deploy --dry-run`
-refuses a curated capability your organisation really has: that refusal is the
-builtin name rule in `references/slng-push.md`, and naming the tool file after
-the capability fixes it properly.
+command for most packages. Go the long way only to read the attachment diff,
+which `voiceai agents push --dry-run` prints and `unmute deploy` does not.
+
+**A curated capability attaches from the package.** `current_datetime`,
+`send_sms`, `user_phone_number` and `end_call` all resolve and attach, by
+`builtin:` or by `slng:`. If one is refused, read the refusal: it is a filename
+or a manifest bucket, never the platform saying no. Never route around it by
+attaching in the dashboard, because a push replaces rather than merges and the
+next deploy detaches what you added by hand.
 
 Run `unmute deploy --dry-run` either way. It is the only check that resolves
 vault entries and holds each injected argument against the published tool's

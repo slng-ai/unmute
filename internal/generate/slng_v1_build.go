@@ -494,6 +494,12 @@ func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []
 			ref.Policy = &slngPolicy{PreActionMessage: &slngPreAction{
 				Enabled: true,
 				Text:    slngSegments{Segments: []slngSegment{{Type: "literal", Value: tool.Announce[0]}}},
+				// A tool that ends the conversation is the one case where the
+				// agent must finish speaking first: end_call hangs up the moment
+				// it runs, so a goodbye spoken alongside it is cut off mid-word.
+				// Every other announce covers a wait, and waiting for it would
+				// add the silence it exists to fill.
+				Wait: tool.Effect == ir.ToolEndsConversation,
 			}}
 		}
 		ref.Arguments = slngArguments(tool.Inject)

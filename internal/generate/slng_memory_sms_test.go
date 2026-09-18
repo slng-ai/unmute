@@ -125,6 +125,25 @@ func TestSlngAnnouncesEveryKindOfToolIncludingABuiltin(t *testing.T) {
 			t.Errorf("tool %q lost its announcement: %q", name, SlngAuthoredAnnouncements(agent)[name])
 		}
 	}
+
+	// A tool that ends the conversation waits for its own sentence, and nothing
+	// else does. end_call hangs up the moment it runs, so a goodbye spoken
+	// alongside it is cut off mid-word; every other announcement covers a wait,
+	// and waiting for one would add the silence it exists to fill.
+	_, files := compileSlng(t, "slng_memory_sms")
+	body := slngBodyOf(t, files)
+	for _, raw := range body["tool_refs"].([]any) {
+		ref := raw.(map[string]any)
+		policy, _ := ref["execution_policy"].(map[string]any)
+		if policy == nil {
+			continue
+		}
+		pre := policy["pre_action_message"].(map[string]any)
+		want := ref["tool"] == "end_call"
+		if pre["wait"] != want {
+			t.Errorf("tool %v pre_action_message.wait = %v, want %v", ref["tool"], pre["wait"], want)
+		}
+	}
 }
 
 func TestSlngSendSmsNeedsTheTwilioVaultEntries(t *testing.T) {

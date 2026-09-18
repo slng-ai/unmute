@@ -2,3 +2,7 @@ description: End the call when the caller is finished or says goodbye.
 
 builtin:
   id: end_call
+
+# A builtin can speak before it runs on this target, and a tool that ends the
+# conversation waits for its own sentence so the hangup does not clip it.
+announce: Thanks for calling, goodbye.
