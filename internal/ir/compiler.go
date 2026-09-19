@@ -1091,9 +1091,9 @@ type Target struct {
 	// serialized: a compiled target holds one region's Models, not all of them.
 	RegionModels  map[string]Bindings `json:"-" yaml:"-"`
 	WarmInstances int                 `json:"warm_instances,omitempty" yaml:"warm_instances,omitempty"`
-	Models            Bindings            `json:"models" yaml:"models"`
-	Destinations      map[string]string   `json:"destinations,omitempty" yaml:"destinations,omitempty"`
-	Telephony         *TelephonyPlan      `json:"telephony,omitempty" yaml:"telephony,omitempty"`
+	Models        Bindings            `json:"models" yaml:"models"`
+	Destinations  map[string]string   `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	Telephony     *TelephonyPlan      `json:"telephony,omitempty" yaml:"telephony,omitempty"`
 }
 
 type Provider string
