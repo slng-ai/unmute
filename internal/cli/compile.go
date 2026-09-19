@@ -64,7 +64,7 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 		// rest of the artifact, which is where it belongs: it described the
 		// output, and it is now next to the output.
 		for _, warning := range artifact.Notes.Warnings {
-			warnf(cmd.ErrOrStderr(), "%s: %s\n", resolved.Name, warning)
+			warnf(cmd.ErrOrStderr(), "%s: %s\n", resolved.Label(), warning)
 		}
 		// Both kinds write the same way. They are still two cases, because the
 		// switch had no default arm: an artifact kind nobody handled produced a
@@ -72,7 +72,7 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 		// The default arm is the point of this switch, not the cases.
 		switch artifact.Kind {
 		case generate.CodeTarget, generate.BodyTarget:
-			outDir := filepath.Join(dir, "build", resolved.Name)
+			outDir := resolved.BuildDir(dir)
 			if err := writeArtifactFiles(cmd.ErrOrStderr(), outDir, artifact.Files); err != nil {
 				return fmt.Errorf("compile %s: %w", dir, err)
 			}
@@ -81,7 +81,7 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 			}
 		default:
 			return fmt.Errorf("compile %s: target %q produced artifact kind %q, which this command does not know how to write",
-				dir, resolved.Name, artifact.Kind)
+				dir, resolved.Label(), artifact.Kind)
 		}
 	}
 	return nil

@@ -132,9 +132,9 @@ func validateSlngInjectText(agent *Agent, name, key, value string, row *TargetVa
 // validateSlngRegions checks deployment against the shared SLNG region list.
 // LiveKit checks its own worker-region set; Pipecat forwards region names.
 func validateSlngRegions(resolved Target, row *TargetValidation) {
-	// One region is FieldDeploymentMultiRegion's job to enforce, and it already
-	// refuses more than one. Checking every entry anyway means a package that
-	// wrote two wrong regions hears about both problems, not just the count.
+	// A target that named several regions has already been split into one
+	// target per region, so this loop runs once per deployment. An absent
+	// region stays an error: SLNG has no default placement to fall back on.
 	if len(resolved.DeploymentRegions) == 0 {
 		row.Errors = add(row.Errors, targetcap.CheckSlngRegion("").Error())
 		return

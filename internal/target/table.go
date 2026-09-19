@@ -111,7 +111,6 @@ const (
 	FieldToolAnnounceTask      Field = "tasks.tools.announce"
 	FieldOutbound              Field = "channels.telephony.outbound"
 	FieldVoicemail             Field = "channels.telephony.on_voicemail"
-	FieldDeploymentMultiRegion Field = "deployment_region.multiple"
 	FieldWarmInstances         Field = "warm_instances"
 	FieldTracingLangfuse       Field = "tracing.provider.langfuse"
 	FieldTracingCoval          Field = "tracing.provider.coval"
@@ -694,13 +693,6 @@ func Default() Table {
 			),
 			FieldTracingCoval: field(
 				deny(Slng, "slng target instruments no process of yours and sees no inbound call, so it can neither install the Coval exporter nor read a simulation ID: run the evaluation against the SLNG agent from Coval, or compile to livekit or pipecat which emit the exporter"),
-			),
-			// Several regions in one deployment_region (N32). LiveKit creates
-			// one deployment per region from one build directory; every other
-			// provider is gated, each in its own words. Verified 2026-08-12.
-			FieldDeploymentMultiRegion: field(
-				deny(Pipecat, "Pipecat Cloud agent names are globally unique across regions, so a second region needs a differently named agent: declare one region here and deploy the second with `pipecat cloud deploy <name>-<region> --region <region>`"),
-				deny(Slng, "slng target takes exactly one deployment region: name one of us-east, us-west, br, eu-west, eu-north, gb, za, il, jp, sg, id, in, au"),
 			),
 			// Instances held ready (warm_instances). Only Pipecat Cloud takes the
 			// number in a file this compiler writes: `[scaling] min_agents` in

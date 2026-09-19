@@ -143,6 +143,10 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 
 	caps := target.Default()
 	for _, resolved := range pushable {
+		// What this target is called to a reader, and what the validation rows
+		// above already printed: the target instance, plus its region when one
+		// target deploys to several.
+		label := resolved.Label()
 		artifact, err := generate.Generate(agent, resolved, caps)
 		if err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
@@ -151,10 +155,10 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		// result does not carry it back, so reading it there yielded "".
 		deployName := agent.DeployName(resolved)
 		for _, warning := range artifact.Notes.Warnings {
-			if reported[resolved.Name+": "+warning] {
+			if reported[label+": "+warning] {
 				continue
 			}
-			warnf(errOut, "%s: %s\n", resolved.Name, warning)
+			warnf(errOut, "%s: %s\n", label, warning)
 		}
 
 		// Generate wrote nothing: it returns an artifact and writeArtifactFiles
@@ -163,7 +167,7 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		// the build directory and the organisation exactly as it found them.
 		runner := newVoiceaiRunner(bin, pushEnv, opts.profile)
 		cache := newResolveCache()
-		deployment, preflight, err := deployResolution(cmd, runner, cache, resolved.Name,
+		deployment, preflight, err := deployResolution(cmd, runner, cache, label,
 			artifact, agent, env, opts.dryRun)
 		if err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
@@ -179,7 +183,7 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		// groups every gap with what asked for it and what fixes it, which is
 		// the useful part; writing a report would mean creating the directory
 		// this refusal exists to leave alone.
-		if err := renderPreflight(out, errOut, resolved.Name, preflight); err != nil {
+		if err := renderPreflight(out, errOut, label, preflight); err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
 		}
 		// The deferred notes go to the preview and to the report, and not to a
@@ -194,11 +198,11 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		// wants the detail looks.
 		if opts.dryRun {
 			for _, line := range deferredLines(deployment) {
-				notef(errOut, "%s: %s\n", resolved.Name, line)
+				notef(errOut, "%s: %s\n", label, line)
 			}
 		}
 
-		outDir := filepath.Join(dir, "build", resolved.Name)
+		outDir := resolved.BuildDir(dir)
 
 		// The staged copy carries the ids and versions this run checked. It is a
 		// temporary directory, deleted on every exit, and it exists before the
@@ -214,7 +218,7 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 			// to delete it is worth saying rather than swallowing: the next run
 			// works either way, so this warns and never fails a deploy.
 			if err := os.RemoveAll(staged); err != nil {
-				warnf(errOut, "%s: the temporary resolved body at %s could not be removed: %v\n", resolved.Name, staged, err)
+				warnf(errOut, "%s: the temporary resolved body at %s could not be removed: %v\n", label, staged, err)
 			}
 		}()
 
@@ -244,21 +248,21 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 			// it rejects the unknown option and writes to its error stream.
 			// So the upgrade guidance rides along with what it actually said,
 			// because the raw complaint on its own reads as a bug in unmute.
-			return fmt.Errorf("deploy %s: slng target %q: %w\n  %s", dir, resolved.Name, err, target.SlngUpgradeGuidance)
+			return fmt.Errorf("deploy %s: slng target %q: %w\n  %s", dir, label, err, target.SlngUpgradeGuidance)
 		}
 		if err := checkResolutionContract(planned); err != nil {
-			return fmt.Errorf("deploy %s: slng target %q: %w", dir, resolved.Name, err)
+			return fmt.Errorf("deploy %s: slng target %q: %w", dir, label, err)
 		}
 		readBaseline(runner, cache, &deployment, planned.Agent.ID)
 
 		writeReport := func(report deployReport) {
 			content, marshalErr := marshalDeployReport(report)
 			if marshalErr != nil {
-				warnf(errOut, "%s: the deployment report could not be written: %v\n", resolved.Name, marshalErr)
+				warnf(errOut, "%s: the deployment report could not be written: %v\n", label, marshalErr)
 				return
 			}
 			if writeErr := os.WriteFile(filepath.Join(outDir, "deploy-report.json"), content, 0o644); writeErr != nil {
-				warnf(errOut, "%s: the deployment report could not be written: %v\n", resolved.Name, writeErr)
+				warnf(errOut, "%s: the deployment report could not be written: %v\n", label, writeErr)
 			}
 		}
 
@@ -266,9 +270,9 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 			return fmt.Errorf("deploy %s: %w", dir, err)
 		}
 		if keySource != "" {
-			fmt.Fprintf(out, "%s: credential from %s\n", resolved.Name, keySource)
+			fmt.Fprintf(out, "%s: credential from %s\n", label, keySource)
 		}
-		fmt.Fprintf(out, "%s: compiled %s (%d files)\n", resolved.Name, outDir, len(artifact.Files))
+		fmt.Fprintf(out, "%s: compiled %s (%d files)\n", label, outDir, len(artifact.Files))
 
 		// The dry run's own result is the preview. A real run pushes again, for
 		// real, and its result is what actually happened.
@@ -290,20 +294,20 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		case opts.dryRun:
 			outcome = "previewed"
 		}
-		report := buildDeployReport(resolved.Name, deployName, result.Agent.ID, result.Agent.Action,
+		report := buildDeployReport(label, deployName, result.Agent.ID, result.Agent.Action,
 			opts.dryRun, outcome, deployment, preflight)
 		writeReport(report)
 		if opts.dryRun {
-			printResolvedPlan(out, resolved.Name, report)
+			printResolvedPlan(out, label, report)
 		}
 		// Before printPushResult, so the attached versions sit above the line
 		// that closes the run rather than after it. Guarded on the push having
 		// actually succeeded: a blocked or failed result has attached nothing,
 		// and saying otherwise is the one thing this output must never do.
 		if !opts.dryRun && result.OK && len(result.Blockers) == 0 {
-			printAttachedVersions(out, resolved.Name, report)
+			printAttachedVersions(out, label, report)
 		}
-		if err := printPushResult(out, errOut, resolved.Name, deployName, outDir, keySource, account, result); err != nil {
+		if err := printPushResult(out, errOut, label, deployName, outDir, keySource, account, result); err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
 		}
 		// After the push and only after it succeeded, because both of these are
@@ -311,9 +315,9 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		// nothing to reach and nothing to call.
 		if !opts.dryRun {
 			in := cmd.InOrStdin()
-			reportReach(in, out, errOut, runner, resolved.Name, deployName, result.Agent.ID, interactiveTerminal(in))
+			reportReach(in, out, errOut, runner, label, deployName, result.Agent.ID, interactiveTerminal(in))
 			if opts.call != "" {
-				placeTestCall(out, errOut, runner, resolved.Name, result.Agent.ID, opts.call)
+				placeTestCall(out, errOut, runner, label, result.Agent.ID, opts.call)
 			}
 		}
 	}
@@ -401,7 +405,7 @@ func printAttachedVersions(out io.Writer, name string, report deployReport) {
 func noSlngTargetGuidance(selected []ir.Target) string {
 	declared := make([]string, 0, len(selected))
 	for _, resolved := range selected {
-		declared = append(declared, fmt.Sprintf("%s (%s)", resolved.Name, resolved.Provider))
+		declared = append(declared, fmt.Sprintf("%s (%s)", resolved.Label(), resolved.Provider))
 	}
 	have := "none"
 	if len(declared) > 0 {

@@ -663,9 +663,9 @@ func TestRegionalGuidanceStaysExplicit(t *testing.T) {
 	packageReference := bundleFile(t, "references/package.md")
 	for _, want := range []string{
 		"`deployment_region` chooses where the agent worker runs",
-		"A LiveKit target accepts one deployment region or a duplicate-free list.",
-		"Pipecat accepts exactly one.",
-		"For hard regional isolation, use one target instance per geography.",
+		"Every target accepts one deployment region or a duplicate-free list.",
+		"compile once per region into `build/<target>/<region>/`",
+		"A region entry may swap model names",
 	} {
 		if !strings.Contains(packageReference, want) {
 			t.Errorf("references/package.md does not state %q", want)

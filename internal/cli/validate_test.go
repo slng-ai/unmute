@@ -174,15 +174,19 @@ func TestValidateOmitsPrerequisiteWithoutTheCapabilityThatNeedsIt(t *testing.T) 
 //
 // Pipecat forwards region codes; these shape errors apply before deployment.
 // LiveKit and SLNG additionally check their published region sets.
+//
+// Several regions is not one of these: every provider takes a list now, and
+// each region becomes its own build and its own deployment name. What is
+// refused is a list that cannot become distinct deployments, which is a
+// repeated name and an empty one.
 func TestValidateRefusesARegionItCannotHonour(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		region  string
 		wantAny []string
 	}{
-		{"several regions", "[us-east, eu-central]", []string{"globally unique across regions"}},
-		{"same region twice", "[us-east, us-east]", []string{`lists "us-east" twice`}},
-		{"empty entry", `[""]`, []string{"empty entry"}},
+		{"same region twice", "[us-east, us-east]", []string{`lists deployment_region "us-east" twice`}},
+		{"empty entry", `[""]`, []string{"empty deployment_region entry"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := writeDailyPackage(t, tc.region)
@@ -190,10 +194,17 @@ func TestValidateRefusesARegionItCannotHonour(t *testing.T) {
 			if err == nil {
 				t.Fatalf("a region unmute cannot honour must fail, got exit 0\n%s", stderr)
 			}
+			// Build refuses these, so the message rides the returned error
+			// rather than a validation report: there is no resolved package to
+			// report rows for.
+			message := err.Error() + stderr
 			for _, want := range tc.wantAny {
-				if !strings.Contains(stderr, want) {
-					t.Errorf("stderr missing %q:\n%s", want, stderr)
+				if !strings.Contains(message, want) {
+					t.Errorf("the refusal is missing %q:\n%s", want, message)
 				}
+			}
+			if !strings.Contains(message, "targets.yaml") {
+				t.Errorf("the refusal does not name the file:\n%s", message)
 			}
 		})
 	}

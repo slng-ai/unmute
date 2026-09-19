@@ -14,12 +14,20 @@ import (
 // its own README prints. These assertions live outside the golden so a
 // regeneration cannot quietly accept a broken artifact.
 
-func livekitArtifact(t *testing.T, regions []string) Artifact {
+// livekitArtifact compiles the build for one declared region, splitting the
+// target first the way the CLI does. A target naming several regions is several
+// builds, so `which` says which one to compile.
+func livekitArtifact(t *testing.T, regions []string, which ...int) Artifact {
 	t.Helper()
 	agent := loadCompilerAgent(t)
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
 	tgt.DeploymentRegions = regions
-	artifact, err := Generate(agent, tgt, target.Default())
+	split := tgt.PerRegion()
+	index := 0
+	if len(which) > 0 {
+		index = which[0]
+	}
+	artifact, err := Generate(agent, split[index], target.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,18 +81,28 @@ func TestLiveKitReadmeDeploySection(t *testing.T) { // FR-003, FR-004, FR-005, F
 		t.Error("a one-element region list changed the README")
 	}
 
-	several := artifactFile(t, livekitArtifact(t, []string{"us-east", "eu-central"}), "README.md")
-	for _, want := range []string{
-		"lk agent create --region us-east --config livekit.us-east.toml --secrets-file .env",
-		"lk agent create --region eu-central --config livekit.eu-central.toml --secrets-file .env",
-		"lk agent deploy --config livekit.us-east.toml",
-		"lk agent deploy --config livekit.eu-central.toml",
-		"nearest deployment is at capacity",
-		"may send a caller to another",
-		"separate agent names and explicit dispatch",
-	} {
-		if !strings.Contains(several, want) {
-			t.Errorf("multi-region README missing %q", want)
+	// Several regions are several builds. Each README describes its own region
+	// and nothing else, and says where the siblings are.
+	regions := []string{"us-east", "eu-central"}
+	for index, region := range regions {
+		build := artifactFile(t, livekitArtifact(t, regions, index), "README.md")
+		for _, want := range []string{
+			"lk agent create --region " + region + " --secrets-file .env",
+			"This directory is **" + region + "**",
+			"its own directory under `build/",
+			"deploy each sibling directory separately",
+			"not because the platform\nchose the nearest worker",
+		} {
+			if !strings.Contains(build, want) {
+				t.Errorf("the %s README is missing %q", region, want)
+			}
+		}
+		other := regions[(index+1)%len(regions)]
+		if strings.Contains(build, "--region "+other) {
+			t.Errorf("the %s README deploys %s too; one directory is one region", region, other)
+		}
+		if strings.Contains(build, "livekit."+region+".toml") {
+			t.Errorf("the %s README names a per-region config file; one directory holds one plain livekit.toml", region)
 		}
 	}
 
@@ -94,6 +112,32 @@ func TestLiveKitReadmeDeploySection(t *testing.T) { // FR-003, FR-004, FR-005, F
 	}
 	if !strings.Contains(none, "the first deploy asks which one to use") {
 		t.Error("README does not say the platform prompts when no region is declared")
+	}
+}
+
+// Two regions are two agent names. Sharing one would be one agent whose
+// behaviour depended on which worker answered, which is exactly what per-region
+// models make wrong.
+func TestLiveKitRegionsGetTheirOwnAgentNames(t *testing.T) {
+	regions := []string{"us-east", "eu-central"}
+	agent := loadCompilerAgent(t)
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+	tgt.DeploymentRegions = regions
+	split := tgt.PerRegion()
+	if len(split) != len(regions) {
+		t.Fatalf("two regions split into %d builds", len(split))
+	}
+	first, second := agent.DeployName(split[0]), agent.DeployName(split[1])
+	if first == second {
+		t.Fatalf("both regions deploy as %q", first)
+	}
+	for index, region := range regions {
+		if !strings.HasSuffix(agent.DeployName(split[index]), "-"+region) {
+			t.Errorf("%s deploys as %q, which does not name its region", region, agent.DeployName(split[index]))
+		}
+		if got := split[index].BuildDir("pkg"); !strings.HasSuffix(got, region) {
+			t.Errorf("%s builds into %q, which does not name its region", region, got)
+		}
 	}
 }
 
@@ -131,10 +175,21 @@ func TestLiveKitReportCarriesRegions(t *testing.T) { // FR-020
 		}
 		return decoded
 	}
-	several := report(t, []string{"us-east", "eu-central"})
-	got, ok := several["deployment_regions"].([]any)
-	if !ok || len(got) != 2 || got[0] != "us-east" || got[1] != "eu-central" {
-		t.Fatalf("deployment_regions = %v, want both in declared order", several["deployment_regions"])
+	// One report per build, each naming its own region: the report describes
+	// the directory it sits in, and a directory holds one region.
+	for index, region := range []string{"us-east", "eu-central"} {
+		var decoded map[string]any
+		if err := json.Unmarshal([]byte(artifactFile(t, livekitArtifact(t, []string{"us-east", "eu-central"}, index), "compile-report.json")), &decoded); err != nil {
+			t.Fatal(err)
+		}
+		got, ok := decoded["deployment_regions"].([]any)
+		if !ok || len(got) != 1 || got[0] != region {
+			t.Fatalf("the %s build reports deployment_regions = %v", region, decoded["deployment_regions"])
+		}
+	}
+	one := report(t, []string{"us-east"})
+	if got, ok := one["deployment_regions"].([]any); !ok || len(got) != 1 || got[0] != "us-east" {
+		t.Fatalf("deployment_regions = %v, want the one declared region", one["deployment_regions"])
 	}
 	if _, present := report(t, nil)["deployment_regions"]; present {
 		t.Error("deployment_regions is in the report with no region declared")

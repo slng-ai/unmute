@@ -62,11 +62,13 @@ instance name, used by `--target` and the `build/<name>/` output folder.
   Omit for a browser-only package; a connection without phone use is refused.
 </ParamField>
 
-<ParamField path="deployment_region" type="string or list of strings">
-  One non-empty platform region name, as a string or a one-item list. More than one region is refused.
+<ParamField path="deployment_region" type="string, or a list of region names and region-to-swaps entries">
+  Non-empty platform region names, as a string or a duplicate-free list.
   Unmute forwards region names as written and does not check them against the
   platform's region list. If omitted, no region is passed and platform placement
-  applies. The generated manifest and secret-set instructions use the same region.
+  applies. Each region compiles to its own build, each with its own
+  `pcc-deploy.toml`, agent name and secret-set instructions. A list entry may
+  carry [model swaps](/reference/targets-yaml#a-region-may-run-its-own-models).
   See [deployment regions](/optimization/regional-infrastructure).
 </ParamField>
 

@@ -1381,7 +1381,7 @@ func TestTargetOverrideKeepsEndpointingDelay(t *testing.T) {
 	overrides := map[string]packagespec.ModelDef{
 		"detector": {Provider: "livekit", Model: "turn-detector-mini"},
 	}
-	bindings := resolveBindings(agent, map[string]bool{}, overrides)
+	bindings := resolveBindings(agent, map[string]bool{}, overrides, nil)
 	if bindings.Turn == nil {
 		t.Fatal("no turn binding resolved")
 	}
@@ -1394,7 +1394,7 @@ func TestTargetOverrideKeepsEndpointingDelay(t *testing.T) {
 
 	// An override that states its own value still wins.
 	overrides["detector"] = packagespec.ModelDef{Provider: "livekit", Model: "turn-detector-mini", EndpointingDelay: "800ms"}
-	if got := resolveBindings(agent, map[string]bool{}, overrides).Turn.EndpointingDelay; got != "800ms" {
+	if got := resolveBindings(agent, map[string]bool{}, overrides, nil).Turn.EndpointingDelay; got != "800ms" {
 		t.Errorf("override value must win: got %q", got)
 	}
 }

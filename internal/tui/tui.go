@@ -2919,8 +2919,11 @@ type advancedField struct {
 // offering them is the console filling in a package it knows will fail. The
 // region stays, because every target deploys somewhere.
 func advancedTargetFields(data *scaffold.Data, regions *string) []advancedField {
-	region := advancedField{"Deployment region (optional)", "Where the platform deploys the agent; forwarded as declared. One region, or several separated by commas for one deployment per region (LiveKit only).", regions, validateBasic, func(value string) {
-		data.DeploymentRegions = parsePhrases(value)
+	region := advancedField{"Deployment region (optional)", "Where the platform deploys the agent; forwarded as declared. One region, or several separated by commas for one build and one deployment per region.", regions, validateBasic, func(value string) {
+		// Rename, not replace: a region here may carry model swaps this field
+		// does not show, and an author editing the list of names did not ask to
+		// lose them.
+		data.DeploymentRegions = data.DeploymentRegions.Rename(parsePhrases(value))
 	}}
 	if !targetcap.EmitsProject(targetcap.Provider(data.Target)) {
 		return []advancedField{region}
@@ -2935,11 +2938,13 @@ func advancedTargetFields(data *scaffold.Data, regions *string) []advancedField 
 
 func editAdvancedTarget(runner *fieldRunner, data *scaffold.Data) error {
 	for {
-		// deployment_region holds one region or several (N32), so it is one
+		// deployment_region holds one region or several, so it is one
 		// comma-separated field: joined for display, split on save. Without the
 		// save hook a multi-region package would lose every region but the
 		// first the moment someone opened this form to edit something else.
-		regions := strings.Join(data.DeploymentRegions, ", ")
+		// Only the names are shown; a region's model swaps ride through the
+		// save hook untouched.
+		regions := strings.Join(data.DeploymentRegions.Names(), ", ")
 		fields := advancedTargetFields(data, &regions)
 		options := make([]menuChoice, 0, len(fields)+1)
 		for i, field := range fields {

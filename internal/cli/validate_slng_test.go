@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -128,9 +129,12 @@ func TestValidateSlngRefusesUnsupportedPackageShapes(t *testing.T) {
 			behaviour: `does not deploy to region "any"`, fix: "eu-north",
 		},
 		{
-			name: "two regions", file: "targets.yaml",
+			// Two regions are two hosted agents, so the list is fine and the
+			// name is what fails: eu-central is a LiveKit worker region, not a
+			// world part SLNG serves.
+			name: "a region slng does not host", file: "targets.yaml",
 			replace: "deployment_region: eu-north", with: "deployment_region: [us-east, eu-central]",
-			behaviour: "takes exactly one deployment region", fix: "name one of",
+			behaviour: `does not deploy to region "eu-central"`, fix: "eu-north",
 		},
 		{
 			name: "inactivity", file: "agent.yaml",
@@ -191,13 +195,18 @@ func TestValidateSlngRefusesUnsupportedPackageShapes(t *testing.T) {
 	}
 }
 
+// failedSlngRow matches the failed row of the slng target, with or without the
+// region a multi-region target adds. The provider in the trailing parentheses
+// is what keeps this from reading as a message about the slng model vendor.
+var failedSlngRow = regexp.MustCompile(`✗ slng(?: \([a-z0-9-]+\))? \(slng\)`)
+
 // assertSlngRefusal holds the whole shape of a good refusal in one place: the
 // target is marked failed on stdout, the reason is under Errors on stderr, it
 // names the target so it cannot be read as a message about the slng model
 // vendor, it names the behaviour, and it says what to do instead.
 func assertSlngRefusal(t *testing.T, stdout, stderr, behaviour, fix string) {
 	t.Helper()
-	if !strings.Contains(stdout, "✗ slng (slng)") {
+	if !failedSlngRow.MatchString(stdout) {
 		t.Errorf("stdout does not mark the slng target failed:\n%s", stdout)
 	}
 	if !strings.Contains(stderr, "Errors:") {

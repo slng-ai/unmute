@@ -97,7 +97,7 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	failed := 0
 	for _, resolved := range targets {
 		row := TargetValidation{
-			Name: resolved.Name, Provider: resolved.Provider,
+			Name: resolved.Label(), Provider: resolved.Provider,
 			Errors:   append([]string(nil), global...),
 			Warnings: append([]string(nil), globalWarnings...),
 		}
@@ -874,18 +874,12 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	if agent.Tracing != nil {
 		applyCapability(caps, tracingCapability(agent.Tracing.Provider), provider, row)
 	}
-	row.Errors = append(row.Errors, validateRegions(resolved.DeploymentRegions)...)
 	if provider == targetcap.LiveKit {
 		for _, region := range resolved.DeploymentRegions {
 			if region != "" && !slices.Contains(targetcap.LiveKitDeploymentRegions, region) {
 				row.Errors = add(row.Errors, fmt.Sprintf("livekit deployment_region %q is unknown: choose one of %s; these are agent worker regions, not media region groups", region, strings.Join(targetcap.LiveKitDeploymentRegions, ", ")))
 			}
 		}
-	}
-	// Only a list of more than one is gated: one region works everywhere the
-	// field works, and the scalar form has since N18.
-	if len(resolved.DeploymentRegions) > 1 {
-		applyCapability(caps, targetcap.FieldDeploymentMultiRegion, provider, row)
 	}
 	// Absent and zero are the same declaration: no instance held ready, which is
 	// every platform's default. So only a stated pool is gated, and a negative
@@ -3074,9 +3068,6 @@ func applyResolvedCapability(capability targetcap.Capability, control targetcap.
 	applyCapabilityValue(capability, string(control), provider, row)
 }
 
-// validateRegions rejects the two authoring mistakes a region list can hold. A
-// duplicate is never deduplicated silently: two first deploys against one config
-// file name is a confusing thing to debug.
 // validateWebhookBaseURL checks the shape every target agrees on, whether or not
 // it reads the field. A literal base URL exists because SLNG's URL validator
 // requires a literal hostname; writing one that is not https, has no host, or
@@ -3101,21 +3092,6 @@ func validateWebhookBaseURL(name, base string) []string {
 		errors = add(errors, fmt.Sprintf("tool %q base_url carries userinfo: send credentials through auth: instead, which reaches the platform's own secret store", name))
 	case parsed.Fragment != "":
 		errors = add(errors, fmt.Sprintf("tool %q base_url carries a fragment, which never reaches a server: remove it", name))
-	}
-	return errors
-}
-
-func validateRegions(regions []string) []string {
-	var errors []string
-	seen := make(map[string]bool, len(regions))
-	for _, region := range regions {
-		switch {
-		case region == "":
-			errors = add(errors, "deployment_region has an empty entry")
-		case seen[region]:
-			errors = add(errors, fmt.Sprintf("deployment_region lists %q twice", region))
-		}
-		seen[region] = true
 	}
 	return errors
 }

@@ -84,10 +84,12 @@ Write these inside `targets.<name>`. The name selects this target with
   Use `slng` for this target. Omission is refused.
 </ParamField>
 
-<ParamField path="deployment_region" type="string or one-item list of strings" required>
-  Accepts `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`. Exactly one region is
-  required; omission, an unknown name, and multiple regions are refused.
-  The retired `any` value is refused. These are the same names speech and the router use.
+<ParamField path="deployment_region" type="string, or a list of region names and region-to-swaps entries" required>
+  Accepts `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`. At least one region is
+  required; omission and an unknown name are refused. The retired `any` value is
+  refused. These are the same names speech and the router use. Each listed
+  region is its own hosted agent, pushed under its own name. A list entry may
+  carry [model swaps](/reference/targets-yaml#a-region-may-run-its-own-models).
 </ParamField>
 
 <ParamField path="models" type="map of model definitions">
@@ -268,7 +270,6 @@ None is dropped quietly.
 | `interruption.minimum_words`, `interruption.ignore_phrases` | interruptions are on or off |
 | a missing greeting, or a model-written one | SLNG requires a greeting and speaks the string it is given |
 | `tracing:` | unmute instruments no process here, so it can install no exporter |
-| a second `deployment_region` | SLNG takes exactly one |
 | outbound calling, `on_voicemail` | a package declares no carrier state on SLNG; `unmute deploy` attaches an existing trunk after a push |
 | a warm human transfer | SLNG's curated transfer places a single blind transfer |
 

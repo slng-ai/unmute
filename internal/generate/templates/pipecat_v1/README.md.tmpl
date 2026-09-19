@@ -900,8 +900,15 @@ This agent deploys to `{{.DeploymentRegion}}`, from the manifest.{{if .SecretSet
 carries the same region, because a set is region-scoped and an agent can only
 read one in its own region.{{end}}
 
-A second region is a second agent, because agent names are globally unique
-across regions:
+{{if .MultiRegion}}This package names several regions, so each one compiled to its
+own directory under `build/`, with its own models and its own agent name. Deploy
+each sibling directory the same way you deploy this one. A caller reaches this
+region through the number that routes to **{{.AgentName}}**.
+
+To add a region outside the package, or one more agent by hand: a second region
+is a second agent, because agent names are globally unique across regions:
+{{else}}A second region is a second agent, because agent names are globally unique
+across regions:{{end}}
 
 ```sh
 {{if .SecretSet}}pipecat cloud secrets set {{.AgentName}}-<region>-secrets --file .env --region <region>

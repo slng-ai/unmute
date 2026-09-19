@@ -9,12 +9,38 @@ import (
 // Schema derives the authoring-package schema at runtime.
 func Schema() (*jsonschema.Schema, error) {
 	options := &jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
-		// Reflection sees Regions as a list and cannot express the scalar
-		// form N32 keeps valid, so the library's own TypeSchemas hook says
-		// it instead. Same hook internal/ir/schema.go uses for its unions.
+		// Reflection sees Regions as a list of structs and cannot express
+		// either the scalar form N32 keeps valid or the swap form, so the
+		// library's own TypeSchemas hook says both instead. Same hook
+		// internal/ir/schema.go uses for its unions.
+		//
+		// An item is a region name, or a one-key object from the region to its
+		// model swaps. The swaps are Pair, which has its own hook below.
 		reflect.TypeFor[Regions](): {OneOf: []*jsonschema.Schema{
 			{Type: "string"},
-			{Type: "array", Items: &jsonschema.Schema{Type: "string"}},
+			{Type: "array", Items: &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+				{Type: "string"},
+				{
+					Type:          "object",
+					MinProperties: ptr(1),
+					MaxProperties: ptr(1),
+					// The swap list's items are Pair's authored shape, written
+					// out rather than referenced: Pair reaches the derived
+					// schema through the TypeSchemas hook below, which inlines
+					// it, so there is no $defs entry to point at.
+					AdditionalProperties: &jsonschema.Schema{
+						Type: "array",
+						Items: &jsonschema.Schema{
+							Type:                 "object",
+							MinProperties:        ptr(1),
+							MaxProperties:        ptr(1),
+							AdditionalProperties: &jsonschema.Schema{Type: "string"},
+						},
+					},
+					Description: "One region with the model names it swaps, written `- eu-north:` followed by `- default_name: replacement_name` items. " +
+						"Both sides name an entry in this package's models.",
+				},
+			}}},
 		}},
 		// Announce is the same mismatch, for the same reason: one sentence as a
 		// scalar, or several alternatives as a list, one spoken per firing.

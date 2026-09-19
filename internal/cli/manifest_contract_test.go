@@ -11,6 +11,7 @@ import (
 
 	"github.com/slng-ai/unmute/internal/manifest"
 	"github.com/slng-ai/unmute/internal/scaffold"
+	"github.com/slng-ai/unmute/internal/spec"
 )
 
 // Both reader-facing examples must compile as a real package. A copied package
@@ -43,7 +44,7 @@ func TestDocumentedManifestCompilesWithoutComputerConfig(t *testing.T) {
 			data.SetTarget(scaffold.DefaultTarget)
 			data.Listen.Language, data.Speak.Language = "en", "en"
 			data.Listen.Params, data.Speak.Params = "world_part: eu-north", "world_part: eu-north"
-			data.DeploymentRegions = []string{"eu-central"}
+			data.DeploymentRegions = spec.Regions{{Name: "eu-central"}}
 			if _, err := scaffold.Write(dir, data); err != nil {
 				t.Fatal(err)
 			}

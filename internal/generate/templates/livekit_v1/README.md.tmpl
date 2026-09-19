@@ -634,15 +634,15 @@ ship, because the platform assigns both of its values.
 
 ```sh
 cp .env.example .env            # then fill in the values
-{{range .Deploys}}lk agent create{{if .Region}} --region {{.Region}}{{end}}{{if .ConfigFile}} --config {{.ConfigFile}}{{end}} --secrets-file .env
-{{end}}```
+lk agent create{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}} --secrets-file .env
+```
 
 Every later version is a redeploy, which needs that config file and the
 `Dockerfile` in this directory:
 
 ```sh
-{{range .Deploys}}lk agent deploy{{if .ConfigFile}} --config {{.ConfigFile}}{{end}}
-{{end}}```
+lk agent deploy
+```
 
 `create` is the first deploy and refuses to run when a config file of that name
 already exists. `deploy` ships a new version of an agent that already exists and
@@ -716,21 +716,22 @@ lk agent update-secrets --secrets-file .env --overwrite  # replaces the whole se
 ```
 
 #### Region
-{{if .Deploys}}{{if (index .Deploys 0).Region}}
+{{if .DeploymentRegion}}
 Region is chosen at the first deploy and is immutable. Moving one means creating
 the agent in the new region and deleting the old one; the platform will not move
 it in place.
-{{- if gt (len .DeploymentRegions) 1}} Each region is its own deployment with its
-own config file, and all of them keep the `{{.AgentName}}` dispatch name.
-When the nearest deployment is at capacity, LiveKit may send a caller to another
-region. For strict locality, use separate agent names and explicit dispatch.
-Create one single-region target instance for each name.
+{{- if .MultiRegion}} This package names several regions, so each one compiled to
+its own directory under `build/{{.Target}}/`, with its own models and its own
+agent name. This directory is **{{.DeploymentRegion}}** and deploys
+**{{.AgentName}}**; deploy each sibling directory separately. A caller reaches
+this region because a dispatch rule names this agent, not because the platform
+chose the nearest worker.
 {{- end}}
 {{- else}}
 No region is declared, so the first deploy asks which one to use. Set
 `deployment_region` on this target in `targets.yaml` to keep the deploy
 unattended. It is fixed at the first deploy and cannot be moved afterwards.
-{{- end}}{{end}}
+{{- end}}
 
 #### Check it, and recover it
 

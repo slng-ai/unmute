@@ -141,10 +141,13 @@ targets:
     deployment_region: eu-central
 ```
 
-<ParamField path="deployment_region" type="string">
-  One Pipecat Cloud worker region. `eu-central` is an example, not a requirement.
-  Unmute forwards the name without checking availability; choose from `regions list`.
-  Omission uses platform placement. Multiple regions on one Pipecat target are refused.
+<ParamField path="deployment_region" type="string, or a list of region names and region-to-swaps entries">
+  Pipecat Cloud worker regions, one or a duplicate-free list. `eu-central` is an
+  example, not a requirement. Unmute forwards the name without checking
+  availability; choose from `regions list`. Omission uses platform placement.
+  Several regions compile to one directory each, and each one deploys under its
+  own agent name, which is what Pipecat Cloud requires: an agent name is global
+  across regions.
 </ParamField>
 
 The secret set must use the same region. For the example above:

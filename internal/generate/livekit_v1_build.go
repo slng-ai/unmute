@@ -47,16 +47,19 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		Target:            tgt.Name,
 		Version:           tgt.Version,
 		DeploymentRegions: tgt.DeploymentRegions,
-		Deploys:           livekitDeploys(tgt.DeploymentRegions),
-		AgentName:         agent.DeployName(tgt),
-		EntryAgent:        agent.EntryAgent,
-		EntryClass:        pyName(agent.EntryAgent),
-		TurnVersion:       turnVersion,
-		Pace:              resolvePaceView(targetcap.LiveKit, tgt.Models.Turn, tgt.Models.Listen),
-		SemanticOff:       semanticEndpointingOff(tgt.Models.Turn),
-		Pins:              tgt.Pins,
-		Tracing:           agent.Tracing != nil,
-		TracingProvider:   tracingProviderOf(agent),
+		DeploymentRegion:  firstRegion(tgt.DeploymentRegions),
+		// Region is set only by the split, so it is the one thing that says
+		// this build has siblings.
+		MultiRegion:     tgt.Region != "",
+		AgentName:       agent.DeployName(tgt),
+		EntryAgent:      agent.EntryAgent,
+		EntryClass:      pyName(agent.EntryAgent),
+		TurnVersion:     turnVersion,
+		Pace:            resolvePaceView(targetcap.LiveKit, tgt.Models.Turn, tgt.Models.Listen),
+		SemanticOff:     semanticEndpointingOff(tgt.Models.Turn),
+		Pins:            tgt.Pins,
+		Tracing:         agent.Tracing != nil,
+		TracingProvider: tracingProviderOf(agent),
 	}
 	if tgt.Telephony != nil {
 		data.CarrierSteps = slices.Clone(tgt.Telephony.ManualSteps)

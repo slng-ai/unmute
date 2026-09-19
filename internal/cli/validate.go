@@ -139,7 +139,12 @@ func validationTargets(agent *ir.Agent, names []string) ([]ir.Target, error) {
 			return nil, fmt.Errorf("target instance %q is not declared", name)
 		}
 		seen[name] = true
-		resolved = append(resolved, value)
+		// One target per region, and this is the only place it happens. Every
+		// command reads its targets through here, so validate, compile, deploy
+		// and dev all see single-region targets and none of them has to know a
+		// target can name more than one. A target naming one region or none is
+		// returned unchanged.
+		resolved = append(resolved, value.PerRegion()...)
 	}
 	return resolved, nil
 }

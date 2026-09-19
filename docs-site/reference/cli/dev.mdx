@@ -17,6 +17,7 @@ Flags:
   -h, --help                 help for dev
       --no-open              do not open the browser automatically
       --port string          port for the local dev UI (default "8765")
+      --region string        deployment region to run, for a target that names several (required without a TTY)
       --source stringArray   seed a fact the call carries: --source from_number=+34600111222 (repeatable; the local stand-in for a caller ID, read by prefetch)
       --target string        target instance name (required without a TTY when multiple exist)
       --var stringArray      seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)
@@ -40,7 +41,16 @@ steps for the route you chose.
   The target instance name, exactly one. Not needed when the package declares a
   single target. With several targets, a terminal gets a picker and a non
   terminal gets an error listing the choices. Unlike `validate` and `compile`,
-  this flag is not repeatable.
+  this flag is not repeatable. A target that names several regions is several
+  builds, so pair this with `--region`.
+</ResponseField>
+
+<ResponseField name="--region" type="string">
+  Which region to run, for a target that names several in
+  `deployment_region`. Each region is its own build, with its own models, so
+  the region is part of choosing what to run. Not needed for a target that
+  names one region or none. With several, a terminal gets a picker and a non
+  terminal gets an error listing the choices.
 </ResponseField>
 
 <ResponseField name="--port" type="string" default="8765">

@@ -543,16 +543,6 @@ type livekitPrompt struct {
 	Body  string
 }
 
-// livekitDeploy is one row of the README's deploy commands: one per declared
-// region, or a single region-less row when the package declares none.
-type livekitDeploy struct {
-	Region string
-	// ConfigFile is empty for a single deployment, so its commands use the
-	// platform's default file name; several regions get the platform's own
-	// per-region naming (livekit.<region>.toml).
-	ConfigFile string
-}
-
 type livekitData struct {
 	// Project is the package's own name, and it labels the generated project:
 	// the pyproject name, the logger, the trace name, the README title, the
@@ -562,10 +552,19 @@ type livekitData struct {
 	// Target is the target instance name, and it is a label too, but a different
 	// one: it is what the author types after `--target`, so every emitted command
 	// naming a target reads this rather than Project or AgentName.
-	Target            string
-	Version           string
+	Target  string
+	Version string
+	// DeploymentRegions is the one region this build deploys to, kept as a
+	// list so the compile report says the same thing on both code drivers.
 	DeploymentRegions []string
-	Deploys           []livekitDeploy
+	// DeploymentRegion is that region on its own, for the README's commands.
+	// Empty when the package declares none and the platform asks at deploy.
+	DeploymentRegion string
+	// MultiRegion says this directory is one of several the target compiled to.
+	// The runbook reads differently then: there are sibling directories to
+	// deploy, and dispatch names this region's agent rather than the platform
+	// routing a caller to the nearest worker.
+	MultiRegion bool
 	// AgentName is the deployed worker's identity: it reaches worker
 	// registration and the SIP dispatch rule, and a dispatch rule matches a
 	// worker by it. Package name joined to target instance, so two packages in
@@ -753,62 +752,61 @@ type livekitData struct {
 // V15 agreement test enforces it, so a field can never be validate-green while
 // the emitter silently drops it (B1). Add a row here only with the code.
 var livekitEmittedFields = map[targetcap.Field]bool{
-	targetcap.FieldListenLocal:           true, // placement forwarded (code target runs it locally)
-	targetcap.FieldSpeakLocal:            true,
-	targetcap.FieldReasonLocal:           true,
-	targetcap.FieldTurnPlacement:         true, // advisory (Inference turn detection supplied)
-	targetcap.FieldSemanticEndpointing:   true, // advisory
-	targetcap.FieldEndpointingDelay:      true, // prewarmed VAD min_silence_duration
-	targetcap.FieldPace:                  true, // endpointing dict + prewarmed VAD floor
-	targetcap.FieldFallback:              true, // llm.FallbackAdapter (V4)
-	targetcap.FieldListenFallback:        true, // stt.FallbackAdapter (T16)
-	targetcap.FieldTask:                  true, // AgentTask; single delegate awaits it (T12)
-	targetcap.FieldTaskModel:             true, // AgentTask(llm=...) (T14, B1)
-	targetcap.FieldTaskNestedResult:      true, // dict finish arg
-	targetcap.FieldTaskGroup:             true, // beta.workflows TaskGroup (warn: experimental)
-	targetcap.FieldTaskGroupReturn:       true, // N13 snapshot/restore + task_results
-	targetcap.FieldTaskFinish:            true, // a step ends on a validated tool result (spec 010)
-	targetcap.FieldTaskOpening:           true, // opening: listen speaks a fixed line and waits
-	targetcap.FieldGroupSkip:             true, // a group step whose confirmation holds is skipped
-	targetcap.FieldContextIsolated:       true, // standalone-AgentTask sequence (T13)
-	targetcap.FieldTransferAnnounce:      true, // awaited outgoing reply before handoff (N44)
-	targetcap.FieldDelegateAnnounce:      true, // unawaited session.say() at the start of the method, matching the tool idiom
-	targetcap.FieldPrefetch:              true, // _prefetch between hydration and session.start (prefetch.go)
-	targetcap.FieldVariableConfirm:       true, // state._unconfirmed, which the emitted _refusal helper reads
-	targetcap.FieldContextNoToolCalls:    true, // copy(exclude_function_call=True)
-	targetcap.FieldTransferBriefing:      true, // WarmTransferTask instructions extra (N25)
-	targetcap.FieldGreetingUserFirst:     true,
-	targetcap.FieldGreetingModelWritten:  true,
-	targetcap.FieldGreetingAbsent:        true,
-	targetcap.FieldInterruptionMinWords:  true, // TurnHandlingOptions interruption min_words
-	targetcap.FieldInterruptionIgnore:    true, // generated stt_node filter mixin
-	targetcap.FieldInactivity:            true, // user_away_timeout + away handler
-	targetcap.FieldLiveModel:             true, // architecture: live — one duplex model as llm=, no stt/tts/turn/vad (specs/023)
-	targetcap.FieldRealtimeModel:         true, // architecture: realtime — one RealtimeModel as llm=, turn taking the package's to choose (specs/024)
-	targetcap.FieldMaxDuration:           true, // asyncio shutdown timer
-	targetcap.FieldThinkingAudio:         true, // BackgroundAudioPlayer thinking sound
-	targetcap.FieldToolOutput:            true, // tool returns response.json()
-	targetcap.FieldToolLocal:             true, // handler copied + wrapped
-	targetcap.FieldToolBuiltin:           true, // prebuilt end_call → beta EndCallTool
-	targetcap.FieldToolSlngHosted:        true, // mirrored module, or an httpx POST built from the mirror's config
-	targetcap.FieldToolKnowledge:         true, // knowledge.py + one @function_tool per lookup
-	targetcap.FieldToolKnowledgeTask:     true, // the same method on an AgentTask's tools surface
-	targetcap.FieldToolMCP:               true, // mcp.MCPToolset mounts on the tools surface (N40)
-	targetcap.FieldToolMCPTask:           true, // the same mount on an AgentTask's tools surface
-	targetcap.FieldToolAuth:              true, // _bearer Authorization header off token_env
-	targetcap.FieldToolInterruption:      true, // warn: runs to completion
-	targetcap.FieldToolAnnounce:          true, // unawaited session.say() before the request
-	targetcap.FieldToolAnnounceTask:      true, // task tools share method_tool, so the same line
-	targetcap.FieldOutbound:              true, // SIP dial-out off job metadata
-	targetcap.FieldVoicemail:             true, // AMD machine-vm branches (N6)
-	targetcap.FieldTracingLangfuse:       true,
-	targetcap.FieldTracingCoval:          true, // tracing.py exports to Coval off the SIP simulation ID
-	targetcap.FieldDeploymentMultiRegion: true, // one README deploy row per declared region, own config file
-	targetcap.FieldToolInject:            true, // hidden request values merged from userdata
-	targetcap.FieldWebhookPath:           true, // rendered, URL-encoded path on the base URL
-	targetcap.FieldTemplates:             true, // update_instructions/_render at session start
-	targetcap.FieldTypedState:            true, // a generated Pydantic class per shape, validated at each finish
-	targetcap.FieldShapedText:            true, // str plus an AfterValidator, never a schema keyword
+	targetcap.FieldListenLocal:          true, // placement forwarded (code target runs it locally)
+	targetcap.FieldSpeakLocal:           true,
+	targetcap.FieldReasonLocal:          true,
+	targetcap.FieldTurnPlacement:        true, // advisory (Inference turn detection supplied)
+	targetcap.FieldSemanticEndpointing:  true, // advisory
+	targetcap.FieldEndpointingDelay:     true, // prewarmed VAD min_silence_duration
+	targetcap.FieldPace:                 true, // endpointing dict + prewarmed VAD floor
+	targetcap.FieldFallback:             true, // llm.FallbackAdapter (V4)
+	targetcap.FieldListenFallback:       true, // stt.FallbackAdapter (T16)
+	targetcap.FieldTask:                 true, // AgentTask; single delegate awaits it (T12)
+	targetcap.FieldTaskModel:            true, // AgentTask(llm=...) (T14, B1)
+	targetcap.FieldTaskNestedResult:     true, // dict finish arg
+	targetcap.FieldTaskGroup:            true, // beta.workflows TaskGroup (warn: experimental)
+	targetcap.FieldTaskGroupReturn:      true, // N13 snapshot/restore + task_results
+	targetcap.FieldTaskFinish:           true, // a step ends on a validated tool result (spec 010)
+	targetcap.FieldTaskOpening:          true, // opening: listen speaks a fixed line and waits
+	targetcap.FieldGroupSkip:            true, // a group step whose confirmation holds is skipped
+	targetcap.FieldContextIsolated:      true, // standalone-AgentTask sequence (T13)
+	targetcap.FieldTransferAnnounce:     true, // awaited outgoing reply before handoff (N44)
+	targetcap.FieldDelegateAnnounce:     true, // unawaited session.say() at the start of the method, matching the tool idiom
+	targetcap.FieldPrefetch:             true, // _prefetch between hydration and session.start (prefetch.go)
+	targetcap.FieldVariableConfirm:      true, // state._unconfirmed, which the emitted _refusal helper reads
+	targetcap.FieldContextNoToolCalls:   true, // copy(exclude_function_call=True)
+	targetcap.FieldTransferBriefing:     true, // WarmTransferTask instructions extra (N25)
+	targetcap.FieldGreetingUserFirst:    true,
+	targetcap.FieldGreetingModelWritten: true,
+	targetcap.FieldGreetingAbsent:       true,
+	targetcap.FieldInterruptionMinWords: true, // TurnHandlingOptions interruption min_words
+	targetcap.FieldInterruptionIgnore:   true, // generated stt_node filter mixin
+	targetcap.FieldInactivity:           true, // user_away_timeout + away handler
+	targetcap.FieldLiveModel:            true, // architecture: live — one duplex model as llm=, no stt/tts/turn/vad (specs/023)
+	targetcap.FieldRealtimeModel:        true, // architecture: realtime — one RealtimeModel as llm=, turn taking the package's to choose (specs/024)
+	targetcap.FieldMaxDuration:          true, // asyncio shutdown timer
+	targetcap.FieldThinkingAudio:        true, // BackgroundAudioPlayer thinking sound
+	targetcap.FieldToolOutput:           true, // tool returns response.json()
+	targetcap.FieldToolLocal:            true, // handler copied + wrapped
+	targetcap.FieldToolBuiltin:          true, // prebuilt end_call → beta EndCallTool
+	targetcap.FieldToolSlngHosted:       true, // mirrored module, or an httpx POST built from the mirror's config
+	targetcap.FieldToolKnowledge:        true, // knowledge.py + one @function_tool per lookup
+	targetcap.FieldToolKnowledgeTask:    true, // the same method on an AgentTask's tools surface
+	targetcap.FieldToolMCP:              true, // mcp.MCPToolset mounts on the tools surface (N40)
+	targetcap.FieldToolMCPTask:          true, // the same mount on an AgentTask's tools surface
+	targetcap.FieldToolAuth:             true, // _bearer Authorization header off token_env
+	targetcap.FieldToolInterruption:     true, // warn: runs to completion
+	targetcap.FieldToolAnnounce:         true, // unawaited session.say() before the request
+	targetcap.FieldToolAnnounceTask:     true, // task tools share method_tool, so the same line
+	targetcap.FieldOutbound:             true, // SIP dial-out off job metadata
+	targetcap.FieldVoicemail:            true, // AMD machine-vm branches (N6)
+	targetcap.FieldTracingLangfuse:      true,
+	targetcap.FieldTracingCoval:         true, // tracing.py exports to Coval off the SIP simulation ID
+	targetcap.FieldToolInject:           true, // hidden request values merged from userdata
+	targetcap.FieldWebhookPath:          true, // rendered, URL-encoded path on the base URL
+	targetcap.FieldTemplates:            true, // update_instructions/_render at session start
+	targetcap.FieldTypedState:           true, // a generated Pydantic class per shape, validated at each finish
+	targetcap.FieldShapedText:           true, // str plus an AfterValidator, never a schema keyword
 
 }
 
@@ -890,26 +888,6 @@ func checkLiveKitPins(pins map[string]string) error {
 // checkLiveKitVersion rejects a framework version outside the templates' range.
 func checkLiveKitVersion(version string) error {
 	return targetcap.CheckVersion(targetcap.LiveKit, version)
-}
-
-// livekitDeploys turns declared regions into the README's deploy rows. No region
-// declared is still one row: the commands are the same, minus the flag, and the
-// README says the platform will ask which region to use. Several regions become
-// one deployment each, named the platform's way so `create` does not refuse on
-// the second one.
-func livekitDeploys(regions []string) []livekitDeploy {
-	if len(regions) == 0 {
-		return []livekitDeploy{{}}
-	}
-	deploys := make([]livekitDeploy, 0, len(regions))
-	for _, region := range regions {
-		row := livekitDeploy{Region: region}
-		if len(regions) > 1 {
-			row.ConfigFile = "livekit." + region + ".toml"
-		}
-		deploys = append(deploys, row)
-	}
-	return deploys
 }
 
 func renderLiveKitFiles(data livekitData) ([]File, error) {

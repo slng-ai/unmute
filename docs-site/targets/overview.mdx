@@ -83,10 +83,13 @@ One is required everywhere. The rest depend on the provider you chose.
   Refused on `slng`, which has no carrier state in a package.
 </ParamField>
 
-<ParamField path="deployment_region" type="string or list of strings">
-  LiveKit accepts `us-east`, `eu-central`, or `ap-south`, singly or in a duplicate-free list.
-  Pipecat forwards one non-empty platform region. Both use platform placement when omitted.
-  SLNG requires one of its [13 world parts](/targets/slng#targets-yaml); no default is inferred.
+<ParamField path="deployment_region" type="string, or a list of region names and region-to-swaps entries">
+  One region or a duplicate-free list, on every target. LiveKit accepts
+  `us-east`, `eu-central`, or `ap-south`. Pipecat forwards a non-empty platform
+  region. Both use platform placement when omitted. SLNG requires at least one
+  of its [13 world parts](/targets/slng#targets-yaml); no default is inferred.
+  Several regions compile to one build each. A list entry may carry
+  [model swaps](/reference/targets-yaml#a-region-may-run-its-own-models).
 </ParamField>
 
 <ParamField path="warm_instances" type="integer, zero or more" default="0">

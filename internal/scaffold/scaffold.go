@@ -154,7 +154,7 @@ type Data struct {
 	Connection        string
 	TargetVersion     string
 	SDKLanguage       string
-	DeploymentRegions []string
+	DeploymentRegions spec.Regions
 	// WarmInstances is the target's warm_instances. The console does not edit it,
 	// and it has to be here anyway: maintain rewrites targets.yaml from this
 	// struct, so a field absent here is a field deleted from the author's file.
@@ -634,6 +634,13 @@ func (d Data) withDefaults() Data {
 // UsesPhoneRoute reports whether anything in the package needs a connection: a
 // telephony channel, or a control that dials a person. Both are ways of using a
 // phone route, and a connection nothing uses is refused (spec FR-016).
+// OneBareRegion reports whether `deployment_region` writes back as the bare
+// scalar an author wrote. One region carrying model swaps needs the list form,
+// because the swaps hang off the region name.
+func (d Data) OneBareRegion() bool {
+	return len(d.DeploymentRegions) == 1 && len(d.DeploymentRegions[0].Swaps) == 0
+}
+
 func (d Data) UsesPhoneRoute() bool {
 	for _, channel := range d.AllChannels() {
 		if channel.Kind == "telephony" {
