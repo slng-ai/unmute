@@ -5,7 +5,7 @@ paths:
 
 # Writing a docs-site page
 
-These are gated in `internal/docsite/`. The full table is [`docs/GATES.md`](../../docs/GATES.md).
+These are gated in `internal/docsite/`. When one fails, read the test that failed.
 
 - **Plain words, short sentences.** No prose sentence runs past 40 words; the
   site's mean is 16. A sentence that trips the gate is nearly always two.

@@ -143,8 +143,6 @@ agreement test MUST fail on drift.
 - `internal/target` owns capabilities, route support, provider catalogue
   entries, verification dates, and documentation URLs.
 - `internal/cli` owns commands, flags, usage, and exit behavior.
-- `docs/ARCHITECTURE.md` owns system boundaries, compiler flow, runtime
-  topology, and repository orientation.
 - `docs-site/` is the only public user-documentation tree.
 - `CLAUDE.md` owns contributor rules and required change surfaces.
 - `internal/skill/assets/` is a shipped offline product surface for coding

@@ -40,10 +40,9 @@ mint a11y                                               # contrast and media alt
 5. **Pages state what the product does and what the CLI prints.** Notes about
    how an author checked the documentation belong in the pull request, not the
    user guide.
-6. **This is the only public documentation tree.** `docs/ARCHITECTURE.md`
-   explains system boundaries for contributors; it is not a second user guide.
-   Public package, target, telephony, transfer, deployment, and CLI guidance
-   belongs here.
+6. **This is the only documentation tree.** There is no contributor guide
+   beside it; the code is the design document. Public package, target,
+   telephony, transfer, deployment, and CLI guidance belongs here.
 7. **A page ships only if the code has the concept.** A tools page exists because
    the `Tool` struct has that execution block; the Models role pages exist because
    the catalog has those roles. If the code lacks a concept, do not document it.

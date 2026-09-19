@@ -1,8 +1,8 @@
 """Prove a compiled package's knowledge retrieval works, with nobody on the phone.
 
-This is the knowledge-base equivalent of `replay_router_scopes.py`: SELF_VERIFY's
-first rule is to reproduce a defect in the layer it lives in, and retrieval is two
-layers below a phone call. If a live call gives a vague answer, run this first. It
+This is the knowledge-base equivalent of `replay_router_scopes.py`. The rule is
+to reproduce a defect in the layer it lives in, and retrieval is two layers
+below a phone call. If a live call gives a vague answer, run this first. It
 imports the emitted `knowledge.py` from a build directory, builds the indexes
 exactly as the agent does at startup, and asks questions straight at `look_up`.
 
@@ -14,7 +14,7 @@ What it can prove:
   - a question the documents do not answer retrieves nothing convincing
 
 What it cannot prove: that the model chose to call the tool, or that it read the
-result out correctly. Those need the live call in docs/HARNESS_TEST.md.
+result out correctly. Those need a live call.
 
 Run it inside the built image, which is the environment that ships:
 

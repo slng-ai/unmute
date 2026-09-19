@@ -1415,16 +1415,14 @@ func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tracked specs and docs: %v", err)
 	}
-	// The allow-list is the point: a new file under docs/ is a deliberate
-	// decision, not somewhere to park notes. Four earn their place. ARCHITECTURE
-	// describes the system, GATES is every rule and the check that fails it,
-	// which lives here rather than in CLAUDE.md because it is a lookup and
-	// CLAUDE.md is read in full every session, and the other two are the two
-	// ways behaviour gets checked: SELF_VERIFY without a caller, HARNESS_TEST
-	// with one.
-	want := "docs/ARCHITECTURE.md\ndocs/GATES.md\ndocs/HARNESS_TEST.md\ndocs/SELF_VERIFY.md"
-	if got := strings.TrimSpace(string(tracked)); got != want {
-		t.Errorf("tracked specs and docs = %q, want the focused allow-list %q", got, want)
+	// There is no docs/ tree. Four files lived here and each one restated
+	// something the code, the tests or CLAUDE.md already said, so they rotted
+	// against it instead of holding it. The code is the design document, the
+	// failing test is the rule, and the public guide is docs-site/. A file
+	// reintroduced here fails this, which is the point: it is a deliberate
+	// decision, not somewhere to park notes.
+	if got := strings.TrimSpace(string(tracked)); got != "" {
+		t.Errorf("tracked specs and docs = %q, want none: the code and docs-site/ own this", got)
 	}
 	if err := exec.Command("git", "-C", repo, "check-ignore", "-q", "--", "specs/.unmute-ignore-probe/spec.md").Run(); err != nil {
 		t.Errorf("specs/ is not ignored: %v", err)
@@ -1684,7 +1682,6 @@ func TestExampleAndDocLinksIntoExamplesResolve(t *testing.T) {
 	}{
 		{filepath.Join("..", "..", "examples"), ".md", false},
 		{filepath.Join("..", voiceAgentTestsDir), ".md", false},
-		{filepath.Join("..", "..", "docs"), ".md", true},
 		{filepath.Join("..", "..", "docs-site"), ".mdx", true},
 	} {
 		err := filepath.WalkDir(source.root, func(path string, entry fs.DirEntry, err error) error {

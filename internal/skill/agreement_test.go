@@ -241,7 +241,6 @@ func TestTracingPrivacyWarningStaysExplicit(t *testing.T) {
 	for name, content := range map[string]string{
 		"references/package.md":                                 bundleFile(t, "references/package.md"),
 		"docs-site/reference/agent-yaml.mdx":                    trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
-		"docs/HARNESS_TEST.md":                                  trackedFile(t, "docs/HARNESS_TEST.md"),
 		"docs-site/tracing/langfuse.mdx":                        trackedFile(t, "docs-site/tracing/langfuse.mdx"),
 		"internal/generate/templates/livekit_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/livekit_v1/README.md.tmpl"),
 		"internal/generate/templates/pipecat_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
@@ -1319,11 +1318,14 @@ func authorFacingModelSurfaces(t *testing.T) map[string]string {
 	}
 	walk := func(root string, ext ...string) {
 		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err // entry is nil here, so this check comes first.
+			}
 			if entry.IsDir() && root == repo("examples") && entry.Name() == "build" {
 				return fs.SkipDir
 			}
-			if err != nil || entry.IsDir() || !slices.Contains(ext, filepath.Ext(path)) {
-				return err
+			if entry.IsDir() || !slices.Contains(ext, filepath.Ext(path)) {
+				return nil
 			}
 			read(path)
 			return nil
@@ -1334,7 +1336,6 @@ func authorFacingModelSurfaces(t *testing.T) map[string]string {
 	}
 	walk(repo("examples"), ".yaml", ".md")
 	walk(repo("docs-site"), ".mdx")
-	walk(repo("docs"), ".md")
 	read(repo("README.md"))
 	read(repo("internal", "scaffold", "scaffold.go"))
 	for _, name := range []string{"references/models.md", "references/package.md"} {

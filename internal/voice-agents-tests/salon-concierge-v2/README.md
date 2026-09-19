@@ -224,7 +224,5 @@ Read a call back afterwards with
 [`scripts/read_langfuse_trace.py`](../../../scripts/read_langfuse_trace.py),
 which needs the Langfuse values above.
 
-For a longer scripted conversation, see the
-[end-to-end harness](../../../docs/HARNESS_TEST.md). The values
-`context.history` takes and what each one sends the model are in
+The values `context.history` takes and what each one sends the model are in
 [the tasks page](../../../docs-site/build/orchestration/tasks.mdx).
