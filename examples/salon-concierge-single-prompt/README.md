@@ -143,5 +143,4 @@ MANAGER_PHONE_NUMBER=<E.164 number>
 
 - [`salon-concierge`](../salon-concierge/) - the same salon, optimized
 - [`examples/README.md`](../README.md) - every shipped example
-- [end-to-end harness](../../docs/HARNESS_TEST.md) - a longer scripted conversation
 - [SLNG gateway](../../docs-site/optimization/regional-infrastructure.mdx) - pick another world part

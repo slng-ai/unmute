@@ -2,9 +2,6 @@
 
 Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. `docs/ARCHITECTURE.md` explains the design and points at the load-bearing code. Go structs and `internal/target` own machine behavior; `docs-site/` is the public user guide. Local feature work lives in ignored `specs/<nnn>-<slug>/` directories.
 
-## Voice contracts
-While writing documents or speaking with the user, always use a simple language and simple wording. 
-
 ## The one rule
 Unmute is written in Go, so you maintain **Go code**, but you also write some Python code snippets and examples, in Python. Checked-in Python has to pass `ruff check .` (CI enforces it). Run `ty check` too when you have the provider SDKs installed, otherwise it only reports imports it cannot resolve.
 
@@ -80,8 +77,7 @@ broken gate can be hundreds.
 - L1 unit (pure logic, table-driven) · L2 in-process command tests (real tree, capture output) · L3 golden files (`-update` to regenerate).
 - L4 smoke (`make smoke`, build tag `smoke`) proves emitted Python is valid — opt-in, needs Python, never in the default suite or PR gate.
 - Telephony is verified on a **deployed** agent, against a real carrier. There is no local phone loop, and no test level stands in for one: `unmute dev` is the browser loop and it stops where the phone leg starts.
-- [`docs/HARNESS_TEST.md`](docs/HARNESS_TEST.md) is the reusable prompt for real end-to-end conversations across the examples.
-- [`docs/SELF_VERIFY.md`](docs/SELF_VERIFY.md) is how to check runtime behaviour **without** a person on the phone, and it is what to do before asking for a live call. Its first rule: find the layer the defect lives in and reproduce it there. A provider defect is usually one HTTP request, so it needs no audio, no tunnel and no simulated caller — [`scripts/replay_router_scopes.py`](scripts/replay_router_scopes.py) is the worked example. A prompt or seam defect lives in the model's turns, and [`scripts/text_run_livekit.py`](scripts/text_run_livekit.py) drives the emitted LiveKit agent through a scripted text conversation with the real model and real local tools, no audio, so read three of those before asking for a call. Coval evaluates conversations you push to it, so verification never waits on inbound reachability.
+- Before asking for a live call, find the layer the defect lives in and reproduce it there. A provider defect is usually one HTTP request, so it needs no audio, no tunnel and no simulated caller: [`scripts/replay_router_scopes.py`](scripts/replay_router_scopes.py) is the worked example. A prompt or seam defect lives in the model's turns, and [`scripts/text_run_livekit.py`](scripts/text_run_livekit.py) drives the emitted LiveKit agent through a scripted text conversation with the real model and real local tools, no audio.
 - After somebody runs `unmute dev` and talks to the agent, read the call back yourself with [`scripts/read_langfuse_trace.py`](scripts/read_langfuse_trace.py): transcript, tool calls and per-span latency, newest trace by default. Needs the package on `tracing.provider: langfuse`, which `examples/salon-concierge` is. Never describe a call from what you were told about it when the spans are one command away. A call is one trace and one session, with a `turn` span per exchange inside it. Add `--check-v4` after any change to tracing: it fails the run when the call splits into several traces, when its root carries no conversation, when a turn recorded the caller and not the reply, when a turn sits in the trace but outside its root, or when an observation is missing the session ID or trace name, none of which is visible in the Langfuse UI.
 
 ## Commits and pull requests (advisory)
@@ -94,8 +90,7 @@ release note reads. A pull request body is two parts and nothing else:
   ask about.
 
 The reasoning that filled a body belongs where a reader finds it later: in the
-code comment beside the thing it explains, in the gate table above, or in the
-commit message. A body that lists every gate is a body nobody reads.
+code comment beside the thing it explains, or in the commit message. A body that lists every gate is a body nobody reads.
 
 **No tool attribution, no co-author trailer and no session link**, in a commit
 message or a pull request. Who wrote it is the author field's job.
@@ -108,8 +103,8 @@ starts failing gets the **code** fixed, not the gate loosened, and a disabled
 check carries its reason inline, the way `.golangci.yml` explains every
 `errcheck` exclusion and every `forbidigo` pattern.
 
-Every gate and what fails it is [`docs/GATES.md`](docs/GATES.md), 242 rows.
-Read it before adding a rule, and when one fails.
+There is no written list of the gates. The tests are the list: when one fails,
+read the test that failed.
 
 ## Four places document emitted behaviour
 The generated `build/<target>/README.md` is the runbook, and almost nobody reads it before they have already read the example's page or the public docs. So **a change to emitted behaviour updates every surface it reaches in the same commit**:
@@ -157,5 +152,5 @@ inherently sequential work is faster done directly.
 ## Skills
 - **ponytail** shapes what gets built: the laziest thing that works, stdlib before a dependency, deletion before addition.
 - **find-docs** for any library, framework, SDK or CLI question, so an answer comes from current docs rather than model memory.
-- **The Coval skills** for verifying runtime behaviour: `coval-resources` for the resource model, `configure-metrics` for writing a metric, `build-test-suite` and `distill-test-set` for scenarios, `setup-agent` + `launch-run`/`watch-run`/`get-results` (or `quick-eval`) for the dial-in path, `diagnose` and `debug-traces` for reading a failure. The `coval` CLI those last ones assume is not installed here, so the REST calls in [`docs/SELF_VERIFY.md`](docs/SELF_VERIFY.md) are the working path and the skills are the reference for what to call. Upstream: <https://github.com/coval-ai/coval-external-skills>.
+- **The Coval skills** for verifying runtime behaviour: `coval-resources` for the resource model, `configure-metrics` for writing a metric, `build-test-suite` and `distill-test-set` for scenarios, `setup-agent` + `launch-run`/`watch-run`/`get-results` (or `quick-eval`) for the dial-in path, `diagnose` and `debug-traces` for reading a failure. The `coval` CLI those last ones assume is not installed here, so call the REST API directly and read the skills as the reference for what to call. Upstream: <https://github.com/coval-ai/coval-external-skills>.
 - **langfuse**, **livekit-agents**, **voice-agent-prompting** and **python-dev** are the rest of the kept set. Everything else is disabled on purpose: the skill listing has a character budget, and a long one drops descriptions until the skills you do use stop matching.

@@ -1415,14 +1415,13 @@ func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tracked specs and docs: %v", err)
 	}
-	// The allow-list is the point: a new file under docs/ is a deliberate
-	// decision, not somewhere to park notes. Four earn their place. ARCHITECTURE
-	// describes the system, GATES is every rule and the check that fails it,
-	// which lives here rather than in CLAUDE.md because it is a lookup and
-	// CLAUDE.md is read in full every session, and the other two are the two
-	// ways behaviour gets checked: SELF_VERIFY without a caller, HARNESS_TEST
-	// with one.
-	want := "docs/ARCHITECTURE.md\ndocs/GATES.md\ndocs/HARNESS_TEST.md\ndocs/SELF_VERIFY.md"
+	// One file earns a place under docs/, and the allow-list is the point: a
+	// second one is a deliberate decision, not somewhere to park notes.
+	// ARCHITECTURE describes the system. GATES, HARNESS_TEST and SELF_VERIFY
+	// were deleted because each restated something the code, the tests or
+	// CLAUDE.md already said, so they rotted against it instead of holding it.
+	// A rule is the test that fails, and the public guide is docs-site/.
+	want := "docs/ARCHITECTURE.md"
 	if got := strings.TrimSpace(string(tracked)); got != want {
 		t.Errorf("tracked specs and docs = %q, want the focused allow-list %q", got, want)
 	}

@@ -58,3 +58,6 @@ bin/
 *.egg-info/
 node_modules/
 *.log
+
+# Personal Claude Code settings: permissions and output style are per person.
+.claude/settings.local.json

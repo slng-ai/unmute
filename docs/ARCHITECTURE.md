@@ -71,8 +71,8 @@ package differently.
 4. `internal/generate.Generate` validates again and dispatches to one target
    driver, which writes the native project.
 
-`internal/target` is the shared rulebook. Validation, the console, and the
-generators must not keep separate capability tables.
+`internal/target` is the shared rulebook. Validation and the generators must
+not keep separate capability tables.
 
 `internal/manifest` owns the computer's saved contract library and default.
 Only creation reads that library: it copies the selected manifest into the
@@ -257,7 +257,6 @@ Start with these files rather than scanning the whole tree.
 | LiveKit driver | `internal/generate/livekit_v1*.go`, `internal/generate/templates/livekit_v1/` |
 | Pipecat driver | `internal/generate/pipecat_v1*.go`, `internal/generate/templates/pipecat_v1/` |
 | Dev conversation and measurement contract | `internal/devmetrics/`, each driver's `dev_metrics.py.tmpl` |
-| Interactive console and styles | `internal/tui/`, `internal/style/` |
 | Package scaffolding | `internal/scaffold/` |
 | Shipped coding-agent skill | `internal/skill/assets/` |
 | Public packages | `examples/` |
@@ -281,10 +280,9 @@ under `docs-site/models/`.
 code owners, including schemas, capabilities, provider lists, docs-site CLI
 help, the shipped skill, and repository layout.
 
-For real conversations, use the
-[end-to-end example harness prompt](HARNESS_TEST.md). It covers the part
-offline and SDK smoke tests cannot: a human speaks to the generated agent and
-checks the expected tool and handoff behavior.
+Offline and SDK smoke tests stop short of one thing: a human speaking to the
+generated agent and checking the tool and handoff behavior that follows. That
+is a live call against a deployed agent, and no test level stands in for it.
 
 ## Architectural invariants
 

@@ -457,7 +457,5 @@ cat examples/salon-concierge/build/pipecat/README.md
 
 ## Where to go next
 
-- For a longer scripted conversation, see the [end-to-end harness](../../docs/HARNESS_TEST.md).
 - For the same salon with the structural features taken back out, see [`salon-concierge-single-prompt`](../salon-concierge-single-prompt/).
-- To check runtime behaviour without a person on the phone, see [self verification](../../docs/SELF_VERIFY.md).
 - For the other shipped packages, see the [examples index](../README.md).

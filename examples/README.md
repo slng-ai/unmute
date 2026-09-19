@@ -21,9 +21,6 @@ something: one agent, browser audio, one built-in tool, no phone number and no
 third-party account. [Your first
 agent](../docs-site/build/your-first-agent.mdx) walks through what it contains.
 
-Use the [end-to-end example harness](../docs/HARNESS_TEST.md) when a change needs a real
-provider request and a human conversation, not only the automated checks.
-
 | Package | Structure | Responsibility split |
 |---|---|---|
 | [`customer-intake`](customer-intake/) | One agent, three tasks, one local tool, one declared shape, browser audio on both code targets | **The typed-state example.** Take a caller's number, name, email address, enquiry and callback time, save each under its own type, and open a customer record. Every declared type appears once. The tool takes one argument from the model and reads four values straight out of state through `inject:`, so the model cannot retype a number it already heard. The caller's number carries `confirm:`, so the tool refuses itself until the caller has agreed the number is theirs. No phone route and no second agent. It traces every call, so it needs the three `LANGFUSE_*` names as well as the two model keys. |
