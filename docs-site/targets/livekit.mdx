@@ -69,10 +69,13 @@ instance name, used by `--target` and the `build/<name>/` output folder.
   Omit for a browser-only package; a connection without phone use is refused.
 </ParamField>
 
-<ParamField path="deployment_region" type="string or list of strings">
+<ParamField path="deployment_region" type="string, or a list of region names and region-to-swaps entries">
   Accepts `us-east`, `eu-central`, or `ap-south`, as one region or a list with
   no empty or duplicate entries. Unknown names are refused at validation. If omitted, no region is passed and platform placement
   applies. The region is chosen at first create and cannot be changed by a redeploy.
+  Each listed region compiles to its own build and deploys under its own agent
+  name. A list entry may carry
+  [model swaps](/reference/targets-yaml#a-region-may-run-its-own-models).
   See [deployment regions](/deploy/livekit-cloud#region-is-chosen-once).
 </ParamField>
 

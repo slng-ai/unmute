@@ -113,8 +113,22 @@ func TestSlngRefusesProjectOnlySettings(t *testing.T) {
 	}
 }
 
-// SLNG checks its required region against the hosted platform's values.
-// The shared validateRegions check also catches empty and duplicate entries.
+// Two hosted regions on one slng target validate: each is its own deployment.
+func TestSlngAcceptsSeveralHostedRegions(t *testing.T) {
+	agent := slngAgent(t)
+	target := targetFor(agent, ProviderSlng)
+	target.DeploymentRegions = []string{"eu-north", "us-east"}
+	report, err := Validate(agent, []Target{target}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("two hosted regions were refused: %v (%#v)", err, reportFor(report, ProviderSlng).Errors)
+	}
+}
+
+// SLNG checks its required region against the hosted platform's values, every
+// entry rather than the first: a package that wrote two wrong regions hears
+// about both. The shared validateRegions check catches empty and duplicate
+// entries. Several regions are accepted, because each one is its own hosted
+// agent with its own name.
 func TestSlngRefusesRegionsOutsideTheFour(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -123,7 +137,7 @@ func TestSlngRefusesRegionsOutsideTheFour(t *testing.T) {
 	}{
 		{"unknown", []string{"any"}, `does not deploy to region "any"`},
 		{"absent", nil, "requires a deployment_region"},
-		{"two", []string{"us-east", "eu-central"}, "takes exactly one deployment region"},
+		{"two, one not hosted", []string{"us-east", "eu-central"}, `does not deploy to region "eu-central"`},
 		{"two and one wrong", []string{"us-east", "atlantis"}, `does not deploy to region "atlantis"`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -138,7 +152,7 @@ func TestSlngRefusesRegionsOutsideTheFour(t *testing.T) {
 			wantSlngError(t, row, test.want)
 			// Every region message lists the accepted values, because the useful
 			// half of "that one is wrong" is which ones are right.
-			if test.name != "two" && !strings.Contains(strings.Join(row.Errors, "\n"), "eu-north") {
+			if !strings.Contains(strings.Join(row.Errors, "\n"), "eu-north") {
 				t.Errorf("the message does not list the accepted regions: %#v", row.Errors)
 			}
 		})

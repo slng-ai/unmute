@@ -263,7 +263,7 @@ func guideManifestTarget(runner *fieldRunner, data *scaffold.Data) error {
 				if err != nil {
 					return err
 				}
-				data.DeploymentRegions = []string{region}
+				data.DeploymentRegions = spec.Regions{{Name: region}}
 			}
 		}
 	}

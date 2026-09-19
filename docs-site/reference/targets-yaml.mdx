@@ -55,11 +55,13 @@ targets:
   telephony.
 </ParamField>
 
-<ParamField path="targets.<name>.deployment_region" type="string or list of strings">
-  Deployment regions; more than one is LiveKit only. LiveKit accepts `us-east`, `eu-central`, or `ap-south`,
-  with no duplicates. Pipecat forwards one non-empty platform region name.
-  Both use platform placement when omitted. SLNG requires exactly one of its
-  [13 world parts](/targets/slng#targets-yaml); omission and `any` are refused. See the target pages for each contract.
+<ParamField path="targets.<name>.deployment_region" type="string, or a list of region names and region-to-swaps entries">
+  Where this target deploys. One region or a duplicate-free list, on every
+  provider. LiveKit accepts `us-east`, `eu-central`, or `ap-south`. Pipecat
+  forwards a non-empty platform region name. Both use platform placement when
+  omitted. SLNG requires at least one of its
+  [13 world parts](/targets/slng#targets-yaml); omission and `any` are refused.
+  A list entry may carry model swaps, so that region runs its own models.
 </ParamField>
 
 <ParamField path="targets.<name>.warm_instances" type="integer">
@@ -106,10 +108,40 @@ exactly `pipecat-ai` 1.10.0. Any other version is refused.
 
 ## Deployment regions
 
-`deployment_region` accepts one region or a list. Pipecat accepts exactly one;
-deploying there again means another target and agent name. LiveKit emits one
-`lk agent create --region` command per declared region. A LiveKit region is
-chosen when the agent is created and cannot be changed in place.
+`deployment_region` accepts one region or a duplicate-free list, on every
+provider. One region compiles to `build/<target>/` and deploys as
+`<name>-<target>`, exactly as before.
+
+Several regions compile to `build/<target>/<region>/`, one complete build each,
+deployed as `<name>-<target>-<region>`. `unmute compile` writes them all and
+`unmute deploy` pushes them all. `unmute dev --region <region>` runs one
+locally. A duplicate region and an empty entry are refused.
+
+### A region may run its own models
+
+Each region can read a different model entry under the same name. Declare the
+regional model in `agent.yaml` beside the one it replaces, then name the pair in
+the region:
+
+```yaml targets.yaml
+targets:
+  slng:
+    provider: slng
+    deployment_region:
+      - us-west
+      - eu-north:
+          - transcriber: transcriber_fr
+          - voice: voice_fr
+```
+
+`transcriber` and `voice` are the names the agents already use. In `us-west`
+they read the entries as written. In `eu-north` they read `transcriber_fr` and
+`voice_fr`. The agent, the prompt and every agent definition are the same in
+both.
+
+Both sides of a swap name an entry in this package's `models:`, and both must be
+the same kind. Unmute refuses a name it cannot find, a swap across kinds, a swap
+of a name no agent uses, and a `live` entry on either side.
 
 LiveKit accepts `us-east`, `eu-central`, or `ap-south` and refuses other names.
 Pipecat forwards its platform's region name as written. A

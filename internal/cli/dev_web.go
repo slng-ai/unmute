@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -60,19 +61,18 @@ func devDispatchName(agent *ir.Agent, resolved ir.Target) string {
 // standardized WebRTC web UI. Pipecat runs on the host because a browser cannot
 // reach the ephemeral UDP ICE candidates gathered inside Docker Desktop;
 // LiveKit still needs its local server stack in Compose.
-func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noOpen, verbose bool) error {
+// The agent and the target arrive already resolved, from selectDevTarget. A
+// target instance name no longer identifies one build: a target that names
+// several regions is several builds with different models, so re-selecting by
+// name here would have run whichever came first.
+func runDevWeb(cmd *cobra.Command, root string, agent *ir.Agent, resolved ir.Target, uiPort, botPort string, noOpen, verbose bool) error {
 	out := cmd.OutOrStdout()
 	printHeader(out, "dev "+displayDir(root))
-	agent, targets, err := loadPackage(root, []string{targetName})
-	if err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
-	}
-	resolved := targets[0]
 	switch resolved.Provider {
 	case ir.ProviderPipecat, ir.ProviderLiveKit:
 		// code targets: run the deployable container below.
 	default:
-		return fmt.Errorf("dev %s: target %q uses %s; its dev runner is not implemented", root, resolved.Name, resolved.Provider)
+		return fmt.Errorf("dev %s: target %q uses %s; its dev runner is not implemented", root, resolved.Label(), resolved.Provider)
 	}
 
 	artifact, err := generate.Generate(agent, resolved, target.Default())
@@ -82,7 +82,7 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 	for _, warning := range artifact.Notes.Warnings {
 		warnf(cmd.ErrOrStderr(), "%s\n", warning)
 	}
-	outDir := filepath.Join(root, "build", resolved.Name)
+	outDir := resolved.BuildDir(root)
 	if err := writeArtifactFiles(cmd.ErrOrStderr(), outDir, artifact.Files); err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
 	}
@@ -121,7 +121,7 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 		provider:    resolved.Provider,
 		agentName:   devDispatchName(agent, resolved),
 		composeFile: composeFile,
-		project:     composeProjectName(root, resolved.Name),
+		project:     composeProjectName(root, strings.Trim(resolved.Name+"-"+resolved.Region, "-")),
 		env:         childEnv,
 		logPath:     filepath.Join(outDir, "dev.log"),
 		uiPort:      uiPort,

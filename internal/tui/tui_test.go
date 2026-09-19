@@ -1871,7 +1871,7 @@ func TestMaintainKeepsEveryDeploymentRegion(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "agent")
 	data := scaffold.Data{Name: "agent"}
 	data.SetTarget("livekit")
-	data.DeploymentRegions = []string{"us-east", "eu-central"}
+	data.DeploymentRegions = spec.Regions{{Name: "us-east"}, {Name: "eu-central"}}
 	if _, err := scaffold.Write(root, data); err != nil {
 		t.Fatal(err)
 	}
@@ -1879,7 +1879,7 @@ func TestMaintainKeepsEveryDeploymentRegion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(agent.data.DeploymentRegions, ","); got != "us-east,eu-central" {
+	if got := strings.Join(agent.data.DeploymentRegions.Names(), ","); got != "us-east,eu-central" {
 		t.Fatalf("regions after load = %q, want both in order", got)
 	}
 	agent.data.Instructions += "\n\nBe brief."
@@ -1897,8 +1897,39 @@ func TestMaintainKeepsEveryDeploymentRegion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("saved package no longer loads: %v", err)
 	}
-	if got := strings.Join(reloaded.data.DeploymentRegions, ","); got != "us-east,eu-central" {
+	if got := strings.Join(reloaded.data.DeploymentRegions.Names(), ","); got != "us-east,eu-central" {
 		t.Fatalf("regions after save = %q, want both in order", got)
+	}
+}
+
+// The console edits region names, so a save must keep the model swaps it never
+// showed. Without this, opening the advanced form to add a region would delete
+// every other region's swaps from the author's file.
+func TestMaintainKeepsRegionModelSwaps(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget("livekit")
+	data.DeploymentRegions = spec.Regions{
+		{Name: "us-east"},
+		{Name: "eu-central", Swaps: []spec.Pair{{Key: "transcriber", Value: "transcriber_fr"}}},
+	}
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(filepath.Join(root, "targets.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), "- eu-central:\n          - transcriber: transcriber_fr") {
+		t.Fatalf("the scaffold did not write the region's swaps:\n%s", written)
+	}
+	// Editing the names must not touch the swaps of a region that survives.
+	kept := data.DeploymentRegions.Rename([]string{"eu-central", "ap-south"})
+	if len(kept) != 2 || len(kept[0].Swaps) != 1 || kept[0].Swaps[0].Value != "transcriber_fr" {
+		t.Fatalf("renaming dropped the surviving region's swaps: %+v", kept)
+	}
+	if len(kept[1].Swaps) != 0 {
+		t.Fatalf("a region added by name arrived with swaps: %+v", kept[1])
 	}
 }
 
@@ -1951,7 +1982,7 @@ func TestAdvancedTargetFormSplitsRegions(t *testing.T) { // N32
 	if err := editAdvancedTarget(runner, &data); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(data.DeploymentRegions, ","); got != "us-east,eu-central" {
+	if got := strings.Join(data.DeploymentRegions.Names(), ","); got != "us-east,eu-central" {
 		t.Fatalf("regions = %q, want both split and trimmed", got)
 	}
 }

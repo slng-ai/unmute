@@ -25,7 +25,7 @@ environment change.
 
 ## LiveKit deployment regions
 
-<ParamField path="deployment_region" type="string or list of strings">
+<ParamField path="deployment_region" type="string, or a list of region names and region-to-swaps entries">
   LiveKit accepts `us-east` (Virginia), `eu-central` (Frankfurt), or `ap-south`
   (Mumbai), as one region or a duplicate-free list. Omit to let the platform
   choose placement. Unknown names, including `eu`, are refused. These are
@@ -52,9 +52,11 @@ Authenticate with `lk cloud auth` and select the project with
    `eu-central` with the region declared in your target. The `.env` path is
    relative to this build directory, not the package root.
 
-For several declared LiveKit regions, use the generated README's create command
-and separate `--config` filename for each region. A later deploy uses
-`lk agent deploy` from the same build directory, with the matching config.
+Several declared regions compile to one directory each,
+`build/livekit/<region>/`, and each holds a complete project with its own agent
+name. Run the steps above from inside the directory for that region. A later
+deploy is `lk agent deploy` from the same directory; the platform writes a
+plain `livekit.toml` there on the first create.
 
 Before recompiling, return to the package root with `cd ../..`.
 `unmute compile` reads the source package, not `build/livekit/`.

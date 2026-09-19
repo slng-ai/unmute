@@ -240,12 +240,12 @@ func TestSelectDevTargetAutoSelectsSoleInstance(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetIn(strings.NewReader(""))
 	cmd.SetOut(&bytes.Buffer{})
-	name, err := selectDevTarget(cmd, dir, "")
+	_, selected, err := selectDevTarget(cmd, dir, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name != "livekit" {
-		t.Fatalf("selected target = %q", name)
+	if selected.Name != "livekit" {
+		t.Fatalf("selected target = %q", selected.Name)
 	}
 }
 
@@ -254,8 +254,8 @@ func TestSelectDevTargetRequiresNameForMultipleWithoutTTY(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetIn(strings.NewReader(""))
 	cmd.SetOut(&bytes.Buffer{})
-	_, err := selectDevTarget(cmd, dir, "")
-	if err == nil || !strings.Contains(err.Error(), "multiple targets declared; pass --target <name>") || !strings.Contains(err.Error(), "pipecat (pipecat)") {
+	_, _, err := selectDevTarget(cmd, dir, "", "")
+	if err == nil || !strings.Contains(err.Error(), "pass --target <name> or --region <region>") || !strings.Contains(err.Error(), "pipecat (pipecat)") {
 		t.Fatalf("selectDevTarget() error = %v", err)
 	}
 }
@@ -324,9 +324,59 @@ func TestSelectDevTargetRejectsUnknownInstance(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetIn(strings.NewReader(""))
 	cmd.SetOut(&bytes.Buffer{})
-	_, err := selectDevTarget(cmd, dir, "missing")
+	_, _, err := selectDevTarget(cmd, dir, "missing", "")
 	if err == nil || !strings.Contains(err.Error(), `target instance "missing" is not declared`) {
 		t.Fatalf("selectDevTarget() error = %v", err)
+	}
+}
+
+// --region picks one build of a target that names several, and each build
+// carries that region's own models. Without it there is nothing to choose by:
+// both builds share a target name.
+func TestSelectDevTargetPicksARegion(t *testing.T) {
+	dir := copyPackage(t, filepath.Join("..", "testdata", "livekit_regions"))
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&bytes.Buffer{})
+	for _, region := range []string{"us-east", "eu-central"} {
+		_, selected, err := selectDevTarget(cmd, dir, "", region)
+		if err != nil {
+			t.Fatalf("region %q: %v", region, err)
+		}
+		if selected.Region != region {
+			t.Fatalf("region %q selected %q", region, selected.Region)
+		}
+		if !strings.HasSuffix(selected.BuildDir(dir), region) {
+			t.Fatalf("region %q builds into %q", region, selected.BuildDir(dir))
+		}
+	}
+	// The two builds listen with different models, which is the whole point of
+	// naming a region.
+	_, east, err := selectDevTarget(cmd, dir, "", "us-east")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, central, err := selectDevTarget(cmd, dir, "", "eu-central")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if east.Models.Listen.Language == central.Models.Listen.Language {
+		t.Fatalf("both regions listen in %q; the swap did not reach the binding", east.Models.Listen.Language)
+	}
+}
+
+// A region nobody declared is refused by name, with what is on offer.
+func TestSelectDevTargetRejectsUnknownRegion(t *testing.T) {
+	dir := copyPackage(t, filepath.Join("..", "testdata", "livekit_regions"))
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&bytes.Buffer{})
+	_, _, err := selectDevTarget(cmd, dir, "", "atlantis")
+	if err == nil || !strings.Contains(err.Error(), `no target deploys to region "atlantis"`) {
+		t.Fatalf("selectDevTarget() error = %v", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "eu-central") {
+		t.Fatalf("the refusal does not name what is on offer: %v", err)
 	}
 }
 

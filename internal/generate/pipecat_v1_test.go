@@ -2402,7 +2402,7 @@ func pipecatArtifactWithRegion(t *testing.T, region string) Artifact {
 	}
 	configured := pkg.Targets["pipecat"]
 	if region != "" {
-		configured.DeploymentRegion = spec.Regions{region}
+		configured.DeploymentRegion = spec.Regions{{Name: region}}
 	}
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	agent, err := ir.Build(pkg)
@@ -2735,17 +2735,6 @@ func TestV1_DailyColdTransferHandlesPrimitiveFailures(t *testing.T) {
 				t.Error("a direct tool must drain its worker instead of stopping downstream processors")
 			}
 		})
-	}
-}
-
-// N32: several regions is a Pipecat gate, not a Pipecat feature. The agreement
-// test alone would also pass if both sides were wrong together, so name the row.
-func TestPipecatDoesNotClaimMultiRegion(t *testing.T) {
-	if pipecatEmittedFields[target.FieldDeploymentMultiRegion] {
-		t.Error("pipecatEmittedFields claims deployment_region.multiple, but one Pipecat agent deploys to one region")
-	}
-	if tag := target.Default().Capability(target.FieldDeploymentMultiRegion, target.Pipecat).Tag; tag != target.Gated {
-		t.Errorf("deployment_region.multiple on pipecat = %q, want gated", tag)
 	}
 }
 

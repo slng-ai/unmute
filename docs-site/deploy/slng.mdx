@@ -76,9 +76,11 @@ targets:
   and names its directory under `build/`.
 </ParamField>
 
-<ParamField path="deployment_region" type="string or one-item list of strings" required>
-  Exactly one [SLNG region](/targets/slng#targets-yaml). There is no default.
-  Omission, an unknown region and multiple regions are refused.
+<ParamField path="deployment_region" type="string, or a list of region names and region-to-swaps entries" required>
+  One or more [SLNG regions](/targets/slng#targets-yaml). There is no default.
+  Omission and an unknown region are refused. Several regions push once per
+  region, each named `<package>-<target>-<region>`, and each answers its own
+  phone number.
 </ParamField>
 
 The package needs a name, one entry agent, a prompt, a fixed greeting, and

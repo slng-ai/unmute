@@ -246,7 +246,7 @@ the old key with its provider after confirming the replacement works.
 
 ### Region is chosen once
 
-<ParamField path="deployment_region" type="string or list of strings">
+<ParamField path="deployment_region" type="string, or a list of region names and region-to-swaps entries">
   On the LiveKit target, Unmute accepts `us-east`, `eu-central`, or `ap-south`,
   either singly or as a list without duplicates. Omission emits no region flag.
   Use an explicit `--region` when destination placement matters.
@@ -258,13 +258,18 @@ parameters and LiveKit media placement are separate settings. See
 
 LiveKit documents a deployment's region as fixed after creation. To move,
 create in the new region and retire the old deployment after verification.
-For several regions, the generated README supplies one create command and one
-`livekit.<region>.toml` per region. Pass the matching `--config` on subsequent
-updates, secret changes and inspection commands.
 
-All those workers share the dispatch name. Routing may use another region
-when the nearest is at capacity. See [multi-region routing](https://docs.livekit.io/deploy/admin/regions/agent-deployment/)
-before relying on worker placement for strict locality.
+Several regions compile to one directory each, `build/<target>/<region>/`, and
+each one holds a complete project with its own agent name. Run `lk agent create`
+and later `lk agent deploy` from inside the directory for that region; the
+platform writes a plain `livekit.toml` there on the first deploy.
+
+Each region is its own agent name, so a caller reaches a region through a
+dispatch rule that names it, not through LiveKit picking the nearest worker.
+That is deliberate: a region can run its own models, and a caller routed to the
+wrong region would get the wrong ones. See
+[multi-region routing](https://docs.livekit.io/deploy/admin/regions/agent-deployment/)
+for how the platform places workers.
 
 ### Telephony needs two more records
 

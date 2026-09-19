@@ -57,7 +57,7 @@ func cloudWebsocketTarget(t *testing.T, opts cloudWebsocketOptions) (*ir.Agent, 
 	}
 	configured := pkg.Targets["pipecat"]
 	if opts.region != "" {
-		configured.DeploymentRegion = []string{opts.region}
+		configured.DeploymentRegion = spec.Regions{{Name: opts.region}}
 	}
 	// Both shapes name the connection, because the connection is where the route
 	// is written. What the receive-only shape drops is the `environment:` block:

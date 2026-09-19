@@ -1082,10 +1082,18 @@ type Target struct {
 	Carrier           string              `json:"carrier,omitempty" yaml:"carrier,omitempty"`
 	Connection        string              `json:"connection,omitempty" yaml:"connection,omitempty"`
 	DeploymentRegions []string            `json:"deployment_regions,omitempty" yaml:"deployment_regions,omitempty"`
-	WarmInstances     int                 `json:"warm_instances,omitempty" yaml:"warm_instances,omitempty"`
-	Models            Bindings            `json:"models" yaml:"models"`
-	Destinations      map[string]string   `json:"destinations,omitempty" yaml:"destinations,omitempty"`
-	Telephony         *TelephonyPlan      `json:"telephony,omitempty" yaml:"telephony,omitempty"`
+	// Region is the one region this copy compiles for, set by PerRegion and
+	// only when the target declared more than one. Empty is the single-region
+	// package: same build directory and same deployment name it always had.
+	Region string `json:"region,omitempty" yaml:"region,omitempty"`
+	// RegionModels is each declared region's resolved bindings, the input
+	// PerRegion splits on. Set only on a multi-region target, and never
+	// serialized: a compiled target holds one region's Models, not all of them.
+	RegionModels  map[string]Bindings `json:"-" yaml:"-"`
+	WarmInstances int                 `json:"warm_instances,omitempty" yaml:"warm_instances,omitempty"`
+	Models        Bindings            `json:"models" yaml:"models"`
+	Destinations  map[string]string   `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	Telephony     *TelephonyPlan      `json:"telephony,omitempty" yaml:"telephony,omitempty"`
 }
 
 type Provider string

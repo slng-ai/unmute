@@ -1535,10 +1535,32 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 		// Declared order, no deduplication, no region invented when none is
 		// declared: validate rejects a duplicate and each README states what
 		// the platform does with an empty list.
-		DeploymentRegions: raw.DeploymentRegion,
+		DeploymentRegions: raw.DeploymentRegion.Names(),
 		WarmInstances:     raw.WarmInstances,
-		Models:            resolveBindings(agent, used, raw.Models),
 		Destinations:      destinations,
+	}
+	// Each region's own bindings, resolved here so every command downstream
+	// reads one region's target and nothing else has to know a swap exists. A
+	// region with no swaps resolves to what the target resolved to before, which
+	// is what keeps a plain list of region names behaving exactly as it did.
+	regionSwaps, err := targetRegionSwaps(pkg, name, raw, agent, used)
+	if err != nil {
+		return Target{}, err
+	}
+	// Models is the first region's, so a single-region target carries its swaps
+	// with no fan-out, and a multi-region target has a defined resolution for
+	// anything reading it before PerRegion splits it. With no region declared
+	// the lookup misses and nothing is swapped.
+	var first string
+	if len(raw.DeploymentRegion) > 0 {
+		first = raw.DeploymentRegion[0].Name
+	}
+	built.Models = resolveBindings(agent, used, raw.Models, regionSwaps[first])
+	if len(raw.DeploymentRegion) > 1 {
+		built.RegionModels = make(map[string]Bindings, len(raw.DeploymentRegion))
+		for _, region := range raw.DeploymentRegion {
+			built.RegionModels[region.Name] = resolveBindings(agent, used, raw.Models, regionSwaps[region.Name])
+		}
 	}
 	if agent.Manifest != nil {
 		built.ManifestModels = make(map[string]ModelDef, len(raw.Models))
@@ -1952,8 +1974,96 @@ func DestinationEnv(value string) string {
 // resolveBindings converts each used effective model into a Binding: think
 // models land in Reason, speak models in Speak, the listen/turn selections in
 // their role slots.
-func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]packagespec.ModelDef) Bindings {
+// swaps is a region's `- default_name: replacement_name` list, flattened. It is
+// read before anything else: a swap says this region reads a different entry of
+// the same palette, so every rule below applies to the entry it lands on. The
+// binding stays keyed by the default name, because that is the name the agents
+// reference, and they do not change per region.
+//
+// No carry-forward is wanted here and none happens. The block below exists so a
+// target override naming only a vendor keeps the package-wide settings; a swap
+// names a complete sibling entry, which states its own.
+// targetRegionSwaps checks every region's model swaps and returns them keyed by
+// region, flattened into the map resolveBindings reads.
+//
+// The refusals here are the ones a swap can only get wrong at author time. Each
+// one quotes the line, because a swap is two bare words and the mistake is
+// almost always a typo in one of them.
+func targetRegionSwaps(pkg *packagespec.Package, name string, raw packagespec.Target, agent *Agent, used map[string]bool) (map[string]map[string]string, error) {
+	var swaps map[string]map[string]string
+	seen := make(map[string]bool, len(raw.DeploymentRegion))
+	for _, region := range raw.DeploymentRegion {
+		where := pkg.Location("targets.yaml", region.Name)
+		// The two mistakes a region list itself can hold, refused here because
+		// this is the last place that sees the list: every stage below is handed
+		// one target per region. A duplicate is never deduplicated silently,
+		// because two deployments under one config file name is a confusing
+		// thing to debug, and here it would also mean one region's swaps
+		// quietly replacing the other's.
+		switch {
+		case strings.TrimSpace(region.Name) == "":
+			return nil, fmt.Errorf("%s: target %q has an empty deployment_region entry", where, name)
+		case seen[region.Name]:
+			return nil, fmt.Errorf("%s: target %q lists deployment_region %q twice", where, name, region.Name)
+		}
+		seen[region.Name] = true
+		if len(region.Swaps) == 0 {
+			continue
+		}
+		flat := make(map[string]string, len(region.Swaps))
+		for _, swap := range region.Swaps {
+			replacement, _ := swap.Value.(string)
+			if _, seen := flat[swap.Key]; seen {
+				return nil, fmt.Errorf("%s: target %q swaps %q twice in region %q. One region, one replacement per model: the second silently won",
+					where, name, swap.Key, region.Name)
+			}
+			from, ok := agent.Models[swap.Key]
+			if !ok {
+				return nil, fmt.Errorf("%s: target %q swaps %q in region %q, which is not a defined model",
+					where, name, swap.Key, region.Name)
+			}
+			to, ok := agent.Models[replacement]
+			if !ok {
+				return nil, fmt.Errorf("%s: target %q swaps %q for %q in region %q, and %q is not a defined model. A swap names two entries of this package's own models",
+					where, name, swap.Key, replacement, region.Name, replacement)
+			}
+			// A swap moves one name to another inside one role. Crossing roles
+			// would put a voice where the agent expects a transcriber, and the
+			// binding is keyed by the name the agents reference, so nothing
+			// downstream would notice.
+			if from.Kind != to.Kind {
+				return nil, fmt.Errorf("%s: target %q swaps %s model %q for %s model %q in region %q. A region swaps one model for another of the same kind",
+					where, name, from.Kind, swap.Key, to.Kind, replacement, region.Name)
+			}
+			// The same reasoning buildTarget already applies to a per-target
+			// override: a live entry carries a think reference a swap would
+			// drop, and it compiles on one target anyway.
+			if from.Kind == KindLive || to.Kind == KindLive {
+				return nil, fmt.Errorf("%s: target %q swaps live model %q in region %q; a live entry takes no per-region swap, because it compiles on pipecat alone",
+					where, name, swap.Key, region.Name)
+			}
+			// A swap of a name nothing reads changes nothing, and the author
+			// will wait for a region that never differs. The listen and turn
+			// selections are named outside `used`, so both count as read.
+			if !used[swap.Key] && swap.Key != agent.Listen && swap.Key != agent.Turn {
+				return nil, fmt.Errorf("%s: target %q swaps %q in region %q, but no agent in this package uses %q, so the swap would change nothing",
+					where, name, swap.Key, region.Name, swap.Key)
+			}
+			flat[swap.Key] = replacement
+		}
+		if swaps == nil {
+			swaps = make(map[string]map[string]string, len(raw.DeploymentRegion))
+		}
+		swaps[region.Name] = flat
+	}
+	return swaps, nil
+}
+
+func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]packagespec.ModelDef, swaps map[string]string) Bindings {
 	effective := func(name string) ModelDef {
+		if to, ok := swaps[name]; ok {
+			name = to
+		}
 		def := agent.Models[name]
 		if override, ok := overrides[name]; ok {
 			replaced := convertModelDef(override, def.Kind, def.Fallback)
@@ -2015,7 +2125,15 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 	if agent.Listen != "" {
 		binding := toBinding(effective(agent.Listen))
 		bindings.Listen = &binding
-		for _, name := range agent.Models[agent.Listen].Fallback {
+		// The fallback chain belongs to the entry this region actually listens
+		// with. Reading it off the default name instead would give a swapped-in
+		// transcriber the fallbacks of the one it replaced, which are models in
+		// the other region.
+		listen := agent.Listen
+		if to, ok := swaps[listen]; ok {
+			listen = to
+		}
+		for _, name := range agent.Models[listen].Fallback {
 			bindings.ListenFallbacks = append(bindings.ListenFallbacks, ListenFallback{Name: name, Binding: toBinding(effective(name))})
 		}
 	}

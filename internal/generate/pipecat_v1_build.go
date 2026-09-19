@@ -42,15 +42,18 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		Target:       target.Name,
 		AgentName:    agent.DeployName(target),
 		Version:      target.Version,
-		// At most one region reaches this driver: a list of several is a gated
-		// validation error (FieldDeploymentMultiRegion), which runs before any
-		// artifact exists.
+		// Exactly one region reaches this driver. A target naming several is
+		// split into one target per region before anything is generated, so
+		// each build directory describes one agent in one place.
 		DeploymentRegion: firstRegion(target.DeploymentRegions),
-		WarmInstances:    target.WarmInstances,
-		MainName:         "main",
-		EntryAgent:       agent.EntryAgent,
-		EntryClass:       pyName(agent.EntryAgent),
-		Transport:        target.Transport,
+		// Region is set only by the split, so it is the one thing that says this
+		// build has siblings.
+		MultiRegion:   target.Region != "",
+		WarmInstances: target.WarmInstances,
+		MainName:      "main",
+		EntryAgent:    agent.EntryAgent,
+		EntryClass:    pyName(agent.EntryAgent),
+		Transport:     target.Transport,
 		// Tracing is on for either provider now, and TracingProvider says which.
 		Tracing:         agent.Tracing != nil,
 		TracingProvider: tracingProviderOf(agent),

@@ -2,6 +2,7 @@ package ir
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -41,8 +42,62 @@ func ValidPackageName(name string) bool {
 // Underscores in the target name become hyphens, because target names are
 // snake_case everywhere else in a package and half of this result's sinks refuse
 // an underscore.
+//
+// A target that names several regions adds the region, for the same collision
+// and one more: every region is its own deployment, with its own models, so two
+// of them under one name would be one agent whose behaviour depends on which
+// worker answered.
 func (a *Agent) DeployName(target Target) string {
-	return a.Name + "-" + strings.ReplaceAll(target.Name, "_", "-")
+	name := a.Name + "-" + strings.ReplaceAll(target.Name, "_", "-")
+	if target.Region == "" {
+		return name
+	}
+	return name + "-" + strings.ReplaceAll(target.Region, "_", "-")
+}
+
+// PerRegion splits a target that names several regions into one single-region
+// target each, in declared order.
+//
+// This is what keeps regions out of every stage below it. Each copy holds
+// exactly one region and that region's models, so the generators, the report
+// and the push all see the single-region target they have always seen. A target
+// naming one region or none is returned untouched, which is why nothing about a
+// single-region package changes.
+func (t Target) PerRegion() []Target {
+	if len(t.DeploymentRegions) < 2 {
+		return []Target{t}
+	}
+	split := make([]Target, 0, len(t.DeploymentRegions))
+	for _, region := range t.DeploymentRegions {
+		copied := t
+		copied.DeploymentRegions = []string{region}
+		copied.Region = region
+		if models, ok := t.RegionModels[region]; ok {
+			copied.Models = models
+		}
+		copied.RegionModels = nil
+		split = append(split, copied)
+	}
+	return split
+}
+
+// BuildDir is where this target's artifact is written, under the package root.
+// A region of a multi-region target gets its own directory, because each one is
+// a complete build: its own models, its own README and its own deployment.
+func (t Target) BuildDir(root string) string {
+	if t.Region == "" {
+		return filepath.Join(root, "build", t.Name)
+	}
+	return filepath.Join(root, "build", t.Name, t.Region)
+}
+
+// Label is how this target is named to a reader: the target instance, plus the
+// region when one target compiles to several.
+func (t Target) Label() string {
+	if t.Region == "" {
+		return t.Name
+	}
+	return t.Name + " (" + t.Region + ")"
 }
 
 // checkPackageName refuses a package that states no name, or states one that

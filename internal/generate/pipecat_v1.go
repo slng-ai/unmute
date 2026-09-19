@@ -514,6 +514,11 @@ type pipecatData struct {
 	AgentName        string
 	Version          string
 	DeploymentRegion string
+	// MultiRegion says this directory is one of several the target compiled to.
+	// The runbook reads differently then: the sibling regions already exist as
+	// directories, each with its own agent name, so nobody has to add the second
+	// one by hand.
+	MultiRegion bool
 	// WarmInstances is `[scaling] min_agents` in the manifest: instances the
 	// platform holds ready. Zero means the section is omitted and the platform's
 	// own default (scale to zero) applies. It is in the manifest rather than left

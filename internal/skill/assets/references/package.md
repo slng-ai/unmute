@@ -410,7 +410,7 @@ provider with different settings, for example `pipecat_twilio` and
 | `pins` | LiveKit-only known package pins, name to semantic version; refused on `slng` |
 | `sdk_language` | `python` when written; refused on `slng` |
 | `connection` | required for LiveKit or Pipecat telephony; illegal with no phone use; refused on `slng` |
-| `deployment_region` | LiveKit: `us-east`, `eu-central`, or `ap-south`, one or a duplicate-free list; Pipecat: one non-empty region; on `slng` exactly one of `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` |
+| `deployment_region` | One region or a duplicate-free list, on every provider. LiveKit: `us-east`, `eu-central`, `ap-south`; Pipecat: a non-empty platform region; `slng`: `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`. A list entry may carry model swaps |
 | `warm_instances` | instances the platform holds ready; zero or more; **Pipecat only**, refused on `livekit` and `slng` |
 | `models` | per target overrides of named `models` entries |
 
@@ -472,16 +472,32 @@ and Pipecat. `models.md` has the accepted world parts and model YAML. A gateway
 choice does not set the worker region or guarantee where a provider processes
 speech.
 
-A LiveKit target accepts one deployment region or a duplicate-free list.
-Pipecat accepts exactly one. Every deployment from one LiveKit target uses the
-same generated model params, so a multi-region deployment does not move STT or
-TTS with each worker.
+Every target accepts one deployment region or a duplicate-free list. Several
+regions compile once per region into `build/<target>/<region>/`, each deployed
+as `<name>-<target>-<region>`.
 
-For hard regional isolation, use one target instance per geography. Give each
-target one deployment region and complete per-target listen and speak model
-overrides with the provider's supported endpoint settings for that geography.
-A target model override replaces the entry instead of merging it, so repeat
-every field that entry needs.
+A region entry may swap model names, so one target runs its own model set per
+region. Declare the regional model in `agent.yaml` beside the one it replaces,
+then name the pair under the region:
+
+```yaml targets.yaml
+targets:
+  slng:
+    provider: slng
+    deployment_region:
+      - us-west
+      - eu-north:
+          - transcriber: transcriber_fr
+          - voice: voice_fr
+```
+
+`transcriber` and `voice` are the names the agents already use; in `eu-north`
+those names read the French entries. Both sides of a swap name an entry in
+`models:`, both must be the same kind, and a swap of a name no agent uses is
+refused. A region with no swaps runs the models as written.
+
+`unmute dev --region <region>` runs one region's build locally, which is how you
+hear one region's models without deploying.
 
 ## Which targets do what
 
@@ -560,7 +576,7 @@ targets:
     deployment_region: eu-north
 ```
 
-That is the whole target. `deployment_region` takes exactly one of `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`. `version`, `pins`, `sdk_language` and `connection` are all refused by
+That is the whole target. `deployment_region` takes one or more of `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`, and each region is its own hosted agent. `version`, `pins`, `sdk_language` and `connection` are all refused by
 name: each describes a generated project and there is none.
 
 Write models as two fields here, the same as everywhere else. SLNG names a
@@ -582,7 +598,6 @@ validate, by name, with what to do instead:
 | `interruption.minimum_words`, `interruption.ignore_phrases` | interruptions are on or off |
 | a missing greeting, or `speaks_first: user` | SLNG requires a greeting and speaks the string it is given |
 | `tracing:` | unmute instruments no process here |
-| more than one `deployment_region` | SLNG takes exactly one |
 | outbound calling, `on_voicemail`, a warm human transfer | a package declares no carrier state on SLNG; `unmute deploy` attaches an existing trunk after a push |
 
 A tool named `end_call`, `detected_answering_machine`, `get_current_datetime`,

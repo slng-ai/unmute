@@ -11,8 +11,9 @@ targets:
     provider: [[.Target]]
 [[if .TargetVersion]]    version: [[quote .TargetVersion]]
 [[end]][[if .SDKLanguage]]    sdk_language: [[.SDKLanguage]]
-[[end]][[if .DeploymentRegions]]    deployment_region:[[if eq (len .DeploymentRegions) 1]] [[yaml (index .DeploymentRegions 0)]][[else]][[range .DeploymentRegions]]
-      - [[yaml .]][[end]][[end]]
+[[end]][[if .DeploymentRegions]]    deployment_region:[[if .OneBareRegion]] [[yaml (index .DeploymentRegions 0).Name]][[else]][[range .DeploymentRegions]]
+      - [[yaml .Name]][[if .Swaps]]:[[range .Swaps]]
+          - [[yaml .Key]]: [[yaml .Value]][[end]][[end]][[end]][[end]]
 [[end]][[if .WarmInstances]]    # Instances the platform holds ready, so a call is not waiting on a cold
     # container. Compiles to `[scaling] min_agents` in pcc-deploy.toml, and bills
     # whether or not anybody calls.

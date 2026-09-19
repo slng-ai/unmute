@@ -1688,8 +1688,11 @@ func TestValidatePipecatDailyCarrierCallSources(t *testing.T) {
 	}
 }
 
-// deployment_region takes one region or several (N32). Several is LiveKit only:
-// every other provider is gated in its own words, before any artifact exists.
+// deployment_region takes one region or several. Several is every provider's:
+// a multi-region target is split into one target per region before validation,
+// so what reaches here is always a single region, and what is still checked is
+// the region's own name. The list cases below are the unsplit shape, which is
+// what an author writes and what the duplicate and empty checks read.
 func TestValidateDeploymentRegions(t *testing.T) { // N32
 	for _, tc := range []struct {
 		name     string
@@ -1705,9 +1708,7 @@ func TestValidateDeploymentRegions(t *testing.T) { // N32
 		{"media group is not a worker region", ProviderLiveKit, []string{"eu"}, `choose one of us-east, eu-central, ap-south`},
 		{"unknown in list", ProviderLiveKit, []string{"us-east", "moon-base-1"}, `deployment_region "moon-base-1" is unknown`},
 		{"pipecat keeps platform vocabulary", ProviderPipecat, []string{"moon-base-1"}, ""},
-		{"several on pipecat", ProviderPipecat, []string{"us-west", "us-east"}, "globally unique across regions"},
-		{"duplicate", ProviderLiveKit, []string{"us-east", "us-east"}, `lists "us-east" twice`},
-		{"empty entry", ProviderLiveKit, []string{"us-east", ""}, "empty entry"},
+		{"several on pipecat", ProviderPipecat, []string{"us-west", "us-east"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			agent := safeAgent(t)

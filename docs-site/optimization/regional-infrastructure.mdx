@@ -19,6 +19,7 @@ On this page:
 - [Separate the regional settings](#separate-the-regional-settings) - four locations, four controls
 - [Choose a speech gateway](#choose-a-speech-gateway) - the 13 SLNG world parts
 - [Place the worker near your users and models](#place-the-worker-near-your-users-and-models) - `deployment_region`
+- [Give a region its own models](#give-a-region-its-own-models) - one agent, one model set per place
 - [Troubleshooting](#troubleshooting) - what the compiler refuses
 
 ## Quickstart
@@ -99,7 +100,7 @@ actually use before deciding whether to change providers or model deployments.
 |---|---|---|---|
 | `params.world_part` | SLNG `listen` and `speak` models on code targets | `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` | The speech gateway endpoint |
 | `params.world_part` | SLNG Context Router `think` models | `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` | The router endpoint |
-| `deployment_region` | Each target in `targets.yaml` | LiveKit: `us-east`, `eu-central`, `ap-south`. SLNG: the same 13 world parts listed above. Pipecat: one platform region name, forwarded without a value check | The agent worker on code targets; call placement on SLNG |
+| `deployment_region` | Each target in `targets.yaml` | LiveKit: `us-east`, `eu-central`, `ap-south`. SLNG: the same 13 world parts listed above. Pipecat: a platform region name, forwarded without a value check. One region or a duplicate-free list on every target | The agent worker on code targets; call placement on SLNG |
 
 SLNG speech, routing, and deployment now share region names. LiveKit keeps its
 own worker names. Each setting is still independent of the others. None alone guarantees
@@ -205,10 +206,10 @@ is still chosen separately.
 Set the worker location in `targets.yaml`, using each platform's own region
 names:
 
-<ParamField path="deployment_region" type="platform region name">
+<ParamField path="deployment_region" type="platform region name, or a list of them">
   Where the generated LiveKit or Pipecat worker runs. Written per target in
-  `targets.yaml`, in that platform's own region names. Pipecat accepts one.
-  LiveKit accepts one region as a scalar or several as a list.
+  `targets.yaml`, in that platform's own region names. Every target accepts one
+  region as a scalar or several as a duplicate-free list.
 </ParamField>
 
 ```yaml targets.yaml
@@ -234,10 +235,7 @@ measure the full call path.
 
 ### One worker region or several
 
-Pipecat accepts one `deployment_region` per target. A second Pipecat region is a
-second target and agent name.
-
-LiveKit accepts either one region as a scalar or several regions as a list:
+Every target accepts one region as a scalar or several as a list:
 
 ```yaml targets.yaml
 targets:
@@ -250,15 +248,67 @@ targets:
       - us-east
 ```
 
-Unmute emits one LiveKit create command per listed region. The deployments keep
-one dispatch name, so LiveKit may send a caller to another declared region when
-the nearest deployment is at capacity. For strict worker locality, use separate
-agent names and explicit dispatch. See LiveKit's
-[multi-region deployment guidance](https://docs.livekit.io/deploy/admin/regions/agent-deployment/#multi-region-deployments).
+Each region compiles to its own complete build, in `build/<target>/<region>/`,
+and deploys under its own name, `<package>-<target>-<region>`. `unmute compile`
+writes them all and `unmute deploy` pushes them all.
 
-Adding worker regions leaves the model settings as authored. Review the model
-endpoints each deployment will call so that a nearby worker also has a short
-path to its STT, LLM, and TTS services.
+Because each region is its own agent name, a caller reaches a region through the
+number or dispatch rule that names it, not because the platform picked the
+nearest worker. That is what makes per-region models safe: a caller cannot land
+on a worker whose models are wrong for them.
+
+### Give a region its own models
+
+A worker near your users still waits on distant models unless those move too. A
+region entry may swap model names, so each region reads its own entries under
+the names the agents already use.
+
+Declare the regional model in `agent.yaml`, beside the one it replaces:
+
+```yaml agent.yaml
+models:
+  listen:
+    transcriber:
+      provider: slng
+      model: "deepgram/nova:3"
+      language: en
+      params:
+        world_part: us-west
+    transcriber_fr:
+      provider: slng
+      model: "deepgram/nova:3"
+      language: fr
+      params:
+        world_part: eu-north
+```
+
+Then name the pair under the region that uses it:
+
+```yaml targets.yaml
+targets:
+  livekit:
+    provider: livekit
+    version: "1.8.1"
+    sdk_language: python
+    deployment_region:
+      - us-west
+      - eu-north:
+          - transcriber: transcriber_fr
+```
+
+<ParamField path="deployment_region[].<region>" type="list of name-to-name pairs">
+  The model entries this region reads instead of the defaults. Each item is
+  `- default_name: replacement_name`. Both sides name an entry in this package's
+  `models:`, and both must be the same kind. A region with no swaps runs the
+  models as written.
+</ParamField>
+
+The agent, the prompt and every agent definition are the same in both regions.
+Only the entries behind the names differ. Run one region locally with
+`unmute dev --region eu-north` to hear it before you deploy.
+
+Unmute refuses a name it cannot find, a swap across kinds, and a swap of a name
+no agent uses, so a region that would never differ is caught at validation.
 
 ## Troubleshooting
 
@@ -314,6 +364,6 @@ call path rather than the worker's own region.
     Deploy one worker region or several.
   </Card>
   <Card title="Pipecat Cloud" icon="cloud" href="/deploy/pipecat-cloud">
-    Deploy one worker region per target.
+    Deploy one worker region or several.
   </Card>
 </Columns>

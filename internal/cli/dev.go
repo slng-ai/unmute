@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -18,13 +19,14 @@ import (
 
 	"github.com/slng-ai/unmute/internal/devmetrics"
 	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/style"
 	"github.com/slng-ai/unmute/internal/tui"
 	"github.com/spf13/cobra"
 )
 
 func newDevCmd() *cobra.Command {
-	var uiPort, botPort, targetName string
+	var uiPort, botPort, targetName, regionName string
 	var noOpen, verbose bool
 	var vars, sources []string
 
@@ -73,19 +75,20 @@ func newDevCmd() *cobra.Command {
 				}
 			}
 
-			selected, err := selectDevTarget(cmd, root, targetName)
+			agent, selected, err := selectDevTarget(cmd, root, targetName, regionName)
 			if err != nil {
 				return err
 			}
 			// Default local mode: start the selected target's WebRTC runtime and
 			// serve one web UI for both Pipecat and LiveKit.
-			return runDevWeb(cmd, root, selected, uiPort, botPort, noOpen, verbose)
+			return runDevWeb(cmd, root, agent, selected, uiPort, botPort, noOpen, verbose)
 		},
 	}
 
 	cmd.Flags().StringVar(&uiPort, "port", "8765", "port for the local dev UI")
 	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "host port for the local agent runtime (with Compose, UNMUTE_DEV_PORT)")
 	cmd.Flags().StringVar(&targetName, "target", "", "target instance name (required without a TTY when multiple exist)")
+	cmd.Flags().StringVar(&regionName, "region", "", "deployment region to run, for a target that names several (required without a TTY)")
 	cmd.Flags().StringArrayVar(&vars, "var", nil, "seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)")
 	cmd.Flags().StringArrayVar(&sources, "source", nil, "seed a fact the call carries: --source from_number=+34600111222 (repeatable; the local stand-in for a caller ID, read by prefetch)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open the browser automatically")
@@ -157,42 +160,72 @@ func isTTY(value any) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-// selectDevTarget chooses by exact instance name. A single target needs no
-// prompt; multiple targets never fall back to map or provider ordering.
-func selectDevTarget(cmd *cobra.Command, root, requested string) (string, error) {
+// selectDevTarget picks the one build `dev` will run. A single build needs no
+// prompt, and several never fall back to map or provider ordering.
+//
+// A target that names
+// several regions is several builds, each with its own models, so the region is
+// part of the choice and not a detail of it.
+//
+// It returns the target rather than its name because a name no longer
+// identifies one build.
+func selectDevTarget(cmd *cobra.Command, root, requested, region string) (*ir.Agent, ir.Target, error) {
 	names := []string(nil)
 	if requested != "" {
 		names = []string{requested}
 	}
-	_, targets, err := loadPackage(root, names)
+	agent, targets, err := loadPackage(root, names)
 	if err != nil {
-		return "", fmt.Errorf("dev %s: %w", root, err)
+		return nil, ir.Target{}, fmt.Errorf("dev %s: %w", root, err)
+	}
+	if region != "" {
+		kept := make([]ir.Target, 0, len(targets))
+		for _, candidate := range targets {
+			if candidate.Region == region || (candidate.Region == "" && slices.Contains(candidate.DeploymentRegions, region)) {
+				kept = append(kept, candidate)
+			}
+		}
+		if len(kept) == 0 {
+			return nil, ir.Target{}, fmt.Errorf("dev %s: no target deploys to region %q; this package declares %s",
+				root, region, devRegionChoices(targets))
+		}
+		targets = kept
 	}
 	if len(targets) == 0 {
-		return "", fmt.Errorf("dev %s: no targets declared in targets.yaml", root)
+		return nil, ir.Target{}, fmt.Errorf("dev %s: no targets declared in targets.yaml", root)
 	}
-	if requested != "" || len(targets) == 1 {
-		return targets[0].Name, nil
+	if len(targets) == 1 {
+		return agent, targets[0], nil
 	}
 	if !isTTY(cmd.InOrStdin()) || !isTTY(cmd.OutOrStdout()) {
-		choices := make([]string, 0, len(targets))
-		for _, candidate := range targets {
-			choices = append(choices, fmt.Sprintf("%s (%s)", candidate.Name, candidate.Provider))
-		}
-		return "", fmt.Errorf("dev %s: multiple targets declared; pass --target <name>: %s", root, strings.Join(choices, ", "))
+		return nil, ir.Target{}, fmt.Errorf("dev %s: several builds to choose from; pass --target <name> or --region <region>: %s",
+			root, devRegionChoices(targets))
 	}
 	options := make([]tui.Option, 0, len(targets))
 	for _, candidate := range targets {
 		options = append(options, tui.Option{
-			Label: fmt.Sprintf("%s  ·  %s", candidate.Name, candidate.Provider),
-			Value: candidate.Name,
+			Label: fmt.Sprintf("%s  ·  %s", candidate.Label(), candidate.Provider),
+			Value: strconv.Itoa(len(options)),
 		})
 	}
-	selected, err := tui.SelectOne(cmd.InOrStdin(), cmd.OutOrStdout(), "Target to run", options)
+	selected, err := tui.SelectOne(cmd.InOrStdin(), cmd.OutOrStdout(), "Build to run", options)
 	if err != nil {
-		return "", fmt.Errorf("dev %s: select target: %w", root, err)
+		return nil, ir.Target{}, fmt.Errorf("dev %s: select target: %w", root, err)
 	}
-	return selected, nil
+	index, err := strconv.Atoi(selected)
+	if err != nil || index < 0 || index >= len(targets) {
+		return nil, ir.Target{}, fmt.Errorf("dev %s: select target: %q is not one of the offered builds", root, selected)
+	}
+	return agent, targets[index], nil
+}
+
+// devRegionChoices names every build on offer, the way the picker labels them.
+func devRegionChoices(targets []ir.Target) string {
+	choices := make([]string, 0, len(targets))
+	for _, candidate := range targets {
+		choices = append(choices, fmt.Sprintf("%s (%s)", candidate.Label(), candidate.Provider))
+	}
+	return strings.Join(choices, ", ")
 }
 
 // packageEnv builds a child process's environment from the ambient env, the
