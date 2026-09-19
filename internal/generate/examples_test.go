@@ -1415,14 +1415,15 @@ func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tracked specs and docs: %v", err)
 	}
-	// There is no docs/ tree. Four files lived here and each one restated
-	// something the code, the tests or CLAUDE.md already said, so they rotted
-	// against it instead of holding it. The code is the design document, the
-	// failing test is the rule, and the public guide is docs-site/. A file
-	// reintroduced here fails this, which is the point: it is a deliberate
-	// decision, not somewhere to park notes.
-	if got := strings.TrimSpace(string(tracked)); got != "" {
-		t.Errorf("tracked specs and docs = %q, want none: the code and docs-site/ own this", got)
+	// One file earns a place under docs/, and the allow-list is the point: a
+	// second one is a deliberate decision, not somewhere to park notes.
+	// ARCHITECTURE describes the system. GATES, HARNESS_TEST and SELF_VERIFY
+	// were deleted because each restated something the code, the tests or
+	// CLAUDE.md already said, so they rotted against it instead of holding it.
+	// A rule is the test that fails, and the public guide is docs-site/.
+	want := "docs/ARCHITECTURE.md"
+	if got := strings.TrimSpace(string(tracked)); got != want {
+		t.Errorf("tracked specs and docs = %q, want the focused allow-list %q", got, want)
 	}
 	if err := exec.Command("git", "-C", repo, "check-ignore", "-q", "--", "specs/.unmute-ignore-probe/spec.md").Run(); err != nil {
 		t.Errorf("specs/ is not ignored: %v", err)
@@ -1682,6 +1683,7 @@ func TestExampleAndDocLinksIntoExamplesResolve(t *testing.T) {
 	}{
 		{filepath.Join("..", "..", "examples"), ".md", false},
 		{filepath.Join("..", voiceAgentTestsDir), ".md", false},
+		{filepath.Join("..", "..", "docs"), ".md", true},
 		{filepath.Join("..", "..", "docs-site"), ".mdx", true},
 	} {
 		err := filepath.WalkDir(source.root, func(path string, entry fs.DirEntry, err error) error {

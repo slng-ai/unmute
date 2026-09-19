@@ -1,6 +1,6 @@
 # Unmute CLI
 
-Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. The flow is `spec.Load` → `ir.Build` → `ir.Validate` → `generate.Generate`, and the code is the design document. Go structs and `internal/target` own machine behavior; `docs-site/` is the public user guide. Local feature work lives in ignored `specs/<nnn>-<slug>/` directories.
+Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. `docs/ARCHITECTURE.md` explains the design and points at the load-bearing code. Go structs and `internal/target` own machine behavior; `docs-site/` is the public user guide. Local feature work lives in ignored `specs/<nnn>-<slug>/` directories.
 
 ## Voice contracts
 While writing documents or speaking with the user, always use a simple language and simple wording. 
@@ -116,7 +116,7 @@ The generated `build/<target>/README.md` is the runbook, and almost nobody reads
 3. the relevant page in `docs-site/`, which is the public answer a reader lands on,
 4. **the skill** in `internal/skill/assets/`, which is what a coding assistant reads before it writes a package.
 
-A fact that is only true in generated output is a fact the reader never sees, and a feature the skill does not know about is a feature no coding agent will use. The reverse rots too, and now fails: `internal/docsite/retired_output_test.go` refuses a page, a skill reference or an example README that quotes a line the CLI has stopped printing, because a reader who copies a stale sample and waits for it cannot tell a stale doc from a broken install. Tests hold the parts that can be held: `internal/generate/examples_test.go` (example routes and links), `internal/skill/agreement_test.go` (the skill's factual lists), and `internal/cli/skill_bundle_test.go` (the commands and flags the skill names). Prose can still rot, so read the example page before you claim you are done.
+A fact that is only true in generated output is a fact the reader never sees, and a feature the skill does not know about is a feature no coding agent will use. The reverse rots too, and now fails: `internal/docsite/retired_output_test.go` refuses a page, a skill reference or an example README that quotes a line the CLI has stopped printing, because a reader who copies a stale sample and waits for it cannot tell a stale doc from a broken install. `docs/ARCHITECTURE.md` changes only when a system boundary, compiler stage, or runtime topology changes. Tests hold the parts that can be held: `internal/generate/examples_test.go` (example routes and links), `internal/skill/agreement_test.go` (the skill's factual lists), and `internal/cli/skill_bundle_test.go` (the commands and flags the skill names). Prose can still rot, so read the example page before you claim you are done.
 
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.

@@ -1336,6 +1336,7 @@ func authorFacingModelSurfaces(t *testing.T) map[string]string {
 	}
 	walk(repo("examples"), ".yaml", ".md")
 	walk(repo("docs-site"), ".mdx")
+	walk(repo("docs"), ".md")
 	read(repo("README.md"))
 	read(repo("internal", "scaffold", "scaffold.go"))
 	for _, name := range []string{"references/models.md", "references/package.md"} {

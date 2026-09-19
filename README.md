@@ -593,6 +593,8 @@ large. It is the fastest way to find out whether somebody is already on it.
   every key of every package file.
 - [Changelog](https://unmute.ai/changelog) says what changed in each
   release.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) explains the design and points
+  at the load-bearing code.
 - [Issues](https://github.com/slng-ai/unmute/issues) for bugs and requests.
 - [Discord](https://discord.gg/kxZactmWj) for questions, and for showing what
   you built.

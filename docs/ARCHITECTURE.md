@@ -1,0 +1,300 @@
+# Architecture
+
+Unmute is a Go compiler for portable voice-agent packages. It reads one
+declarative package, resolves it for a target, and writes a project that the
+selected orchestrator runs natively. Unmute is not part of the generated
+agent's production process.
+
+This is the only internal design document. It explains system boundaries,
+compiler flow, runtime topology, and the files a contributor needs first.
+Public usage lives in [`docs-site/`](../docs-site/README.md).
+
+## Sources of truth
+
+Each surface has one owner:
+
+| Surface | Owner |
+|---|---|
+| Authoring fields and unresolved schema | Go structs in `internal/spec` |
+| Resolved and debug schema | Go structs in `internal/ir` |
+| Target capabilities, routes, and model providers | `internal/target` |
+| Commands, flags, usage, and exits | `internal/cli` |
+| System boundaries and compiler flow | This document |
+| Public user guidance | `docs-site/` |
+| Contributor workflow and gates | `CLAUDE.md` |
+| Coding assistants that build Unmute packages | `internal/skill/assets/` |
+
+Feature specs under `specs/` are ignored local work. They help plan a change,
+but they do not outrank shipped code or tracked documentation.
+
+## System boundary
+
+The repository owns the compiler and its templates. A generated artifact is
+output, not a second maintained application.
+
+```text
+Agent package
+    |
+    v
+spec.Load -> ir.Build -> ir.Validate -> generate.Generate
+                                              |
+                                              v
+                                  Target-native project
+                                              |
+                                              v
+                                      LiveKit or Pipecat
+```
+
+Four rules hold the boundary:
+
+- Maintained runtime code in this repository is Go.
+- Python exists in templates, copied local handlers, examples, and generated
+  output.
+- Generated projects contain no Unmute runtime dependency.
+- Authors edit the source package and compile again instead of editing
+  `build/<target>/`.
+
+## Compiler flow
+
+Validation and generation use the same stages, so they cannot interpret a
+package differently.
+
+1. `internal/spec.Load` reads `agent.yaml`, `targets.yaml`, prompts, tools,
+   connections, local handlers, and the linked package-root `manifest`.
+   Strict decoding rejects unknown fields.
+2. `internal/ir.Build` resolves names, model bindings, controls, connections,
+   overrides, and routes into target-independent IR.
+3. `internal/ir.Validate` checks the IR against the selected target's
+   capability table. Unsupported behavior fails before generation. Safe
+   target differences can produce warnings. A package manifest additionally
+   checks every declared profile and target, including unselected alternatives.
+4. `internal/generate.Generate` validates again and dispatches to one target
+   driver, which writes the native project.
+
+`internal/target` is the shared rulebook. Validation and the generators must
+not keep separate capability tables.
+
+`internal/manifest` owns the computer's saved contract library and default.
+Only creation reads that library: it copies the selected manifest into the
+package before scaffold preflight. The compiler reads that copy, never local
+config, so teammates and CI evaluate the same contract. The compile report
+records its company name, revision and language or region verification gaps.
+
+## Target boundary
+
+The source package describes durable behavior. A target driver owns how that
+behavior is expressed in one framework.
+
+- **LiveKit** emits `agent.py` and uses a separate LiveKit Server for media,
+  rooms, and job dispatch.
+- **Pipecat** emits `bot.py`. The generated process owns both its network
+  endpoint and conversation pipeline.
+
+Both outputs are normal Python projects with pinned dependencies, a
+Dockerfile, a compile report, and a generated runbook. They can run without
+Unmute after compilation.
+
+## Runtime topology
+
+### LiveKit
+
+```text
+Browser or phone bridge
+         |
+         v
+LiveKit Server <----> generated Agent worker
+                            agent.py
+```
+
+The server owns rooms, media, participants, signaling, and job dispatch. The
+generated worker registers with it and runs one dispatched conversation. An
+agent handoff changes the active agent inside that session; it does not move
+the call to another container.
+
+LiveKit telephony has two shapes:
+
+- The Twilio connector is an HTTPS/WebSocket bridge that joins a LiveKit room.
+  It needs no SIP service and no Redis.
+- The SIP route adds LiveKit SIP. LiveKit Server and LiveKit SIP share Redis
+  for service coordination. The generated agent worker does not use Redis.
+
+### Pipecat
+
+```text
+Browser or carrier
+        |
+        v
+Generated Pipecat application
+  |- network transport
+  |- speech-to-text
+  |- conversation pipeline
+  |- agents, tasks, and tools
+  `- text-to-speech
+```
+
+There is no separate room server. `PipelineWorker` and `LLMWorker` are objects
+inside the generated process, not deployment workers. Telephony adds an HTTPS
+and WebSocket front door. Routes that need shared call coordination use Redis
+for bounded records such as call correlation, idempotency, transfers, and
+admission counters.
+
+### Where a phone call is exercised
+
+Nowhere on the developer's machine. A phone call reaches an agent that is
+deployed, and every telephony route this compiler emits deploys to a managed
+platform:
+
+```text
+LiveKit `sip`        LiveKit `connector`      LiveKit Cloud
+Pipecat `cloud-websocket`                     Pipecat Cloud
+Pipecat `daily-sip`                           Pipecat Cloud
+```
+
+So there is one local loop, the browser, and it is the whole of `unmute dev`. It
+exercises the prompt, the tools, the models and the turn-taking, and it stops
+where the phone leg starts. What a carrier needs from the other end is publicly
+routable signalling and media ingress, which a laptop behind normal NAT does not
+have, so a local stand-in could never have answered the question anyway.
+
+The compiler still emits everything a deployed call needs, and that is the part
+the tests hold: the deploy manifest, the runbook's carrier steps, and, on an
+inbound LiveKit SIP route, the trunk and dispatch-rule records plus the one
+command that creates them.
+
+## Dev loop topology
+
+The dev server starts before the runtime it serves, not after it. The listener
+binds, the page is served, and the browser opens; only then does the target's
+runtime start. Startup output reaches the page through an in-memory buffer that
+replays on connect, so output produced before the browser finished loading is
+still there, and every connected page receives the same stream.
+
+That ordering is what makes a failed start readable: the process stays alive with
+the page up, while the terminal still prints the error and the log path and the
+command still exits non-zero. Serving first is additional information, never a
+softened failure. Every borrowed local resource is still released on every exit
+path, including an interrupt during a build.
+
+## Measurement boundary
+
+The emitted agent prints a flushed, framed stdout line whenever recognized or
+generated text, activity, or a measurement changes. The line is the boundary:
+`internal/devmetrics` owns the typed Go contract and decoder; each target's
+`dev_metrics.py` produces it. Agreement fixtures and SDK smoke tests hold the
+two languages to the same contract.
+
+V2 records are full snapshots of calls, exchanges, text segments, operations,
+or measurements. A call ID, entity ID, revision and creation order let the page
+replace the right entity without guessing from words or arrival time. The dev
+bootstrap selects the call before media connects: LiveKit uses the room name;
+Pipecat receives the issued ID in its offer request data. Text finality, model
+completion, tool outcome and audio playback remain separate facts. Available
+SDK request identities determine model-call counts; an aggregate measurement
+alone cannot establish a count. Unknown associations stay unassigned.
+
+The existing `/api/events` SSE feed carries records and runtime output. Its
+bounded replay buffer counts full serialized event bytes. Server identity and
+data sequence identify the replay cursor; state and gap controls carry no SSE
+ID. Overflow closes the affected subscriber without blocking the producer.
+Eviction, restart or a missing sequence makes history visibly incomplete for
+the selected call, even after individual entities receive fresh snapshots.
+The audio connection stays separate. Old unversioned turn/session records remain
+readable in logs and do not attach to the identified conversation.
+
+Producers ship in every artifact and stay inert unless `UNMUTE_DEV_METRICS` is
+set, which only `unmute dev` does. Emitting them conditionally would make
+`build/<target>/` depend on which command last ran.
+
+This display path adds no external exporter or collector. The local
+`build/<target>/dev.log` contains the raw records, including recognized and
+generated transcript text; the visible measurement filter omits repeated text
+fragments. Dev records exclude audio, reasoning, prompts, tool payloads and
+secrets. Trace export remains a separate opt-in feature. Observation preserves
+the framework's native results, chunks, cancellation and speech handles.
+
+## State and deployment boundaries
+
+Redis never stores credentials, raw webhook bodies, audio, transcripts,
+prompts, model context, task state, or agent-handoff state. Active conversation
+state stays in the process handling the call.
+
+The compiler emits images, local Compose files, and target-native deployment
+metadata. It does not provision production networking, secret storage,
+carrier numbers, carrier applications, SIP trunks, Redis, or replicas. Those
+belong to the operator.
+
+The slng target draws the same boundary a stage earlier. `internal/generate`
+compiles a `slng:` or `mcp:` reference to a name only, offline, with no
+socket to SLNG: it cannot know whether the organisation still publishes that
+name, whether an injected argument fits its parameters, or which Vault
+entries it needs, and its compile report names those as deferred rather than
+silently skipping them. Resolving a reference to a published tool, checking
+it, and discovering Vault requirements happen once, in `internal/cli`, when
+an author runs `unmute deploy`; that is the only place a credential is read
+or an account write happens. A committed mirror is the one exception, and it
+narrows rather than widens the boundary: `internal/ir` checks it offline for
+a selected code target only, because that target builds and runs the tool
+itself, and a `slng`-only compile needs none.
+
+Public run instructions are kept with the behavior they explain:
+
+- [local development](../docs-site/dev/overview.mdx)
+- [telephony](../docs-site/telephony/overview.mdx)
+- [targets](../docs-site/targets/overview.mdx)
+- [deployment](../docs-site/deploy/going-live.mdx)
+
+## Repository map
+
+Start with these files rather than scanning the whole tree.
+
+| Area | Files |
+|---|---|
+| Program entry | `main.go`, `internal/cli/root.go` |
+| Package loading and authoring schema | `internal/spec/` |
+| Resolution and validation | `internal/ir/` |
+| Capabilities and model provider catalogue | `internal/target/` |
+| Driver dispatch and emitted artifacts | `internal/generate/artifact.go` |
+| LiveKit driver | `internal/generate/livekit_v1*.go`, `internal/generate/templates/livekit_v1/` |
+| Pipecat driver | `internal/generate/pipecat_v1*.go`, `internal/generate/templates/pipecat_v1/` |
+| Dev conversation and measurement contract | `internal/devmetrics/`, each driver's `dev_metrics.py.tmpl` |
+| Package scaffolding | `internal/scaffold/` |
+| Shipped coding-agent skill | `internal/skill/assets/` |
+| Public packages | `examples/` |
+| Public documentation | `docs-site/` |
+
+Provider integrations are typed entries in
+`internal/target/catalog_{pipecat,livekit}.go`. `service_call.go` lowers a
+catalogue entry and model binding into a constructor for the templates. Add a
+provider there, then update the catalogue golden and the matching Models page
+under `docs-site/models/`.
+
+## Test layers
+
+- **L1 unit**: pure table-driven logic.
+- **L2 command**: the real Cobra tree runs in process with captured output.
+- **L3 golden**: generated files and catalogue resolution are byte-pinned.
+- **L4 smoke**: opt-in tests install provider SDKs and import generated Python.
+
+`make test` runs L1 through L3 with the race detector and needs no Python.
+`make smoke` runs L4. Repository agreement tests bind repeated facts to their
+code owners, including schemas, capabilities, provider lists, docs-site CLI
+help, the shipped skill, and repository layout.
+
+Offline and SDK smoke tests stop short of one thing: a human speaking to the
+generated agent and checking the tool and handoff behavior that follows. That
+is a live call against a deployed agent, and no test level stands in for it.
+
+## Architectural invariants
+
+- Compile ahead of time. Never interpret the package in production.
+- Keep portable behavior in the source package and target mechanics in the
+  drivers.
+- Reject unsupported behavior before writing an artifact.
+- Derive schemas from Go structs. Do not hand-author schema JSON.
+- Keep one capability rulebook in `internal/target`.
+- Keep secret values out of source packages and generated reports.
+- Emit one artifact directory per target instance and one carrier route per
+  telephony target.
+- Keep media and conversation state in the active process, never in Redis.
+- Measure locally. Nothing measured leaves the machine that produced it.
+- Scale from declared capacity and measured behavior, not authored agent count.
