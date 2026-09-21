@@ -585,6 +585,11 @@ class ToolModel(Model):
         return ToolModelStream(self, response=response, chat_ctx=chat_ctx, tools=tools or [], conn_options=conn_options)
 
 
+# The two lines internal/testdata/remy/agent.yaml gives the find_slot step. The
+# chooser picks either one, so the assertions name the set, not the line.
+FIND_SLOT_ANNOUNCE = ("Let me see what is open.", "One moment, let me look at the book.")
+
+
 async def check_task_return(capture, *, direct=False):
     call_id = "livekit-task-return-direct" if direct else "livekit-task-return"
 
@@ -681,7 +686,15 @@ async def check_task_return(capture, *, direct=False):
         for operation in operations:
             values = measured(capture, call_id, "request_duration", operation_id=operation["id"])
             assert len(values) == 1 and values[0]["measurement"]["exchange_id"] == operation["operation"]["exchange_id"]
-        assert [text for text, _ in capture.messages(call_id, "assistant")] == ["Checking the diary.", "Which day?", "Should I book it?", "Done, it’s in the diary."]
+        # The group enters find_slot, which carries announce:, so one of its two
+        # lines lands between the tool that delegated and the step's own first
+        # question. Exactly one: a second copy would mean the seam said it too.
+        # do_find is a bare delegate this test builds itself, so the direct run
+        # reaches the same step with nothing to announce.
+        spoken = [text for text, _ in capture.messages(call_id, "assistant")]
+        said = [text for text in spoken if text in FIND_SLOT_ANNOUNCE]
+        assert len(said) == (0 if direct else 1), spoken
+        assert spoken == ["Checking the diary.", *said, "Which day?", "Should I book it?", "Done, it’s in the diary."], spoken
         # Replay delayed real SDK callbacks in the immutable context captured
         # where each request ran, after the same native handle has resumed.
         previous = operations[0]["operation"]["exchange_id"]

@@ -234,11 +234,16 @@ async def main():
     session = probe.session
     assert session is not None, "the emitted entrypoint built no session"
     try:
-        # 1. The session is the model and nothing else. A transcriber, a
-        # synthesizer, a turn setting or a detector would be a keyword here.
-        assert set(probe.kwargs) == {"llm", "user_away_timeout"}, probe.kwargs
+        # 1. The session is the model, its retry cap and nothing else. A
+        # transcriber, a synthesizer, a turn setting or a detector would be a
+        # keyword here.
+        assert set(probe.kwargs) == {"llm", "conn_options", "user_away_timeout"}, probe.kwargs
         assert isinstance(probe.kwargs["llm"], gpt_live_model.GPTLiveModel), probe.kwargs["llm"]
         assert probe.kwargs["user_away_timeout"] == 20, probe.kwargs
+        # One retry for the reasoning model, not the framework's three: a
+        # caller cannot wait out 4.1 seconds of sleep between the attempts. The
+        # other two roles keep the default.
+        assert probe.kwargs["conn_options"].llm_conn_options.max_retry == 1, probe.kwargs["conn_options"]
 
         await until(lambda: probe.socket is not None, "the emitted session never opened a socket")
         socket = probe.socket
