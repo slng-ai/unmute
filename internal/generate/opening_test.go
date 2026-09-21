@@ -21,25 +21,31 @@ func TestListeningOpeningMakesNoRequest(t *testing.T) {
 	for _, want := range []string{
 		`{"role": "assistant", "content": "What would you like me to pass on?"}`,
 		"respond_immediately=False,",
-		`"type": "tts_say",`,
-		`"append_text_to_context": False,`,
+		`await self.queue_frame(TTSSpeakFrame("What would you like me to pass on?", append_to_context=False))`,
 	} {
 		if !strings.Contains(node, want) {
 			t.Errorf("the pipecat listening node is missing %q:\n%s", want, node)
 		}
 	}
+	// Never a Flows pre-action. This node is built inside the tool call that
+	// builds the flow, and a `tts_say` pre-action holds it there until a frame
+	// that call is blocking reaches the sink: the step then says nothing and
+	// asks the model nothing.
+	if strings.Contains(node, `"type": "tts_say"`) {
+		t.Errorf("the listening line went back to a pre-action, which deadlocks the first node:\n%s", node)
+	}
 }
 
 // The line has to survive the step's own history policy. On Pipecat a node's
-// RESET replaces the whole message list after pre-actions have run, so a line
-// the pre-action wrote into the context would be wiped: it is seeded in
-// task_messages, which the reset carries, and the pre-action only speaks it.
+// RESET replaces the whole message list as the node is built, so a line only
+// the spoken frame carried would be wiped: it is seeded in task_messages,
+// which the reset carries, and the frame only speaks it.
 func TestListeningOpeningSurvivesAReset(t *testing.T) {
 	pipecat := terminalModule(t, "pipecat", "bot.py")
 	node := blockAfter(t, pipecat, "def _take_note_node_take_note(self)")
 	seedAt := strings.Index(node, `{"role": "assistant", "content": "What would you like me to pass on?"}`)
-	actionAt := strings.Index(node, `"append_text_to_context": False,`)
-	if seedAt < 0 || actionAt < 0 {
+	spokenAt := strings.Index(node, "append_to_context=False")
+	if seedAt < 0 || spokenAt < 0 {
 		t.Fatalf("the listening node is not built the way a reset survives:\n%s", node)
 	}
 	if !strings.Contains(node, "ContextStrategy.RESET") {

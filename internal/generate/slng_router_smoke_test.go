@@ -316,7 +316,7 @@ async def check():
             worker=SimpleNamespace(context=context,state=state)
             setattr(worker,"_"+name+"_finish_"+name,lambda *args:None)
             worker._bind_state=lambda handler:handler
-            node=getattr(generated.DeskAgent,"_"+name+"_node_"+name)(worker)
+            node=await getattr(generated.DeskAgent,"_"+name+"_node_"+name)(worker)
             assert_policy(policy,json.dumps(context.get_messages()))
             assert "PRIVATE_OLD_INSTRUCTIONS" not in node["role_message"]
         return

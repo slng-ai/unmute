@@ -318,45 +318,49 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			t.Errorf("booking is split again into %q; one task owns draft, confirm and apply", name)
 		}
 	}
-	// Two plain tasks the concierge runs in order, and deliberately NOT a task
-	// group. A `book` group held the same two steps until 2026-09-16 and was a
-	// better shape on LiveKit: it chained the steps itself, so the owner spent
-	// no model request deciding to enter the second one.
+	// One `book` group chains verification and booking, so the concierge spends
+	// no model request deciding to enter the second step. That request was the
+	// whole cost of the two-plain-tasks shape this replaced between 2026-09-16
+	// and 2026-09-21.
 	//
-	// It came out because it does not run on Pipecat at all. On the live Pipecat
-	// call of that day (trace 5a330c65) the group was entered, held the call for
-	// eleven seconds, made no model request and produced no audio, and the
-	// caller heard only the greeting. The lowering compiles and validates; it
-	// never speaks. One extra round trip is the price of the shipped example
-	// working on both targets.
-	//
-	// Put the group back only with a Pipecat call proving it speaks.
-	if len(resolved.TaskGroups) != 0 {
-		t.Errorf("task groups = %v, want none: groups produce no speech on Pipecat",
+	// The group came out in the first place because it produced no speech and
+	// no model request on Pipecat (trace 5a330c65). The cause was the step's
+	// opening line, emitted as a Flows `tts_say` pre-action: that holds the
+	// first node until a frame the running tool call is blocking reaches the
+	// worker sink. The line is a queued frame now and the chain runs; the
+	// runtime proof is TestSmokePipecatGroupChainsWithoutAnOwnerRequest.
+	group, ok := resolved.TaskGroups["book"]
+	if !ok {
+		t.Fatalf("task groups = %v, want a `book` group chaining verification into booking",
 			slices.Sorted(maps.Keys(resolved.TaskGroups)))
 	}
+	if len(group.Steps) != 2 || group.Steps[0].Task != "verify_customer" || group.Steps[1].Task != "manage_booking" {
+		t.Errorf("book runs %v, want verify_customer then manage_booking", group.Steps)
+	}
+	// Structural, not a prompt rule: a caller who has already agreed to their
+	// number is not asked again, and nothing in the owner's prompt decides it.
+	if group.Steps[0].SkipWhenConfirmed != "customer_phone" {
+		t.Errorf("verification skips on %q, want the confirmation of customer_phone", group.Steps[0].SkipWhenConfirmed)
+	}
 	for _, name := range []string{"verify_customer", "manage_booking"} {
-		if _, ok := resolved.Tasks[name]; !ok {
-			t.Fatalf("task %q is gone; the concierge runs verification then booking", name)
-		}
-		// Both need a trigger now. As group steps only the group carried one,
-		// and a task with no `when:` is a definition its agent cannot decide to
-		// run, so it would reach the model as a tool nothing describes.
-		delegate, ok := resolved.Controls[name].(*ir.Delegate)
+		task, ok := resolved.Tasks[name]
 		if !ok {
-			t.Errorf("%q is not a delegate the concierge can call: %T", name, resolved.Controls[name])
-			continue
+			t.Fatalf("task %q is gone; the book flow runs verification then booking", name)
 		}
-		if delegate.When == "" {
-			t.Errorf("delegate %q has no when:, so the concierge cannot decide to run it", name)
+		// One announcement each, on the step and not on a tool. The diary line
+		// sat on `find_slots` until 2026-09-16: a tool's line is emitted inside
+		// the tool body, so a model that read the diary twice in one turn spoke
+		// twice (trace 917975e9). A step's fires once in the entry.
+		if len(task.Announce) == 0 {
+			t.Errorf("step %q says nothing as it is entered", name)
 		}
-		// One announcement each, and both at the seam. The diary line sat on
-		// `find_slots` until 2026-09-16: a tool's line is emitted inside the
-		// tool body, so a model that read the diary twice in one turn spoke
-		// twice (trace 917975e9). A delegate's fires once per entry.
-		if len(delegate.Announce) == 0 {
-			t.Errorf("delegate %q says nothing as it is entered", name)
-		}
+	}
+	// Verification is also a delegate, because customer care calls it on its own
+	// before writing a complaint down and a caller who opens with a complaint
+	// has never been near booking.
+	verify, ok := resolved.Controls["verify_customer"].(*ir.Delegate)
+	if !ok || verify.When == "" {
+		t.Errorf("verify_customer = %#v, want a delegate with a when: of its own", resolved.Controls["verify_customer"])
 	}
 	// One read and one write, and the seam is the conversation's own: find_slots
 	// answers "what do they hold" and "what is free" together, because a caller
@@ -459,12 +463,15 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if !strings.Contains(resolved.Tools["end_call"].Description, "A question is never one of those") {
 		t.Error("end_call does not say a question is not an ending, and a live call hung up on one")
 	}
-	// A delegate straight to the task, not to a group. The `book` group that
-	// wrapped it came out on 2026-09-16; the assertion above holds that none is
-	// back.
-	bookingDelegate, ok := resolved.Controls["manage_booking"].(*ir.Delegate)
-	if !ok || bookingDelegate.Task != "manage_booking" || bookingDelegate.Group != "" {
-		t.Fatalf("manage_booking = %#v, want a delegate to the booking task", resolved.Controls["manage_booking"])
+	// The only delegate into booking is the group. Booking has no `when:` of its
+	// own, so the concierge cannot route past verification straight into the
+	// diary, and there is no second route for it to spend a request choosing.
+	bookDelegate, ok := resolved.Controls["book"].(*ir.Delegate)
+	if !ok || bookDelegate.Group != "book" || bookDelegate.Task != "" {
+		t.Fatalf("book = %#v, want a delegate to the booking flow", resolved.Controls["book"])
+	}
+	if control, reachable := resolved.Controls["manage_booking"]; reachable {
+		t.Fatalf("manage_booking is callable on its own (%#v); the flow is the only way in", control)
 	}
 	// Both steps end on their own tools, which is the pair of requests spec 010
 	// removes. A step that stops declaring finish: goes back to asking the model
@@ -792,16 +799,15 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		}
 	}
 
-	// The shape, held as tightly as the old shape was held. Two agents, and the
-	// booking step is a delegate on the entry agent rather than an agent of its
-	// own.
+	// The shape, held as tightly as the old shape was held. Two agents, and
+	// booking is a flow on the entry agent rather than an agent of its own.
 	if len(resolved.Agents) != 2 {
 		t.Errorf("the example has %d agents, want 2: %v", len(resolved.Agents), slices.Sorted(maps.Keys(resolved.Agents)))
 	}
-	if _, ok := resolved.Controls["manage_booking"].(*ir.Delegate); !ok {
-		t.Fatalf("manage_booking = %T, want a delegate", resolved.Controls["manage_booking"])
+	if _, ok := resolved.Controls["book"].(*ir.Delegate); !ok {
+		t.Fatalf("book = %T, want a delegate", resolved.Controls["book"])
 	}
-	if !slices.Contains(resolved.Agents[resolved.EntryAgent].Tools, "manage_booking") {
+	if !slices.Contains(resolved.Agents[resolved.EntryAgent].Tools, "book") {
 		t.Errorf("the entry agent does not hold the booking flow: %v", resolved.Agents[resolved.EntryAgent].Tools)
 	}
 }

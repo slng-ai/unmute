@@ -7,6 +7,11 @@ A task group is an ordered sequence of tasks. Use one when the order must be a
 runtime guarantee. A task that runs inside a group is called a step of that
 group.
 
+It also costs less than the same tasks run one at a time. The agent chooses the
+group once; each step after the first opens by itself. Two tasks the agent picks
+between spend a model request on the choice between them, and that request
+speaks nothing and does nothing.
+
 On this page:
 
 - [Declare a group](#declare-a-group) - steps, in order

@@ -498,7 +498,7 @@ async def main() -> None:
         flow_frames.extend(frames)
 
     owner.queue_frames = capture_flow_frames
-    await flow.initialize(owner._run_verify_node_verify())
+    await flow.initialize(await owner._run_verify_node_verify())
     owner.queue_frames = original_queue_frames
     task_tools = next(
         frame.tools for frame in flow_frames if isinstance(frame, LLMSetToolsFrame)

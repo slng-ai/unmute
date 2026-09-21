@@ -999,7 +999,7 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 		// The chain is a plan now, decided as the flow starts, because a group
 		// may skip a step whose confirmation holds and stops when one ends
 		// unserved. The next step is looked up rather than named.
-		`return _task_status(self._run_verify_results["verify"]), self._run_verify_node(_next)`,
+		`return _task_status(self._run_verify_results["verify"]), await self._run_verify_node(_next)`,
 		`def _run_verify_next(self, name):`,
 	} {
 		if !strings.Contains(bot, want) {
@@ -1240,7 +1240,7 @@ func TestV2_PipecatDelegateSnapshotsCompletedOwnerCall(t *testing.T) {
 		if start < 0 {
 			t.Fatalf("missing generated delegate %q", name)
 		}
-		end := bytes.Index(bot[start:], []byte("\n    def _"+name+"_node_"))
+		end := bytes.Index(bot[start:], []byte("\n    async def _"+name+"_node_"))
 		if end < 0 {
 			t.Fatalf("missing first node after generated delegate %q", name)
 		}
