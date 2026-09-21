@@ -39,11 +39,11 @@ def _google_vertex_client(api_key, location):
         vertexai=True,
         api_key=api_key,
         location=location,
-        http_options={
-            "base_url": f"https://{host}/v1beta1",
-            "base_url_resource_scope": "COLLECTION",
-            "api_version": "v1beta1",
-        },
+        http_options=_google_genai.types.HttpOptions(
+            base_url=f"https://{host}/v1beta1",
+            base_url_resource_scope=_google_genai.types.ResourceScope.COLLECTION,
+            api_version="v1beta1",
+        ),
     )
 
 `
