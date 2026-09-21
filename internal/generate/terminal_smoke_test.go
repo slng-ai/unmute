@@ -168,7 +168,7 @@ async def check_pipecat():
     worker.flush_pipeline = ignore
     worker._do_book_settle = lambda: generated.DeskAgent._do_book_settle(worker)
     worker._do_book_next = lambda name: generated.DeskAgent._do_book_next(worker, name)
-    worker._do_book_node = lambda name: generated.DeskAgent._do_book_node(worker, name)
+    worker._do_book_node = lambda name: generated.DeskAgent._do_book_node(worker, name)  # a coroutine; the caller awaits it
     worker._do_book_advance_book = lambda values: generated.DeskAgent._do_book_advance_book(worker, values)
     worker._do_book_finish_book = lambda args, flow: generated.DeskAgent._do_book_finish_book(worker, args, flow)
     worker._do_book_complete_book = lambda: generated.DeskAgent._do_book_complete_book(worker)

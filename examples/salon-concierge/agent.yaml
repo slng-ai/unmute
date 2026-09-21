@@ -15,13 +15,11 @@ agents:
     tasks:
       - name: verify_customer
         when: >-
-          Run this when `customer_verified` is empty and what you do next needs
-          the caller identified: the booking step, or writing a complaint down.
-          Run it on its own when the caller explicitly corrects their phone
-          number. Never run it twice for one call: once `customer_verified`
-          names a status, the caller is verified for the rest of the call. A
-          change of date, time or service is not a phone correction and needs no
-          verification.
+          Run this when the caller explicitly corrects their phone number, and
+          when a complaint is about to be written down. Never before a booking:
+          the `book` flow runs this step itself when the saved number is not
+          confirmed. A change of date, time or service is not a phone
+          correction.
         instructions: tasks/verify-customer.md
         # Spoken as the step is entered, so it covers the lookup's latency. Short
         # and about the caller, not about the process: "let me verify you first"
@@ -51,10 +49,11 @@ agents:
         context:
           history: messages
 
+      # No `when:` here on purpose, which makes this a definition and not
+      # something the concierge can choose. The only way in is the `book` flow
+      # below, so a booking cannot start without verification having been
+      # decided first.
       - name: manage_booking
-        when: >-
-          The caller wants to create, move or cancel a booking. Includes a
-          change to an appointment just made.
         instructions: tasks/booking.md
         # "Double check" implied a check that had already happened, on the first
         # look of the call. These say the same thing in fewer words and none of
@@ -79,6 +78,8 @@ agents:
           - appointment: result.appointment
         context:
           history: messages
+    task_groups:
+      - book
     handoffs:
       - to_complaints
     escalations:
@@ -123,6 +124,29 @@ escalations:
       destination: manager_line
       ring_timeout: 30s
       on_unavailable: hangup
+
+# One booking request, start to finish, and no model request in the middle of
+# it deciding what comes next. The concierge picks this once; the flow runs
+# verification and then booking itself.
+#
+# No `announce:` on the group. Its line would fire on every entry and no
+# sentence is true on both halves: the flow opens on the verification question
+# the first time and on the diary every time after. Each step carries its own
+# list instead, and a skipped step speaks nothing.
+task_groups:
+  book:
+    when: >-
+      The caller wants to create, move or cancel a booking. Includes a change to
+      an appointment just made.
+    steps:
+      # Skipped once the caller has agreed to their number, which is every
+      # booking after the first on a call. Decided as the flow starts, so a
+      # confirmation withdrawn mid-flow is the next invocation's question.
+      - task: verify_customer
+        skip_when_confirmed: customer_phone
+      - manage_booking
+    context_scope: shared
+    then: return
 
 shapes:
   - name: Appointment
@@ -197,11 +221,16 @@ variables:
       by the verification step as it ends, which only happens on a number the
       caller agreed to, so a value here means the number beside it is confirmed.
 
-      It exists for the concierge, which has to decide whether to verify before
-      running the booking step and cannot read `customer_phone` to find out: an
-      unconfirmed number renders in no prompt but the verification step's own,
-      and a confirmed one must not be in front of an agent that might say it out
-      loud. This carries the same fact with nothing sensitive in it.
+      It exists for customer care, which has to decide whether to identify the
+      caller before writing a complaint down and cannot read `customer_phone` to
+      find out: an unconfirmed number renders in no prompt but the verification
+      step's own, and a confirmed one must not be in front of an agent that
+      might say it out loud. This carries the same fact with nothing sensitive
+      in it.
+
+      The concierge does not read it. The `book` flow decides the same thing
+      structurally with `skip_when_confirmed:`, off the confirmation itself
+      rather than off a copy of it.
 
       Empty means nobody has been verified yet on this call.
 

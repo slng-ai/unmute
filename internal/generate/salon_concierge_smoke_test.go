@@ -674,6 +674,10 @@ async def booking_flow(worker, context, *, action, booking_id=""):
     # is already a no-op from quiet(worker), so a flow_manager stand-in exposing
     # just that worker is enough.
     flow_manager = SimpleNamespace(worker=worker)
+    # The caller asks for this one. A flow entered with nothing new said since
+    # the last one returned is refused, which is the guard that stops the owner
+    # reading its own finished result as a fresh request.
+    context.add_message({"role": "user", "content": f"Please {action} it."})
     node = await enter_book(worker)
     # The number is confirmed, so the plan skips verification and opens on the
     # booking step: the owner request between the two is the one this package
@@ -801,6 +805,11 @@ async def verify_then_create():
     # A second book while the caller holds a booking is the tool's own
     # refusal, an ordinary result: the step stays open, and moving keeps
     # the booking's identity.
+    #
+    # The caller asks for it first. A flow entered with nothing new said since
+    # the last one returned is refused, and that refusal leaves the previous
+    # invocation's plan in place.
+    context.add_message({"role": "user", "content": "Can I have another one too?"})
     node = await enter_book(worker)
     assert worker._book_plan == ["manage_booking"], worker._book_plan
     step = handlers(node)

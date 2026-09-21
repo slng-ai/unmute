@@ -127,12 +127,12 @@ async def check_stale_visit():
         _confirm_number_active_step="confirm_number", _confirm_number_results={},
         _confirm_number_snapshot=([],[]), _confirm_number_visit=object(), _slng_session_id="test")
     worker._confirm_number_finish_confirm_number=partial(generated.DeskAgent._confirm_number_finish_confirm_number,worker)
-    node=generated.DeskAgent._confirm_number_node_confirm_number(worker)
+    node=await generated.DeskAgent._confirm_number_node_confirm_number(worker)
     old=next(fn.handler for fn in node["functions"] if fn.name=="finish_confirm_number_confirm_number")
     worker._confirm_number_visit=object()
     result,_=await old({"caller_phone":"+34600111222"},None)
     assert result=={"status":"already handled"} and not fresh.caller_phone
-    node=generated.DeskAgent._confirm_number_node_confirm_number(worker)
+    node=await generated.DeskAgent._confirm_number_node_confirm_number(worker)
     current=next(fn.handler for fn in node["functions"] if fn.name=="finish_confirm_number_confirm_number")
     await current({"caller_phone":"+34600111222"},None)
     await current({"caller_phone":"+34600999888"},None)
@@ -156,7 +156,7 @@ async def check_injection():
             SimpleNamespace(userdata=fresh, session=SimpleNamespace()), note="authored")
     else:
         worker = SimpleNamespace(context=generated.LLMContext(),state=fresh,_bind_state=lambda handler:handler,_book_finish_book=lambda *args:None)
-        node = generated.DeskAgent._book_node_book(worker)
+        node = await generated.DeskAgent._book_node_book(worker)
         schema = next(tool for tool in node["functions"] if tool.name == "inspect_state")
         assert set(schema.properties) == {"note"} and schema.required == ["note"],schema
         result = await generated._flow_tool_inspect_state({"note":"authored"}, None, fresh)

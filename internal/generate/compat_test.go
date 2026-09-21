@@ -93,6 +93,15 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // both records there and reported success. That reaches every package on an
 // inbound SIP route, whichever keys it writes.
 //
+// And on 2026-09-21, for one more: a Pipecat step's node builder is an
+// `async def` and speaks the step's opening line with a queued TTSSpeakFrame
+// instead of a Flows `tts_say` pre-action. A pre-action holds the node until
+// the ActionFinishedFrame behind it reaches the worker sink, and a frame this
+// worker queues does not move until the tool call building the flow returns, so
+// the first node of every flow deadlocked: nothing spoken, nothing asked of the
+// model (trace 5a330c65). The `async def` reaches every Pipecat package with a
+// task; the line itself only reaches a group step or `opening: listen`.
+//
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {

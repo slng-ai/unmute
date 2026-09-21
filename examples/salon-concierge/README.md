@@ -17,7 +17,7 @@ On this page:
 - [What you need](#what-you-need) - the values in `.env`
 - [Structure](#structure) - what each path holds
 - [The two agents and their tasks](#the-two-agents-and-their-tasks) - who does what
-- [The booking flow](#the-booking-flow) - two tasks, run in order
+- [The booking flow](#the-booking-flow) - one group, two steps, one request in
 - [Typed values and context](#typed-values-and-context) - what crosses a handoff
 - [Before the greeting](#before-the-greeting) - the pre-fetch block
 - [The manager transfer and the knowledge bases](#the-manager-transfer-and-the-knowledge-bases) - escalation and documents
@@ -106,8 +106,8 @@ call. Customer care is a second agent because it holds a document set and a
 permission the concierge must not have: the refund policy and the complaint
 record.
 
-**Two tasks, run in that order by the concierge.** Verification confirms who is
-calling. Booking does book, move and cancel in one task and saves a typed
+**Two tasks, run in that order by the `book` flow.** Verification confirms who
+is calling. Booking does book, move and cancel in one task and saves a typed
 Appointment.
 
 A task is worth a model request when something has to happen in an order.
@@ -137,23 +137,32 @@ its own fixed line as it starts, so the prompt adds none of its own.
 
 ## The booking flow
 
-**Two steps, and the concierge runs them in order.** Verification, then booking.
-The concierge reads `customer_verified`: empty means nobody on this call has been
-identified, so it runs `verify_customer` first; a status there means that caller
-is verified for the rest of the call and it goes straight to `manage_booking`. A
-caller who corrects their number gets verification again, because entering that
-step withdraws the confirmation it made.
+**One flow, two steps, and the concierge decides nothing in between.** `book` is
+a task group holding `verify_customer` and then `manage_booking`. The concierge
+calls it once; when verification ends, booking opens by itself. Nothing reads a
+variable to work out what comes next, and no model request is spent choosing.
 
-**This was a task group until September 2026, and the group was the better
-shape.** `book` held the same two steps and chained them itself, so the concierge
-spent no model request deciding to enter the second one. It came out because it
-does not run on Pipecat: on a live call the group was entered, held the call for
-eleven seconds, made no model request and produced no audio at all, and the
-caller heard only the greeting. The lowering compiles and validates; it never
-speaks. One extra model request on the booking turn is what the example costs to
-work on both targets. `skip_when_confirmed:` went with it, because that is a
-group-step field, and the decision it made structurally is now the concierge's
-to make from `customer_verified`.
+**Verification is skipped once the caller has agreed to their number.**
+`skip_when_confirmed: customer_phone` decides that as the flow starts, so a
+second booking on the same call goes straight to the diary. A caller who
+corrects their number gets verification again, because entering that step
+withdraws the confirmation it made.
+
+**This went the long way round.** The group was removed in September 2026 after
+a live Pipecat call where it was entered, held the caller for eleven seconds,
+made no model request and produced no audio at all. The two steps became plain
+tasks the concierge picked between, which cost one model request on every
+booking turn: a request that spoke nothing, did nothing, and only named the next
+task.
+
+The cause was not the group. It was the step's opening line, which was lowered
+to a Pipecat Flows `tts_say` pre-action. A pre-action holds the node until the
+frame behind it has travelled to the end of the worker's pipeline, and a frame
+queued from inside the tool call that is building the flow does not move until
+that call returns. The first node of every flow waited on itself. The line is a
+plain queued frame now, nothing waits, and
+`TestSmokePipecatGroupChainsWithoutAnOwnerRequest` drives the package through
+the real framework to keep it that way.
 
 **Both steps end on their own tools.** `verify_customer` names its lookup
 under `finish:`, and `manage_booking` names `save_booking` once, with its three
@@ -187,7 +196,7 @@ checked in one place.
 it and they need different lines, because different things are happening behind
 them.
 
-The front one is `verify_customer`'s. It fires as the concierge calls the step,
+The front one is `verify_customer`'s. It fires as the flow enters the step,
 covering the two model requests it takes to ask the caller for their number.
 
 The second is `manage_booking`'s, covering the three requests between the caller
@@ -223,10 +232,11 @@ refuses a save that arrives unconfirmed. The caller heard "putting that through
 now" and then a question asking their permission.
 
 **A spoken line is not a caller turn.** A step that opens with "Got it," after
-its own announcement is agreeing with itself, which a live call on Pipecat did,
-because a `TTSSpeakFrame` never reaches the model's context there. Both step
-prompts say in one sentence that a fixed line was already spoken and to go
-straight to the question, so the two targets behave the same.
+its own announcement is agreeing with itself, which a live call on Pipecat did:
+the line was spoken and the model could not see it, so its first turn read as an
+answer to nothing. The line is seeded as the step's own first assistant turn now
+on both targets, and both step prompts still say in one sentence that a fixed
+line was already spoken and to go straight to the question.
 
 The hesitation a person actually makes before answering rides on the answer
 instead. The booking prompt opens its first sentence with a written "hmm" or
@@ -349,10 +359,10 @@ The dev page streams caller and generated agent text, running tools and availabl
 measurements. Final caller words do not wait for a model reply. Each numbered
 SDK model call shows its own first-response and full-duration values at a glance.
 TTS first audio and tool duration also stay visible; Debug details holds
-secondary timings and source metadata. A call into a task, such as `verify_customer`,
-gets a `HANDOFF` row and no duration, which is what accounts for the extra model
-call in that reply. On Pipecat each measured reply is also split into the parts
-that make it up, with what each cost and who owns it, and a tool that produced no
+secondary timings and source metadata. A call into a task or a flow, such as
+`book`, gets a `HANDOFF` row and no duration, which is what accounts for the
+extra model call in that reply. On Pipecat each measured reply is also split
+into the parts that make it up, with what each cost and who owns it, and a tool that produced no
 result says whether it failed or ran past its deadline. Reply latency excludes
 browser delivery; source-limited measurements
 remain unassigned, and a lost event range labels the call count as observed.

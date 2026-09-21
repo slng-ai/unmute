@@ -86,18 +86,25 @@ the server, not the package, owns that order.
 
 A prompt that says "always identify the caller first" is a request. A task group
 is a guarantee. A `when:` clause naming the dependency is not a guarantee the
-same way, but it is cheap: no extra step, no extra prompt, and nothing the
-caller is spoken through. See "Order steps with the prompt" below. Reach for
-a task group when the order must hold, and for a `when:` clause when one
-value should usually be there before one step runs.
+same way, but it is cheap on one task: no extra step, no extra prompt, and
+nothing the caller is spoken through. See "Order steps with the prompt" below.
+
+It stops being cheap the moment there are two of them in a row. Two tasks the
+agent picks between are the same two steps plus a model request at the seam,
+and that request speaks no words and does no work: it exists only to name the
+next task. A group spends one request on the way in and none between the steps.
+So a `when:` clause is for one step that needs a value to be there first, and a
+group is for a sequence, whether or not the order is safety-critical. Writing a
+sequence as `when:`-bearing tasks to avoid "the weight of a group" buys nothing
+and costs the caller a silence per seam.
 
 ## What each shape costs
 
 | Shape | Control | Context | Correcting a step | The cost |
 |---|---|---|---|---|
 | one agent and tools | stays with the agent for the whole call | the whole conversation | ask again | the prompt carries everything, and grows |
-| task | returns when the task finishes | what `context:` gives the task | run it again | one more prompt and one more tool list to keep straight |
-| task group | returns when the group finishes | shared across the steps, or not | steps can be revisited inside the group | an order you have to be sure about |
+| task | returns when the task finishes | what `context:` gives the task | run it again | one more prompt and one more tool list to keep straight, and a model request every time the agent chooses it |
+| task group | returns when the group finishes | shared across the steps, or not | steps can be revisited inside the group | an order you have to be sure about. One request on the way in, and none between the steps |
 | handoff | leaves for good | chosen speech history plus explicitly referenced saved values | another handoff back | nothing returns, so there is no automatic way back |
 
 These are not exclusive. One agent can run a task in one phase and hand off in
@@ -345,6 +352,15 @@ task and an `announce:` into the next cover the same handover, so the caller
 hears two lines for one request. Both cases read as a stutter. The task's line
 covers two model requests and the tool's covers a request body, so the task's
 is usually the one worth keeping.
+
+**In a group, put the line on each step and none on the group.** A step's own
+`announce:` fires as that step is entered, so a group of three steps covers all
+three seams with three lines that are each true where they play. The group's own
+line fires once on the way in, before anything has been decided, and it has to
+be true of whichever step runs first: a group that opens on a verification
+question the first time and on a diary read every time after has no such
+sentence, and a skipped first step would hear a line about work that never
+happened.
 
 Denied on the `slng` target, which writes one agent with no steps.
 
@@ -597,7 +613,11 @@ own `tasks:` list. The order is a guarantee, not a request in a prompt. A
 group contains tasks, not other groups.
 
 An agent runs a group by naming it in its own `task_groups:` list, the same
-way it names a handoff or an escalation. The group's `context_scope` governs
+way it names a handoff or an escalation. It costs one model request to enter,
+whatever the group then runs: each step after the first opens by itself. The
+same tasks written as separate `when:`-bearing tasks cost a request per step,
+and the extra request speaks nothing and does nothing but name the next task.
+The group's `context_scope` governs
 how the members relate while the group runs. It does not replace a member
 task's `context:` block. A member may omit both `assign:` and `context:` when it
 saves no value and the default spoken-message history is right.

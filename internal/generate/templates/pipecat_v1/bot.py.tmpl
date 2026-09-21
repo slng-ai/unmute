@@ -1345,12 +1345,12 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}{{if (index $d.StepTasks 0).CtxExpr}}        # context.history on this task. Shaped after the snapshot above, so the
         # finish path restores the owner's own context whatever this step saw.
         self.context.set_messages({{(index $d.StepTasks 0).CtxExpr}})
-{{end}}{{if $d.RuntimeChain}}        await flow.initialize(self._{{$d.MethodName}}_node(self._{{$d.MethodName}}_active_step))
-{{else}}        await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
+{{end}}{{if $d.RuntimeChain}}        await flow.initialize(await self._{{$d.MethodName}}_node(self._{{$d.MethodName}}_active_step))
+{{else}}        await flow.initialize(await self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
 {{end}}{{if $d.RuntimeChain}}
-    def _{{$d.MethodName}}_node(self, name) -> NodeConfig:
+    async def _{{$d.MethodName}}_node(self, name) -> NodeConfig:
         """One step's node by name, because the chain is decided at run time."""
-        return {
+        return await {
 {{range $d.StepTasks}}            {{pyq .Name}}: self._{{$d.MethodName}}_node_{{.Name}},
 {{end}}        }[name]()
 
@@ -1365,7 +1365,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         self._{{$d.MethodName}}_pending = False
         self._{{$d.MethodName}}_settled.set()
 {{end}}{{range $t := $d.StepTasks}}
-    def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
+    async def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
 {{if $d.CarriesTurn}}        # This step's own ending, whatever the step before it did. Held on the
         # flow rather than the step, so the tool that ended the previous step
         # closed this one's mutations too: a verified caller was told their
@@ -1383,36 +1383,37 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}{{if and $t.AnnounceChosen $t.SpeaksItsOwnLine}}        # Read once. Alternatives pick a line per call, so the seeded turn and
         # the spoken one have to come from the same read.
         _open = {{$t.Announce}}
+{{end}}{{if $t.SpeaksItsOwnLine}}        # The step's own line, queued rather than handed to the framework as a
+        # `tts_say` pre-action, and that is not a style choice. A pre-action
+        # holds the node until the ActionFinishedFrame behind it reaches the
+        # worker sink, and a frame this worker queues does not move until the
+        # tool call that is building this flow returns. The first node of a
+        # flow is built inside that call, so the two wait on each other: on a
+        # live Pipecat call on 2026-09-16 a task group was entered, said
+        # nothing, asked the model nothing, and held the caller for eleven
+        # seconds. Queued, nothing waits, and the line is spoken in the same
+        # place it would have been.
+        #
+        # append_to_context=False because the seeded assistant turn below is
+        # how the line enters the context. Appending here as well would put it
+        # in twice.
+        await self.queue_frame(TTSSpeakFrame({{$t.OpenExpr}}, append_to_context=False))
 {{end}}        return NodeConfig(
             name={{pyq $t.Name}},
             role_message={{$t.PromptExpr}},
 {{if eq $t.Opening "listen"}}            # opening: listen. The line is seeded as this step's own first turn and
-            # spoken by the pre-action, and no completion is run: the caller
+            # spoken by the frame above, and no completion is run: the caller
             # answers a question that cost no model request. Seeded rather than
-            # left to the pre-action's own context write, because a step with
-            # history: reset replaces the message list after pre-actions run.
+            # left to the spoken frame's own context write, because a step with
+            # history: reset replaces the message list as the node is built.
             task_messages=[{{if $t.Announce}}{"role": "assistant", "content": {{$t.OpenExpr}}}{{else}}{"role": "developer", "content": "Wait for the caller."}{{end}}],
             respond_immediately=False,
-{{if $t.Announce}}            pre_actions=[
-                {
-                    "type": "tts_say",
-                    "text": {{$t.OpenExpr}},
-                    "append_text_to_context": False,
-                }
-            ],
-{{end}}{{else}}            task_messages=[{"role": "developer", "content": "Begin this step."}{{if and $t.Announce $t.SpeakOpening}}, {"role": "assistant", "content": {{$t.OpenExpr}}}{{end}}],
-{{if and $t.Announce $t.SpeakOpening}}            # A group step speaks its own line as it is entered, the way the key
-            # says it does, and the seeded assistant turn is what stops the
-            # model opening by acknowledging a sentence it cannot otherwise see:
-            # a TTSSpeakFrame never reaches the context, and a live call on
-            # 2026-09-16 answered its own announcement with "Got it.".
-            pre_actions=[
-                {
-                    "type": "tts_say",
-                    "text": {{$t.OpenExpr}},
-                    "append_text_to_context": False,
-                }
-            ],
+{{else}}            task_messages=[{"role": "developer", "content": "Begin this step."}{{if and $t.Announce $t.SpeakOpening}}, {"role": "assistant", "content": {{$t.OpenExpr}}}{{end}}],
+{{if and $t.Announce $t.SpeakOpening}}            # The seeded turn above is the line the frame spoke, and it is what
+            # stops the model opening by acknowledging a sentence it would
+            # otherwise not be able to see: the frame carries no context write
+            # of its own, and a live call on 2026-09-16 answered its own
+            # announcement with "Got it.".
 {{end}}{{end}}            functions=[
 {{range $t.Tools}}                FlowsFunctionSchema(
                     name={{pyq .Name}},
@@ -1622,7 +1623,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                 await self.queue_frame(LLMUpdateSettingsFrame(
                     delta=LLMSettings(extra={"extra_headers": _scope}),
                 ))
-{{end}}            return _task_status(self._{{$d.MethodName}}_results[{{pyq $t.Name}}]), self._{{$d.MethodName}}_node(_next)
+{{end}}            return _task_status(self._{{$d.MethodName}}_results[{{pyq $t.Name}}]), await self._{{$d.MethodName}}_node(_next)
 {{else}}        self._{{$d.MethodName}}_active_step = {{if $t.NextName}}{{pyq $t.NextName}}{{else}}None{{end}}
 {{end}}{{if and $t.NextName (not $d.RuntimeChain)}}{{if $t.SlngNextHeaders}}        # The next step is a different prompt site, so it asks under a different
         # cache scope. Queued before the node is handed back, for the same reason
@@ -1630,7 +1631,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(extra={"extra_headers": {{$t.SlngNextHeaders}}}),
         ))
-{{end}}        return _task_status(self._{{$d.MethodName}}_results[{{pyq $t.Name}}]), self._{{$d.MethodName}}_node_{{$t.NextName}}()
+{{end}}        return _task_status(self._{{$d.MethodName}}_results[{{pyq $t.Name}}]), await self._{{$d.MethodName}}_node_{{$t.NextName}}()
 {{else}}{{if and $d.HasTransfers (ne $d.Then "end")}}        flow_messages = None
         flow_tools = None
         completion_started = False

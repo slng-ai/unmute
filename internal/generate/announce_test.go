@@ -18,10 +18,15 @@ import (
 // built, so the step must not say it again. Saying it twice is the failure this
 // holds shut, and it is one `and` in each template.
 //
-// Held against internal/testdata/remy rather than the salon, which
-// stopped running a task group on 2026-09-16: groups produce no speech at all on
-// Pipecat (trace 5a330c65), so the shipped example went back to plain tasks and
-// this invariant needed a fixture that still exercises it.
+// Held against internal/testdata/remy, which runs two groups and nothing else,
+// so a line emitted per delegate rather than per step shows up as a count.
+//
+// On Pipecat the line is a queued TTSSpeakFrame and not a `tts_say` pre-action,
+// which it was until 2026-09-21. A pre-action holds the node until its
+// ActionFinishedFrame reaches the worker sink, and a frame queued from inside
+// the tool call that builds the flow does not move until that call returns, so
+// the first node of every flow deadlocked: the group said nothing, asked the
+// model nothing, and held the caller (trace 5a330c65).
 func TestAGroupStepSpeaksItsOwnAnnounceOnce(t *testing.T) {
 	for _, tc := range []struct {
 		provider ir.Provider
@@ -29,7 +34,7 @@ func TestAGroupStepSpeaksItsOwnAnnounceOnce(t *testing.T) {
 		want     string
 	}{
 		{ir.ProviderLiveKit, "agent.py", "if self._speak_opening:"},
-		{ir.ProviderPipecat, "bot.py", `"type": "tts_say"`},
+		{ir.ProviderPipecat, "bot.py", `await self.queue_frame(TTSSpeakFrame(_open, append_to_context=False))`},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			agent := loadExample(t, "remy")
@@ -90,13 +95,15 @@ func TestAnnounceAlternativesLowerToTheHelperAndOneLineDoesNot(t *testing.T) {
 				"import random",
 				"def _announce(key: str, lines: list[str]) -> str:",
 				// The key is per call site, so one site's history never
-				// silences another's. Both of the salon's lines sit at a
-				// delegate seam since 2026-09-16: the diary line moved off
-				// `find_slots` because a tool's line is emitted inside the tool
-				// body and fires once per call, so a model that read the diary
-				// twice in one turn spoke twice (trace 917975e9).
+				// silences another's, and the salon has both kinds: the diary
+				// line belongs to a step of the `book` flow, and verification
+				// is also a delegate customer care calls on its own. Neither
+				// sits on a tool since 2026-09-16, because a tool's line is
+				// emitted inside the tool body and fires once per call, so a
+				// model that read the diary twice in one turn spoke twice
+				// (trace 917975e9).
 				`"delegate:verify_customer",`,
-				`"delegate:manage_booking",`,
+				`"task:manage_booking",`,
 				`"Let me have a look at the diary.",`,
 			} {
 				if !strings.Contains(py, want) {

@@ -775,9 +775,9 @@ class IntakeAgent(TracedLLMWorker):
         # context.history on this task. Shaped after the snapshot above, so the
         # finish path restores the owner's own context whatever this step saw.
         self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
-        await flow.initialize(self._run_collect_node_collect())
+        await flow.initialize(await self._run_collect_node_collect())
 
-    def _run_collect_node_collect(self) -> NodeConfig:
+    async def _run_collect_node_collect(self) -> NodeConfig:
         self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
         return NodeConfig(
             name="collect",
@@ -885,11 +885,11 @@ class IntakeAgent(TracedLLMWorker):
         # context.history on this task. Shaped after the snapshot above, so the
         # finish path restores the owner's own context whatever this step saw.
         self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
-        await flow.initialize(self._run_triage_node(self._run_triage_active_step))
+        await flow.initialize(await self._run_triage_node(self._run_triage_active_step))
 
-    def _run_triage_node(self, name) -> NodeConfig:
+    async def _run_triage_node(self, name) -> NodeConfig:
         """One step's node by name, because the chain is decided at run time."""
-        return {
+        return await {
             "collect": self._run_triage_node_collect,
         }[name]()
 
@@ -899,7 +899,7 @@ class IntakeAgent(TracedLLMWorker):
         position = plan.index(name) + 1
         return plan[position] if position < len(plan) else None
 
-    def _run_triage_node_collect(self) -> NodeConfig:
+    async def _run_triage_node_collect(self) -> NodeConfig:
         self.context.set_messages([])
         return NodeConfig(
             name="collect",
@@ -948,7 +948,7 @@ class IntakeAgent(TracedLLMWorker):
             _next = None
         self._run_triage_active_step = _next
         if _next is not None:
-            return _task_status(self._run_triage_results["collect"]), self._run_triage_node(_next)
+            return _task_status(self._run_triage_results["collect"]), await self._run_triage_node(_next)
         # then: return — restore the owner's pre-flow context (messages and
         # tools); only a completed or unserved status crosses back.
         messages, tools = self._run_triage_snapshot

@@ -35,6 +35,8 @@ Open the first matching reference; load another only when needed.
 Read the whole brief first. If it names **required order**, **separate roles** or permissions, or a server's **next step**, open `references/orchestration.md`.
 Choose the smallest native shape and tell the user what you chose.
 
+**Two steps in a row are one task group, not two tasks with a `when:` each.** Smallest is not fewest keys: every task an agent can choose between costs a model request to choose it, and that request speaks nothing and does nothing. A group is entered once and the steps after the first cost no request to reach.
+
 **Keep state small.** Keep only values needed across a task or handoff, by a later tool, or as prompt facts. Prefer one timestamp to separate date and time values; `references/variables.md` has the example.
 
 **Every agent-level list attaches something already declared, except `tasks:`, written where it runs.** Five kinds: `tools:`, `tasks:` and `task_groups:` come back, `handoffs:` and `escalations:` do not. No `kind:` field, and all five share one namespace. `references/orchestration.md` has the table.

@@ -303,13 +303,13 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 			// booking. Each merged-away name cost the model its own round trip.
 			"def _flow_tool_find_slots(", "def _flow_tool_save_booking(",
 			"def _flow_tool_find_or_create_customer(", "async def _prefetch(",
-			// Two plain tasks the concierge runs in order, so each flow's
-			// symbols are named after its own task. They were named after a
-			// `book` group until 2026-09-16, when the group came out: groups
-			// produce no speech at all on Pipecat (trace 5a330c65).
-			"_manage_booking_active_step", "_manage_booking_results",
-			"_manage_booking_snapshot", "_manage_booking_finish_manage_booking",
-			"_manage_booking_transfer_manage_booking_to_complaints",
+			// The `book` flow's symbols carry the flow's name and the step's,
+			// because one invocation runs both steps. Verification is also a
+			// delegate of its own, which customer care calls, so its own set
+			// exists alongside.
+			"_book_active_step", "_book_results", "_book_snapshot",
+			"_book_finish_verify_customer", "_book_finish_manage_booking",
+			"_book_transfer_manage_booking_to_complaints",
 			"_verify_customer_results", "_verify_customer_snapshot",
 			"_verify_customer_finish_verify_customer",
 		}},
