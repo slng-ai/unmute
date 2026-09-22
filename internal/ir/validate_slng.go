@@ -314,18 +314,37 @@ func refuseSlngProjectValues(resolved Target, row *TargetValidation) {
 // The message is the whole point of the story. Before it existed, a Vault token
 // produced "references {{$ACME_KEY}}, which is not a declared variable", which
 // is true and sends the author to declare a variable that must not exist.
+//
+// Prompt text is refused on every target now, including slng, for two different
+// reasons that need two different sentences. On livekit and pipecat there is no
+// Vault to read. On slng there is, and it does not reach a prompt: SLNG takes
+// {{$NAME}} inside an MCP server URL and nowhere else
+// (_validate_url_template in app/schemas/mcp_server.py), while a prompt and a
+// greeting are Handlebars templates whose placeholder names are letters, digits
+// and underscores (app/utils/template_validator.py), so the dollar is a syntax
+// error. The create path parses all four prompt fields through that validator
+// before it stores anything, so the push is refused, not the call.
+//
+// This used to return early for slng with the comment "slng resolves them; the
+// token reaches the emitted body unchanged". The second half was true and the
+// first half was true only of an MCP URL, so a package carrying a Vault token
+// in its greeting validated clean and was refused by the platform. Read out of
+// slng-ai/backend@develop at 0957de04.
 func validateVaultTokens(agent *Agent, provider targetcap.Provider, row *TargetValidation) {
-	if provider == targetcap.Slng {
-		return // slng resolves them; the token reaches the emitted body unchanged
-	}
 	report := func(site, value string) {
 		for _, ref := range TemplateRefs(value) {
 			name, vault := VaultToken(ref)
 			if !vault {
 				continue
 			}
+			if provider == targetcap.Slng {
+				row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+					"%s: {{$%s}} is a SLNG Vault variable, and SLNG substitutes one into an MCP server URL and nowhere else: a prompt and a greeting take {{name}} placeholders, so the dollar is refused when the agent is pushed. Declare %s as a package variable and use {{%s}}, or leave the credential to the tool that needs it, which names its Vault entry by bare name",
+					site, name, strings.ToLower(name), strings.ToLower(name)))
+				continue
+			}
 			row.Errors = add(row.Errors, fmt.Sprintf(
-				"%s: {{$%s}} is a SLNG Vault variable, which only a slng target resolves: declare %s as a package variable and use {{%s}}, or compile this package to a slng target as well",
+				"%s: {{$%s}} is a SLNG Vault variable, and this target has no Vault to resolve it from: declare %s as a package variable and use {{%s}}",
 				site, name, strings.ToLower(name), strings.ToLower(name)))
 		}
 	}
@@ -337,6 +356,17 @@ func validateVaultTokens(agent *Agent, provider targetcap.Provider, row *TargetV
 	}
 	if agent.Conversation != nil && agent.Conversation.Greeting != nil {
 		report("conversation.greeting.text", agent.Conversation.Greeting.Text)
+	}
+	// The tool sites stay livekit and pipecat only, which is where they were
+	// before slng started checking anything here. On slng a `webhook:` block is
+	// already refused whole, and a hosted tool's description is the platform's
+	// own rather than something unmute sends, so neither token reaches a body.
+	// `inject:` is the one that is left open deliberately: an override becomes
+	// argument_overrides, and how the platform templates those was not read at
+	// 0957de04. Refusing it on a guess is the mistake this whole change is
+	// undoing, so it stays silent until somebody reads that path.
+	if provider == targetcap.Slng {
+		return
 	}
 	for _, name := range slices.Sorted(maps.Keys(agent.Tools)) {
 		tool := agent.Tools[name]

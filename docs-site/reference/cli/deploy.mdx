@@ -181,8 +181,8 @@ name. Two limits on that, both worth knowing:
 
 - The push checks a name and its kind. It never reads whether the entry holds
   a value, so neither run can tell you that.
-- The push reads the names in your package: the `{{$NAME}}` tokens in your
-  prompts and the credentials on your own tool bodies. A credential
+- The push reads the names in your package: the credentials named on your own
+  tool bodies. A credential
   **discovered** from a hosted tool's published contract, or from a hosted MCP
   server's connection, is in neither, so it reaches no later check and an
   unreadable vault blocks it here.

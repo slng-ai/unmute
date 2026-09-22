@@ -635,7 +635,14 @@ own credential is SLNG's, invisible to an offline compile, so `unmute deploy`
 reads the account directly and may ask about an entry the runbook never named.
 Unmute lists names and never values, either way.
 
-A `{{$NAME}}` token in a prompt, a greeting or a tool field is a **SLNG Vault
-variable**, not a package variable: SLNG substitutes the value at run time and
-nothing declares it in the package. It passes on a slng target and is refused on
-a livekit or pipecat one, which cannot resolve it.
+A `{{$NAME}}` token is a **SLNG Vault variable**, not a package variable: SLNG
+holds the value and nothing declares it in the package. SLNG substitutes one
+into an MCP server URL and nowhere else. A prompt and a greeting are templates
+whose placeholder names hold letters, digits and underscores, so a token in
+either is refused when the agent is pushed, and unmute refuses it at validation
+on every target.
+
+Do not write one into a prompt, a greeting or a tool field. For a value that
+varies per call, declare a package variable and write `{{name}}`. For a
+credential, name the Vault entry on the tool that reads it, as a bare name in
+its `auth:` block with no braces and no dollar.

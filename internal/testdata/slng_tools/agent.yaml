@@ -73,10 +73,12 @@ tools:
 conversation:
   greeting:
     speaks_first: agent
-    # Two token kinds in one line on purpose: {{customer_name}} is a package
-    # variable SLNG renders from template_defaults, and {{$ACME_BRAND}} is a
-    # SLNG Vault variable nothing in this package declares.
-    text: "Hi {{customer_name}}, you have reached {{$ACME_BRAND}} support."
+    # {{customer_name}} is a package variable, which SLNG renders from
+    # template_defaults. A {{$NAME}} Vault token may not join it here: SLNG
+    # substitutes one into an MCP server URL and nowhere else, and a greeting is
+    # a template whose placeholder names carry no dollar, so a token here is
+    # refused when the agent is pushed rather than when the call is placed.
+    text: "Hi {{customer_name}}, you have reached Acme support."
   interruption:
     enabled: true
 

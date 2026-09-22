@@ -17,7 +17,15 @@ import (
 
 // SlngTargetVerified is when the values below were last read out of
 // slng-ai/backend@develop. Re-read before relying on any of them.
-const SlngTargetVerified = "2026-08-25"
+//
+// Last read at 0957de04. SlngRegions was checked against the live
+// agent_region_bucket table that turn and is right: twelve of its thirteen
+// codes are enabled buckets backed by SLNG's own clusters. `in` is the
+// exception and has no bucket at all, so a package naming it compiles here and
+// is refused by the push. Left as it is rather than removed, because whether
+// India gets its own SLNG region or keeps being served by the LiveKit-side
+// ap-south bucket is a platform decision and not this file's to make.
+const SlngTargetVerified = "2026-09-22"
 
 // SlngRegions is the shared deployment, speech and router region list,
 // supplied by the SLNG team on 2026-09-14.

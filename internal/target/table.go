@@ -541,8 +541,13 @@ func Default() Table {
 			// Denied on slng since reference-only. This row was allowed there
 			// *because* SLNG derives a code tool's result schema by
 			// introspecting the Output class in the code_src unmute wrote
-			// (tool.py:353, read 2026-08-25). unmute now writes no code_src, so
-			// there is nothing to introspect and the field reaches nothing.
+			// That introspection still happens and has moved: it is the
+			// "introspect" action of the tool harness in
+			// app/services/tool_runner.py, which reads the Output class by name
+			// and returns its JSON schema, read at 0957de04. The old note
+			// pointed at tool.py:353, which no longer holds it. unmute writes
+			// no code_src either way, so there is nothing to introspect and the
+			// field reaches nothing.
 			// Refused rather than dropped, and the message says which fact
 			// changed.
 			FieldToolOutput: field(

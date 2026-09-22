@@ -422,31 +422,73 @@ func TestNoSlngFileOpensASocket(t *testing.T) {
 	}
 }
 
-func TestVaultTokenPassesOnSlngAndIsNamedElsewhere(t *testing.T) {
-	agent := slngAgent(t)
-	agent.Conversation.Greeting.Text = "Hi {{customer_name}}, you have reached {{$ACME_BRAND}}."
+// A Vault token in prompt text is refused on every target, and the two refusals
+// say different things because the reasons are different.
+//
+// This was TestVaultTokenPassesOnSlngAndIsNamedElsewhere, and the half it
+// asserted about slng was wrong: SLNG substitutes {{$NAME}} into an MCP server
+// URL and nowhere else, so a greeting carrying one validated clean here and was
+// refused by the platform at push.
+func TestVaultTokenInPromptTextIsRefusedOnEveryTarget(t *testing.T) {
+	const greeting = "Hi {{customer_name}}, you have reached {{$ACME_BRAND}}."
 
-	// On slng it passes, and it reaches the emitted body unchanged; the emitter
-	// side of that is covered in internal/generate.
-	if row := validateSlng(t, agent); len(row.Errors) > 0 {
-		t.Errorf("a Vault token was refused on the one target that resolves it: %#v", row.Errors)
+	// On slng the message has to say where a Vault token does work, or an author
+	// who read that SLNG resolves them has no way to see what changed.
+	agent := slngAgent(t)
+	agent.Conversation.Greeting.Text = greeting
+	row := validateSlng(t, agent)
+	joined := strings.Join(row.Errors, "\n")
+	if len(row.Errors) == 0 {
+		t.Fatal("a Vault token in a greeting passed on slng, and the platform refuses it at push")
+	}
+	for _, want := range []string{"slng target", "SLNG Vault variable", "MCP server URL", "conversation.greeting.text"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the slng message does not contain %q:\n%s", want, joined)
+		}
 	}
 
-	// On a code target it fails, and the message names the token for what it is.
+	// On a code target it fails too, and the message names the token for what it
+	// is. It must no longer offer slng as the place the token would work.
+	agent = slngAgent(t)
+	agent.Conversation.Greeting.Text = greeting
 	target := targetFor(agent, ProviderSlng)
 	target.Provider, target.Name, target.Version = ProviderLiveKit, "livekit", "1.8.1"
 	report, err := Validate(agent, []Target{target}, targetcap.Default())
 	if err == nil {
 		t.Fatal("a Vault token passed on livekit, which cannot resolve one")
 	}
-	joined := strings.Join(reportFor(report, ProviderLiveKit).Errors, "\n")
-	for _, want := range []string{"SLNG Vault variable", "only a slng target resolves"} {
+	joined = strings.Join(reportFor(report, ProviderLiveKit).Errors, "\n")
+	for _, want := range []string{"SLNG Vault variable", "no Vault to resolve it from"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the message does not contain %q, so it points at the wrong concept:\n%s", want, joined)
 		}
 	}
 	if strings.Contains(joined, "is not a declared variable") {
 		t.Errorf("the old message survived, which is the whole defect:\n%s", joined)
+	}
+	if strings.Contains(joined, "compile this package to a slng target") {
+		t.Errorf("the message still sends the author to slng, where a prompt token is refused too:\n%s", joined)
+	}
+}
+
+// Agent instructions are the other site the platform parses on the create path,
+// so a Vault token may not pass there on slng either.
+func TestVaultTokenInAgentInstructionsIsRefusedOnSlng(t *testing.T) {
+	agent := slngAgent(t)
+	for name := range agent.Agents {
+		entry := agent.Agents[name]
+		entry.Instructions += "\n\nBill it to {{$ACME_ACCOUNT}}."
+		agent.Agents[name] = entry
+	}
+	row := validateSlng(t, agent)
+	joined := strings.Join(row.Errors, "\n")
+	if len(row.Errors) == 0 {
+		t.Fatal("a Vault token in an agent's instructions passed on slng")
+	}
+	for _, want := range []string{"instructions", "ACME_ACCOUNT", "MCP server URL"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the message does not say %q:\n%s", want, joined)
+		}
 	}
 }
 

@@ -264,8 +264,13 @@ func slngVaultRequirements(agent *ir.Agent, built slngArtifacts) (secrets, varia
 			}
 		}
 	}
-	addVariable(built.Body.SystemPrompt, "the entry agent's instructions")
-	addVariable(built.Body.Greeting, "conversation.greeting.text")
+	// The prompt and the greeting used to be scanned here too. They are not any
+	// more, because ir.validateVaultTokens now refuses a {{$NAME}} token in
+	// either on this target: SLNG substitutes one into an MCP server URL and
+	// nowhere else, and a prompt is a template whose placeholder names carry no
+	// dollar. Scanning a site the validator refuses would put the two in
+	// disagreement about where a Vault variable may live, which is the shape of
+	// the defect that made this change necessary.
 	for _, name := range slices.Sorted(maps.Keys(seenSecret)) {
 		secrets = append(secrets, Requirement{Name: name, Where: seenSecret[name]})
 	}
