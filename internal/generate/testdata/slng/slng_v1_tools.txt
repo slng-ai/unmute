@@ -22,7 +22,7 @@ SLNG reads these from its own secret store. No secret value appears in any file
 in this directory or on any command line below, and unmute has never seen one.
 
 This is only what compiling your package could find written in it: a declared
-`auth:` or a `{{$NAME}}` token in your prompt or greeting. A hosted tool or MCP
+`auth:`, or a name a tool reads its credential by. A hosted tool or MCP
 server's own credential is not on this list either way: SLNG holds it, and this
 compile never asked SLNG anything. `unmute deploy` reads your
 organisation directly and checks or creates whatever the resolved tools
@@ -39,14 +39,6 @@ the SLNG dashboard instead if you prefer. A name is an uppercase name starting w
 | Vault name | Needed because |
 |---|---|
 | `REFUND_API_TOKEN` | tools/refund.slng.json, the hosted tool reads it |
-
-**Variables** — values SLNG substitutes into text at run time, written in the
-package as `{{$NAME}}` tokens. Nothing declares them in the package: SLNG
-holds the value, so only a slng target resolves one.
-
-| Vault name | Needed because |
-|---|---|
-| `ACME_BRAND` | conversation.greeting.text |
 
 
 ## 2. Deploy
@@ -334,7 +326,7 @@ Compile from the package instead. That is the shape this file is.
   "schema_version": 2,
   "name": "slng-tools-fixture-slng",
   "system_prompt": "You are the front desk for Acme Support.\n\nAnswer in one or two short sentences. Use the caller's name once, near the\nstart, and not again.\n\nIf the caller says they are finished, or says goodbye, end the call.\n",
-  "greeting": "Hi {{customer_name}}, you have reached {{$ACME_BRAND}} support.",
+  "greeting": "Hi {{customer_name}}, you have reached Acme support.",
   "language": "en",
   "region": "eu-north",
   "models": {
@@ -503,12 +495,6 @@ Compile from the package instead. That is the shape this file is.
       {
         "name": "REFUND_API_TOKEN",
         "where": "tools/refund.slng.json, the hosted tool reads it"
-      }
-    ],
-    "variables": [
-      {
-        "name": "ACME_BRAND",
-        "where": "conversation.greeting.text"
       }
     ]
   },
