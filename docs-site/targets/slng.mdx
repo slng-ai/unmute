@@ -231,8 +231,7 @@ the package could see, grouped by source, above the push command. No secret valu
 any command in the runbook.
 
 That list is only what a compile can read offline: a tool's declared `auth:`,
-a `{{"{{$NAME}}"}}` token in your text, and anything a committed mirror
-recorded. A hosted tool or MCP server's own credential is not on it, because
+and anything a committed mirror recorded. A hosted tool or MCP server's own credential is not on it, because
 SLNG holds that credential and a compile never asks SLNG anything.
 `unmute deploy` reads the account directly and may ask to create an entry the
 runbook never named.
@@ -241,13 +240,19 @@ Two kinds appear there:
 
 - a **secret** is a credential a tool authenticates with, named in the package
   as an environment variable and stored in the Vault under the same name;
-- a **variable** is a `{{$NAME}}` token that SLNG substitutes into text at run
-  time.
+- a **variable** is a `{{$NAME}}` token that SLNG substitutes at run time.
 
-A `{{$NAME}}` token passes validation on a slng target and reaches the body
-unchanged. On a LiveKit or Pipecat target it is refused, and the message says
-what the token is rather than telling you to declare a variable that must not
-exist.
+SLNG substitutes a `{{$NAME}}` token into an MCP server URL and nowhere else. A
+prompt and a greeting are templates whose placeholder names hold letters,
+digits and underscores, so a token written in either is refused when the agent
+is pushed. Unmute refuses it at validation instead, on every target, and the
+message says what the token is rather than telling you to declare a variable
+that must not exist.
+
+For a value your prompt varies per call, declare a package variable and write
+`{{"{{name}}"}}`. For a credential, let the tool that needs it name its Vault
+entry: a tool's `auth:` block names the entry by its bare name, with no
+braces and no dollar.
 
 A package that needs no Vault entries is told so, rather than shown an empty
 list.

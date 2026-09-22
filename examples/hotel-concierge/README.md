@@ -152,9 +152,9 @@ the model has no text tool, and the prompt says so to the guest.
   what lets an inbound phone call, which supplies no arguments, pass dispatch.
 - **Secrets.** No `secrets:` block. The request tool's credential is SLNG's,
   discovered by `unmute deploy` from the published tool. The package reads no
-  Vault entry by name: a `{{$NAME}}` Vault variable works in a prompt on this
-  target, but Vault variables belong to a project, so every per-deployment
-  value here is a template variable instead.
+  Vault entry by name. A `{{$NAME}}` Vault variable would not work in a prompt
+  on this target: SLNG substitutes one into an MCP server URL and nowhere else,
+  so every per-deployment value here is a template variable instead.
 - **Compiled output.** `build/slng/`: `agent.json`, `README.md` and
   `compile-report.json`. That is all of it.
 

@@ -22,7 +22,7 @@ SLNG reads these from its own secret store. No secret value appears in any file
 in this directory or on any command line below, and unmute has never seen one.
 
 This is only what compiling your package could find written in it: a declared
-`auth:` or a `{{"{{$NAME}}"}}` token in your prompt or greeting.{{if or .HostedRefs .MCPRefs}} A hosted tool or MCP
+`auth:`, or a name a tool reads its credential by.{{if or .HostedRefs .MCPRefs}} A hosted tool or MCP
 server's own credential is not on this list either way: SLNG holds it, and this
 compile never asked SLNG anything.{{end}} `unmute deploy` reads your
 organisation directly and checks or creates whatever the resolved tools
@@ -43,9 +43,11 @@ the SLNG dashboard instead if you prefer. A name is {{.NameShape}}.
 {{end}}
 {{end -}}
 {{if .VaultVariables -}}
-**Variables** — values SLNG substitutes into text at run time, written in the
-package as `{{"{{$NAME}}"}}` tokens. Nothing declares them in the package: SLNG
-holds the value, so only a slng target resolves one.
+**Variables** — values SLNG substitutes at run time, written in the package as
+`{{"{{$NAME}}"}}` tokens. Nothing declares them in the package: SLNG holds the
+value. SLNG substitutes one into an MCP server URL and nowhere else, so a token
+in a prompt or a greeting is refused rather than listed here; a value your
+prompt varies per call is a package variable written `{{"{{name}}"}}`.
 
 | Vault name | Needed because |
 |---|---|

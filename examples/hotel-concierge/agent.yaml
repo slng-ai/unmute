@@ -84,9 +84,10 @@ variables:
 # There is no `secrets:` block. The places tool's credential is SLNG's, held
 # in its Vault under the name the published tool records, and `unmute deploy`
 # discovers it from the platform rather than this file repeating it. Every
-# value this package varies per deployment is a template variable above; a
-# `{{$NAME}}` Vault variable would also work in the prompt on this target, but
-# Vault variables belong to a project, so this package keeps them out.
+# value this package varies per deployment is a template variable above. A
+# `{{$NAME}}` Vault variable would not work in the prompt either way: SLNG
+# substitutes one into an MCP server URL and nowhere else, and a prompt is a
+# template whose placeholder names carry no dollar, so the push refuses it.
 
 tools:
   - hotel_info

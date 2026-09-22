@@ -336,7 +336,11 @@ func TestSlngV1LeaksNoSecretValue(t *testing.T) {
 func TestSlngV1RunbookGroupsVaultNames(t *testing.T) {
 	_, files := compileSlng(t, "slng_tools")
 	runbook := files["README.md"]
-	for _, want := range []string{"**Secrets**", "REFUND_API_TOKEN", "**Variables**", "ACME_BRAND"} {
+	// **Variables** and a {{$NAME}} name are deliberately not asserted here any
+	// more. The fixture carried its Vault variable in the greeting, which this
+	// target now refuses, and no site a slng package can still write one in is
+	// exercised by a fixture. The grouping itself is covered by the golden.
+	for _, want := range []string{"**Secrets**", "REFUND_API_TOKEN"} {
 		if !strings.Contains(runbook, want) {
 			t.Errorf("the runbook does not carry %q:\n%s", want, runbook)
 		}
