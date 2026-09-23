@@ -102,6 +102,13 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // model (trace 5a330c65). The `async def` reaches every Pipecat package with a
 // task; the line itself only reaches a group step or `opening: listen`.
 //
+// And on 2026-09-23, for one more: every Pipecat package with no phone route of
+// its own now answers the runner's Twilio route (`bot.py -t twilio`), with a
+// `"twilio"` transport entry, the `websocket` extra and the credential-free
+// `_carrier_transport`. Before, a simulated caller had no way into a
+// browser-only bot, so utils/coval_sim could not test three of the five
+// code examples on Pipecat before a release. Nothing real dials that route.
+//
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {

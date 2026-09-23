@@ -1129,11 +1129,35 @@ func TestPublicExamplesValidateAndGenerate(t *testing.T) {
 						}
 					}
 				}
-				if _, err := Generate(agent, resolved, target.Default()); err != nil {
+				artifact, err := Generate(agent, resolved, target.Default())
+				if err != nil {
 					t.Errorf("generate %q: %v", resolved.Name, err)
+					continue
+				}
+				if resolved.Provider == ir.ProviderPipecat {
+					assertAnswersTwilioRoute(t, resolved.Name, artifact.Files)
 				}
 			}
 		})
+	}
+}
+
+// assertAnswersTwilioRoute holds the one way utils/coval_sim reaches a
+// Pipecat example before a release: the runner's Twilio route, `bot.py -t
+// twilio`. The bot has to name the route in transport_params, and the project
+// has to install the extra that carries it, or a simulated call dies in the
+// websocket handshake and the release check tests nothing.
+func assertAnswersTwilioRoute(t *testing.T, name string, files []File) {
+	t.Helper()
+	contents := map[string]string{}
+	for _, file := range files {
+		contents[file.Path] = string(file.Content)
+	}
+	if !strings.Contains(contents["bot.py"], `"twilio": lambda: FastAPIWebsocketParams(`) {
+		t.Errorf("target %q: bot.py has no \"twilio\" entry in transport_params, so `bot.py -t twilio` cannot take a simulated call", name)
+	}
+	if !regexp.MustCompile(`pipecat-ai\[[^\]]*\bwebsocket\b`).MatchString(contents["pyproject.toml"]) {
+		t.Errorf("target %q: pyproject.toml does not install pipecat-ai's websocket extra, which the Twilio route needs", name)
 	}
 }
 

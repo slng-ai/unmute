@@ -11,7 +11,14 @@ cp .env.example .env                      # then fill in your keys
 uv run bot.py -t webrtc                   # web: open the URL it prints
 
 ```
-
+{{if .LocalTwilio}}
+This package has no phone route, but the bot still answers the runner's Twilio
+route, so a simulated caller can reach it. `uv run bot.py -t twilio -x <public
+host>` serves a TwiML webhook at `/` and a Media Streams websocket at `/ws`.
+Point a Coval websocket agent in TwiML webhook mode at `https://<public host>/`
+through a tunnel. Nothing real dials this route, and the call ends when the
+socket closes.
+{{end}}
 Pipecat logs default to `INFO`. Set `UNMUTE_LOG_LEVEL=DEBUG` only in a
 controlled environment because logs can contain caller speech, tool data, and
 phone details.

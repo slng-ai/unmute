@@ -113,6 +113,24 @@ unmute dev examples/pharmacy-refills --target pipecat
 ## Advanced
 
 <details>
+<summary>Let Coval call it on your laptop</summary>
+
+This package has no phone route, but its Pipecat build still answers the
+runner's Twilio route. So Coval can place simulated calls to it, on both
+targets, with nothing deployed:
+
+```sh
+uv run --project utils/coval_sim coval-sim add pharmacy-refills   # once
+make sim TEST_SET=<your test set id>
+```
+
+`add` creates the Coval agents `unmute-pharmacy-refills-livekit` and
+`unmute-pharmacy-refills-pipecat`. Attach a test set and metrics to both in Coval first.
+[The coval-sim guide](../../utils/coval_sim/README.md) has the rest.
+
+</details>
+
+<details>
 <summary>Compare turn detection or use a separate voice</summary>
 
 Change `turn_detection` on the existing realtime entry, validate, and repeat the same reference-reading test.

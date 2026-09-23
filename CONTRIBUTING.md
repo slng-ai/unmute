@@ -274,6 +274,23 @@ Two suites are opt-in and never the pull request gate:
 Run `make smoke` yourself if you changed what gets emitted. It catches a
 template that produces Python which does not run.
 
+### Before a release, let Coval call every example
+
+A maintainer runs this before tagging a release, and after a change to an
+example. Coval places simulated calls to the examples, running on your laptop,
+and grades them.
+
+```sh
+make sim                                  # every test set attached to an example
+make sim TEST_SET=KG5MJ39q                # one Coval test set
+```
+
+What to test lives in Coval: a test set runs against every Coval agent named
+`unmute-<example>-<target>` it is attached to. Setup, every option, how to read a
+failed row and what has gone wrong before are in
+[`utils/coval_sim/README.md`](utils/coval_sim/README.md). It needs real Coval and
+LiveKit keys, so it is not part of CI.
+
 ### A rule with no gate is a wish
 
 Standards here are things a test fails on, not things a reviewer has to

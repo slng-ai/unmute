@@ -113,6 +113,24 @@ unmute dev examples/takeaway-orders --target pipecat
 ## Advanced
 
 <details>
+<summary>Let Coval call it on your laptop</summary>
+
+This package has no phone route, but its Pipecat build still answers the
+runner's Twilio route. So Coval can place simulated calls to it, on both
+targets, with nothing deployed:
+
+```sh
+uv run --project utils/coval_sim coval-sim add takeaway-orders   # once
+make sim TEST_SET=<your test set id>
+```
+
+`add` creates the Coval agents `unmute-takeaway-orders-livekit` and
+`unmute-takeaway-orders-pipecat`. Attach a test set and metrics to both in Coval first.
+[The coval-sim guide](../../utils/coval_sim/README.md) has the rest.
+
+</details>
+
+<details>
 <summary>Change the live model or backend</summary>
 
 Edit `models.live` and its referenced `models.think` entry in `agent.yaml`.
