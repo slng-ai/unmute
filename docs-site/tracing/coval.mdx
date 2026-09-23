@@ -90,6 +90,13 @@ Then, in your token server, read that header and put it into the room's agent
 dispatch metadata as `{"coval.simulation_id": "<the header value>"}`. With the
 LiveKit server SDK that is the `metadata` argument on `RoomAgentDispatch`.
 
+Your token server also has to name the agent to dispatch. Coval does not send it.
+The request body is only `room_name` and `participant_name`, even when the Coval
+agent sets `livekit_agent_name`. A token with no dispatch leaves the room empty,
+and the simulation fails with no transcript. So set the Coval agent's
+`token_request_payload` to `{"agent_name": "<your agent name>"}`. Coval adds it
+to the body, and your server dispatches that name.
+
 Unmute does not generate that token server for a deployed agent. On LiveKit Cloud
 it is yours. `unmute dev` does it for you locally, so you can try the route before
 you write it.
@@ -107,6 +114,19 @@ Four routes, checked in this order.
 3. A custom parameter on the carrier stream. A Twilio
    `<Stream><Parameter name="X-Coval-Simulation-Id" value="..."/>` lands here.
 4. `COVAL_SIMULATION_ID` in the environment.
+
+Every Pipecat build also answers the runner's Twilio route, even a package with
+no phone route. So Coval can call a bot on your laptop:
+
+```sh
+uv run bot.py -t twilio -x <public host>
+```
+
+Put a tunnel in front of port 7860. Then create a Coval websocket agent in TwiML
+webhook mode, with `voice_url` set to `https://<public host>/`. Coval posts to
+that webhook, reads the stream URL from the reply, and sends Twilio's `connected`
+and `start` messages before any audio. The runner's reply carries no
+`<Parameter>`, so on this path the trace does not find its simulation.
 
 ## Calls that no simulation owns
 

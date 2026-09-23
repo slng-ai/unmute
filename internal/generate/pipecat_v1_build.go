@@ -217,6 +217,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	if err != nil {
 		return pipecatData{}, err
 	}
+	data.LocalTwilio = data.CloudWebsocket == nil
 
 	applyConversation(agent.Conversation, target.Telephony != nil, &data)
 	if data.Realtime {
@@ -889,7 +890,7 @@ func collectImportsExtras(data pipecatData) (imports, extras, deps []string) {
 	if data.Transport == "daily-sip" {
 		extraSet["daily"] = true
 	}
-	if data.CloudWebsocket != nil {
+	if data.CloudWebsocket != nil || data.LocalTwilio {
 		// This project terminates a carrier's WebSocket, so it declares the extra
 		// that carries the machinery rather than inheriting fastapi from `runner`
 		// (research D12/F10).

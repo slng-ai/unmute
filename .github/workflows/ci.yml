@@ -162,6 +162,10 @@ jobs:
       # ruff honours .gitignore, so `.` is the tracked Python and nothing else.
       - run: ruff check .
       - run: python3 -m unittest discover -s scripts -p 'test_render_changelog.py'
+      # The Coval release check is its own uv project, with pydantic, so its
+      # tests run in its own environment. They need no network and no account.
+      - run: pip install uv==0.11.16
+      - run: uv run --project utils/coval_sim pytest -q utils/coval_sim/tests
 
   # Known vulnerabilities, both in what we import and in the standard library we
   # link into every released binary. Same go.mod version as every other job, so

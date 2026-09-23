@@ -197,6 +197,11 @@ Two things about `coval` that users get wrong, so say them before they ask:
   `<entry-agent>-<agent-name>`. Decided at start-up, not at compile time, so one
   build serves both. Each trace also carries `coval.call.origin`, one of
   `phone`, `websocket` or `browser`.
+- **Coval can call a Pipecat bot on a laptop, with no deploy.** Every Pipecat
+  build answers `uv run bot.py -t twilio -x <public host>`, phone route or not.
+  Behind a tunnel, a Coval websocket agent in TwiML webhook mode with
+  `voice_url: https://<public host>/` reaches it. That path carries no simulation
+  ID, so its traces are filed as conversations, not inside the run.
 
 ## Changing the agent
 

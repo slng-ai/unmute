@@ -126,6 +126,24 @@ only the two code targets.
 ## Advanced
 
 <details>
+<summary>Let Coval call it on your laptop</summary>
+
+This package has no phone route, but its Pipecat build still answers the
+runner's Twilio route. So Coval can place simulated calls to it, on both
+targets, with nothing deployed:
+
+```sh
+uv run --project utils/coval_sim coval-sim add customer-intake   # once
+make sim TEST_SET=<your test set id>
+```
+
+`add` creates the Coval agents `unmute-customer-intake-livekit` and
+`unmute-customer-intake-pipecat`. Attach a test set and metrics to both in Coval first.
+[The coval-sim guide](../../utils/coval_sim/README.md) has the rest.
+
+</details>
+
+<details>
 <summary>Drive it through a scripted conversation, with no audio</summary>
 
 To watch the values land without talking to anything, drive the compiled LiveKit

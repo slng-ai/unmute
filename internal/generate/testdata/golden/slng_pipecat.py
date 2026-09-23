@@ -49,6 +49,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -319,6 +320,48 @@ def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None):
 # should fail before the caller hears anything either.
 require_env()
 
+
+# --- a caller on a Twilio-shaped websocket ----------------------------------
+# `python bot.py -t twilio -x <public host>` serves a TwiML webhook and a Media
+# Streams websocket, the way Twilio would reach a phone route. This package has
+# no phone route, so nothing real dials it. It is here for a simulated caller,
+# such as a Coval run against this bot on your laptop.
+async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
+    """The carrier's stream, with the call ended by closing the socket.
+
+    Used by a package that holds no carrier credentials at all, which needs a
+    transport that never asks a carrier to hang a call up.
+
+    A package that receives calls and never places or redirects one holds no
+    carrier credentials. The framework's own telephony path cannot be used
+    for that: it always asks the serializer to hang the call up through the
+    carrier's REST API, and the serializer refuses to be built without credentials
+    for it (`auto_hang_up is enabled but missing required parameters`, verified
+    against pipecat-ai 1.5.0 on 2026-08-13). So the transport is built here, with
+    automatic hangup off.
+
+    Nothing is lost. Closing the stream ends the call, because the markup your
+    number points at has nothing after `<Connect>`. Declare a connection and this
+    function is not emitted at all: the framework's path is used, and the agent
+    ends calls through the carrier's own call control.
+    """
+    from pipecat.runner.utils import parse_telephony_websocket
+    from pipecat.serializers.twilio import TwilioFrameSerializer
+    from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
+
+    transport_type, call_data = await parse_telephony_websocket(runner_args.websocket)
+    # Set the same two attributes the framework's path sets, so _phone_session
+    # above reads the handshake the same way whichever path built the transport.
+    runner_args.transport_type = transport_type
+    runner_args.call_data = call_data
+    params = transport_params[transport_type]()
+    params.add_wav_header = False
+    params.serializer = TwilioFrameSerializer(
+        stream_sid=call_data["stream_id"],
+        call_sid=call_data["call_id"],
+        params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
+    )
+    return FastAPIWebsocketTransport(websocket=runner_args.websocket, params=params)
 
 
 # --- declared state ----------------------------------------------------------
@@ -1305,6 +1348,9 @@ transport_params: dict = {
     # onto whatever this returns, so on the Daily route it has to be the params
     # class that declares them. The generic one rejects the assignment.
     "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    # A simulated caller on the runner's Twilio route (`-t twilio`); see
+    # _carrier_transport.
+    "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
 
 }
 
@@ -1507,7 +1553,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 async def bot(runner_args: RunnerArguments) -> None:
     _configure_logging()
 
-    transport = await create_transport(runner_args, transport_params)
+    # A websocket session is a phone call on this route, and this package holds no
+    # carrier credentials, so it builds that transport itself (see
+    # _carrier_transport). Everything else, browser and console, is the framework's.
+    if getattr(runner_args, "websocket", None) is not None:
+        transport = await _carrier_transport(runner_args)
+    else:
+        transport = await create_transport(runner_args, transport_params)
     await run_bot(transport, runner_args)
 
 

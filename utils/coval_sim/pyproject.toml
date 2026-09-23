@@ -1,0 +1,16 @@
+[project]
+name = "coval-sim"
+version = "0.1.0"
+description = "Let Coval call every example in this repository, running on this laptop."
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.11,<3"]
+
+[project.scripts]
+coval-sim = "coval_sim.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
