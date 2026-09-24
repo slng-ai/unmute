@@ -1016,7 +1016,7 @@ class IntakeAgent(LLMWorker):
         return NodeConfig(
             name="collect",
             role_message="Ask for the caller's email and confirm the account for {{customer_id}}.\n\nWhen this step is complete, call `finish_run_collect_collect` with: tier.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_collect_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.",
-            task_messages=[{"role": "developer", "content": "Begin this step."}],
+            task_messages=[{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}],
             functions=[
                 FlowsFunctionSchema(
                     name="lookup_customer",
@@ -1149,7 +1149,7 @@ class IntakeAgent(LLMWorker):
         return NodeConfig(
             name="collect",
             role_message="Ask for the caller's email and confirm the account for {{customer_id}}.\n\nWhen this step is complete, call `finish_run_triage_collect` with: tier.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_triage_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.",
-            task_messages=[{"role": "developer", "content": "Begin this step."}],
+            task_messages=[{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}],
             functions=[
                 FlowsFunctionSchema(
                     name="lookup_customer",
@@ -1228,7 +1228,7 @@ class IntakeAgent(LLMWorker):
         return NodeConfig(
             name="confirm",
             role_message="Read the booking back and ask the caller to confirm.\n\nWhen this step is complete, call `finish_run_triage_confirm` with: confirmed.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_triage_confirm` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.",
-            task_messages=[{"role": "developer", "content": "Begin this step."}],
+            task_messages=[{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}],
             functions=[
                 FlowsFunctionSchema(
                     name="finish_run_triage_confirm",

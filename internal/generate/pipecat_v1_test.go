@@ -1119,7 +1119,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		// The compiler appends its finish contract, so this matches the
 		// authored opening only.
 		`role_message="Ask for the caller's email, look them up, and confirm their account tier.`,
-		`task_messages=[{"role": "developer", "content": "Begin this step."}]`,
+		`task_messages=[{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}]`,
 		// The delegate resolves its call with run_llm=False so only the flow node
 		// responds — no double assistant turn (V7/B4).
 		`properties=FunctionCallResultProperties(run_llm=False),`,

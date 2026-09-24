@@ -88,8 +88,8 @@ func TestLiveKitExportHookKeepsTheWholeCall(t *testing.T) {
 	tracing := artifactFile(t, artifact, "tracing.py")
 
 	for _, want := range []string{
-		`def _export_every_span(span: ReadableSpan) -> bool:`,
-		"should_export_span=_export_every_span",
+		`def _export_call_spans(span: ReadableSpan) -> bool:`,
+		"should_export_span=_export_call_spans",
 		"from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider",
 	} {
 		if !strings.Contains(tracing, want) {
@@ -97,12 +97,16 @@ func TestLiveKitExportHookKeepsTheWholeCall(t *testing.T) {
 		}
 	}
 
-	hook := pipecatMethodBody(t, tracing, "def _export_every_span(", "\n\n\ndef ")
-	if !strings.HasSuffix(strings.TrimSpace(hook), "return True") {
-		t.Errorf("the filter hook must end by exporting the span, or the call is dropped:\n%s", hook)
+	hook := pipecatMethodBody(t, tracing, "def _export_call_spans(", "\n\n\ndef ")
+	// The hook drops exactly one thing: the loop monitor's stall span when it has
+	// no parent, which otherwise arrives as a trace of its own. Anything wider
+	// drops the call, because the v4 default filter this replaces keeps none of it.
+	const keep = `return not (span.name == "event_loop_blocked" and span.parent is None)`
+	if !strings.HasSuffix(strings.TrimSpace(hook), keep) {
+		t.Errorf("the filter hook must export every span but a parentless event_loop_blocked:\n%s", hook)
 	}
 	if strings.Contains(hook, "return False") {
-		t.Errorf("this hook never drops a span:\n%s", hook)
+		t.Errorf("this hook drops nothing else:\n%s", hook)
 	}
 	// A span name written here is overwritten on ingestion, so writing one
 	// leaves a line that looks load-bearing and does nothing.
@@ -227,7 +231,7 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 		`TURN_SPANS = ("user_turn", "agent_turn")`,
 		`self._tracer.start_span("turn", context=self._call_context)`,
 		"set_tracer_provider(trace_provider, metadata=metadata)",
-		"should_export_span=_export_every_span",
+		"should_export_span=_export_call_spans",
 		"ctx.add_shutdown_callback(flush_trace)",
 		`@session.on("conversation_item_added")`,
 	} {

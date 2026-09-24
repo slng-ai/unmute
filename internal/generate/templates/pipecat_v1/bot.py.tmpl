@@ -1419,12 +1419,20 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             # history: reset replaces the message list as the node is built.
             task_messages=[{{if $t.Announce}}{"role": "assistant", "content": {{$t.OpenExpr}}}{{else}}{"role": "developer", "content": "Wait for the caller."}{{end}}],
             respond_immediately=False,
-{{else}}            task_messages=[{"role": "developer", "content": "Begin this step."}{{if and $t.Announce $t.SpeakOpening}}, {"role": "assistant", "content": {{$t.OpenExpr}}}{{end}}],
+{{else}}            task_messages=[{{if and $t.Announce $t.SpeakOpening}}{"role": "assistant", "content": {{$t.OpenExpr}}}, {{end}}{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}],
 {{if and $t.Announce $t.SpeakOpening}}            # The seeded turn above is the line the frame spoke, and it is what
             # stops the model opening by acknowledging a sentence it would
             # otherwise not be able to see: the frame carries no context write
             # of its own, and a live call on 2026-09-16 answered its own
             # announcement with "Got it.".
+            #
+            # The line goes first and the instruction last. The Gemini adapter
+            # sends a developer message after the first as a user turn, so the
+            # other order ended the request on the model's own sentence: on a
+            # call on 2026-09-24 two step openings came back empty and the
+            # caller sat through 15 and 10 seconds of silence, and a booking
+            # step answered "Begin this step." by asking again for the service
+            # and day the caller had already given.
 {{end}}{{end}}            functions=[
 {{range $t.Tools}}                FlowsFunctionSchema(
                     name={{pyq .Name}},

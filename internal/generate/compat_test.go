@@ -109,6 +109,21 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // browser-only bot, so utils/coval_sim could not test three of the five
 // code examples on Pipecat before a release. Nothing real dials that route.
 //
+// And on 2026-09-24, for one more: a Pipecat step's seeded opening line now
+// comes before the step's instruction, and the instruction points the model at
+// what the caller already said. The Gemini adapter sends that instruction as a
+// user turn, so the old order ended every step request on the model's own
+// sentence: two step openings came back empty (15 and 10 seconds of silence),
+// and a booking step asked again for a service and day the caller had given.
+// The wording reaches every Pipecat package with a task.
+//
+// The same day, two tracing fixes that reach every package on Langfuse. On
+// Pipecat, each call's tracing record lives in a ContextVar instead of one
+// process-wide object: three concurrent Coval calls to one bot were filed under
+// the last call's session. On LiveKit, the export filter drops the loop
+// monitor's parentless `event_loop_blocked` span, which made each of three
+// concurrent calls arrive as three traces.
+//
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {

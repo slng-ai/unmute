@@ -509,7 +509,7 @@ async def main() -> None:
     signature = LLMSpecificMessage(llm="google", message={"type": "thought_signature", "signature": b"probe"})
     task_messages = [
         signature,
-        {"role": "developer", "content": "Begin this step."},
+        {"role": "developer", "content": "Begin this step. Work from what the caller has already said."},
         {"role": "user", "content": "This is really about billing."},
         {
             "role": "assistant",
@@ -1310,6 +1310,38 @@ async def assert_worker_start_failure_stops_runner() -> None:
     assert pipeline_started.is_set()
 
 
+async def assert_concurrent_calls_keep_their_own_session(memory) -> None:
+    """Two calls in one process, interleaved: every span keeps its own call.
+
+    Both calls are named before either opens a span, which is what the runner's
+    Twilio route did with three concurrent Coval calls and what filed them all
+    under the last call's session while the record was one shared object.
+    """
+    tracer = trace.get_tracer("smoke.concurrency")
+    both_named = asyncio.Barrier(2)
+
+    async def call(session: str) -> None:
+        tracing_config.start_call({"langfuse.session.id": session})
+        await both_named.wait()
+        with tracer.start_as_current_span(tracing_config.CALL_SPAN):
+            await asyncio.sleep(0)
+            with tracer.start_as_current_span(tracing_config.TURN_SPAN):
+                await asyncio.sleep(0)
+                tracing_config.CALL.said("user", f"hello from {session}")
+
+    await asyncio.gather(call("call-a"), call("call-b"))
+    spans = [
+        s for s in memory.get_finished_spans()
+        if s.instrumentation_scope.name == "smoke.concurrency"
+    ]
+    assert len(spans) == 4, [s.name for s in spans]
+    for span in spans:
+        session = span.attributes["langfuse.session.id"]
+        said = span.attributes["langfuse.observation.input"]
+        assert f"hello from {session}" in said, (span.name, session, said)
+    memory.clear()
+
+
 async def main() -> None:
     await assert_worker_start_failure_stops_runner()
 
@@ -1343,6 +1375,7 @@ async def main() -> None:
     assert provider is tracing_config.setup_langfuse_tracing()
     assert provider is trace.get_tracer_provider()
     provider.add_span_processor(SimpleSpanProcessor(memory))
+    await assert_concurrent_calls_keep_their_own_session(memory)
 
     agent_names = sorted(
         name.removeprefix("build_").removesuffix("_llm")

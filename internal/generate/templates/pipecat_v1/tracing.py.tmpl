@@ -9,6 +9,7 @@ import base64
 {{end}}import json
 import os
 from collections.abc import Mapping, Sequence
+from contextvars import ContextVar
 from datetime import datetime, timezone
 
 from opentelemetry import trace
@@ -48,24 +49,41 @@ class CallTrace(SpanProcessor):
 
     pipecat's tree is already the shape we want, `conversation` over `turn` over
     the service spans, so nothing here re-parents anything.
+
+    The processor is one per process, because the tracer provider is, but the
+    bookkeeping is one per call. A process can run several calls at once (the
+    runner's Twilio route took three concurrent Coval calls on 2026-09-24), and
+    a single shared record filed all three under the last call's session. Each
+    call's record lives in a ContextVar set at the top of that call's coroutine,
+    so every task its pipeline starts inherits it and sees only its own call.
     """
 
-    # ponytail: one call at a time, because the tracer provider is installed once
-    # per process and a warm Pipecat Cloud container reuses it for the next call.
-    # Give each call its own context object if a container ever runs two at once.
-    def __init__(self) -> None:
-        self._attributes: dict[str, AttributeValue] = {}
+    def start_call(self, attributes: Mapping[str, AttributeValue]) -> None:
+        """Point tracing at this call, from inside the call's own coroutine."""
+        _CURRENT_CALL.set(_Call(attributes))
+
+    def on_start(self, span: Span, parent_context: Context | None = None) -> None:
+        call = _CURRENT_CALL.get()
+        if call is not None:
+            call.on_start(span)
+
+    def said(self, role: str, text: str) -> None:
+        """Record one line, on its own turn and on the call as a whole."""
+        call = _CURRENT_CALL.get()
+        if call is not None:
+            call.said(role, text)
+
+
+class _Call:
+    """What one call's spans share: its attributes, its root, its current turn."""
+
+    def __init__(self, attributes: Mapping[str, AttributeValue]) -> None:
+        self._attributes: dict[str, AttributeValue] = dict(attributes)
         self._call: Span | None = None
         self._turn: Span | None = None
         self._transcript: list[dict[str, str]] = []
 
-    def start_call(self, attributes: Mapping[str, AttributeValue]) -> None:
-        """Point tracing at this call, forgetting the one the container ran before."""
-        self._attributes = dict(attributes)
-        self._call, self._turn = None, None
-        self._transcript = []
-
-    def on_start(self, span: Span, parent_context: Context | None = None) -> None:
+    def on_start(self, span: Span) -> None:
         span.set_attributes(self._attributes)
         if span.name == CALL_SPAN:
             self._call = span
@@ -73,7 +91,6 @@ class CallTrace(SpanProcessor):
             self._turn = span
 
     def said(self, role: str, text: str) -> None:
-        """Record one line, on its own turn and on the call as a whole."""
         self._transcript.append({"role": role, "content": text})
         if self._turn is not None and self._turn.is_recording():
             side = "input" if role == "user" else "output"
@@ -86,6 +103,9 @@ class CallTrace(SpanProcessor):
             )
             if role != "user":
                 self._call.set_attribute("langfuse.observation.output", json.dumps(text))
+
+
+_CURRENT_CALL: ContextVar[_Call | None] = ContextVar("unmute_call", default=None)
 
 
 CALL = CallTrace()

@@ -2815,7 +2815,7 @@ def install_turn_spans(provider: TracerProvider, call: CallTrace) -> None:
     setattr(provider, "__unmute_turn_spans__", True)
 
 
-def _export_every_span(span: ReadableSpan) -> bool:
+def _export_call_spans(span: ReadableSpan) -> bool:
     """Export the whole call, whatever the default filter would make of it.
 
     The hook has to be set, and not for any filtering of our own: every span
@@ -2833,8 +2833,15 @@ def _export_every_span(span: ReadableSpan) -> bool:
     on ingestion, which is the one thing worse than not writing it: verified on
     2026-09-16 by renaming the span locally, watching the write land, and
     reading the tool's bare name back off a deployed call.
+
+    The one span it drops is livekit's `event_loop_blocked` when it has no
+    parent. The loop monitor files one, back-dated and already ended, for any
+    stall past 100ms, and when it finds no span to nest under it becomes a trace
+    of its own: three concurrent Coval calls on 2026-09-24 each arrived as three
+    traces. Nothing is lost by dropping it, because the monitor also logs the
+    stall and records it as an event on the session span.
     """
-    return True
+    return not (span.name == "event_loop_blocked" and span.parent is None)
 
 
 def setup_langfuse(
@@ -2877,7 +2884,7 @@ def setup_langfuse(
         # Setting this is what keeps the call: the v4 default filter recognises
         # neither livekit-agents' scope nor this module's, so leaving the
         # default in place drops the whole call before the exporter sees it.
-        should_export_span=_export_every_span,
+        should_export_span=_export_call_spans,
     )
 
     async def flush_trace() -> None:
