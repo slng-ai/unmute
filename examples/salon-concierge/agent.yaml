@@ -55,13 +55,13 @@ agents:
       # decided first.
       - name: manage_booking
         instructions: tasks/booking.md
-        # "Double check" implied a check that had already happened, on the first
-        # look of the call. These say the same thing in fewer words and none of
-        # them claims a second look.
+        # The same step books, moves and cancels, so no line may name what it is
+        # about to do. "I'll check the diary" and "let me see what's free" said
+        # it was looking for slots, which sounded odd ahead of a cancellation.
         announce:
-          - Let me have a look at the diary.
-          - One second, I'll check the diary.
-          - Right, let me see what's free.
+          - One sec.
+          - Let me have a look.
+          - One moment, let me look.
         tools:
           - find_slots
           - save_booking

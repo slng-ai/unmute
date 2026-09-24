@@ -421,7 +421,8 @@ interrupting.
 ### The agent does not know the caller's number
 
 A browser session has no carrier, so nothing supplies a caller number. The
-`caller` pre-fetch entry is skipped and `customer_phone` keeps its default.
+`caller` pre-fetch entry is skipped and `customer_phone` keeps its default, so
+the agent asks the caller for their number.
 
 **Fix:** Seed one to exercise the pre-fetch and the readback:
 
