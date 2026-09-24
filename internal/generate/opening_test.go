@@ -75,7 +75,7 @@ func TestOpeningGenerateIsByteIdenticalToToday(t *testing.T) {
 	}
 	pipecat := terminalModule(t, "pipecat", "bot.py")
 	node := blockAfter(t, pipecat, "def _do_book_node_verify(self)")
-	if !strings.Contains(node, `task_messages=[{"role": "developer", "content": "Begin this step."}]`) {
+	if !strings.Contains(node, `task_messages=[{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}]`) {
 		t.Errorf("a generating step no longer seeds the developer turn it always seeded:\n%s", node)
 	}
 	if strings.Contains(node, "respond_immediately") {

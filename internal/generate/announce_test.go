@@ -104,7 +104,7 @@ func TestAnnounceAlternativesLowerToTheHelperAndOneLineDoesNot(t *testing.T) {
 				// (trace 917975e9).
 				`"delegate:verify_customer",`,
 				`"task:manage_booking",`,
-				`"Let me have a look at the diary.",`,
+				`"Let me have a look.",`,
 			} {
 				if !strings.Contains(py, want) {
 					t.Errorf("the alternatives package is missing %q", want)
