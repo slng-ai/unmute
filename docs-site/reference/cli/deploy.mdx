@@ -1,19 +1,17 @@
 ---
 title: "unmute deploy"
-description: "Validate, compile and push a package to SLNG in one command."
+description: "Validate, compile and push a package to SLNG in one command, or point a Twilio number at a twilio target you host."
 ---
 
 ```text
 $ unmute deploy --help
 Compile a package and push it to SLNG.
 
-Validates the package, checks its published references, compiles each slng target,
-then performs a guarded push through `voiceai`. The agent is written only after
-its checks pass. A real deploy may first refresh MCP discovery or fill a Vault
-entry with consent; the deploy report records those changes. A dry run makes
-no remote changes.
+Validates the package, compiles each slng target, then pushes it with `voiceai agents push`. Nothing on SLNG is created until every check passes, so a run that reports problems has changed nothing.
 
 The credential is read from SLNG_API_KEY, falling back to VOICEAI_API_KEY and then to whatever profile `voiceai login` stored. The organisation a push resolved is always printed, because an environment key and a stored profile can belong to different ones.
+
+With --target naming one twilio target, deploy instead points an existing Twilio number at the app you already host for it. It checks the number, checks that the host's /healthz names this build, sends /voice one signed request and compares the TwiML, then sets only the number's VoiceUrl and VoiceMethod. It uploads nothing and places no call. The account SID, Auth Token, number SID and public URL are read from the environment names the connection declares. The old route is saved to a private file under your user config directory before anything is written.
 
 With no package-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
 
@@ -28,7 +26,7 @@ Flags:
       --label string      version label (default: the package name and a timestamp)
       --profile string    voiceai credential profile to check and push with
       --run-samples       run each tool's sample against your real dependencies
-      --target strings    slng target instance name (repeatable; default: every slng target)
+      --target strings    target instance name (repeatable for slng; default: every slng target; one twilio target per run)
 ```
 
 ## What it needs
@@ -95,10 +93,11 @@ hash SLNG's own snapshot recorded. The `requirements satisfied` count is the
 same account read, folded in with every Vault entry, MCP server and builtin the
 package needs.
 
-Only a `slng` target is deployed. A livekit or pipecat target compiles to a
-project that somebody else's platform runs, so it is `unmute compile` plus that
-platform's own deploy step. Deploying a package with no slng target names the
-block that would add one.
+With no `--target`, only `slng` targets are deployed. A livekit or pipecat
+target compiles to a project that somebody else's platform runs, so it is
+`unmute compile` plus that platform's own deploy step. Deploying a package with
+no slng target names the block that would add one. A twilio target is deployed
+only when `--target` names it; see [A twilio target](#a-twilio-target).
 
 The organisation is printed on every run because an exported key and a stored
 profile can belong to different ones, and nothing else on screen would tell you
@@ -388,6 +387,41 @@ JSON
 This executes the hosted tool against its real dependencies. The example
 assumes your organisation publishes `check_order` with an `order_number`
 parameter; change the name and input for your own tool.
+
+## A twilio target
+
+```sh
+unmute deploy --target twilio --dry-run
+unmute deploy --target twilio
+```
+
+With `--target` naming one twilio target, `unmute deploy` points one existing
+Twilio number at the app you already host for it. It needs no `voiceai` and no
+SLNG key. It uploads nothing, buys no number and places no call.
+
+It reads the account SID, the Auth Token, the number SID and the public URL
+from the environment names the connection declares. It needs no model key.
+
+Before it writes, it checks three things: the number takes voice calls and has
+no TwiML App, SIP trunk or fallback URL; the host's `/healthz` names this
+build's `artifact_id`; and a signed `POST /voice` answers this build's TwiML.
+Then it saves the old voice URL to a private file under your user config
+directory, sets `VoiceUrl` and `VoiceMethod` only, and reads the number back.
+
+A successful run reads:
+
+```text
+✓ twilio (twilio)
+twilio: routed +15005550006 (PN<sid>) to POST https://relay.example.com/voice
+twilio: old route saved to <config dir>/unmute/twilio-rollback/PN<sid>-<time>-<n>.json
+twilio: wrote build/twilio/deploy-report.json
+twilio: no call was placed; call +15005550006 to check speech, the WebSocket and the hangup
+```
+
+It refuses to run with more than one target selected, or with `--profile`,
+`--agent-id`, `--label`, `--run-samples` or `--call`, which are slng flags.
+Every check, the dry run and how to put the old route back are on
+[the Twilio target page](/targets/twilio#point-the-number-at-it).
 
 ## Where to go next
 

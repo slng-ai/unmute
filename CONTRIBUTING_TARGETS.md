@@ -242,10 +242,13 @@ headers a proxy could rewrite. See `signed()` in
 [app.py.tmpl](internal/generate/templates/twilio_v1/app.py.tmpl).
 
 **This repository does not write to a carrier account without an explicit command.** `slng` is the only
-target `unmute deploy` pushes to. `livekit` and `pipecat` are compiled with `unmute compile` and
-deployed by that platform's own tool. `twilio` is compiled with `unmute compile` and hosted by the
-author, and nobody's number, trunk or webhook is touched. See `noSlngTargetGuidance` in
-[internal/cli/deploy.go](internal/cli/deploy.go).
+target `unmute deploy` pushes to, through `voiceai`. `livekit` and `pipecat` are compiled with
+`unmute compile` and deployed by that platform's own tool. `twilio` is compiled with `unmute compile`
+and hosted by the author. `unmute deploy --target <twilio target>` is the one command that writes to a
+Twilio account: it sets `VoiceUrl` and `VoiceMethod` on one existing number, after checking the host's
+`/healthz` `artifact_id` and a signed `/voice`, and saves the old route first. It never touches a trunk,
+an app or any other number setting. See
+[internal/cli/deploy_twilio.go](internal/cli/deploy_twilio.go).
 
 ## Getting authors onto the target
 
@@ -367,8 +370,9 @@ has been made against it.
   general JSON Schema engine.
 - **One process, bounded call slots.** `capacity.max_sessions` becomes `MAX_SESSIONS` in `app.py`, one
   process, one replica.
-- **Manual hosting, no account writes.** The author hosts the app behind HTTPS, sets `public_url`, and
-  points the number at `/voice` themselves. `phone_number_sid` is deploy-only, never read by the app.
+- **Manual hosting, one explicit account write.** The author hosts the app behind HTTPS and sets
+  `public_url`. `unmute deploy --target <name>` then points the number at `/voice`, or the author does it
+  in the Console. `phone_number_sid` is deploy-only, never read by the app.
 - **`unmute dev` refuses it.** Twilio only reaches a public origin, so there is no local browser loop to
   serve.
 

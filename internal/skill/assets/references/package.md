@@ -717,5 +717,16 @@ turn fields, tracing, realtime and live, fallbacks, custom endpoints,
 `tools/`. The app reads the three Twilio names above plus the think model's
 key. `phone_number_sid` is deploy-only: the app never reads it. There is no
 `unmute dev` loop for this target, because Twilio can only call a public
-https origin. The emitted README says how to host the app and point the
-number at `/voice`; unmute changes nothing in the Twilio account.
+https origin. The user hosts the app; unmute never uploads it.
+
+Once it is hosted, `unmute deploy --target <name>` points one existing number
+at `https://<origin>/voice`. Run it with `--dry-run` first. It reads
+`account_sid`, `auth_token`, `phone_number_sid` and `public_url` through the
+connection's environment names, and no model key. Before writing it checks the
+number (voice capable, no TwiML App, trunk or fallback URL), that the host's
+`/healthz` returns this build's `artifact_id`, and that a signed `POST /voice`
+returns this build's TwiML. It then saves the old route under the user config
+directory and sets only `VoiceUrl` and `VoiceMethod`. A missing or different
+`artifact_id` means recompile and rehost. It takes one twilio target per run,
+and refuses `--profile`, `--agent-id`, `--label`, `--run-samples` and `--call`.
+It places no call, so a real call is still the only check of speech.

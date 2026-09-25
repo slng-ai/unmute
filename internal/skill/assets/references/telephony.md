@@ -141,7 +141,8 @@ A key from another route is refused, and the refusal carries the accepted set.
 
 The Twilio route is the `provider: twilio` target; it is described in
 `references/package.md` under "The twilio target". Its app is hosted by the
-user, not by a managed platform, and `phone_number_sid` is deploy-only.
+user, not by a managed platform, and `phone_number_sid` is read only by
+`unmute deploy --target <name>`, which points that number at the hosted app.
 
 The SIP route uses standard SIP names rather than one vendor's, because the same
 generated code dials through any SIP carrier with them.

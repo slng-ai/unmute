@@ -71,6 +71,11 @@ WSS_PLACEHOLDER = "__PUBLIC_WSS_ORIGIN__"
 CALL_SID = re.compile(r"CA[0-9a-f]{32}")
 SESSION_ID = re.compile(r"VX[0-9a-f]{32}")
 HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>'
+# Which build this is, served on /healthz so `unmute deploy` can refuse to route
+# a number at a different one. An Unmute drift check, not a Twilio API and not
+# an attestation. Hashed from the rest of this file, the TwiML, the pins, the
+# image and the tools; never from a credential or the public origin.
+ARTIFACT_ID = "sha256:14b26c0ec0cf96de053e9966c42a2bd53678b7feb9e7aa22436ce0d9ec4b931e"
 
 # --- tools ---------------------------------------------------------------------
 
@@ -805,10 +810,11 @@ def build_app(client: Any = None) -> web.Application:
 
     async def healthz(request: web.Request) -> web.Response:
         # 503 while draining, or when every slot is held by a handler that
-        # outlived its call: the process can take no call either way.
+        # outlived its call: the process can take no call either way. A 200
+        # does not promise a free slot: /voice may still answer <Hangup/>.
         if slots.draining or slots.orphaned >= slots.limit:
-            return web.json_response({"ok": False}, status=503)
-        return web.json_response({"ok": True})
+            return web.json_response({"ok": False, "artifact_id": ARTIFACT_ID}, status=503)
+        return web.json_response({"ok": True, "artifact_id": ARTIFACT_ID})
 
     async def voice(request: web.Request) -> web.Response:
         # https://www.twilio.com/docs/usage/security: the exact URL Twilio
@@ -1046,11 +1052,12 @@ sequenceDiagram
 
 ## Run it
 
-You host this app yourself. unmute does not create or change anything in your
-Twilio account in this release.
+You host this app yourself. unmute never uploads it, never buys a number and
+never places a call. The one thing it can change in your Twilio account is the
+voice webhook of one number you name, and only when you run `unmute deploy`.
 
 1. Copy `.env.example` to `.env` and fill it in.
-2. Start the app:
+2. Start the app on your host:
 
    ```sh
    uv run --env-file .env python app.py
@@ -1068,15 +1075,69 @@ Twilio account in this release.
    [phone numbers](https://www.twilio.com/docs/phone-numbers)):
 
    - host the built app behind HTTPS at a public origin you control, and set the public_url environment name to that origin, for example https://relay.example.com, with no path
-   - in the Twilio Console, open the number (Phone Numbers, Manage, Active Numbers) and set "A call comes in" to Webhook, HTTP POST, https://<your origin>/voice
-   - take the number off any SIP trunk first: a number on a trunk ignores its own voice configuration
+   - take the number off any SIP trunk and any TwiML App, and clear its voice fallback URL: deploy refuses a number with any of them, and never clears one for you
+   - run `unmute deploy --target <name> --dry-run`, then again without --dry-run, to point the number at https://<your origin>/voice; or, in the Twilio Console, open the number (Phone Numbers, Manage, Active Numbers) and set "A call comes in" to Webhook, HTTP POST, https://<your origin>/voice
 
    Twilio must reach `/voice`, `/conversation` and `/connect-action` at your
    origin. `TWILIO_PUBLIC_URL` is the environment name for that origin.
 4. Call the number.
 
-`GET /healthz` answers 200 while the app can take calls, and 503 while it
-drains or when every call slot is held.
+`GET /healthz` answers 200 while the process is up, even when every call slot
+is busy: then `/voice` answers `<Hangup/>`. It answers 503 only while the app
+drains, or when every slot is held by a tool handler that outlived its call.
+Both answers carry `artifact_id`, the build this app is.
+
+## Point the number with unmute deploy
+
+`unmute deploy --target twilio` sets the number's webhook for you. Run it
+where the package is, after step 2. It reads these environment names, from the
+shell or the package's `.env`:
+
+| Name | What it is |
+|---|---|
+| `TWILIO_ACCOUNT_SID` | The account that owns the number. |
+| `TWILIO_AUTH_TOKEN` | That account's Auth Token. It must be the one the host uses. |
+| `TWILIO_PHONE_NUMBER_SID` | The number to route, `PN` followed by 32 characters. Only deploy reads it. |
+| `TWILIO_PUBLIC_URL` | The host's public origin, the same value the host has. |
+
+It needs no model key: the model runs on your host. It then does this, in order:
+
+1. Reads the number
+   ([IncomingPhoneNumber](https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource)). It refuses a number that
+   cannot take voice calls, or that has a TwiML App, a SIP trunk or a voice
+   fallback URL. It never clears one of those for you.
+2. Reads `/healthz` and compares its `artifact_id` with this build. A different
+   or missing id means the host runs another build: recompile, rehost, run again.
+   The id is unmute's own drift check, not a Twilio feature.
+3. Sends `/voice` one request signed with the Auth Token, the way Twilio signs a
+   call ([webhook security](https://www.twilio.com/docs/usage/security)), and compares the TwiML with
+   this build's ([Connect](https://www.twilio.com/docs/voice/twiml/connect),
+   [ConversationRelay](https://www.twilio.com/docs/voice/twiml/connect/conversationrelay)). This proves the HTTP
+   answer only. It does not open the WebSocket, run the model or place a call.
+   A 503 or a `<Hangup/>` answer means "busy, try again later".
+4. Stops if the number already points at `https://<your origin>/voice`.
+5. With `--dry-run`, stops here and prints the change it would make.
+6. Reads the number again and stops if its voice settings moved.
+7. Saves the old voice URL and method to a new private file under your user
+   config directory, in `unmute/twilio-rollback/`. If that fails, it stops.
+8. Sets `VoiceUrl` and `VoiceMethod` only. SMS and every other setting stay as
+   they were.
+9. Reads the number back. The result is `routed`, `not_changed` or `unknown`,
+   and it writes `build/twilio/deploy-report.json` with IDs, the outcome and
+   the snapshot path. `call_verified` is always false: only a real call verifies
+   a call.
+
+Two deploys to one number at the same time are not supported.
+
+### Put the old route back
+
+The deploy prints the snapshot path. The file holds the exact old URL, which
+may carry a secret, so it is readable only by you.
+
+1. Open the number in the Twilio Console. Check its voice URL is still the
+   snapshot's `new_voice_url`. If it is not, somebody changed it after the
+   deploy: stop, and decide with them.
+2. Set "A call comes in" back to the snapshot's `voice_url` and `voice_method`.
 
 ## How it behaves
 
@@ -1130,6 +1191,7 @@ drains or when every call slot is held.
 </Response>
 === compile-report.json ===
 {
+  "artifact_id": "sha256:14b26c0ec0cf96de053e9966c42a2bd53678b7feb9e7aa22436ce0d9ec4b931e",
   "bindings": [
     {
       "binding": {
@@ -1306,8 +1368,8 @@ drains or when every call slot is held.
     },
     "manual_steps": [
       "host the built app behind HTTPS at a public origin you control, and set the public_url environment name to that origin, for example https://relay.example.com, with no path",
-      "in the Twilio Console, open the number (Phone Numbers, Manage, Active Numbers) and set \"A call comes in\" to Webhook, HTTP POST, https://\u003cyour origin\u003e/voice",
-      "take the number off any SIP trunk first: a number on a trunk ignores its own voice configuration"
+      "take the number off any SIP trunk and any TwiML App, and clear its voice fallback URL: deploy refuses a number with any of them, and never clears one for you",
+      "run `unmute deploy --target \u003cname\u003e --dry-run`, then again without --dry-run, to point the number at https://\u003cyour origin\u003e/voice; or, in the Twilio Console, open the number (Phone Numbers, Manage, Active Numbers) and set \"A call comes in\" to Webhook, HTTP POST, https://\u003cyour origin\u003e/voice"
     ],
     "evidence": [
       {

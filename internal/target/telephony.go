@@ -457,12 +457,13 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		{Name: "connect_action", Method: "POST", Path: "/connect-action"},
 		{Name: "health", Method: "GET", Path: "/healthz"},
 	}
-	// No AutoWebhookEndpoint: nothing writes the number's webhook in this
-	// release, so the operator follows the manual steps below.
+	// No AutoWebhookEndpoint: the dev loop never reaches this route. The
+	// number's webhook is written only by an explicit `unmute deploy --target`,
+	// or by hand, as the steps below say.
 	route.ManualSteps = []string{
 		"host the built app behind HTTPS at a public origin you control, and set the public_url environment name to that origin, for example https://relay.example.com, with no path",
-		"in the Twilio Console, open the number (Phone Numbers, Manage, Active Numbers) and set \"A call comes in\" to Webhook, HTTP POST, https://<your origin>/voice",
-		"take the number off any SIP trunk first: a number on a trunk ignores its own voice configuration",
+		"take the number off any SIP trunk and any TwiML App, and clear its voice fallback URL: deploy refuses a number with any of them, and never clears one for you",
+		"run `unmute deploy --target <name> --dry-run`, then again without --dry-run, to point the number at https://<your origin>/voice; or, in the Twilio Console, open the number (Phone Numbers, Manage, Active Numbers) and set \"A call comes in\" to Webhook, HTTP POST, https://<your origin>/voice",
 	}
 	routes[relay] = route
 	return routes
