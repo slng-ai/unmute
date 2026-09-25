@@ -85,7 +85,6 @@ type twilioNumber struct {
 	AccountSID   string `json:"account_sid"`
 	SID          string `json:"sid"`
 	PhoneNumber  string `json:"phone_number"`
-	ReceiveMode  string `json:"voice_receive_mode"`
 	Capabilities struct {
 		Voice bool `json:"voice"`
 	} `json:"capabilities"`
@@ -100,6 +99,7 @@ type twilioRoute struct {
 	FallbackURL string `json:"voice_fallback_url"`
 	Application string `json:"voice_application_sid"`
 	Trunk       string `json:"trunk_sid"`
+	ReceiveMode string `json:"voice_receive_mode"`
 }
 
 type twilioSnapshot struct {
@@ -204,13 +204,19 @@ func runTwilioDeploy(cmd *cobra.Command, dir string, agent *ir.Agent, resolved i
 		AccountSID: cfg.account, PhoneNumberSID: cfg.number, PhoneNumber: number.PhoneNumber,
 		Destination: desired, PreviousVoiceURL: redactURL(number.VoiceURL), Preflight: preflight,
 	}
-	if number.VoiceURL == desired && strings.EqualFold(number.VoiceMethod, http.MethodPost) {
+	unchanged := routesTo(number, desired)
+	// A dry run writes nothing at all, here or in build/: not even a report
+	// that the route is already right.
+	switch {
+	case unchanged && dryRun:
+		fmt.Fprintf(out, "%s: %s already routes to %s\n", resolved.Name, number.PhoneNumber, desired)
+		return nil
+	case unchanged:
 		record.Outcome = "unchanged"
 		fmt.Fprintf(out, "%s: %s already routes to %s\n", resolved.Name, number.PhoneNumber, desired)
 		writeTwilioReport(out, errOut, dir, record)
 		return nil
-	}
-	if dryRun {
+	case dryRun:
 		fmt.Fprintf(out, "%s: would route %s (%s) to POST %s, now %s %s\n", resolved.Name,
 			number.PhoneNumber, cfg.number, desired, cmp.Or(number.VoiceMethod, "-"), redactURL(number.VoiceURL))
 		return nil
@@ -219,6 +225,9 @@ func runTwilioDeploy(cmd *cobra.Command, dir string, agent *ir.Agent, resolved i
 	again, err := cfg.fetchNumber()
 	if err != nil {
 		return fail(fmt.Errorf("re-read before writing: %w", err))
+	}
+	if err := cfg.checkNumber(again); err != nil {
+		return fail(fmt.Errorf("re-read before writing, nothing was written: %w", err))
 	}
 	if again.twilioRoute != number.twilioRoute {
 		return fail(errors.New("the number's voice configuration changed while this ran; nothing was written, run deploy again"))
@@ -234,13 +243,18 @@ func runTwilioDeploy(cmd *cobra.Command, dir string, agent *ir.Agent, resolved i
 	record.Snapshot = snapshot
 
 	// One write, never retried: a timeout does not say whether it landed, and
-	// the readback below is what decides.
+	// the readback below is what decides. An old route read back after a write
+	// that was not refused proves nothing: the write may still land later.
 	writeErr := cfg.updateVoice(desired)
 	after, readErr := cfg.fetchNumber()
+	var conflict error
+	if readErr == nil {
+		conflict = cfg.checkNumber(after)
+	}
 	switch {
-	case readErr == nil && after.VoiceURL == desired && strings.EqualFold(after.VoiceMethod, http.MethodPost):
+	case readErr == nil && conflict == nil && routesTo(after, desired):
 		record.Outcome = "routed"
-	case readErr == nil && after.twilioRoute == again.twilioRoute:
+	case readErr == nil && twilioRefused(writeErr) && after.twilioRoute == again.twilioRoute:
 		record.Outcome = "not_changed"
 	default:
 		record.Outcome = "unknown"
@@ -255,18 +269,40 @@ func runTwilioDeploy(cmd *cobra.Command, dir string, agent *ir.Agent, resolved i
 		fmt.Fprintf(out, "%s: no call was placed; call %s to check speech, the WebSocket and the hangup\n", resolved.Name, number.PhoneNumber)
 		return nil
 	case "not_changed":
-		cause := cmp.Or(writeErr, errors.New("the write was answered, the readback shows no change"))
-		return fail(fmt.Errorf("the number still routes where it did: %w", cause))
+		return fail(fmt.Errorf("the number still routes where it did: %w", writeErr))
 	default:
-		cause := errors.Join(writeErr, readErr)
+		cause := errors.Join(writeErr, readErr, conflict)
 		if cause == nil {
-			cause = errors.New("the readback shows a route this run did not write")
+			cause = errors.New("the write was answered, and the readback does not show it yet")
 		}
 		return fail(fmt.Errorf("the write's outcome is unknown: %w\n"+
 			"  check the number in the Twilio Console, or run this again with --dry-run.\n"+
-			"  the old route is saved in %s; restore it by hand only if the number still routes to %s",
+			"  the old route is saved in %s; restore it by hand only if the number still routes to POST %s\n"+
+			"  and has no TwiML App, SIP trunk or fallback URL",
 			cause, snapshot, desired))
 	}
+}
+
+// routesTo is the route this deploy writes: VoiceUrl and POST.
+func routesTo(n twilioNumber, voiceURL string) bool {
+	return n.VoiceURL == voiceURL && strings.EqualFold(n.VoiceMethod, http.MethodPost)
+}
+
+// twilioStatusError is an answer from the Twilio API that is not 200. The
+// message never quotes the body, which can echo a value back.
+type twilioStatusError struct {
+	status int
+	msg    string
+}
+
+func (e *twilioStatusError) Error() string { return e.msg }
+
+// twilioRefused is a write Twilio answered with a 4xx: it validated the
+// request and applied nothing. A timeout, a 5xx or a lost connection says
+// nothing about whether the write landed.
+func twilioRefused(err error) bool {
+	statusErr, ok := errors.AsType[*twilioStatusError](err)
+	return ok && statusErr.status >= 400 && statusErr.status < 500
 }
 
 func artifactContent(artifact generate.Artifact, path string) []byte {
@@ -407,10 +443,11 @@ func (c twilioConfig) twilioAPI(req *http.Request, into any) error {
 		case http.StatusNotFound:
 			hint = fmt.Sprintf("; account %s has no number %s", c.account, c.number)
 		}
+		msg := fmt.Sprintf("the Twilio API %s answered %d%s", req.Method, status, hint)
 		if problem.Code != 0 {
-			return fmt.Errorf("the Twilio API %s answered %d (error %d)%s", req.Method, status, problem.Code, hint)
+			msg = fmt.Sprintf("the Twilio API %s answered %d (error %d)%s", req.Method, status, problem.Code, hint)
 		}
-		return fmt.Errorf("the Twilio API %s answered %d%s", req.Method, status, hint)
+		return &twilioStatusError{status: status, msg: msg}
 	}
 	if into == nil {
 		return nil
@@ -541,33 +578,51 @@ type twimlNode struct {
 	Children []twimlNode
 }
 
+// parseTwiML reads exactly one XML document: one root element, and outside it
+// only whitespace, comments, processing instructions and, before the root, a
+// directive. A second root or stray text is not a document Twilio would run.
 func parseTwiML(body []byte) (twimlNode, error) {
 	dec := xml.NewDecoder(bytes.NewReader(body))
 	var stack []twimlNode
+	var root *twimlNode
 	for {
 		tok, err := dec.Token()
 		if errors.Is(err, io.EOF) {
-			return twimlNode{}, errors.New("no root element")
+			if root == nil {
+				return twimlNode{}, errors.New("no root element")
+			}
+			return *root, nil
 		}
 		if err != nil {
 			return twimlNode{}, err
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
+			if root != nil {
+				return twimlNode{}, fmt.Errorf("a second root element <%s>", t.Name.Local)
+			}
 			node := twimlNode{Name: t.Name.Local, Attrs: map[string]string{}}
 			for _, a := range t.Attr {
 				node.Attrs[a.Name.Local] = a.Value
 			}
 			stack = append(stack, node)
 		case xml.CharData:
+			text := strings.TrimSpace(string(t))
 			if len(stack) > 0 {
-				stack[len(stack)-1].Text += strings.TrimSpace(string(t))
+				stack[len(stack)-1].Text += text
+			} else if text != "" {
+				return twimlNode{}, errors.New("text outside the root element")
+			}
+		case xml.Directive:
+			if root != nil {
+				return twimlNode{}, errors.New("a directive after the root element")
 			}
 		case xml.EndElement:
 			node := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
 			if len(stack) == 0 {
-				return node, nil
+				root = &node
+				continue
 			}
 			stack[len(stack)-1].Children = append(stack[len(stack)-1].Children, node)
 		}

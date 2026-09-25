@@ -1186,17 +1186,22 @@ It needs no model key: the model runs on your host. It then does this, in order:
    [ConversationRelay](https://www.twilio.com/docs/voice/twiml/connect/conversationrelay)). This proves the HTTP
    answer only. It does not open the WebSocket, run the model or place a call.
    A 503 or a `<Hangup/>` answer means "busy, try again later".
-4. Stops if the number already points at `https://<your origin>/voice`.
-5. With `--dry-run`, stops here and prints the change it would make.
-6. Reads the number again and stops if its voice settings moved.
+4. With `--dry-run`, stops here and prints the change it would make. A dry run
+   writes no file, not even the report.
+5. Stops if the number already points at `https://<your origin>/voice` with
+   `POST`.
+6. Reads the number again. It stops if the voice settings moved, or if the
+   number now fails a check from step 1.
 7. Saves the old voice URL and method to a new private file under your user
    config directory, in `unmute/twilio-rollback/`. If that fails, it stops.
 8. Sets `VoiceUrl` and `VoiceMethod` only. SMS and every other setting stay as
    they were.
-9. Reads the number back. The result is `routed`, `not_changed` or `unknown`,
-   and it writes `build/twilio-gemini/deploy-report.json` with IDs, the outcome and
-   the snapshot path. `call_verified` is always false: only a real call verifies
-   a call.
+9. Reads the number back. The result is `routed` only if the number points at
+   `/voice` with `POST` and still passes every check from step 1. It is
+   `not_changed` only if Twilio refused the write. Anything else, such as a
+   timeout, is `unknown`, because the write may still land. It writes
+   `build/twilio-gemini/deploy-report.json` with IDs, the outcome and the snapshot
+   path. `call_verified` is always false: only a real call verifies a call.
 
 Two deploys to one number at the same time are not supported.
 
@@ -1205,9 +1210,11 @@ Two deploys to one number at the same time are not supported.
 The deploy prints the snapshot path. The file holds the exact old URL, which
 may carry a secret, so it is readable only by you.
 
-1. Open the number in the Twilio Console. Check its voice URL is still the
-   snapshot's `new_voice_url`. If it is not, somebody changed it after the
-   deploy: stop, and decide with them.
+1. Open the number in the Twilio Console. Check that "A call comes in" is still
+   a webhook to the snapshot's `new_voice_url` with `HTTP POST`. Check that the
+   number has no TwiML App, no SIP trunk and no fallback URL. If any of this is
+   different, somebody changed the number after the deploy: stop, and decide
+   with them.
 2. Set "A call comes in" back to the snapshot's `voice_url` and `voice_method`.
 
 ## How it behaves

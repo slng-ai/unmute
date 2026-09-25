@@ -52,8 +52,13 @@ type fakeTwilio struct {
 	relay        []byte
 	postStatus   int           // non-zero: refuse the write with this status
 	postDelay    time.Duration // applied, then answered late
-	failAfter    bool          // every read after a write fails
-	onRead       func(n int, number map[string]any)
+	// applyLate holds the write back until the readback after it has been
+	// answered, then applies it: the client times out and reads the old route,
+	// and only then does the write land.
+	applyLate     bool
+	readAfterPOST chan struct{}
+	failAfter     bool // every read after a write fails
+	onRead        func(n int, number map[string]any)
 }
 
 func newFakeTwilio(t *testing.T) *fakeTwilio {
@@ -125,6 +130,17 @@ func (f *fakeTwilio) serve(w http.ResponseWriter, r *http.Request) {
 				_, _ = w.Write([]byte(`{"code": 21999, "message": "echo ` + oldSecret + `"}`))
 				return
 			}
+			if f.applyLate {
+				f.readAfterPOST = make(chan struct{})
+				wait := f.readAfterPOST
+				f.mu.Unlock()
+				select {
+				case <-wait:
+				case <-time.After(10 * time.Second):
+					f.t.Error("no readback came after the write")
+				}
+				f.mu.Lock()
+			}
 			f.number["voice_url"], f.number["voice_method"] = r.PostForm.Get("VoiceUrl"), r.PostForm.Get("VoiceMethod")
 			if f.postDelay > 0 {
 				f.mu.Unlock()
@@ -139,6 +155,13 @@ func (f *fakeTwilio) serve(w http.ResponseWriter, r *http.Request) {
 			}
 			if f.onRead != nil {
 				f.onRead(f.reads, f.number)
+			}
+			if f.readAfterPOST != nil {
+				// Answer this read with the old route, then let the write land.
+				_ = json.NewEncoder(w).Encode(f.number)
+				close(f.readAfterPOST)
+				f.readAfterPOST = nil
+				return
 			}
 		}
 		_ = json.NewEncoder(w).Encode(f.number)
@@ -195,6 +218,13 @@ func deployTwilio(t *testing.T, f *fakeTwilio, env map[string]string, args ...st
 	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "twilio_relay"))); err != nil {
 		t.Fatal(err)
 	}
+	return deployTwilioIn(t, f, dir, env, args...)
+}
+
+// deployTwilioIn runs deploy on a package copy made earlier, so a second run
+// sees what the first one left in build/.
+func deployTwilioIn(t *testing.T, f *fakeTwilio, dir string, env map[string]string, args ...string) twilioRun {
+	t.Helper()
 	values := map[string]string{
 		"TWILIO_ACCOUNT_SID": fakeAccount, "TWILIO_AUTH_TOKEN": fakeToken,
 		"TWILIO_PHONE_NUMBER_SID": fakeNumber, "TWILIO_PUBLIC_URL": f.srv.URL,
@@ -367,6 +397,24 @@ func TestTwilioDeployRefusesBeforeWriting(t *testing.T) {
 			f.voiceBody = strings.Replace(f.renderRelay(), `interruptible="speech"`, `interruptible="none"`, 1)
 		}, "differs from this build at /Response/Connect/ConversationRelay@interruptible"},
 		{"not TwiML", func(f *fakeTwilio) { f.voiceBody = "hello" }, "not TwiML"},
+		{"this build's TwiML and a second root", func(f *fakeTwilio) {
+			f.voiceBody = f.renderRelay() + "<Response><Hangup/></Response>"
+		}, "not TwiML"},
+		{"this build's TwiML and trailing text", func(f *fakeTwilio) { f.voiceBody = f.renderRelay() + "oops" }, "not TwiML"},
+		{"app added before the write", func(f *fakeTwilio) {
+			f.onRead = func(n int, number map[string]any) {
+				if n == 2 {
+					number["voice_application_sid"] = "AP0123"
+				}
+			}
+		}, "re-read before writing, nothing was written: number +15005550006 is configured by TwiML App AP0123"},
+		{"fax before the write", func(f *fakeTwilio) {
+			f.onRead = func(n int, number map[string]any) {
+				if n == 2 {
+					number["voice_receive_mode"] = "fax"
+				}
+			}
+		}, "receives fax"},
 		{"route drift", func(f *fakeTwilio) {
 			f.onRead = func(n int, number map[string]any) {
 				if n == 2 {
@@ -470,6 +518,100 @@ func TestTwilioDeployReadsBackTheWrite(t *testing.T) {
 			t.Errorf("outcome = %q", report.Outcome)
 		}
 	})
+	t.Run("write that timed out and landed after the readback", func(t *testing.T) {
+		f := newFakeTwilio(t)
+		f.applyLate = true
+		run := deployTwilio(t, f, nil, "--target", "twilio")
+		if run.err == nil || !strings.Contains(run.err.Error(), "outcome is unknown") ||
+			!strings.Contains(run.err.Error(), snapshots(t)[0]) {
+			t.Fatalf("err = %v, want an unknown outcome naming the snapshot", run.err)
+		}
+		if strings.Contains(run.err.Error(), "still routes where it did") {
+			t.Errorf("a write that may still land was called not changed: %v", run.err)
+		}
+		if report := twilioReportOf(t, run.dir); report.Outcome != "unknown" {
+			t.Errorf("outcome = %q", report.Outcome)
+		}
+		f.srv.Close() // waits for the held write to land
+		if _, writes := f.counts(); writes != 1 || f.number["voice_url"] != f.srv.URL+"/voice" {
+			t.Errorf("writes = %d, voice_url = %v: the write should have landed once, late", writes, f.number["voice_url"])
+		}
+	})
+	t.Run("readback shows the route and a new trunk", func(t *testing.T) {
+		f := newFakeTwilio(t)
+		f.onRead = func(n int, number map[string]any) {
+			if n == 3 {
+				number["trunk_sid"] = "TK0123"
+			}
+		}
+		run := deployTwilio(t, f, nil, "--target", "twilio")
+		if run.err == nil || !strings.Contains(run.err.Error(), "outcome is unknown") ||
+			!strings.Contains(run.err.Error(), "SIP trunk TK0123") {
+			t.Fatalf("err = %v, want an unknown outcome naming the trunk", run.err)
+		}
+		if strings.Contains(run.out, "routed ") {
+			t.Errorf("stdout claims a route calls cannot reach:\n%s", run.out)
+		}
+		if report := twilioReportOf(t, run.dir); report.Outcome != "unknown" {
+			t.Errorf("outcome = %q", report.Outcome)
+		}
+	})
+}
+
+// A dry run on a number that already routes here leaves the last report and
+// the snapshot it names exactly as they were, and writes nothing to Twilio.
+func TestTwilioDeployDryRunKeepsEarlierFiles(t *testing.T) {
+	f := newFakeTwilio(t)
+	first := deployTwilio(t, f, nil, "--target", "twilio")
+	if first.err != nil {
+		t.Fatal(first.err)
+	}
+	reportPath := filepath.Join(first.dir, "build", "twilio", "deploy-report.json")
+	report, _ := os.ReadFile(reportPath)
+	files := snapshots(t)
+	if len(files) != 1 {
+		t.Fatalf("snapshots = %v", files)
+	}
+	snapshot, _ := os.ReadFile(files[0])
+
+	dry := deployTwilioIn(t, f, first.dir, nil, "--target", "twilio", "--dry-run")
+	if dry.err != nil || !strings.Contains(dry.out, "already routes to") {
+		t.Fatalf("dry run: %v\n%s", dry.err, dry.out)
+	}
+	if strings.Contains(dry.out, "wrote ") {
+		t.Errorf("dry run says it wrote a file:\n%s", dry.out)
+	}
+	afterReport, _ := os.ReadFile(reportPath)
+	afterSnapshot, _ := os.ReadFile(files[0])
+	if !bytes.Equal(report, afterReport) || !bytes.Equal(snapshot, afterSnapshot) || len(snapshots(t)) != 1 {
+		t.Error("a dry run changed the report or the snapshots")
+	}
+	if _, writes := f.counts(); writes != 1 {
+		t.Errorf("writes = %d, want only the first run's", writes)
+	}
+}
+
+func TestParseTwiMLNeedsOneDocument(t *testing.T) {
+	const root = `<Response><Connect><ConversationRelay url="wss://x"/></Connect></Response>`
+	for _, tc := range []struct {
+		name, body string
+		ok         bool
+	}{
+		{"declaration, comments and newlines", "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- a -->\n" + root + "\n<!-- b -->\n", true},
+		{"a second root", root + "<Response/>", false},
+		{"trailing text", root + "hello", false},
+		{"leading text", "hello" + root, false},
+		{"malformed suffix", root + "<Hangup", false},
+		{"unclosed root", "<Response><Connect></Connect>", false},
+		{"no root", "<!-- nothing -->", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseTwiML([]byte(tc.body))
+			if (err == nil) != tc.ok {
+				t.Errorf("err = %v, want ok = %v", err, tc.ok)
+			}
+		})
+	}
 }
 
 // The choice between slng and twilio is made before voiceai, an SLNG key, or

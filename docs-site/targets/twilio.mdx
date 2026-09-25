@@ -308,16 +308,21 @@ flowchart TD
    ([Connect](https://www.twilio.com/docs/voice/twiml/connect)). A 503 or a
    bare `<Hangup/>` means "busy, try again later". This proves the HTTP answer
    only, not the WebSocket, the speech or the hangup callback.
-4. It stops if the number already points at `https://<your origin>/voice`.
-   With `--dry-run`, it stops before any write and prints the change.
-5. It reads the number again and stops if its voice settings moved. Then it
-   saves the old voice URL and method to a new private file under your user
-   config directory, in `unmute/twilio-rollback/`.
+4. With `--dry-run`, it prints the change and stops. A dry run writes no file.
+   Without it, it stops if the number already points at
+   `https://<your origin>/voice` with `POST`.
+5. It reads the number again. It stops if the voice settings moved, or if the
+   number now fails a check from step 1. Then it saves the old voice URL and
+   method to a new private file under your user config directory, in
+   `unmute/twilio-rollback/`.
 6. It sets `VoiceUrl` and `VoiceMethod` only. SMS and every other setting keep
    their values.
 7. It reads the number back, and writes `build/<target>/deploy-report.json`
-   with the outcome: `routed`, `not_changed` or `unknown`. An `unknown` outcome
-   exits 1 and prints the snapshot path.
+   with the outcome. `routed` means the number points at `/voice` with `POST`
+   and still passes every check from step 1. `not_changed` means Twilio refused
+   the write. Anything else, such as a timeout, is `unknown`, because the write
+   may still land. An `unknown` outcome exits 1 and prints the snapshot path.
+   Nothing is retried.
 
 Two deploys to one number at the same time are not supported.
 
@@ -325,10 +330,11 @@ To route by hand instead, open the number in the Twilio Console (Phone Numbers,
 Manage, Active Numbers). Set "A call comes in" to Webhook, HTTP POST,
 `https://<your origin>/voice`.
 
-To put the old route back, first check in the Console that the number still
-points at the snapshot's `new_voice_url`. If it does not, somebody changed it
-since, so stop and ask. If it does, set "A call comes in" back to the
-snapshot's `voice_url` and `voice_method`.
+To put the old route back, first check the number in the Console. "A call comes
+in" must still be a webhook to the snapshot's `new_voice_url` with `HTTP POST`,
+and the number must have no TwiML App, SIP trunk or fallback URL. If anything
+differs, somebody changed the number since, so stop and ask. If it all matches,
+set "A call comes in" back to the snapshot's `voice_url` and `voice_method`.
 
 Then call the number. That call is the only check of the speech path.
 

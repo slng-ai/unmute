@@ -729,4 +729,10 @@ returns this build's TwiML. It then saves the old route under the user config
 directory and sets only `VoiceUrl` and `VoiceMethod`. A missing or different
 `artifact_id` means recompile and rehost. It takes one twilio target per run,
 and refuses `--profile`, `--agent-id`, `--label`, `--run-samples` and `--call`.
+A dry run writes nothing, not even the report. The outcome is `routed` only when
+the readback shows `/voice` with `POST` and the number still passes the checks,
+`not_changed` only when Twilio refused the write, and `unknown` otherwise. The
+write is never retried. To put the old route back from the snapshot, first check
+the number still points at the snapshot's `new_voice_url` with `POST` and has no
+TwiML App, trunk or fallback URL. If not, somebody changed it since, so stop.
 It places no call, so a real call is still the only check of speech.
