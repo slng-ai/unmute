@@ -53,6 +53,7 @@ type twilioData struct {
 	LocalTools   []twilioTool
 	Deps         []string
 	Env          twilioEnv
+	Region       string // the Twilio Region that handles the calls
 	DeployEnv    []string
 	Docs         targetcap.TwilioDocLinks
 	ManualSteps  []string
@@ -231,6 +232,7 @@ func buildTwilioData(agent *ir.Agent, resolved ir.Target) (twilioData, error) {
 			AuthToken:  plan.Environment["auth_token"],
 			PublicURL:  plan.Environment["public_url"],
 		}
+		data.Region = plan.Region
 		data.DeployEnv = plan.DeployEnvironment
 		data.ManualSteps = plan.ManualSteps
 	}

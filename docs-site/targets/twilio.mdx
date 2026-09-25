@@ -170,6 +170,14 @@ is for pointing the number at the app; the app itself never reads it.
   `public_url`. `phone_number_sid` is for the deploy step only.
 </ParamField>
 
+<ParamField path="region" type="us1 | ie1 | au1" default="us1">
+  The [Twilio Region](https://www.twilio.com/docs/global-infrastructure/understanding-twilio-regions)
+  that handles the calls. Each region keeps its own copy of the number's voice
+  settings and has its own Auth Token. Outside `us1`, `auth_token` must name
+  that region's token, because Twilio signs the region's requests with it. The
+  number's routing region must match too. Refused on every other route.
+</ParamField>
+
 To think with Gemini instead, replace the think entry:
 
 ```yaml
@@ -293,7 +301,8 @@ The emitted `README.md` repeats these steps with links to each Twilio page.
 - A call through a Twilio number with this target.
 - The signed WebSocket handshake behind a real proxy.
 - How Twilio plays tokens already sent when an interrupt arrives.
-- Twilio regions other than the default US1.
+- A call in `ie1` or `au1`. The docs list ConversationRelay in both regions.
+  They do not say whether Deepgram and ElevenLabs run there.
 - The Gemini Developer API path, with no `vertexai`, against a real key.
 
 ## Where to go next

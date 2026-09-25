@@ -200,10 +200,20 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 					pkg.Location(path, value), name, key)
 			}
 		}
+		if raw.Region != "" {
+			if raw.Transport != targetcap.TwilioTransport || raw.Carrier != "twilio" {
+				return nil, fmt.Errorf("%s: connection %q names region %s, but only a twilio %s route has a "+
+					"Twilio Region. Remove region", pkg.Location(path, "region:"), name, raw.Region, targetcap.TwilioTransport)
+			}
+			if !slices.Contains(targetcap.TwilioRegions, raw.Region) {
+				return nil, fmt.Errorf("%s: connection %q region %q is not a Twilio Region; use one of %s",
+					pkg.Location(path, "region:"), name, raw.Region, strings.Join(targetcap.TwilioRegions, ", "))
+			}
+		}
 		// Kind is a resolved-surface field with no author to read it from: every
 		// connection is telephony, so it is set here rather than deleted, which
 		// keeps the resolved schema and its goldens still (data-model §2).
-		out.Connections[name] = Connection{Kind: "telephony", Environment: maps.Clone(raw.Environment)}
+		out.Connections[name] = Connection{Kind: "telephony", Environment: maps.Clone(raw.Environment), Region: raw.Region}
 	}
 	if pkg.Agent.Capacity != nil {
 		out.Capacity = &Capacity{
@@ -1931,8 +1941,12 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 	}
 	slices.Sort(services)
 	slices.SortFunc(reasons, func(a, b TelephonyCoordinationReason) int { return strings.Compare(a.Name, b.Name) })
+	region := ""
+	if resolved.Provider == ProviderTwilio {
+		region = cmp.Or(connection.Region, targetcap.TwilioRegions[0])
+	}
 	return &TelephonyPlan{
-		Channels: channels, Connection: resolved.Connection,
+		Channels: channels, Connection: resolved.Connection, Region: region,
 		Key:         TelephonyKey{Provider: resolved.Provider, Transport: resolved.Transport, Carrier: resolved.Carrier},
 		Environment: maps.Clone(connection.Environment), Destinations: maps.Clone(resolved.Destinations),
 		SystemSources: sources, Evidence: evidence,

@@ -675,6 +675,11 @@ environment:
   public_url: TWILIO_PUBLIC_URL
 ```
 
+The connection may also name `region: us1`, `ie1` or `au1` (default `us1`),
+the Twilio Region that handles the calls. Outside `us1`, `auth_token` must name
+that region's own Auth Token, and the number's routing region must match. No
+call has been placed in `ie1` or `au1` yet.
+
 What a twilio package may carry, and nothing else:
 
 - one cascade agent, and exactly one channel: `kind: telephony`,

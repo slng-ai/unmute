@@ -71,6 +71,39 @@ func TestTwilioGolden(t *testing.T) {
 	}
 }
 
+// Outside US1 the runbook says the Auth Token and the number's routing must
+// belong to the region; in US1, where nothing differs, it says nothing.
+func TestTwilioRegionReachesTheRunbook(t *testing.T) {
+	for _, region := range []string{"", "us1", "ie1", "au1"} {
+		t.Run(region, func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio_relay"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			connection := pkg.Connections["phone"]
+			connection.Region = region
+			pkg.Connections["phone"] = connection
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			artifact, err := Generate(agent, agent.Targets["twilio"], target.Default())
+			if err != nil {
+				t.Fatal(err)
+			}
+			readme := artifactFile(t, artifact, "README.md")
+			note := "handled in the Twilio Region `" + region + "`"
+			regional := region == "ie1" || region == "au1"
+			if strings.Contains(readme, "handled in the Twilio Region") != regional {
+				t.Errorf("region %q: runbook note present = %v, want %v", region, !regional, regional)
+			}
+			if regional && (!strings.Contains(readme, note) || !strings.Contains(readme, "`TWILIO_AUTH_TOKEN` must be that\n   region's Auth Token")) {
+				t.Errorf("region %q: runbook does not name the region and its token:\n%s", region, readme)
+			}
+		})
+	}
+}
+
 // Each project carries only the SDK, dependency and key its think binding
 // selects. The other provider's key may be absent from the machine entirely.
 func TestTwilioArtifactCarriesOnlyTheSelectedProvider(t *testing.T) {

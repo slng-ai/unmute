@@ -52,6 +52,12 @@ You host this app yourself. unmute does not create or change anything in your
 Twilio account in this release.
 
 1. Copy `.env.example` to `.env` and fill it in.
+{{- if ne .Region "us1"}}
+   This package's calls are handled in the Twilio Region `{{.Region}}`
+   ([Twilio Regions]({{.Docs.Regions}})). `{{.Env.AuthToken}}` must be that
+   region's Auth Token, not the US1 one: Twilio signs the region's requests
+   with it. The number's routing region must also be `{{.Region}}`.
+{{- end}}
 2. Start the app:
 
    ```sh

@@ -36,6 +36,11 @@ environment:
   receive-only Pipecat cloud-websocket. Otherwise the missing route keys are refused.
 </ParamField>
 
+<ParamField path="region" type="us1 | ie1 | au1" default="us1">
+  Twilio Region that handles the calls, on a twilio `conversation-relay` route
+  only. Refused on every other route. See [the Twilio target](/targets/twilio).
+</ParamField>
+
 The target names the file and says nothing else about telephony:
 
 ```yaml targets.yaml

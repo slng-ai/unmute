@@ -226,6 +226,40 @@ func TestTwilioTurnParamsDoNotWarn(t *testing.T) {
 
 // The number SID is a deploy value: the plan keeps it out of what the running
 // app is asked for, and says where it went.
+// The region decides which copy of the number's config deploy writes, so the
+// plan always names one.
+func TestTwilioRegionReachesThePlan(t *testing.T) {
+	for _, tc := range []struct{ region, want, err string }{
+		{"", "us1", ""},
+		{"ie1", "ie1", ""},
+		{"au1", "au1", ""},
+		{"eu", "", `region "eu" is not a Twilio Region; use one of us1, ie1, au1`},
+	} {
+		t.Run(tc.region, func(t *testing.T) {
+			pkg, err := packagespec.Load(filepath.Join("..", "testdata", "twilio_relay"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			connection := pkg.Connections["phone"]
+			connection.Region = tc.region
+			pkg.Connections["phone"] = connection
+			agent, err := Build(pkg)
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) {
+					t.Fatalf("err = %v, want %q", err, tc.err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := targetFor(agent, ProviderTwilio).Telephony.Region; got != tc.want {
+				t.Errorf("plan region = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTwilioPlanKeepsTheNumberSIDDeployOnly(t *testing.T) {
 	plan := targetFor(twilioAgent(t), ProviderTwilio).Telephony
 	if plan == nil {

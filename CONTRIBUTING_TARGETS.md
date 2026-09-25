@@ -218,6 +218,10 @@ call-context facts, each tagged with a note, docs link and date), its `RequiredE
 its `ManualSteps` (what it cannot automate, in the operator's own words). Twilio's route runs one
 `application` process, exposing `/voice`, `/conversation`, `/connect-action` and `/healthz`.
 
+A twilio connection's **`region:`** (`us1`, `ie1`, `au1`, from `target.TwilioRegions`) is checked
+where connections are built and lands on `TelephonyPlan.Region`, `us1` when unset. The app never
+reads it: only the Auth Token's value differs per region. Deploy uses it to pick the REST host.
+
 **`DeployOnlyEnvironment`** names connection keys only a deploy step reads, never the running app.
 Twilio's `phone_number_sid` is the example: it points a number at the app, and `app.py` never reads it.
 `buildTelephonyPlan` ([internal/ir/build.go](internal/ir/build.go)) splits a connection's environment

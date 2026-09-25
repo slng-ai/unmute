@@ -1016,13 +1016,17 @@ type Capacity struct {
 type Connection struct {
 	Kind        string            `json:"kind" yaml:"kind"`
 	Environment map[string]string `json:"environment" yaml:"environment"`
+	Region      string            `json:"region,omitempty" yaml:"region,omitempty"`
 }
 
 type TelephonyPlan struct {
-	Channels            []string                   `json:"channels" yaml:"channels"`
-	Connection          string                     `json:"connection" yaml:"connection"`
-	Key                 TelephonyKey               `json:"key" yaml:"key"`
-	Environment         map[string]string          `json:"environment" yaml:"environment"`
+	Channels    []string          `json:"channels" yaml:"channels"`
+	Connection  string            `json:"connection" yaml:"connection"`
+	Key         TelephonyKey      `json:"key" yaml:"key"`
+	Environment map[string]string `json:"environment" yaml:"environment"`
+	// Region is the Twilio Region of a ConversationRelay route, us1 when the
+	// connection names none. Deploy writes the number's config in this region.
+	Region              string                     `json:"region,omitempty" yaml:"region,omitempty"`
 	Destinations        map[string]string          `json:"destinations,omitempty" yaml:"destinations,omitempty"`
 	SystemSources       map[string]VariableSource  `json:"system_sources,omitempty" yaml:"system_sources,omitempty"`
 	Evidence            []TelephonyFeatureEvidence `json:"evidence" yaml:"evidence"`

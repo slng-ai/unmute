@@ -27,6 +27,13 @@ const TwilioTargetVerified = "2026-09-25"
 // only transport the target takes, and the carrier is always twilio.
 const TwilioTransport = "conversation-relay"
 
+// TwilioRegions are the Twilio Regions a connection's `region:` may name,
+// default first. ConversationRelay is documented in all three. Each region
+// keeps its own copy of a number's voice configuration and its own Auth Token,
+// and only calls routed to that region use it:
+// https://www.twilio.com/docs/global-infrastructure/understanding-twilio-regions
+var TwilioRegions = []string{"us1", "ie1", "au1"}
+
 // TwilioPython is the interpreter line the emitted project and its container
 // use. Session 1 measured the providers on CPython 3.12.13.
 const TwilioPython = "3.12"
@@ -166,6 +173,7 @@ type TwilioDocLinks struct {
 	Hangup            string
 	Onboarding        string
 	Numbers           string
+	Regions           string
 }
 
 // TwilioDocs is the one copy of those links.
@@ -177,6 +185,7 @@ var TwilioDocs = TwilioDocLinks{
 	Hangup:            "https://www.twilio.com/docs/voice/twiml/hangup",
 	Onboarding:        "https://www.twilio.com/docs/voice/conversationrelay/onboarding",
 	Numbers:           "https://www.twilio.com/docs/phone-numbers",
+	Regions:           "https://www.twilio.com/docs/global-infrastructure/understanding-twilio-regions",
 }
 
 // twilioOnlyOne is the reason shared by every row that needs a second agent,
