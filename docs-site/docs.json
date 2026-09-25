@@ -226,6 +226,7 @@
           "telephony/twilio",
           "telephony/livekit-twilio",
           "telephony/pipecat-twilio",
+          "telephony/twilio-conversation-relay",
           {
             "group": "Transfers",
             "icon": "phone-forwarded",
