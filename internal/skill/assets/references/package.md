@@ -680,6 +680,10 @@ the Twilio Region that handles the calls. Outside `us1`, `auth_token` must name
 that region's own Auth Token, and the number's routing region must match. No
 call has been placed in `ie1` or `au1` yet.
 
+`unmute init <name> --target twilio` writes this starter with no questions:
+the OpenAI binding below, Deepgram and ElevenLabs, one inbound phone channel,
+`end_call`, and the connection with the four `TWILIO_*` names.
+
 What a twilio package may carry, and nothing else:
 
 - one cascade agent, and exactly one channel: `kind: telephony`,

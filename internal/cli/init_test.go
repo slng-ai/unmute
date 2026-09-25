@@ -76,6 +76,49 @@ func TestInit_scaffoldsValidV1Package(t *testing.T) {
 	}
 }
 
+// --target writes the same starter the wizard does after picking a target, so
+// a twilio package can be scaffolded without a terminal.
+func TestInitTargetTwilioValidatesAndCompiles(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "relay")
+	if out, err := run(t, "init", dir, "--target", "twilio"); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	if out, err := run(t, "validate", dir); err != nil || !strings.Contains(out, "✓ twilio (twilio)") {
+		t.Fatalf("validate: %v\n%s", err, out)
+	}
+	if out, err := run(t, "compile", dir); err != nil {
+		t.Fatalf("compile: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "build", "twilio", "app.py")); err != nil {
+		t.Errorf("no twilio app: %v", err)
+	}
+}
+
+func TestInitTargetRefusesBeforeWriting(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"unknown target", []string{"--target", "vapi"}, `--target "vapi" is not a target; use one of livekit, pipecat, slng, twilio`},
+		{"with a manifest", []string{"--from-manifest", "--target", "twilio"}, "--target and --from-manifest cannot be used together"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "relay")
+			_, err := run(t, append([]string{"init", dir}, tc.args...)...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+				t.Error("a refused init wrote files")
+			}
+		})
+	}
+	if _, err := run(t, "init", "--target", "twilio"); err == nil || !strings.Contains(err.Error(), "--target needs a name") {
+		t.Errorf("init --target with no name: %v", err)
+	}
+}
+
 func TestInit_seedsEndCallByDefault(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "support-bot")
 	out, err := run(t, "init", dir)

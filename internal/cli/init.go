@@ -5,17 +5,20 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/scaffold"
 	"github.com/slng-ai/unmute/internal/style"
+	"github.com/slng-ai/unmute/internal/target"
 	"github.com/slng-ai/unmute/internal/tui"
 	"github.com/spf13/cobra"
 )
 
 func newInitCmd() *cobra.Command {
 	var fromManifest bool
+	var provider string
 	command := &cobra.Command{
 		Use:   "init [name]",
 		Short: "Scaffold a new v1 agent package.",
@@ -28,6 +31,25 @@ func newInitCmd() *cobra.Command {
 			}
 			if len(args) > 0 && strings.TrimSpace(args[0]) == "" {
 				return fmt.Errorf("agent name required")
+			}
+			if provider == "" {
+				return nil
+			}
+			// --target skips the wizard, so it needs the name the wizard would
+			// have asked for. A manifest chooses the target itself, inside the
+			// allow list it carries.
+			if fromManifest {
+				return fmt.Errorf("--target and --from-manifest cannot be used together: the manifest chooses the target")
+			}
+			if len(args) == 0 {
+				return fmt.Errorf("--target needs a name: unmute init <name> --target %s", provider)
+			}
+			if !slices.Contains(target.Providers, target.Provider(provider)) {
+				names := make([]string, 0, len(target.Providers))
+				for _, known := range target.Providers {
+					names = append(names, string(known))
+				}
+				return fmt.Errorf("--target %q is not a target; use one of %s", provider, strings.Join(names, ", "))
 			}
 			return nil
 		},
@@ -81,10 +103,15 @@ func newInitCmd() *cobra.Command {
 				return runConsole(cmd, true)
 			}
 			dir := args[0]
-			return writeScaffold(cmd, dir, scaffold.Data{Name: filepath.Base(dir), Tools: scaffold.DefaultTools()})
+			data := scaffold.Data{Name: filepath.Base(dir), Tools: scaffold.DefaultTools()}
+			if provider != "" {
+				data.SetTarget(provider)
+			}
+			return writeScaffold(cmd, dir, data)
 		},
 	}
 	command.Flags().BoolVar(&fromManifest, "from-manifest", false, "Choose a saved organization manifest.")
+	command.Flags().StringVar(&provider, "target", "", "Scaffold for this target (livekit, pipecat, slng or twilio) without the wizard.")
 	return command
 }
 
