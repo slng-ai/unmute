@@ -198,6 +198,14 @@ class Relay:
             if message.get("type") != "text" or message.get("last"):
                 return tokens
 
+    async def stays_open(self, secs: float = 0.3) -> bool:
+        """True when the app leaves the socket open, as it must after an end."""
+        try:
+            await self.next(secs)
+        except TimeoutError:
+            return True
+        return not self.ws.closed
+
     async def quiet(self, secs: float = 0.3) -> list[dict[str, Any]]:
         got = []
         with contextlib.suppress(TimeoutError):
@@ -344,6 +352,8 @@ def env(app: Any, script: list[list[Any]] | None = None, **patches: Any) -> Env:
     # A short drain, so the test server's shutdown does not wait out the
     # default for a call a case left open.
     patches.setdefault("DRAIN_TIMEOUT", 0.2)
+    # The same for a socket the fake never closes after an end message.
+    patches.setdefault("END_GRACE", 0.2)
     return Env(app, fake_for(app, script or []), patches)
 
 
@@ -657,8 +667,30 @@ async def end_call_ends_the_session(app: Any) -> None:
 
 
 @case
+async def end_waits_for_twilio_to_close(app: Any) -> None:
+    # Twilio closes the socket once it has the end message. An app that closes
+    # first can beat the end there, and the session fails as 64105: seen on a
+    # real call, where the Connect callback said status=failed.
+    async with env(app, [["Goodbye. ", call("end_call", {})]], END_GRACE=2.0) as e:
+        relay = await e.relay()
+        await relay.prompt("That's all")
+        await relay.reply()
+        check((await relay.next())["type"] == "end", "end_call sent no end")
+        check(await relay.stays_open(), "the app closed the socket before Twilio did")
+        await relay.ws.close()
+        await until(lambda: e.slots[0].taken == 0)
+    # A peer that never closes is closed by the app after END_GRACE.
+    async with env(app, [["Goodbye. ", call("end_call", {})]], END_GRACE=0.2) as e:
+        relay = await e.relay()
+        await relay.prompt("That's all")
+        await relay.reply()
+        check((await relay.next())["type"] == "end", "end_call sent no end")
+        check(await relay.next(2.0) is None, "the app never closed a socket Twilio left open")
+
+
+@case
 async def overload_is_refused(app: Any) -> None:
-    async with env(app, MAX_SESSIONS=1) as e:
+    async with env(app, MAX_SESSIONS=1, END_GRACE=2.0) as e:
         await e.relay()
         body = await (await e.post("/voice", {"AccountSid": ACCOUNT})).text()
         check("<Hangup/>" in body and "Connect" not in body, "/voice took a call past max_sessions")
@@ -666,6 +698,8 @@ async def overload_is_refused(app: Any) -> None:
         await second.setup()
         end = await second.next()
         check(end and end["type"] == "end" and "busy" in end["handoffData"], f"a second session was admitted: {end}")
+        check(await second.stays_open(), "the busy refusal closed the socket before Twilio did")
+        await second.ws.close()
 
 
 @case

@@ -57,6 +57,7 @@ TOOL_DEADLINE = 30.0  # seconds a turn waits for one tool
 MODEL_TIMEOUT = 30.0  # seconds for one model response
 SETUP_TIMEOUT = 10.0  # seconds from WebSocket open to the setup message
 DRAIN_TIMEOUT = 20.0  # seconds shutdown waits for calls to finish
+END_GRACE = 5.0  # seconds Twilio has to close the socket after an end message
 MAX_PENDING_PROMPTS = 8  # caller turns waiting while a tool runs
 MAX_PROMPT_CHARS = 4000
 MAX_HISTORY = 80  # history entries kept per call
@@ -425,6 +426,7 @@ class Call:
         self.unexpected = 0
         self.ending = False
         self.closed = False
+        self.closer: asyncio.Task | None = None  # closes the socket if Twilio does not
         self.holding = False  # the slot outlives the call until a handler ends
         self.released = False
         if GREETING:
@@ -486,12 +488,24 @@ class Call:
                 await self.ws.send_json({"type": "end", "handoffData": json.dumps({"reasonCode": reason})})
             except ConnectionError:
                 pass
+        # Twilio closes the socket once it has taken the end message. Closing
+        # it here first can reach Twilio before the end does, and the session
+        # then fails as 64105 "WebSocket ended" instead of ending. The reader
+        # keeps draining until Twilio closes; this closes only for a peer that
+        # never does.
+        self.closer = asyncio.ensure_future(self.close_after(END_GRACE))
+
+    async def close_after(self, seconds: float) -> None:
+        await asyncio.sleep(seconds)
         await self.ws.close()
 
     # --- the reader --------------------------------------------------------------
 
     async def read(self) -> None:
         async for message in self.ws:
+            if self.closed:
+                # The call has ended on our side. Only Twilio's close is left.
+                continue
             if message.type != WSMsgType.TEXT:
                 self.event("protocol_error", detail="non_text_frame")
                 await self.ws.close(code=1003)
@@ -512,7 +526,7 @@ class Call:
                     continue
                 if len(self.pending) >= MAX_PENDING_PROMPTS:
                     await self.end("prompt_overflow")
-                    return
+                    continue
                 await self.on_prompt(text[:MAX_PROMPT_CHARS])
             elif kind == "interrupt":
                 heard = event.get("utteranceUntilInterrupt")
@@ -522,7 +536,6 @@ class Call:
                 self.event("relay_error", count=self.relay_errors)
                 if self.relay_errors >= MAX_RELAY_ERRORS:
                     await self.end("relay_errors")
-                    return
             else:
                 # dtmf is disabled in the TwiML, a second setup is a protocol
                 # error, and anything else is not ours to act on.
@@ -530,9 +543,6 @@ class Call:
                 self.event("unexpected_event", kind=str(kind)[:32])
                 if kind == "setup" or self.unexpected >= MAX_UNEXPECTED:
                     await self.end("protocol_error")
-                    return
-            if self.closed:
-                return
 
     async def on_prompt(self, text: str) -> None:
         # Each final prompt is its own turn, kept as said: two identical
@@ -742,6 +752,8 @@ class Call:
         """The socket is gone. Give the slot back once no handler is running."""
         self.closed = True
         self.cancel_stream()
+        if self.closer is not None:
+            self.closer.cancel()
         if self.tool_future is not None and not self.tool_future.done():
             self.holding = True
             self.slots.orphaned += 1
@@ -753,6 +765,12 @@ class Call:
         if not self.released:
             self.released = True
             self.slots.give_back()
+
+
+async def drain(ws: web.WebSocketResponse) -> None:
+    """Read and drop messages until the peer closes the socket."""
+    async for _ in ws:
+        pass
 
 
 def heard_prefix(sent: str, heard: str) -> str:
@@ -924,6 +942,11 @@ def build_app(client: Any = None) -> web.Application:
         if not slots.take():
             log.info("event=call_refused reason=%s", "draining" if slots.draining else "full")
             await ws.send_json({"type": "end", "handoffData": json.dumps({"reasonCode": "busy"})})
+            # As in Call.end: wait for Twilio to close, or the refusal fails as 64105.
+            try:
+                await asyncio.wait_for(drain(ws), END_GRACE)
+            except TimeoutError:
+                pass
             await ws.close()
             return ws
         call = Call(ws, setup, model_client, slots)
@@ -1075,7 +1098,9 @@ sequenceDiagram
    caller's speech into text and the app's text into speech.
 4. The app sends the conversation to the model, runs any tool the model asks
    for, and streams the reply back as text.
-5. When the session ends, Twilio asks `/connect-action`, and the app hangs up.
+5. To end the session, the app sends `end` and waits up to five seconds for
+   Twilio to close the WebSocket. Closing it first can fail the session with
+   error 64105. Twilio then asks `/connect-action`, and the app hangs up.
 
 ## What is in this folder
 

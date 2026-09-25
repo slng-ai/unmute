@@ -28,7 +28,9 @@ sequenceDiagram
    caller's speech into text and the app's text into speech.
 4. The app sends the conversation to the model, runs any tool the model asks
    for, and streams the reply back as text.
-5. When the session ends, Twilio asks `/connect-action`, and the app hangs up.
+5. To end the session, the app sends `end` and waits up to five seconds for
+   Twilio to close the WebSocket. Closing it first can fail the session with
+   error 64105. Twilio then asks `/connect-action`, and the app hangs up.
 
 ## What is in this folder
 
