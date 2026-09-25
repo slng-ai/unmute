@@ -47,8 +47,10 @@ questions, so the same six files appear every time.
 unmute init my-relay --target twilio
 ```
 
-`--target` takes `livekit`, `pipecat`, `slng` or `twilio`. It writes the
-starter the console writes after you pick that target, and still asks nothing.
+`--target` takes `livekit`, `pipecat` or `twilio`. It writes the starter the
+console writes after you pick that target, and still asks nothing. An SLNG
+package needs a deployment region, and only the console asks for one, so
+`--target slng` is refused: run `unmute init` in a terminal and pick SLNG there.
 For `twilio` that is one inbound phone channel, Deepgram and ElevenLabs inside
 ConversationRelay, an OpenAI model, and `connections/phone.yaml` with the four
 `TWILIO_*` names. See [the Twilio target](/targets/twilio).
@@ -167,7 +169,7 @@ Usage:
 Flags:
       --from-manifest   Choose a saved organization manifest.
   -h, --help            help for init
-      --target string   Scaffold for this target (livekit, pipecat, slng or twilio) without the wizard.
+      --target string   Scaffold for this target (livekit, pipecat or twilio) without the wizard. SLNG needs the wizard.
 ```
 
 ## Troubleshooting

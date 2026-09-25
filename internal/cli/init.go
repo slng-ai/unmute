@@ -44,10 +44,19 @@ func newInitCmd() *cobra.Command {
 			if len(args) == 0 {
 				return fmt.Errorf("--target needs a name: unmute init <name> --target %s", provider)
 			}
+			// An SLNG package needs a deployment region, and only the wizard
+			// asks for one. Guessing a region would deploy somewhere the author
+			// never chose, so the shortcut sends them to the wizard instead.
+			if target.Provider(provider) == target.Slng {
+				return fmt.Errorf("--target slng needs a deployment region, and only the wizard asks for one: " +
+					"run `unmute init` in a terminal and pick SLNG there")
+			}
 			if !slices.Contains(target.Providers, target.Provider(provider)) {
 				names := make([]string, 0, len(target.Providers))
 				for _, known := range target.Providers {
-					names = append(names, string(known))
+					if known != target.Slng {
+						names = append(names, string(known))
+					}
 				}
 				return fmt.Errorf("--target %q is not a target; use one of %s", provider, strings.Join(names, ", "))
 			}
@@ -111,7 +120,7 @@ func newInitCmd() *cobra.Command {
 		},
 	}
 	command.Flags().BoolVar(&fromManifest, "from-manifest", false, "Choose a saved organization manifest.")
-	command.Flags().StringVar(&provider, "target", "", "Scaffold for this target (livekit, pipecat, slng or twilio) without the wizard.")
+	command.Flags().StringVar(&provider, "target", "", "Scaffold for this target (livekit, pipecat or twilio) without the wizard. SLNG needs the wizard.")
 	return command
 }
 

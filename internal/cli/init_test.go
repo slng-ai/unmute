@@ -94,13 +94,30 @@ func TestInitTargetTwilioValidatesAndCompiles(t *testing.T) {
 	}
 }
 
+func TestInitTargetFrameworksValidate(t *testing.T) {
+	for _, provider := range []string{"livekit", "pipecat"} {
+		t.Run(provider, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "desk")
+			if out, err := run(t, "init", dir, "--target", provider); err != nil {
+				t.Fatalf("init: %v\n%s", err, out)
+			}
+			want := "✓ " + provider + " (" + provider + ")"
+			if out, err := run(t, "validate", dir); err != nil || !strings.Contains(out, want) {
+				t.Fatalf("validate: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
 func TestInitTargetRefusesBeforeWriting(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
 		want string
 	}{
-		{"unknown target", []string{"--target", "vapi"}, `--target "vapi" is not a target; use one of livekit, pipecat, slng, twilio`},
+		{"unknown target", []string{"--target", "vapi"}, `--target "vapi" is not a target; use one of livekit, pipecat, twilio`},
+		// SLNG needs a deployment region, which only the wizard asks for.
+		{"slng", []string{"--target", "slng"}, "--target slng needs a deployment region, and only the wizard asks for one: run `unmute init` in a terminal and pick SLNG there"},
 		{"with a manifest", []string{"--from-manifest", "--target", "twilio"}, "--target and --from-manifest cannot be used together"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
