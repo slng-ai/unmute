@@ -405,6 +405,8 @@ from the environment names the connection declares. It needs no model key.
 Before it writes, it checks three things: the number takes voice calls and has
 no TwiML App, SIP trunk or fallback URL; the host's `/healthz` names this
 build's `artifact_id`; and a signed `POST /voice` answers this build's TwiML.
+It reads and writes the number's settings in the connection's `region`, and
+refuses a number whose calls another region handles.
 Then it saves the old voice URL to a private file under your user config
 directory, sets `VoiceUrl` and `VoiceMethod` only, and reads the number back.
 

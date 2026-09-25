@@ -111,7 +111,9 @@ It needs no model key: the model runs on your host. It then does this, in order:
 1. Reads the number
    ([IncomingPhoneNumber]({{.Docs.NumberResource}})). It refuses a number that
    cannot take voice calls, or that has a TwiML App, a SIP trunk or a voice
-   fallback URL. It never clears one of those for you.
+   fallback URL. It never clears one of those for you. It reads the number's
+   copy in `{{.Region}}`, and refuses a number whose calls another region
+   handles. It never changes the routing.
 2. Reads `/healthz` and compares its `artifact_id` with this build. A different
    or missing id means the host runs another build: recompile, rehost, run again.
    The id is unmute's own drift check, not a Twilio feature.

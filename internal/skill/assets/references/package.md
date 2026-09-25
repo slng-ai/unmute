@@ -725,7 +725,9 @@ at `https://<origin>/voice`. Run it with `--dry-run` first. It reads
 connection's environment names, and no model key. Before writing it checks the
 number (voice capable, no TwiML App, trunk or fallback URL), that the host's
 `/healthz` returns this build's `artifact_id`, and that a signed `POST /voice`
-returns this build's TwiML. It then saves the old route under the user config
+returns this build's TwiML. It reads and writes the number in the connection's
+`region`, and refuses a number whose routing region differs; it never changes
+routing. It then saves the old route under the user config
 directory and sets only `VoiceUrl` and `VoiceMethod`. A missing or different
 `artifact_id` means recompile and rehost. It takes one twilio target per run,
 and refuses `--profile`, `--agent-id`, `--label`, `--run-samples` and `--call`.

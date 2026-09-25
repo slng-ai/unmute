@@ -59,6 +59,9 @@ type fakeTwilio struct {
 	readAfterPOST chan struct{}
 	failAfter     bool // every read after a write fails
 	onRead        func(n int, number map[string]any)
+	// voiceRegion is the number's routing region; "" answers 404, which is
+	// what Twilio says for a number with no routing of its own (US1).
+	voiceRegion string
 }
 
 func newFakeTwilio(t *testing.T) *fakeTwilio {
@@ -187,8 +190,129 @@ func (f *fakeTwilio) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "text/xml")
 		_, _ = w.Write([]byte(cmpOr(f.voiceBody, f.renderRelay())))
+	case "/v2/PhoneNumbers/+15005550006":
+		if user, pass, ok := r.BasicAuth(); !ok || user != fakeAccount || pass != fakeToken {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if f.voiceRegion == "" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"phone_number": "+15005550006", "voice_region": f.voiceRegion})
 	default:
 		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+// regionalPackage copies the fixture with region: set on its connection, and
+// points the fake at the build it compiles to: the runbook, so the artifact
+// id, differs by region.
+func regionalPackage(t *testing.T, f *fakeTwilio, region string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "twilio_relay"))); err != nil {
+		t.Fatal(err)
+	}
+	conn := filepath.Join(dir, "connections", "phone.yaml")
+	body, err := os.ReadFile(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(conn, append(body, []byte("region: "+region+"\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := spec.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := generate.Generate(agent, agent.Targets["twilio"], target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.artifactID = artifact.ArtifactID
+	return dir
+}
+
+// useRegionHost sends the region's REST calls to the fake and US1's nowhere,
+// so a request to the wrong copy of the number fails the run.
+func useRegionHost(t *testing.T, f *fakeTwilio, region string) {
+	t.Helper()
+	oldBase, oldHost := twilioAPIBase, twilioRegionHosts[region]
+	twilioAPIBase, twilioRegionHosts[region] = "https://127.0.0.1:1", f.srv.URL
+	t.Cleanup(func() { twilioAPIBase, twilioRegionHosts[region] = oldBase, oldHost })
+}
+
+func TestTwilioDeployWritesTheRegionsCopy(t *testing.T) {
+	f := newFakeTwilio(t)
+	f.voiceRegion = "ie1"
+	useRegionHost(t, f, "ie1")
+	dir := regionalPackage(t, f, "ie1")
+	run := deployTwilioIn(t, f, dir, nil, "--target", "twilio")
+	if run.err != nil {
+		t.Fatalf("deploy: %v\n%s%s", run.err, run.out, run.errOut)
+	}
+	if len(f.writes) != 1 {
+		t.Fatalf("%d writes on the ie1 host, want 1", len(f.writes))
+	}
+	report := twilioReportOf(t, dir)
+	if report.Region != "ie1" || report.Outcome != "routed" {
+		t.Errorf("report region %q outcome %q, want ie1 routed", report.Region, report.Outcome)
+	}
+	var snapshot twilioSnapshot
+	data, err := os.ReadFile(report.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Region != "ie1" || snapshot.APIHost != f.srv.URL {
+		t.Errorf("snapshot region %q host %q, want ie1 on the ie1 host", snapshot.Region, snapshot.APIHost)
+	}
+}
+
+func TestTwilioDeployRefusesARoutingMismatch(t *testing.T) {
+	for _, tc := range []struct{ name, region, routed, want string }{
+		{"ie1 package, number on us1", "ie1", "us1", "routes its calls to us1, and the connection names region ie1"},
+		{"us1 package, number on au1", "us1", "au1", "routes its calls to au1, and the connection names region us1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeTwilio(t)
+			f.voiceRegion = tc.routed
+			useRegionHost(t, f, "ie1")
+			var dir string
+			if tc.region == "us1" {
+				twilioAPIBase = f.srv.URL
+				dir = t.TempDir()
+				if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "twilio_relay"))); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				dir = regionalPackage(t, f, tc.region)
+			}
+			run := deployTwilioIn(t, f, dir, nil, "--target", "twilio")
+			if run.err == nil || !strings.Contains(run.err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", run.err, tc.want)
+			}
+			if len(f.writes) != 0 {
+				t.Errorf("a routing mismatch wrote %d times", len(f.writes))
+			}
+		})
+	}
+}
+
+func TestTwilioDeployNamesTheRegionalToken(t *testing.T) {
+	f := newFakeTwilio(t)
+	useRegionHost(t, f, "ie1")
+	dir := regionalPackage(t, f, "ie1")
+	run := deployTwilioIn(t, f, dir, map[string]string{"TWILIO_AUTH_TOKEN": "us1-token-not-ie1"}, "--target", "twilio")
+	if run.err == nil || !strings.Contains(run.err.Error(), "TWILIO_AUTH_TOKEN is the ie1 Auth Token") {
+		t.Fatalf("err = %v, want the regional token hint", run.err)
 	}
 }
 

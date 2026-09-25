@@ -46,6 +46,15 @@ import (
 
 var (
 	twilioAPIBase = "https://api.twilio.com"
+	// twilioRegionHosts are the REST hosts outside US1. Each region keeps its
+	// own copy of a number's voice settings and takes only its own Auth Token.
+	// The host names an edge as well as the region: the older api.ie1 form
+	// stopped working on 2026-04-28.
+	// https://www.twilio.com/docs/global-infrastructure/api-domain-migration-guide
+	twilioRegionHosts = map[string]string{
+		"ie1": "https://api.dublin.ie1.twilio.com",
+		"au1": "https://api.sydney.au1.twilio.com",
+	}
 	// No redirect is followed: every request carries a credential or a
 	// signature, and neither should reach a host it was not addressed to.
 	twilioHTTP = &http.Client{
@@ -77,6 +86,8 @@ var errTwilioBusy = errors.New("the host cannot take a call right now (draining,
 type twilioConfig struct {
 	account, token, number string
 	origin                 string // https://host[:port], no trailing slash
+	region                 string // us1, ie1 or au1
+	apiBase                string // the region's REST host
 	envNames               map[string]string
 }
 
@@ -109,6 +120,10 @@ type twilioSnapshot struct {
 	AccountSID     string `json:"account_sid"`
 	PhoneNumberSID string `json:"phone_number_sid"`
 	PhoneNumber    string `json:"phone_number"`
+	// Region and APIHost name the copy of the number's settings this route
+	// was read from and written to. A restore writes to the same host.
+	Region  string `json:"region"`
+	APIHost string `json:"api_host"`
 	// The exact old values, which may hold a credential in a query string.
 	// That is why this file is 0600 and never printed.
 	VoiceURL    string `json:"voice_url"`
@@ -123,6 +138,7 @@ type twilioDeployReport struct {
 	AccountSID       string   `json:"account_sid"`
 	PhoneNumberSID   string   `json:"phone_number_sid"`
 	PhoneNumber      string   `json:"phone_number"`
+	Region           string   `json:"region"`
 	Destination      string   `json:"destination"`
 	PreviousVoiceURL string   `json:"previous_voice_url"` // redacted
 	Preflight        []string `json:"preflight"`
@@ -186,7 +202,13 @@ func runTwilioDeploy(cmd *cobra.Command, dir string, agent *ir.Agent, resolved i
 	if err := cfg.checkNumber(number); err != nil {
 		return fail(err)
 	}
-	preflight := []string{"number " + number.SID + " takes voice calls and has no app, trunk or fallback"}
+	if err := cfg.checkRouting(number.PhoneNumber); err != nil {
+		return fail(err)
+	}
+	preflight := []string{
+		"number " + number.SID + " takes voice calls and has no app, trunk or fallback in " + cfg.region,
+		"number routes its calls to " + cfg.region,
+	}
 	if err := cfg.checkHealth(artifact.ArtifactID); err != nil {
 		return fail(err)
 	}
@@ -201,7 +223,7 @@ func runTwilioDeploy(cmd *cobra.Command, dir string, agent *ir.Agent, resolved i
 	desired := cfg.origin + "/voice"
 	record := twilioDeployReport{
 		Provider: string(ir.ProviderTwilio), Target: resolved.Name, ArtifactID: artifact.ArtifactID,
-		AccountSID: cfg.account, PhoneNumberSID: cfg.number, PhoneNumber: number.PhoneNumber,
+		AccountSID: cfg.account, PhoneNumberSID: cfg.number, PhoneNumber: number.PhoneNumber, Region: cfg.region,
 		Destination: desired, PreviousVoiceURL: redactURL(number.VoiceURL), Preflight: preflight,
 	}
 	unchanged := routesTo(number, desired)
@@ -235,6 +257,7 @@ func runTwilioDeploy(cmd *cobra.Command, dir string, agent *ir.Agent, resolved i
 	snapshot, err := saveTwilioSnapshot(twilioSnapshot{
 		TakenAt: time.Now().UTC().Format(time.RFC3339), Target: resolved.Name, ArtifactID: artifact.ArtifactID,
 		AccountSID: cfg.account, PhoneNumberSID: cfg.number, PhoneNumber: again.PhoneNumber,
+		Region: cfg.region, APIHost: cfg.apiBase,
 		VoiceURL: again.VoiceURL, VoiceMethod: again.VoiceMethod, NewVoiceURL: desired,
 	})
 	if err != nil {
@@ -276,10 +299,10 @@ func runTwilioDeploy(cmd *cobra.Command, dir string, agent *ir.Agent, resolved i
 			cause = errors.New("the write was answered, and the readback does not show it yet")
 		}
 		return fail(fmt.Errorf("the write's outcome is unknown: %w\n"+
-			"  check the number in the Twilio Console, or run this again with --dry-run.\n"+
-			"  the old route is saved in %s; restore it by hand only if the number still routes to POST %s\n"+
+			"  check the number's %s settings in the Twilio Console, or run this again with --dry-run.\n"+
+			"  the old route is saved in %s; restore it by hand on %s only if the number still routes to POST %s\n"+
 			"  and has no TwiML App, SIP trunk or fallback URL",
-			cause, snapshot, desired))
+			cause, cfg.region, snapshot, cfg.apiBase, desired))
 	}
 }
 
@@ -349,6 +372,14 @@ func twilioConfigFrom(resolved ir.Target, env []string) (twilioConfig, error) {
 		return twilioConfig{}, fmt.Errorf("%s %w", names["public_url"], err)
 	}
 	cfg.origin = origin
+	cfg.region = cmp.Or(resolved.Telephony.Region, "us1")
+	cfg.apiBase = twilioAPIBase
+	if cfg.region != "us1" {
+		cfg.apiBase = twilioRegionHosts[cfg.region]
+	}
+	if cfg.apiBase == "" {
+		return twilioConfig{}, fmt.Errorf("region %s has no Twilio REST host", cfg.region)
+	}
 	return cfg, nil
 }
 
@@ -397,7 +428,43 @@ func twilioSignedURL(origin, path string) string {
 }
 
 func (c twilioConfig) numberURL() string {
-	return twilioAPIBase + "/2010-04-01/Accounts/" + c.account + "/IncomingPhoneNumbers/" + c.number + ".json"
+	return c.apiBase + "/2010-04-01/Accounts/" + c.account + "/IncomingPhoneNumbers/" + c.number + ".json"
+}
+
+// checkRouting refuses a number whose calls another region handles: a voice
+// URL written in this region would never be used. Deploy never changes the
+// routing, which moves every call to the number.
+// https://www.twilio.com/docs/global-infrastructure/inbound-processing-api
+//
+// ponytail: the routes host is the region's API host with api. swapped for
+// routes. That is proven on US1 with the US1 token. Twilio documents IE1 both
+// as routes.dublin.ie1 with a regional key and as US1-only, so off US1 this is
+// unverified until a call runs there.
+func (c twilioConfig) checkRouting(phoneNumber string) error {
+	base := strings.Replace(c.apiBase, "://api.", "://routes.", 1)
+	req, err := http.NewRequest(http.MethodGet, base+"/v2/PhoneNumbers/"+url.PathEscape(phoneNumber), nil)
+	if err != nil {
+		return err
+	}
+	var routing struct {
+		VoiceRegion string `json:"voice_region"`
+	}
+	err = c.twilioAPI(req, &routing)
+	if statusErr, ok := errors.AsType[*twilioStatusError](err); ok && statusErr.status == http.StatusNotFound {
+		// No routing of its own: the number's calls go to US1.
+		routing.VoiceRegion, err = "us1", nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the number's routing region: %w", err)
+	}
+	if got := cmp.Or(routing.VoiceRegion, "us1"); got != c.region {
+		return fmt.Errorf("number %s routes its calls to %s, and the connection names region %s, so a voice URL written there "+
+			"would never be used. Nothing was written. Set the number's routing region to %s in the Twilio Console "+
+			"(the number's Regional tab), or with POST https://routes.twilio.com/v2/PhoneNumbers/<number> VoiceRegion=%s, "+
+			"wait up to five minutes, then deploy again. Deploy never changes routing",
+			phoneNumber, got, c.region, c.region, c.region)
+	}
+	return nil
 }
 
 func (c twilioConfig) fetchNumber() (twilioNumber, error) {
@@ -440,6 +507,9 @@ func (c twilioConfig) twilioAPI(req *http.Request, into any) error {
 		switch status {
 		case http.StatusUnauthorized:
 			hint = fmt.Sprintf("; check %s and %s belong together", c.envNames["account_sid"], c.envNames["auth_token"])
+			if c.region != "us1" {
+				hint += fmt.Sprintf(", and that %s is the %s Auth Token: each region has its own", c.envNames["auth_token"], c.region)
+			}
 		case http.StatusNotFound:
 			hint = fmt.Sprintf("; account %s has no number %s", c.account, c.number)
 		}

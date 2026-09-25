@@ -75,7 +75,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:14b26c0ec0cf96de053e9966c42a2bd53678b7feb9e7aa22436ce0d9ec4b931e"
+ARTIFACT_ID = "sha256:4886402ffc0031986356f06c7513c3be2ff63d9938e9093b5f5b0389d491cb46"
 
 # --- tools ---------------------------------------------------------------------
 
@@ -1105,7 +1105,9 @@ It needs no model key: the model runs on your host. It then does this, in order:
 1. Reads the number
    ([IncomingPhoneNumber](https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource)). It refuses a number that
    cannot take voice calls, or that has a TwiML App, a SIP trunk or a voice
-   fallback URL. It never clears one of those for you.
+   fallback URL. It never clears one of those for you. It reads the number's
+   copy in `us1`, and refuses a number whose calls another region
+   handles. It never changes the routing.
 2. Reads `/healthz` and compares its `artifact_id` with this build. A different
    or missing id means the host runs another build: recompile, rehost, run again.
    The id is unmute's own drift check, not a Twilio feature.
@@ -1198,7 +1200,7 @@ may carry a secret, so it is readable only by you.
 </Response>
 === compile-report.json ===
 {
-  "artifact_id": "sha256:14b26c0ec0cf96de053e9966c42a2bd53678b7feb9e7aa22436ce0d9ec4b931e",
+  "artifact_id": "sha256:4886402ffc0031986356f06c7513c3be2ff63d9938e9093b5f5b0389d491cb46",
   "bindings": [
     {
       "binding": {

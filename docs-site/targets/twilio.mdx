@@ -298,7 +298,9 @@ flowchart TD
 1. It reads the number
    ([IncomingPhoneNumber](https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource)).
    It refuses a number that takes no voice calls, or that has a TwiML App, a
-   SIP trunk or a voice fallback URL. It never clears these for you.
+   SIP trunk or a voice fallback URL. It never clears these for you. It reads
+   the copy of the number in the connection's `region`, and it refuses a
+   number whose calls another region handles. It never changes the routing.
 2. It reads `/healthz`. A missing or different `artifact_id` means the host
    runs another build, so recompile and rehost first. The id is an unmute
    check, not a Twilio feature.

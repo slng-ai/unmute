@@ -247,7 +247,9 @@ target `unmute deploy` pushes to, through `voiceai`. `livekit` and `pipecat` are
 and hosted by the author. `unmute deploy --target <twilio target>` is the one command that writes to a
 Twilio account: it sets `VoiceUrl` and `VoiceMethod` on one existing number, after checking the host's
 `/healthz` `artifact_id` and a signed `/voice`, and saves the old route first. It never touches a trunk,
-an app or any other number setting. See
+an app or any other number setting. It talks to the connection region's REST host
+(`twilioRegionHosts`), and refuses a number whose `voice_region` differs, because that region's copy of
+the number would never be used. See
 [internal/cli/deploy_twilio.go](internal/cli/deploy_twilio.go).
 
 ## Getting authors onto the target

@@ -77,7 +77,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:2de77119c6ce88a983ce8665aab14c9d02714532f3c71533d17e46d16882e136"
+ARTIFACT_ID = "sha256:bdf61a13452efd33f07283b73ee709150d6eb01a3dffbdfeb050866c59c97cfa"
 
 def _google_vertex_client(api_key, location):
     from google import genai as _google_genai
@@ -1176,7 +1176,9 @@ It needs no model key: the model runs on your host. It then does this, in order:
 1. Reads the number
    ([IncomingPhoneNumber](https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource)). It refuses a number that
    cannot take voice calls, or that has a TwiML App, a SIP trunk or a voice
-   fallback URL. It never clears one of those for you.
+   fallback URL. It never clears one of those for you. It reads the number's
+   copy in `us1`, and refuses a number whose calls another region
+   handles. It never changes the routing.
 2. Reads `/healthz` and compares its `artifact_id` with this build. A different
    or missing id means the host runs another build: recompile, rehost, run again.
    The id is unmute's own drift check, not a Twilio feature.
@@ -1284,7 +1286,7 @@ def opening_hours(day):
     return {"day": day, "open": bool(opens), "opens": opens, "closes": closes}
 === compile-report.json ===
 {
-  "artifact_id": "sha256:2de77119c6ce88a983ce8665aab14c9d02714532f3c71533d17e46d16882e136",
+  "artifact_id": "sha256:bdf61a13452efd33f07283b73ee709150d6eb01a3dffbdfeb050866c59c97cfa",
   "bindings": [
     {
       "binding": {
