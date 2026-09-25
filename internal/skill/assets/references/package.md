@@ -736,7 +736,9 @@ returns this build's TwiML. It reads and writes the number in the connection's
 `region`, and refuses a number whose routing region differs; it never changes
 routing. It then saves the old route under the user config
 directory and sets only `VoiceUrl` and `VoiceMethod`. A missing or different
-`artifact_id` means recompile and rehost. It takes one twilio target per run,
+`artifact_id` means recompile and rehost, and every package change, including a
+switch of think provider, changes it. One build runs at one origin: two builds
+need two origins and two numbers. It takes one twilio target per run,
 and refuses `--profile`, `--agent-id`, `--label`, `--run-samples` and `--call`.
 A dry run writes nothing, not even the report. The outcome is `routed` only when
 the readback shows `/voice` with `POST` and the number still passes the checks,

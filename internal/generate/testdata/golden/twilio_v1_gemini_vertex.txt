@@ -1207,6 +1207,14 @@ It needs no model key: the model runs on your host. It then does this, in order:
 
 Two deploys to one number at the same time are not supported.
 
+### After a change
+
+Any change to the package, including a switch of think provider, changes this
+build's `artifact_id`. Run `unmute compile` again, stop the old app, host the
+new build at the same origin, then run `unmute deploy --target twilio-gemini`
+again. Until the new build runs, deploy refuses the old one. One build runs at
+one origin: to keep two builds up, give each its own origin and its own number.
+
 ### Put the old route back
 
 The deploy prints the snapshot path. The file holds the exact old URL, which

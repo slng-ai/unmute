@@ -299,8 +299,10 @@ its own gate:
    held by [internal/cli/skill_bundle_test.go](internal/cli/skill_bundle_test.go)
    (`TestSkillBundleNamesRealCommands`).
 
-Twilio's four are [README.md.tmpl](internal/generate/templates/twilio_v1/README.md.tmpl), the
-acceptance package's [README](internal/voice-agents-tests/relay-desk/README.md),
+Twilio's are [README.md.tmpl](internal/generate/templates/twilio_v1/README.md.tmpl), the public
+example's [README](examples/twilio-conversation-relay/README.md) and the acceptance package's
+[README](internal/voice-agents-tests/relay-desk/README.md), the walkthrough
+[docs-site/telephony/twilio-conversation-relay.mdx](docs-site/telephony/twilio-conversation-relay.mdx),
 [docs-site/targets/twilio.mdx](docs-site/targets/twilio.mdx), and the "The twilio target" section of
 [internal/skill/assets/references/package.md](internal/skill/assets/references/package.md).
 
@@ -384,6 +386,12 @@ channel, one read-only local tool (`opening_hours`) plus `end_call`, and two tar
 (`twilio-openai` and `twilio-gemini`, the latter on Vertex AI in `eu`). It is not a public example. It
 is what this repository dials against to prove the target's whole first-release surface, held to one
 bar: it validates and generates on every target it declares.
+
+The public example,
+[examples/twilio-conversation-relay](examples/twilio-conversation-relay), is the same desk with one
+`twilio` target on OpenAI. Its README carries the Gemini block to paste in, and
+`TestTwilioExampleCompilesOnBothThinkProviders` compiles that exact block, so the page cannot drift
+from a binding that builds.
 
 ## A short checklist for a new target (advisory)
 
