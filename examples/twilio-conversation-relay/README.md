@@ -23,6 +23,7 @@ On this page:
 - [Point the number at it](#point-the-number-at-it) - `unmute deploy`
 - [Make the call](#make-the-call) - the tool, an interruption, the hangup
 - [Use Gemini instead](#use-gemini-instead) - switch, recompile, rehost
+- [Use another Twilio region](#use-another-twilio-region) - Ireland or Australia
 - [Put the old route back](#put-the-old-route-back) - the rollback snapshot
 - [Files](#files) - what each file holds
 - [What it does not do](#what-it-does-not-do) - the limits of this route
@@ -292,6 +293,36 @@ Then:
 
 The same rule holds for any change to the package: prompt, tool, speech or
 model. Recompile, rehost, then deploy.
+
+## Use another Twilio region
+
+Twilio handles calls in US1 by default. To keep the calls in Ireland (IE1) or
+Australia (AU1), name the region in `connections/twilio_relay.yaml`:
+
+```yaml
+transport: conversation-relay
+carrier: twilio
+region: ie1
+environment:
+  # unchanged
+```
+
+Three things change with the region
+([Twilio Regions](https://www.twilio.com/docs/global-infrastructure/understanding-twilio-regions)):
+
+1. `TWILIO_AUTH_TOKEN` must be that region's Auth Token. In the Console, open
+   API keys & tokens and pick the region. The US1 token is refused there, and
+   the app checks signatures with the same token.
+2. The number must route its calls to that region. Set it on the number's
+   Regional tab in the Console. The change can take five minutes. Deploy checks
+   it and refuses a mismatch. It never changes the routing for you.
+3. Deploy writes the number's settings in that region, on
+   `api.dublin.ie1.twilio.com` or `api.sydney.au1.twilio.com`. Each region keeps
+   its own copy, so the US1 copy stays as it was.
+
+Recompile, rehost and deploy as for any other change. No call has been placed
+in IE1 or AU1 yet. Twilio lists ConversationRelay in both, but does not say
+whether Deepgram and ElevenLabs run there.
 
 ## Put the old route back
 
