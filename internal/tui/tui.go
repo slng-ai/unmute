@@ -734,10 +734,17 @@ func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, bin
 			if err != nil {
 				return err
 			}
-			if !back {
+			// Picking the brand already bound keeps the binding as written,
+			// including an alias such as gemini and the chosen distributor.
+			if !back && selected != brand {
 				routes := catalog.Distributors(framework, role, selected)
 				if len(routes) > 0 {
 					binding.Provider = routes[0]
+				}
+				// A twilio think binding forwards its model and params to one
+				// vendor's request, so the other vendor's would fail on a call.
+				if framework == targetcap.Twilio && role == targetcap.Reason && len(routes) > 0 {
+					*binding = scaffold.TwilioReasonStarter(routes[0])
 				}
 			}
 		case "distributor":

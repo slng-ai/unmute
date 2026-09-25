@@ -691,7 +691,10 @@ What a twilio package may carry, and nothing else:
 - think: `provider: openai` (Chat Completions) or `provider: google`
   (`gemini` also accepted; native `generateContent`). Params are forwarded to
   the request as written. `vertexai: true` with a `location` uses Vertex AI
-  with the same `GOOGLE_API_KEY`; without them it is the Gemini Developer API;
+  with the same `GOOGLE_API_KEY`; without them it is the Gemini Developer API.
+  To switch provider, replace model and params together: the other vendor's
+  params are refused, and its model id would fail on a call. The console does
+  this for you when the provider changes;
 - listen: `provider: deepgram` with a model such as `nova-3-general` and an
   optional `language`;
 - speak: `provider: elevenlabs` with `model` (for example `flash_v2_5`), a

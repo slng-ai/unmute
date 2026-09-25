@@ -202,6 +202,12 @@ true` and a `location`, the app calls Vertex AI with that API key. Without
 them, it calls the Gemini Developer API. Only the selected provider's SDK and
 key reach the project, so the other key may be missing on your machine.
 
+In the `unmute` console, switching the think provider loads that provider's
+starter: `gpt-5.6-luna` with its two params for OpenAI, or
+`gemini-3.1-flash-lite` with `thinking_level: MINIMAL` on the Developer API for
+Google. Add `vertexai` and `location` yourself. Picking the provider that is
+already bound keeps the binding as it is.
+
 ## What the package may carry
 
 | Section | What works |
