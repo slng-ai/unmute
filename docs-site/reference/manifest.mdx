@@ -380,9 +380,10 @@ models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no
   for that provider.
 </ParamField>
 
-<ParamField path="regions.deployments[].provider" type="livekit | pipecat | slng" required>
-  Exactly one of `livekit`, `pipecat`, or `slng`. Match the target's
-  `provider`, not its instance name. There is no default.
+<ParamField path="regions.deployments[].provider" type="livekit | pipecat | slng | twilio" required>
+  Exactly one of `livekit`, `pipecat`, `slng`, or `twilio`. Match the target's
+  `provider`, not its instance name. There is no default. A `twilio` target
+  takes no `deployment_region`, because you host its one process yourself.
 </ParamField>
 
 <ParamField path="regions.deployments[].allow" type="string[]" required>
@@ -404,7 +405,7 @@ models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no
 </ParamField>
 
 <ParamField path="targets.allow" type="string[]" required>
-  Any subset of `livekit`, `pipecat`, and `slng`. These are deployment
+  Any subset of `livekit`, `pipecat`, `slng`, and `twilio`. These are deployment
   providers, not target instance names. An empty list allows no target.
   Every target declared in the package is checked, even when a command
   selects only one of them.

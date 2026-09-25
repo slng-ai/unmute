@@ -24,8 +24,9 @@ one and say plainly which you picked and what it cannot do.
 | LiveKit Agents | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into LiveKit SIP |
 | LiveKit Agents | `sip` | Exotel | no adapter, so this route is refused at validation |
 | LiveKit Agents | `connector` | Twilio | a generated bridge turns Twilio Media Streams into a LiveKit room |
+| Twilio | `conversation-relay` | Twilio | Twilio ConversationRelay does the speech and calls a small app the user hosts |
 
-Four of those five rows are routes an author can pick; the Exotel row is listed
+Five of those six rows are routes an author can pick; the Exotel row is listed
 so its refusal is not a surprise. Pipecat has no self-hosted `sip` route and no
 `carrier-websocket` route for any carrier. Both were removed. Never offer
 either, and never offer Telnyx or Plivo on a Pipecat target: those two carriers
@@ -43,8 +44,8 @@ describing the route.
 
 Every Pipecat route here deploys to Pipecat Cloud, with `pipecat cloud deploy`.
 Every LiveKit route here deploys to LiveKit Cloud, or to a LiveKit Server the
-user runs themselves. There is no route left with no managed platform under
-it.
+user runs themselves. The Twilio `conversation-relay` route runs on the
+user's own host, behind a public HTTPS origin, with Twilio doing the speech.
 
 ## What the transport decides
 
@@ -135,6 +136,11 @@ A key from another route is refused, and the refusal carries the accepted set.
 | Pipecat | `daily-sip` | `twilio` | `account_sid`, `auth_token`, `sip_address`, `from_number` |
 | LiveKit Agents | `sip` | `twilio`, `telnyx`, `plivo` | `sip_address`, `sip_username`, `sip_password`, `from_number` |
 | LiveKit Agents | `connector` | `twilio` | `account_sid`, `auth_token`, `from_number` |
+| Twilio | `conversation-relay` | `twilio` | `account_sid`, `auth_token`, `phone_number_sid`, `public_url` |
+
+The Twilio route is the `provider: twilio` target; it is described in
+`references/package.md` under "The twilio target". Its app is hosted by the
+user, not by a managed platform, and `phone_number_sid` is deploy-only.
 
 The SIP route uses standard SIP names rather than one vendor's, because the same
 generated code dials through any SIP carrier with them.

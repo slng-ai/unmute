@@ -548,3 +548,31 @@ import:   from pipecat.services.soniox.tts import SonioxTTSService
 install:  pipecat-ai[soniox]
 env:      SONIOX_API_KEY
 
+=== twilio listen deepgram ===
+binding:  provider=deepgram model=model-1
+class:    ConversationRelay
+args:     speechModel="model-1", transcriptionLanguage="es-MX", sample_rate=24000
+install:  ships with the framework
+
+=== twilio reason google ===
+binding:  provider=google model=model-1
+class:    genai.Client
+args:     api_key=os.environ["GOOGLE_API_KEY"], model="model-1", sample_rate=24000
+import:   from google import genai
+install:  google-genai
+env:      GOOGLE_API_KEY
+
+=== twilio reason openai ===
+binding:  provider=openai model=model-1
+class:    AsyncOpenAI
+args:     api_key=os.environ["OPENAI_API_KEY"], model="model-1", sample_rate=24000
+import:   from openai import AsyncOpenAI
+install:  openai
+env:      OPENAI_API_KEY
+
+=== twilio speak elevenlabs ===
+binding:  provider=elevenlabs model=model-1 voice=voice-1
+class:    ConversationRelay
+args:     voice="voice-1", model="model-1", ttsLanguage="es-MX", sample_rate=24000
+install:  ships with the framework
+

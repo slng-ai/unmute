@@ -250,6 +250,10 @@ tests, so you will hear about it from `make test` rather than from review.
 One pull request, one change. Two unrelated fixes in a branch means neither can
 merge until both are agreed.
 
+Adding a target, or changing what one emits, accepts or refuses? Read
+[CONTRIBUTING_TARGETS.md](CONTRIBUTING_TARGETS.md) first. It walks the files a
+target touches and the tests that hold each one.
+
 ### Run the checks before you push
 
 CI runs six jobs on every pull request. Each has a local equivalent, and

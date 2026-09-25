@@ -1518,7 +1518,7 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 	// (pipecat, cloud-websocket) needs no carrier credentials — did not go away,
 	// it moved into the connection file, which is legal with a route and no
 	// `environment:` block (spec FR-009a).
-	if telephony && (raw.Provider == string(ProviderLiveKit) || raw.Provider == string(ProviderPipecat)) && raw.Connection == "" {
+	if telephony && targetcap.EmitsProject(targetcap.Provider(raw.Provider)) && raw.Connection == "" {
 		return Target{}, fmt.Errorf("%s: target %q has a telephony channel and names no connection. "+
 			"Add connection: <name> and a connections/<name>.yaml declaring the route",
 			pkg.Location("targets.yaml", name+":"), name)
@@ -1848,11 +1848,20 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		}
 	}
 	requiredEnvironment := make([]string, 0, len(connection.Environment)+len(route.RuntimeEnvironment))
-	for _, name := range connection.Environment {
-		if name != "" {
-			requiredEnvironment = append(requiredEnvironment, name)
+	var deployEnvironment []string
+	for key, name := range connection.Environment {
+		if name == "" {
+			continue
 		}
+		// A key only a deploy step reads is kept out of what the running
+		// process is asked for.
+		if slices.Contains(route.DeployOnlyEnvironment, key) {
+			deployEnvironment = append(deployEnvironment, name)
+			continue
+		}
+		requiredEnvironment = append(requiredEnvironment, name)
 	}
+	slices.Sort(deployEnvironment)
 	for _, requirement := range route.RuntimeEnvironment {
 		if hasAnyFeature(requirement.AnyFeatures) {
 			requiredEnvironment = append(requiredEnvironment, requirement.Name)
@@ -1886,6 +1895,13 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		// record this route does not keep. Same Redis-free shape the LiveKit
 		// connector route already has.
 		services = []string{"application"}
+	}
+	// The twilio target is one process with bounded call slots. Twilio runs the
+	// media and the call; the app keeps its calls in memory, so nothing is
+	// shared between processes and there is no store to coordinate through.
+	if resolved.Provider == ProviderTwilio {
+		services = []string{"application"}
+		coordination = "in_process"
 	}
 	// A LiveKit SIP route's topology is a LiveKit Server and a SIP service beside
 	// the agent, coordinating through a store. On LiveKit Cloud the platform runs
@@ -1921,6 +1937,7 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		Environment: maps.Clone(connection.Environment), Destinations: maps.Clone(resolved.Destinations),
 		SystemSources: sources, Evidence: evidence,
 		Processes: processes, PublicEndpoints: endpoints, RequiredEnvironment: requiredEnvironment,
+		DeployEnvironment: deployEnvironment,
 		// Scoped to what this package's route actually requires. The route
 		// declares its locally-supplied names statically, but some of them are
 		// feature-gated — UNMUTE_OUTBOUND_TOKEN only exists on a package that

@@ -405,13 +405,13 @@ provider with different settings, for example `pipecat_twilio` and
 
 | Field | What it is |
 |---|---|
-| `provider` | `livekit`, `pipecat`, or `slng` |
-| `version` | required exact `x.y.z` framework version for code targets; refused on `slng` |
-| `pins` | LiveKit-only known package pins, name to semantic version; refused on `slng` |
+| `provider` | `livekit`, `pipecat`, `slng`, or `twilio` |
+| `version` | required exact `x.y.z` framework version for LiveKit and Pipecat; refused on `slng` and `twilio` |
+| `pins` | LiveKit-only known package pins, name to semantic version; refused on `slng` and `twilio` |
 | `sdk_language` | `python` when written; refused on `slng` |
-| `connection` | required for LiveKit or Pipecat telephony; illegal with no phone use; refused on `slng` |
-| `deployment_region` | LiveKit: `us-east`, `eu-central`, or `ap-south`, one or a duplicate-free list; Pipecat: one non-empty region; on `slng` exactly one of `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` |
-| `warm_instances` | instances the platform holds ready; zero or more; **Pipecat only**, refused on `livekit` and `slng` |
+| `connection` | required for LiveKit, Pipecat or Twilio telephony; illegal with no phone use; refused on `slng` |
+| `deployment_region` | LiveKit: `us-east`, `eu-central`, or `ap-south`, one or a duplicate-free list; Pipecat: one non-empty region; on `slng` exactly one of `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`; refused on `twilio` |
+| `warm_instances` | instances the platform holds ready; zero or more; **Pipecat only**, refused on `livekit`, `slng` and `twilio` |
 | `models` | per target overrides of named `models` entries |
 
 That is the whole list. A `models` override is keyed by the entry name from
@@ -490,11 +490,14 @@ every field that entry needs.
 | `pipecat` | yes | yes |
 | `livekit` | yes | yes |
 | `slng` | yes | no |
+| `twilio` | yes | yes |
 
-Those are the only three. A provider earns a place here by having a driver that
+Those are the only four. A provider earns a place here by having a driver that
 owns its whole output, so validate and compile agree about what exists.
 
 `pipecat` and `livekit` generate a runnable Python project you host and run.
+`twilio` generates a small Python web app that Twilio ConversationRelay calls;
+see "The twilio target" below.
 `slng` generates a deployment body for a platform that runs the agent for you,
 so there is nothing to run locally and `unmute dev` does not apply to it. See
 "The slng target" below.
@@ -646,3 +649,68 @@ Do not write one into a prompt, a greeting or a tool field. For a value that
 varies per call, declare a package variable and write `{{name}}`. For a
 credential, name the Vault entry on the tool that reads it, as a bare name in
 its `auth:` block with no braces and no dollar.
+
+## The twilio target
+
+`provider: twilio` writes a small Python web app that Twilio ConversationRelay
+calls. ConversationRelay listens and speaks on Twilio's side. The app answers
+the number's webhook, holds the ConversationRelay WebSocket, thinks with one
+model and runs the package's local tools. You host the app yourself.
+
+```yaml
+# targets.yaml
+targets:
+  twilio:
+    provider: twilio
+    sdk_language: python
+    connection: twilio_relay
+
+# connections/twilio_relay.yaml
+transport: conversation-relay
+carrier: twilio
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  phone_number_sid: TWILIO_PHONE_NUMBER_SID
+  public_url: TWILIO_PUBLIC_URL
+```
+
+What a twilio package may carry, and nothing else:
+
+- one cascade agent, and exactly one channel: `kind: telephony`,
+  `inbound: true`, `outbound: false`;
+- think: `provider: openai` (Chat Completions) or `provider: google`
+  (`gemini` also accepted; native `generateContent`). Params are forwarded to
+  the request as written. `vertexai: true` with a `location` uses Vertex AI
+  with the same `GOOGLE_API_KEY`; without them it is the Gemini Developer API;
+- listen: `provider: deepgram` with a model such as `nova-3-general` and an
+  optional `language`;
+- speak: `provider: elevenlabs` with `model` (for example `flash_v2_5`), a
+  bare voice id in `voice`, and an optional `language`. The app builds
+  ConversationRelay's `voice` as `<voice id>-<model>`, so a voice that already
+  has the suffix is refused;
+- an optional turn entry with `params` only: `speechTimeout` (whole
+  milliseconds, 600 to 5000), `interruptSensitivity` (`high`, `medium`,
+  `low`), `ignoreBackchannel` (`true` or `false`). No provider or model;
+- a fixed `conversation.greeting.text` with `speaks_first: agent`, or
+  `speaks_first: user` with no text;
+- `conversation.interruption.enabled`, and `protect: [greeting]`;
+- local tools whose `input` and `output` are flat objects of `string`,
+  `integer`, `number` and `boolean` fields (optional `enum` and
+  `description`), plus the builtin `end_call` with no `instructions`.
+
+Everything else is refused before a file is written, with the reason:
+more agents, tasks, groups, handoffs, transfers, variables, shapes,
+prefetch, webhook, MCP, knowledge and hosted tools, tool announce and
+`interruption: cancel`, inactivity and duration timers, `pace` and the other
+turn fields, tracing, realtime and live, fallbacks, custom endpoints,
+`version`, `pins`, `deployment_region` and `warm_instances`.
+
+`unmute compile` writes `build/<target>/app.py`,
+`conversation-relay.xml.tmpl`, `pyproject.toml`, `Dockerfile`,
+`.dockerignore`, `.env.example`, `README.md`, `compile-report.json` and
+`tools/`. The app reads the three Twilio names above plus the think model's
+key. `phone_number_sid` is deploy-only: the app never reads it. There is no
+`unmute dev` loop for this target, because Twilio can only call a public
+https origin. The emitted README says how to host the app and point the
+number at `/voice`; unmute changes nothing in the Twilio account.

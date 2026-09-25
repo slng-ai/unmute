@@ -71,6 +71,14 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 	switch resolved.Provider {
 	case ir.ProviderPipecat, ir.ProviderLiveKit:
 		// code targets: run the deployable container below.
+	case ir.ProviderTwilio:
+		// Said plainly, because a browser loop here would test something the
+		// target never does: Twilio does the listening and speaking, and it
+		// only reaches a public https origin.
+		return fmt.Errorf("dev %s: target %q is a Twilio ConversationRelay app and has no local browser loop: "+
+			"Twilio listens and speaks, and it can only call a public https origin. "+
+			"Run `unmute compile`, then follow build/%s/README.md to host it and point a number at it",
+			root, resolved.Name, resolved.Name)
 	default:
 		return fmt.Errorf("dev %s: target %q uses %s; its dev runner is not implemented", root, resolved.Name, resolved.Provider)
 	}

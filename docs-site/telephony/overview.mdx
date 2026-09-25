@@ -207,6 +207,7 @@ A target says where the agent runs. These are the keys a phone agent uses, and
 | Pipecat | `daily-sip` | Twilio | your carrier forwards the call into a Daily room through a helper you host, and Pipecat Cloud runs the agent |
 | LiveKit | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into LiveKit SIP |
 | LiveKit | `connector` | Twilio | a generated bridge turns Twilio Media Streams into a LiveKit room |
+| Twilio | `conversation-relay` | Twilio | Twilio ConversationRelay does the speech and calls a small app you host. See [Twilio target](/targets/twilio) |
 
 Exotel is not listed for LiveKit SIP: no adapter, so this route is refused at validation.
 
@@ -218,9 +219,10 @@ Exotel is not listed for LiveKit SIP: no adapter, so this route is refused at va
 | Pipecat `daily-sip` | Pipecat Cloud, plus the public helper you host |
 | LiveKit `sip` | LiveKit Cloud, or a LiveKit deployment of your own |
 | LiveKit `connector` | the bridge container you host, connected to a LiveKit Server you run |
+| Twilio `conversation-relay` | the app container you host at a public HTTPS origin |
 
-Every route above deploys to a managed platform, so a phone call reaches this
-agent only once it is deployed. There is no route with nothing to deploy.
+A phone call reaches the agent only once it is deployed. There is no route with
+nothing to deploy.
 
 The Pipecat Daily helper exposes one public `/call` webhook. It requires the
 exact HTTPS base URL in `UNMUTE_PUBLIC_URL` (an optional path is allowed) and

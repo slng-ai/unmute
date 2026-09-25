@@ -30,13 +30,13 @@ targets:
 </ParamField>
 
 <ParamField path="targets.<name>.provider" type="string" required>
-  Target provider. Accepts `livekit`, `pipecat`, `slng`. Required; omission is refused.
+  Target provider. Accepts `livekit`, `pipecat`, `slng`, `twilio`. Required; omission is refused.
 </ParamField>
 
 <ParamField path="targets.<name>.version" type="string">
   Framework version pinned in an emitted project. Accepts exact `x.y.z` in the supported
   window for LiveKit and Pipecat. Required for LiveKit and Pipecat; omit on SLNG, which
-  emits no framework project.
+  emits no framework project, and on Twilio, whose app runs on no framework.
 </ParamField>
 
 <ParamField path="targets.<name>.pins" type="map of strings">

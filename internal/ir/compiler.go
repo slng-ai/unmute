@@ -1019,16 +1019,19 @@ type Connection struct {
 }
 
 type TelephonyPlan struct {
-	Channels            []string                      `json:"channels" yaml:"channels"`
-	Connection          string                        `json:"connection" yaml:"connection"`
-	Key                 TelephonyKey                  `json:"key" yaml:"key"`
-	Environment         map[string]string             `json:"environment" yaml:"environment"`
-	Destinations        map[string]string             `json:"destinations,omitempty" yaml:"destinations,omitempty"`
-	SystemSources       map[string]VariableSource     `json:"system_sources,omitempty" yaml:"system_sources,omitempty"`
-	Evidence            []TelephonyFeatureEvidence    `json:"evidence" yaml:"evidence"`
-	Processes           []TelephonyProcess            `json:"processes" yaml:"processes"`
-	PublicEndpoints     []TelephonyEndpoint           `json:"public_endpoints,omitempty" yaml:"public_endpoints,omitempty"`
-	RequiredEnvironment []string                      `json:"required_environment" yaml:"required_environment"`
+	Channels            []string                   `json:"channels" yaml:"channels"`
+	Connection          string                     `json:"connection" yaml:"connection"`
+	Key                 TelephonyKey               `json:"key" yaml:"key"`
+	Environment         map[string]string          `json:"environment" yaml:"environment"`
+	Destinations        map[string]string          `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	SystemSources       map[string]VariableSource  `json:"system_sources,omitempty" yaml:"system_sources,omitempty"`
+	Evidence            []TelephonyFeatureEvidence `json:"evidence" yaml:"evidence"`
+	Processes           []TelephonyProcess         `json:"processes" yaml:"processes"`
+	PublicEndpoints     []TelephonyEndpoint        `json:"public_endpoints,omitempty" yaml:"public_endpoints,omitempty"`
+	RequiredEnvironment []string                   `json:"required_environment" yaml:"required_environment"`
+	// DeployEnvironment names the connection's deploy-only values: read by the
+	// step that configures the carrier, never by the running process.
+	DeployEnvironment   []string                      `json:"deploy_environment,omitempty" yaml:"deploy_environment,omitempty"`
 	LocalEnvironment    []string                      `json:"locally_supplied_environment" yaml:"locally_supplied_environment"`
 	AutoWebhookEndpoint string                        `json:"auto_webhook_endpoint,omitempty" yaml:"auto_webhook_endpoint,omitempty"`
 	ManualSteps         []string                      `json:"manual_steps,omitempty" yaml:"manual_steps,omitempty"`
@@ -1097,6 +1100,7 @@ const (
 	ProviderLiveKit Provider = "livekit"
 	ProviderPipecat Provider = "pipecat"
 	ProviderSlng    Provider = "slng"
+	ProviderTwilio  Provider = "twilio"
 )
 
 type Bindings struct {

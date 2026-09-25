@@ -153,17 +153,19 @@ runtime cannot run a model as defined, it overrides that single entry by name,
 the way LiveKit does with the turn detector above. The agent itself does not
 change.
 
-## Three targets
+## Four targets
 
 | Target | Kind | What you get |
 |---|---|---|
 | [LiveKit Agents](https://unmute.ai/targets/livekit) | code | `build/livekit/agent.py`, a Python project you host and run |
 | [Pipecat](https://unmute.ai/targets/pipecat) | code | `build/pipecat/bot.py`, plus a `pcc-deploy.toml` for Pipecat Cloud |
 | [SLNG](https://unmute.ai/targets/slng) | hosted | `unmute deploy` pushes a deployment body and SLNG runs the agent |
+| [Twilio](https://unmute.ai/targets/twilio) | phone app | `build/<target>/app.py`, a small app Twilio ConversationRelay calls; you host it |
 
-`pipecat`, `livekit` and `slng` are the only values `provider` accepts. A code
-target gives you something to host. The hosted target has nothing to host, and
-no `unmute dev`.
+`pipecat`, `livekit`, `slng` and `twilio` are the only values `provider`
+accepts. A code target gives you something to host. The hosted target has
+nothing to host, and no `unmute dev`. The Twilio target answers inbound phone
+calls only, and has no `unmute dev` either.
 
 ## What compile writes
 

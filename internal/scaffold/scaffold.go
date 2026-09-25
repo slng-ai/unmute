@@ -88,6 +88,10 @@ Everything you say is read out loud.
 	// Authored as two fields, never a folded `openai/...` string: the value is
 	// forwarded to the SDK verbatim.
 	DefaultReasonModel = "gpt-5.6-terra"
+	// TwilioReasonModel is the think model the twilio target was measured on:
+	// streamed replies and tool follow-ups through Chat Completions on
+	// 2026-09-25, with reasoning_effort none.
+	TwilioReasonModel = "gpt-5.6-luna"
 	// RouterExampleModel is the second, and last, model identifier this
 	// repository teaches. It exists because the router example has to name a
 	// different model from the scaffold default to be worth reading: a matched
@@ -475,6 +479,8 @@ func DefaultTransport(target string) string {
 		return "daily-sip"
 	case "livekit":
 		return "sip"
+	case string(targetcap.Twilio):
+		return targetcap.TwilioTransport
 	}
 	return ""
 }
@@ -493,6 +499,11 @@ func ceilingFor(provider targetcap.Provider) string {
 
 // SetTarget selects an orchestrator and resets its target-dependent defaults.
 func (d *Data) SetTarget(provider string) {
+	if d.Target == string(targetcap.Twilio) {
+		// The phone channel was twilio's default, not the author's choice, and
+		// no other target's starter carries it.
+		d.Channels = nil
+	}
 	d.Target = provider
 	d.Transport = ""
 	d.Carrier = ""
@@ -512,6 +523,19 @@ func (d *Data) SetTarget(provider string) {
 	case "livekit":
 		d.TargetVersion = ceilingFor(targetcap.LiveKit)
 		d.SDKLanguage = "python"
+	case string(targetcap.Twilio):
+		// The first-release shape, and nothing it refuses: one inbound phone
+		// channel, ConversationRelay's own speech, and the think binding
+		// measured on 2026-09-25. Returns before the shared starter below,
+		// which is SLNG speech the twilio target does not run.
+		d.SDKLanguage = "python"
+		d.Transport = targetcap.TwilioTransport
+		d.Carrier = "twilio"
+		d.Channels = []Channel{{Name: "phone", Kind: "telephony", Inbound: true}}
+		d.Listen = Binding{Provider: "deepgram", Model: "nova-3-general", Language: "en-US"}
+		d.Reason = Binding{Provider: "openai", Model: TwilioReasonModel, Params: "reasoning_effort: \"none\"\nparallel_tool_calls: false"}
+		d.Speak = Binding{Provider: "elevenlabs", Model: "flash_v2_5", Voice: "UgBBYS2sOqTuMpoF3BR0", Language: "en-US"}
+		return
 	}
 	// Pipecat and LiveKit share the safe SLNG/OpenAI starter.
 	//
@@ -654,8 +678,12 @@ func (d Data) ConnectionEnvironment() []ConnectionKey {
 		return nil
 	}
 	keys := make([]ConnectionKey, 0, len(required))
+	prefix := ""
+	if d.Target == string(targetcap.Twilio) {
+		prefix = "TWILIO_" // the names Twilio's own docs and SDKs use
+	}
 	for _, name := range required {
-		keys = append(keys, ConnectionKey{Key: name, Env: strings.ToUpper(name)})
+		keys = append(keys, ConnectionKey{Key: name, Env: prefix + strings.ToUpper(name)})
 	}
 	sort.Slice(keys, func(i, j int) bool { return keys[i].Key < keys[j].Key })
 	return keys
@@ -935,6 +963,13 @@ func (d Data) DeclaredSecrets() []string {
 		}
 		if tool.Auth != nil && tool.Auth.TokenEnv != "" {
 			set[tool.Auth.TokenEnv] = true
+		}
+	}
+	// The twilio app reads its connection's names, so a fresh package declares
+	// them rather than drawing the undeclared-secret warning on first compile.
+	if framework == targetcap.Twilio {
+		for _, key := range d.ConnectionEnvironment() {
+			set[key.Env] = true
 		}
 	}
 	if d.Tracing != nil {

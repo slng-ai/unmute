@@ -249,7 +249,8 @@
             "pages": [
               "targets/pipecat",
               "targets/livekit",
-              "targets/slng"
+              "targets/slng",
+              "targets/twilio"
             ]
           },
           {

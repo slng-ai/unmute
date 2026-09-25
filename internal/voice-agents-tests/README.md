@@ -34,6 +34,11 @@ package: reset tasks receive only the saved variables named in their prompts.
 It also exercises omitted `history`, whose default is spoken messages. v2 is
 the control it is measured against.
 
+[`relay-desk`](relay-desk/) is the Twilio ConversationRelay acceptance
+package: one agent, one inbound phone channel, one read-only tool and
+`end_call`, compiled twice, once thinking on OpenAI and once on Gemini through
+Vertex AI in the EU.
+
 ## Running one
 
 Same commands as any package. `build/` under here is ignored, like every other
