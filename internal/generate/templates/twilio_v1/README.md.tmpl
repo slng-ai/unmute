@@ -30,7 +30,8 @@ sequenceDiagram
    for, and streams the reply back as text.
 5. To end the session, the app sends `end` and waits up to five seconds for
    Twilio to close the WebSocket. Closing it first can fail the session with
-   error 64105. Twilio then asks `/connect-action`, and the app hangs up.
+   [error 64105]({{.Docs.WebSocketEnded}}). Twilio then asks `/connect-action`,
+   and the app hangs up.
 
 ## What is in this folder
 
@@ -56,7 +57,9 @@ Twilio account in this release.
    This package's calls are handled in the Twilio Region `{{.Region}}`
    ([Twilio Regions]({{.Docs.Regions}})). `{{.Env.AuthToken}}` must be that
    region's Auth Token, not the US1 one: Twilio signs the region's requests
-   with it. The number's routing region must also be `{{.Region}}`.
+   with it ([regional credentials]({{.Docs.RegionalTokens}})). The number's
+   routing region must also be `{{.Region}}`
+   ([inbound processing region]({{.Docs.InboundRouting}})).
 {{- end}}
 2. Start the app:
 

@@ -173,9 +173,10 @@ A connection writes no `kind:`. Every transport in the catalog is telephony, so
 A target says where the agent runs. These are the keys a phone agent uses, and
 [`targets.yaml`](/reference/targets-yaml) has the rest.
 
-<ParamField path="provider" type="livekit | pipecat | slng" required>
-  Which orchestrator this target compiles to. Only `livekit` and `pipecat`
-  carry a phone call.
+<ParamField path="provider" type="livekit | pipecat | slng | twilio" required>
+  Which orchestrator this target compiles to. `livekit`, `pipecat` and
+  `twilio` carry a phone call. `twilio` takes inbound calls only, through
+  [ConversationRelay](/targets/twilio).
 </ParamField>
 
 <ParamField path="version" type="exact x.y.z">

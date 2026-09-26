@@ -36,7 +36,8 @@ sequenceDiagram
    for, and streams the reply back.
 5. To end the session, the app sends `end` and waits up to five seconds for
    Twilio to close the WebSocket. Closing it first can fail the session with
-   error 64105. Twilio then asks `/connect-action`, and the app hangs up.
+   [error 64105](https://www.twilio.com/docs/api/errors/64105). Twilio then
+   asks `/connect-action`, and the app hangs up.
 
 On this page:
 
@@ -174,8 +175,12 @@ is for pointing the number at the app; the app itself never reads it.
   The [Twilio Region](https://www.twilio.com/docs/global-infrastructure/understanding-twilio-regions)
   that handles the calls. Each region keeps its own copy of the number's voice
   settings and has its own Auth Token. Outside `us1`, `auth_token` must name
-  that region's token, because Twilio signs the region's requests with it. The
-  number's routing region must match too. Refused on every other route.
+  that region's token
+  ([regional credentials](https://www.twilio.com/docs/global-infrastructure/manage-regional-api-credentials)),
+  because Twilio signs the region's requests with it. The number's routing
+  region must match too
+  ([inbound processing region](https://www.twilio.com/docs/global-infrastructure/inbound-processing-console)).
+  Refused on every other route.
 </ParamField>
 
 To think with Gemini instead, replace the think entry:
@@ -253,7 +258,9 @@ The generated project has no unmute dependency and reads no YAML.
 unmute changes nothing in your Twilio account in this release. There is no
 `unmute dev` loop either, because Twilio can only call a public HTTPS origin.
 
-1. Copy `build/<target>/.env.example` to `.env` and fill it in.
+1. Copy `build/<target>/.env.example` to `.env` and fill it in. The account
+   owner must have accepted the AI/ML addendum that turns ConversationRelay on
+   ([onboarding](https://www.twilio.com/docs/voice/conversationrelay/onboarding)).
 2. Run the app, with `uv run --env-file .env python app.py` or the Dockerfile.
 3. Put it behind HTTPS at a public origin, for example
    `https://relay.example.com`, and set `TWILIO_PUBLIC_URL` to exactly that,
@@ -278,7 +285,9 @@ The emitted `README.md` repeats these steps with links to each Twilio page.
   full, `/voice` hangs up. The other capacity fields are planning numbers only.
   Run one copy per number.
 - **Speech settings.** Deepgram transcribes and ElevenLabs speaks, both inside
-  ConversationRelay. DTMF detection is off. With interruption on, the caller can
+  ConversationRelay
+  ([voice configuration](https://www.twilio.com/docs/voice/conversationrelay/voice-configuration)).
+  DTMF detection is off. With interruption on, the caller can
   talk over the agent; `protect: [greeting]` keeps the greeting whole.
 - **Streaming.** The reply streams as text tokens
   ([WebSocket messages](https://www.twilio.com/docs/voice/conversationrelay/websocket-messages)).

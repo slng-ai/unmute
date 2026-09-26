@@ -106,7 +106,8 @@ make the check pass.
 
 A successful compile is not a runtime test. Use the [browser loop](/dev/overview)
 for LiveKit or Pipecat. SLNG runs on its hosted platform and has no `unmute dev`;
-follow the [deployment workflow](/reference/cli/deploy).
+follow the [deployment workflow](/reference/cli/deploy). Twilio has no
+`unmute dev` either: its first real test is a phone call.
 
 ## What an agent carries
 
@@ -460,7 +461,7 @@ models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no
 </ParamField>
 
 <ParamField path="tools.builtin.allow" type="string[]" required>
-  Exact builtin IDs. Currently `end_call` is supported on all three targets;
+  Exact builtin IDs. Currently `end_call` is supported on all four targets;
   `send_sms` is supported only on SLNG. The manifest accepts nonempty ID
   strings, while tool validation checks whether the ID and target are
   supported. An empty list forbids builtin tools.

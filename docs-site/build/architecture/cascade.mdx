@@ -113,7 +113,7 @@ The quickstart names the transcriber, reasoning model, and voice under `models`.
 The agent binds its reasoning and voice by name. A single transcriber is selected automatically for the package.
 
 <ParamField path="architecture" type="cascade | realtime | live">
-  Set `cascade`, or omit the key for the same result. Cascade is supported on all three targets, subject to each target's model and feature limits.
+  Set `cascade`, or omit the key for the same result. Cascade is supported on all four targets, subject to each target's model and feature limits. It is the only architecture the Twilio target takes.
 </ParamField>
 
 <ParamField path="think" type="a models.think entry name" required>

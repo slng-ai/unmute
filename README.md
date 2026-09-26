@@ -560,7 +560,7 @@ published SLNG conformance fixtures and needs network.
 ## Contributing
 
 Contributions are welcome, from anyone. Unmute is MIT licensed and every part of
-it is open: the compiler, the three targets, the examples, the skill and the
+it is open: the compiler, the four targets, the examples, the skill and the
 docs site.
 
 A pull request needs five things:

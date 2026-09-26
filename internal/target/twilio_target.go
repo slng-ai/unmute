@@ -174,6 +174,9 @@ type TwilioDocLinks struct {
 	Onboarding        string
 	Numbers           string
 	Regions           string
+	RegionalTokens    string
+	InboundRouting    string
+	WebSocketEnded    string
 }
 
 // TwilioDocs is the one copy of those links.
@@ -186,6 +189,9 @@ var TwilioDocs = TwilioDocLinks{
 	Onboarding:        "https://www.twilio.com/docs/voice/conversationrelay/onboarding",
 	Numbers:           "https://www.twilio.com/docs/phone-numbers",
 	Regions:           "https://www.twilio.com/docs/global-infrastructure/understanding-twilio-regions",
+	RegionalTokens:    "https://www.twilio.com/docs/global-infrastructure/manage-regional-api-credentials",
+	InboundRouting:    "https://www.twilio.com/docs/global-infrastructure/inbound-processing-console",
+	WebSocketEnded:    "https://www.twilio.com/docs/api/errors/64105",
 }
 
 // twilioOnlyOne is the reason shared by every row that needs a second agent,

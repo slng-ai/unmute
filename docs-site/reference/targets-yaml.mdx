@@ -80,8 +80,9 @@ provider with different settings, for example `pipecat_twilio` and
 
 That is the whole list. A target says where the agent runs and, for a phone
 agent, which one connection carries the call. `unmute compile` compiles a
-project only for `livekit` and `pipecat` today; a `slng` target compiles to a
-deployment body instead, which [Deploy to SLNG](/deploy/slng) covers.
+project for `livekit`, `pipecat` and `twilio`; a `slng` target compiles to a
+deployment body instead, which [Deploy to SLNG](/deploy/slng) covers. A
+`twilio` project is one app you host; see [the Twilio target](/targets/twilio).
 
 `vapi` and `deepgram` used to be target names too. Both are retired, and
 `unmute validate` refuses either one:
@@ -89,7 +90,7 @@ deployment body instead, which [Deploy to SLNG](/deploy/slng) covers.
 ```text
 provider "deepgram" was retired: the deepgram target never emitted a runnable project and
   was retired on 2026-08-24; deepgram remains available as a model vendor, for example
-  slng/deepgram/nova:3-en. Supported providers: livekit, pipecat, slng
+  slng/deepgram/nova:3-en. Supported providers: livekit, pipecat, slng, twilio
 ```
 
 Deepgram stays a model vendor: what the refusal calls out is the target name,

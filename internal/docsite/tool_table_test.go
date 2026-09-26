@@ -29,7 +29,17 @@ type toolKindRow struct {
 	LiveKit string
 	Pipecat string
 	Slng    string
+	Twilio  string
 }
+
+// webhookRefusedOn names the targets that refuse a webhook tool. webhook: has
+// no capability field, so the refusal lives in ir: validateTwilioTool.
+var webhookRefusedOn = map[target.Provider]bool{target.Twilio: true}
+
+// agentToolRowPattern is a row of the agent-scoped table, one cell per target.
+var agentToolRowPattern = regexp.MustCompile(
+	`^\|\s*` + "`" + `([a-z_]+):` + "`" + `\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|$`,
+)
 
 // wordFor is how the page spells each capability tag. Bold is stripped before
 // comparing, so emphasis is the author's choice and not part of the contract.
@@ -107,9 +117,9 @@ func TestToolKindTableMatchesCapabilities(t *testing.T) {
 
 	var rows []toolKindRow
 	for _, line := range section(t, body, "## How each target treats a tool") {
-		if m := toolRowPattern.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
+		if m := agentToolRowPattern.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
 			rows = append(rows, toolKindRow{
-				Kind: m[1], LiveKit: clean(m[2]), Pipecat: clean(m[3]), Slng: clean(m[4]),
+				Kind: m[1], LiveKit: clean(m[2]), Pipecat: clean(m[3]), Slng: clean(m[4]), Twilio: clean(m[5]),
 			})
 		}
 	}
@@ -121,9 +131,16 @@ func TestToolKindTableMatchesCapabilities(t *testing.T) {
 	for _, row := range rows {
 		seen[row.Kind] = true
 		if row.Kind == "webhook" {
-			for _, cell := range []string{row.LiveKit, row.Pipecat, row.Slng} {
-				if cell != "yes" {
-					t.Errorf("webhook: row says %q; webhook has no capability field, so every target supports it", cell)
+			for _, cell := range []struct {
+				provider target.Provider
+				written  string
+			}{{target.LiveKit, row.LiveKit}, {target.Pipecat, row.Pipecat}, {target.Slng, row.Slng}, {target.Twilio, row.Twilio}} {
+				want := "yes"
+				if webhookRefusedOn[cell.provider] {
+					want = "no"
+				}
+				if cell.written != want {
+					t.Errorf("webhook: on %s the page says %q, want %q", cell.provider, cell.written, want)
 				}
 			}
 			continue
@@ -140,6 +157,7 @@ func TestToolKindTableMatchesCapabilities(t *testing.T) {
 			{target.LiveKit, row.LiveKit},
 			{target.Pipecat, row.Pipecat},
 			{target.Slng, row.Slng},
+			{target.Twilio, row.Twilio},
 		} {
 			want := wordFor(table.Capability(field, check.provider).Tag)
 			if check.written != want {

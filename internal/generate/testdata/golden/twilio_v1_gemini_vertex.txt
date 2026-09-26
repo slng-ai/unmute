@@ -1100,7 +1100,8 @@ sequenceDiagram
    for, and streams the reply back as text.
 5. To end the session, the app sends `end` and waits up to five seconds for
    Twilio to close the WebSocket. Closing it first can fail the session with
-   error 64105. Twilio then asks `/connect-action`, and the app hangs up.
+   [error 64105](https://www.twilio.com/docs/api/errors/64105). Twilio then asks `/connect-action`,
+   and the app hangs up.
 
 ## What is in this folder
 

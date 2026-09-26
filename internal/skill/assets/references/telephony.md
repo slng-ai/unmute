@@ -5,10 +5,11 @@ carrier, together. Pick the route from all three, never from a brand name.
 
 ## "Put it on Twilio" is not a route
 
-Twilio reaches both targets, four different ways, and they are not
+Twilio reaches three targets, five different ways, and they are not
 interchangeable. Before writing anything, get three answers:
 
-1. **Which target**, Pipecat or LiveKit?
+1. **Which target**, Pipecat, LiveKit or Twilio? The twilio target is one
+   inbound agent with one prompt; anything more needs Pipecat or LiveKit.
 2. **Which transport**, which is the mechanism that carries the call?
 3. **Which carrier**?
 
