@@ -380,9 +380,13 @@ Then call the number. That call is the only check of the speech path.
 
 ## What is not verified yet
 
-- A call through a Twilio number with this target.
-- The signed WebSocket handshake behind a real proxy.
-- How Twilio plays tokens already sent when an interrupt arrives.
+- A call behind a proxy other than a cloudflared quick tunnel.
+- How Twilio plays tokens already sent when an interrupt arrives. One live
+  interrupt was heard, on OpenAI.
+- `end_call` on a real call since the app waits for Twilio to close the socket.
+  The close order is tested offline only.
+- A second call refused while `max_sessions` calls are running. The refusal
+  is tested offline only.
 - A call in `ie1` or `au1`. The docs list ConversationRelay in both regions.
   They do not say whether Deepgram and ElevenLabs run there.
 - The Gemini Developer API path, with no `vertexai`, against a real key.
