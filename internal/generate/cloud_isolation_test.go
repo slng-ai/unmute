@@ -82,6 +82,12 @@ func telephonyRouteArtifact(t *testing.T, key target.TelephonyKey) (Artifact, er
 	if key.Provider == target.LiveKit {
 		instance = "livekit"
 	}
+	if key.Provider == target.Twilio {
+		fixture, instance = "twilio_relay", "twilio"
+		if pkg, err = spec.Load(filepath.Join("..", "testdata", fixture)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	configured, ok := pkg.Targets[instance]
 	if !ok {
 		t.Fatalf("fixture %s has no %s target", fixture, instance)

@@ -876,6 +876,10 @@ type Connection struct {
 	Carrier     string            `json:"carrier,omitempty" yaml:"carrier,omitempty"`
 	Kind        string            `json:"kind" yaml:"kind"`
 	Environment map[string]string `json:"environment" yaml:"environment"`
+	// Region is the Twilio Region that handles a ConversationRelay route's
+	// calls: us1 (the default), ie1 or au1. Each region keeps its own copy of
+	// the number's voice configuration and its own Auth Token.
+	Region string `json:"region,omitempty" yaml:"region,omitempty"`
 }
 
 type TargetsFile struct {

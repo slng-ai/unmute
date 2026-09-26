@@ -22,7 +22,7 @@ environment:
 
 <ParamField path="transport" type="string" required>
   Mechanism that carries the call. Accepts `sip`, `connector`, `cloud-websocket`,
-  `daily-sip`, as allowed by the target provider. Required; omission is refused.
+  `daily-sip`, `conversation-relay`, as allowed by the target provider. Required; omission is refused.
 </ParamField>
 
 <ParamField path="carrier" type="string" required>
@@ -34,6 +34,11 @@ environment:
   Names holding the route's account values. Accepts route keys listed below to UPPER_SNAKE
   env names. Omission is allowed only when the route needs no account values, such as
   receive-only Pipecat cloud-websocket. Otherwise the missing route keys are refused.
+</ParamField>
+
+<ParamField path="region" type="us1 | ie1 | au1" default="us1">
+  Twilio Region that handles the calls, on a twilio `conversation-relay` route
+  only. Refused on every other route. See [the Twilio target](/targets/twilio).
 </ParamField>
 
 The target names the file and says nothing else about telephony:
@@ -105,6 +110,10 @@ connections/twilio_voice.yaml: connection "twilio_voice" requires environment ke
 | Pipecat | `daily-sip` | `twilio` | `account_sid`, `auth_token`, `sip_address`, `from_number` |
 | LiveKit | `sip` | `twilio`, `telnyx`, `plivo` | `sip_address`, `sip_username`, `sip_password`, `from_number` |
 | LiveKit | `connector` | `twilio` | `account_sid`, `auth_token`, `from_number` |
+| Twilio | `conversation-relay` | `twilio` | `account_sid`, `auth_token`, `phone_number_sid`, `public_url` |
+
+On `conversation-relay`, `phone_number_sid` is for pointing the number at the
+app. The running app never reads it, so it is not asked of the process.
 
 The SIP route uses standard SIP names rather than one vendor's, because the same
 generated code dials through any SIP carrier with them.

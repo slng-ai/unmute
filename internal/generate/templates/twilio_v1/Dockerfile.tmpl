@@ -1,0 +1,23 @@
+# One process, as a non-root user. The app terminates HTTPS nowhere: put it
+# behind a proxy or platform that serves your public https origin.
+FROM python:{{.Python}}-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 relay
+
+WORKDIR /app
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir uv \
+    && uv pip install --system --no-cache -r pyproject.toml
+
+COPY app.py conversation-relay.xml.tmpl ./
+{{- if .LocalTools}}
+COPY tools/ ./tools/
+{{- end}}
+
+USER relay
+ENV PORT=8080 PYTHONUNBUFFERED=1
+EXPOSE 8080
+CMD ["python", "app.py"]

@@ -171,6 +171,11 @@ func sizing(agent *Agent, resolved Target) []Sizing {
 	if targetcap.IsCode(targetcap.Provider(resolved.Provider)) {
 		workers = agent.Capacity.MaxSessions
 	}
+	// The twilio app is one process serving max_sessions call slots, so it has
+	// one worker however many calls it takes.
+	if resolved.Provider == ProviderTwilio {
+		workers = 1
+	}
 	local := resolvedHasLocal(resolved)
 	gpus := 0
 	if local && targetcap.IsCode(targetcap.Provider(resolved.Provider)) {
@@ -184,6 +189,12 @@ func sizing(agent *Agent, resolved Target) []Sizing {
 	result := []Sizing{
 		{Target: resolved.Name, Metric: "workers", Value: fmt.Sprint(workers), Status: "unbenchmarked", Basis: basis},
 		{Target: resolved.Name, Metric: "gpus", Value: fmt.Sprint(gpus), Status: "unbenchmarked", Basis: basis},
+	}
+	if resolved.Provider == ProviderTwilio {
+		result = append(result, Sizing{
+			Target: resolved.Name, Metric: "call_slots", Value: fmt.Sprint(agent.Capacity.MaxSessions),
+			Status: "enforced", Basis: "max_sessions; the app refuses a call past this count",
+		})
 	}
 	average, averageErr := time.ParseDuration(string(agent.Capacity.AvgSessionDuration))
 	for _, kind := range slices.Sorted(maps.Keys(channelKinds)) {
@@ -866,10 +877,16 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		row.Errors = add(row.Errors, fmt.Sprintf("%s code target requires version", resolved.Provider))
 	}
 	validateDriverValues(agent, resolved, provider, row)
+	for _, warning := range turnParamsWarning(agent, provider) {
+		row.Warnings = add(row.Warnings, warning)
+	}
 	validateVaultTokens(agent, provider, row)
 	prefetchSkipWarnings(agent, resolved, row)
 	if provider == targetcap.Slng {
 		validateSlngTarget(agent, resolved, row)
+	}
+	if provider == targetcap.Twilio {
+		validateTwilioTarget(agent, resolved, row)
 	}
 	if agent.Tracing != nil {
 		applyCapability(caps, tracingCapability(agent.Tracing.Provider), provider, row)
@@ -1455,7 +1472,7 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		if err := catalog.CheckVendor(provider, role, binding.Provider, binding.EndpointEnv != ""); err != nil {
 			row.Errors = add(row.Errors, err.Error())
 		}
-		if (provider == targetcap.LiveKit || provider == targetcap.Pipecat) && role == targetcap.Reason &&
+		if targetcap.EmitsProject(provider) && role == targetcap.Reason &&
 			(binding.Provider == "google" || binding.Provider == "gemini") {
 			if err := targetcap.CheckGoogleParams(binding.Params); err != nil {
 				row.Errors = add(row.Errors, fmt.Sprintf("%s think model %q: %v", provider, binding.Model, err))
@@ -2826,7 +2843,7 @@ func hasWarmTransfer(agent *Agent) bool {
 
 func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
 	for channelName, channel := range agent.Channels {
-		if channel.Kind == ChannelTelephony && (provider == targetcap.LiveKit || provider == targetcap.Pipecat) && resolved.Telephony == nil {
+		if channel.Kind == ChannelTelephony && targetcap.EmitsProject(provider) && resolved.Telephony == nil {
 			row.Errors = add(row.Errors, "telephony channel requires a resolved Connection plan")
 			continue
 		}
@@ -2882,7 +2899,13 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 	if plan == nil {
 		return
 	}
-	if plan.Coordination != "shared" {
+	// The twilio target keeps its calls in one process, so its coordination is
+	// in-process and nothing else's is.
+	isTwilioRelay := plan.Key.Provider == ProviderTwilio
+	switch {
+	case isTwilioRelay && plan.Coordination != "in_process":
+		row.Errors = add(row.Errors, "the twilio target runs one process, so its telephony coordination must be in_process")
+	case !isTwilioRelay && plan.Coordination != "shared":
 		row.Errors = add(row.Errors, "telephony coordination must be shared")
 	}
 	// One route runs nothing of the operator's, so an empty process list is the
@@ -2947,7 +2970,7 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 	allowedServices := map[string]bool{"application": true}
 	requiredServices := []string{"application"}
 	switch {
-	case isPipecatDailyCarrier, hostsNothing:
+	case isPipecatDailyCarrier, hostsNothing, isTwilioRelay:
 		// application only, already in both sets. On the cloud-websocket route the
 		// application is the deployed agent: the platform hosts it, and dev runs the
 		// same one locally, which is why an empty process list and one application
@@ -3199,17 +3222,14 @@ func promptSuffixErrors(name string, model ModelDef) []string {
 // behaviour either way. Each message names what to use instead, because "this
 // does nothing" tells an author they are wrong and not what to write.
 //
-// If turn params ever do get forwarded, the `params` line here is what to delete.
+// Turn params left this package-wide pass when the twilio target started
+// forwarding them: they are dead on some targets and not others, so
+// turnParamsWarning says so per target.
 func turnDeadFieldWarnings(name string, model ModelDef) []string {
 	if model.Kind != KindTurn {
 		return nil
 	}
 	var warnings []string
-	if len(model.Params) > 0 {
-		warnings = add(warnings, fmt.Sprintf(
-			"model %q is a turn model and sets params (%s), which no target reads: turn params are not forwarded to either framework. Use pace for the turn window and endpointing_delay for the silence window; there is no way to reach an individual framework parameter from a package today",
-			name, strings.Join(sortedKeys(model.Params), ", ")))
-	}
 	if model.AgentID != "" {
 		warnings = add(warnings, fmt.Sprintf(
 			"model %q is a turn model and sets agent_id, which no target reads: agent_id scopes the SLNG Context Router's cache and belongs on the think binding that names the router",
@@ -3219,6 +3239,26 @@ func turnDeadFieldWarnings(name string, model ModelDef) []string {
 		warnings = add(warnings, fmt.Sprintf(
 			"model %q is a turn model and sets fallback, which no target reads: fallback is a think and listen field. A turn detector has no fallback chain on either code target",
 			name))
+	}
+	return warnings
+}
+
+// turnParamsWarning names turn params on a target that does not read them. Every
+// target except twilio drops them; twilio forwards them to ConversationRelay and
+// checks each one in validateTwilioTarget.
+func turnParamsWarning(agent *Agent, provider targetcap.Provider) []string {
+	if provider == targetcap.Twilio {
+		return nil
+	}
+	var warnings []string
+	for _, name := range sortedKeys(agent.Models) {
+		model := agent.Models[name]
+		if model.Kind != KindTurn || len(model.Params) == 0 {
+			continue
+		}
+		warnings = add(warnings, fmt.Sprintf(
+			"model %q is a turn model and sets params (%s), which the %s target does not read: turn params are not forwarded to either framework. Use pace for the turn window and endpointing_delay for the silence window; there is no way to reach an individual framework parameter from a package today",
+			name, strings.Join(sortedKeys(model.Params), ", "), provider))
 	}
 	return warnings
 }

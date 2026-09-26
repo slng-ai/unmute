@@ -200,10 +200,20 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 					pkg.Location(path, value), name, key)
 			}
 		}
+		if raw.Region != "" {
+			if raw.Transport != targetcap.TwilioTransport || raw.Carrier != "twilio" {
+				return nil, fmt.Errorf("%s: connection %q names region %s, but only a twilio %s route has a "+
+					"Twilio Region. Remove region", pkg.Location(path, "region:"), name, raw.Region, targetcap.TwilioTransport)
+			}
+			if !slices.Contains(targetcap.TwilioRegions, raw.Region) {
+				return nil, fmt.Errorf("%s: connection %q region %q is not a Twilio Region; use one of %s",
+					pkg.Location(path, "region:"), name, raw.Region, strings.Join(targetcap.TwilioRegions, ", "))
+			}
+		}
 		// Kind is a resolved-surface field with no author to read it from: every
 		// connection is telephony, so it is set here rather than deleted, which
 		// keeps the resolved schema and its goldens still (data-model §2).
-		out.Connections[name] = Connection{Kind: "telephony", Environment: maps.Clone(raw.Environment)}
+		out.Connections[name] = Connection{Kind: "telephony", Environment: maps.Clone(raw.Environment), Region: raw.Region}
 	}
 	if pkg.Agent.Capacity != nil {
 		out.Capacity = &Capacity{
@@ -1518,7 +1528,7 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 	// (pipecat, cloud-websocket) needs no carrier credentials — did not go away,
 	// it moved into the connection file, which is legal with a route and no
 	// `environment:` block (spec FR-009a).
-	if telephony && (raw.Provider == string(ProviderLiveKit) || raw.Provider == string(ProviderPipecat)) && raw.Connection == "" {
+	if telephony && targetcap.EmitsProject(targetcap.Provider(raw.Provider)) && raw.Connection == "" {
 		return Target{}, fmt.Errorf("%s: target %q has a telephony channel and names no connection. "+
 			"Add connection: <name> and a connections/<name>.yaml declaring the route",
 			pkg.Location("targets.yaml", name+":"), name)
@@ -1848,11 +1858,20 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		}
 	}
 	requiredEnvironment := make([]string, 0, len(connection.Environment)+len(route.RuntimeEnvironment))
-	for _, name := range connection.Environment {
-		if name != "" {
-			requiredEnvironment = append(requiredEnvironment, name)
+	var deployEnvironment []string
+	for key, name := range connection.Environment {
+		if name == "" {
+			continue
 		}
+		// A key only a deploy step reads is kept out of what the running
+		// process is asked for.
+		if slices.Contains(route.DeployOnlyEnvironment, key) {
+			deployEnvironment = append(deployEnvironment, name)
+			continue
+		}
+		requiredEnvironment = append(requiredEnvironment, name)
 	}
+	slices.Sort(deployEnvironment)
 	for _, requirement := range route.RuntimeEnvironment {
 		if hasAnyFeature(requirement.AnyFeatures) {
 			requiredEnvironment = append(requiredEnvironment, requirement.Name)
@@ -1887,6 +1906,13 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		// connector route already has.
 		services = []string{"application"}
 	}
+	// The twilio target is one process with bounded call slots. Twilio runs the
+	// media and the call; the app keeps its calls in memory, so nothing is
+	// shared between processes and there is no store to coordinate through.
+	if resolved.Provider == ProviderTwilio {
+		services = []string{"application"}
+		coordination = "in_process"
+	}
 	// A LiveKit SIP route's topology is a LiveKit Server and a SIP service beside
 	// the agent, coordinating through a store. On LiveKit Cloud the platform runs
 	// all three; a self-hosted deployment runs them itself, which is why REDIS_URL
@@ -1915,12 +1941,17 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 	}
 	slices.Sort(services)
 	slices.SortFunc(reasons, func(a, b TelephonyCoordinationReason) int { return strings.Compare(a.Name, b.Name) })
+	region := ""
+	if resolved.Provider == ProviderTwilio {
+		region = cmp.Or(connection.Region, targetcap.TwilioRegions[0])
+	}
 	return &TelephonyPlan{
-		Channels: channels, Connection: resolved.Connection,
+		Channels: channels, Connection: resolved.Connection, Region: region,
 		Key:         TelephonyKey{Provider: resolved.Provider, Transport: resolved.Transport, Carrier: resolved.Carrier},
 		Environment: maps.Clone(connection.Environment), Destinations: maps.Clone(resolved.Destinations),
 		SystemSources: sources, Evidence: evidence,
 		Processes: processes, PublicEndpoints: endpoints, RequiredEnvironment: requiredEnvironment,
+		DeployEnvironment: deployEnvironment,
 		// Scoped to what this package's route actually requires. The route
 		// declares its locally-supplied names statically, but some of them are
 		// feature-gated — UNMUTE_OUTBOUND_TOKEN only exists on a package that

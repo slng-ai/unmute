@@ -784,3 +784,66 @@ func TestPipecatHistoryRowIsPerValue(t *testing.T) {
 		}
 	}
 }
+
+// TestTwilioRowsAreDeliberate is the twilio sibling of the slng check above.
+// field() seeds only the framework targets, so every twilio answer is written
+// in twilioFields; this asserts that mechanism directly, and that every note
+// the target speaks names itself and an alternative.
+func TestTwilioRowsAreDeliberate(t *testing.T) {
+	if got := field()[Twilio]; got.Tag != "" {
+		t.Fatalf("field() seeds twilio with %q; every undecided row is now silently supported", got.Tag)
+	}
+	table := Default()
+	for field := range table.Fields {
+		if _, ok := twilioFields()[field]; !ok {
+			t.Errorf("%s has no twilio decision in twilioFields", field)
+		}
+	}
+	notes := map[string]string{}
+	for field, byProvider := range table.Fields {
+		if tag := byProvider[Twilio].Tag; tag == Gated || tag == Warn {
+			notes[string(field)] = byProvider[Twilio].Note
+		}
+	}
+	for control, byProvider := range table.Controls {
+		if byProvider[Twilio].Tag == Gated {
+			notes["control "+string(control)] = byProvider[Twilio].Note
+		}
+	}
+	for name, note := range notes {
+		if !strings.HasPrefix(note, "twilio target") {
+			t.Errorf("%s: twilio note does not start with %q, so it reads like a note about the twilio carrier: %q", name, "twilio target", note)
+		}
+		if split := strings.LastIndex(note, ": "); split < 0 || strings.TrimSpace(note[split+2:]) == "" {
+			t.Errorf("%s: twilio note names no alternative: %q", name, note)
+		}
+	}
+	if IsCode(Twilio) || !EmitsProject(Twilio) {
+		t.Error("twilio emits a project on no framework: EmitsProject true, IsCode false")
+	}
+	if _, ok := Window(Twilio); ok {
+		t.Error("twilio has a framework support window; its runtime pins live in TwilioPins")
+	}
+}
+
+func TestTwilioTurnParams(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value any
+		ok    bool
+	}{
+		{"speechTimeout", 800, true},
+		{"speechTimeout", uint64(5000), true},
+		{"speechTimeout", 599, false},
+		{"speechTimeout", 800.5, false},
+		{"interruptSensitivity", "medium", true},
+		{"interruptSensitivity", "loud", false},
+		{"ignoreBackchannel", true, true},
+		{"ignoreBackchannel", "yes", false},
+		{"eotThreshold", 0.7, false},
+	} {
+		if err := CheckTwilioTurnParam(tc.name, tc.value); (err == nil) != tc.ok {
+			t.Errorf("%s=%v: err=%v, want ok=%v", tc.name, tc.value, err, tc.ok)
+		}
+	}
+}

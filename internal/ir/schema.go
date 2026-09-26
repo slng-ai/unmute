@@ -156,7 +156,7 @@ func enumOptions() *jsonschema.ForOptions {
 		reflect.TypeFor[ThinkingAudio]():    enum(ThinkingNone, ThinkingSubtle),
 		reflect.TypeFor[ChannelKind]():      enum(ChannelRealtimeAudio, ChannelTelephony),
 		reflect.TypeFor[VoicemailAction]():  enum(VoicemailHangup, VoicemailLeaveMessage),
-		reflect.TypeFor[Provider]():         enum(ProviderLiveKit, ProviderPipecat, ProviderSlng),
+		reflect.TypeFor[Provider]():         enum(ProviderLiveKit, ProviderPipecat, ProviderSlng, ProviderTwilio),
 	}}
 }
 

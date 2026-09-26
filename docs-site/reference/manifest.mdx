@@ -106,7 +106,8 @@ make the check pass.
 
 A successful compile is not a runtime test. Use the [browser loop](/dev/overview)
 for LiveKit or Pipecat. SLNG runs on its hosted platform and has no `unmute dev`;
-follow the [deployment workflow](/reference/cli/deploy).
+follow the [deployment workflow](/reference/cli/deploy). Twilio has no
+`unmute dev` either: its first real test is a phone call.
 
 ## What an agent carries
 
@@ -380,9 +381,10 @@ models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no
   for that provider.
 </ParamField>
 
-<ParamField path="regions.deployments[].provider" type="livekit | pipecat | slng" required>
-  Exactly one of `livekit`, `pipecat`, or `slng`. Match the target's
-  `provider`, not its instance name. There is no default.
+<ParamField path="regions.deployments[].provider" type="livekit | pipecat | slng | twilio" required>
+  Exactly one of `livekit`, `pipecat`, `slng`, or `twilio`. Match the target's
+  `provider`, not its instance name. There is no default. A `twilio` target
+  takes no `deployment_region`, because you host its one process yourself.
 </ParamField>
 
 <ParamField path="regions.deployments[].allow" type="string[]" required>
@@ -404,7 +406,7 @@ models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no
 </ParamField>
 
 <ParamField path="targets.allow" type="string[]" required>
-  Any subset of `livekit`, `pipecat`, and `slng`. These are deployment
+  Any subset of `livekit`, `pipecat`, `slng`, and `twilio`. These are deployment
   providers, not target instance names. An empty list allows no target.
   Every target declared in the package is checked, even when a command
   selects only one of them.
@@ -459,7 +461,7 @@ models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no
 </ParamField>
 
 <ParamField path="tools.builtin.allow" type="string[]" required>
-  Exact builtin IDs. Currently `end_call` is supported on all three targets;
+  Exact builtin IDs. Currently `end_call` is supported on all four targets;
   `send_sms` is supported only on SLNG. The manifest accepts nonempty ID
   strings, while tool validation checks whether the ID and target are
   supported. An empty list forbids builtin tools.
