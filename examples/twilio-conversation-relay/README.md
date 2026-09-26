@@ -311,11 +311,15 @@ Three things change with the region
 ([Twilio Regions](https://www.twilio.com/docs/global-infrastructure/understanding-twilio-regions)):
 
 1. `TWILIO_AUTH_TOKEN` must be that region's Auth Token. In the Console, open
-   API keys & tokens and pick the region. The US1 token is refused there, and
-   the app checks signatures with the same token.
-2. The number must route its calls to that region. Set it on the number's
-   Regional tab in the Console. The change can take five minutes. Deploy checks
-   it and refuses a mismatch. It never changes the routing for you.
+   API keys & tokens and pick the region
+   ([regional credentials](https://www.twilio.com/docs/global-infrastructure/manage-regional-api-credentials)).
+   The US1 token is refused there, and the app checks signatures with the same
+   token.
+2. The number must route its calls to that region. In the Console, use
+   Re-route in the number's routing settings
+   ([inbound processing region](https://www.twilio.com/docs/global-infrastructure/inbound-processing-console)).
+   The change can take five minutes. Deploy checks it and refuses a mismatch.
+   It never changes the routing for you.
 3. Deploy writes the number's settings in that region, on
    `api.dublin.ie1.twilio.com` or `api.sydney.au1.twilio.com`. Each region keeps
    its own copy, so the US1 copy stays as it was.

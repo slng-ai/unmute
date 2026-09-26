@@ -198,8 +198,9 @@ set "A call comes in" back to the snapshot's `voice_url` and `voice_method`.
 | Deploy says the app "names no build" or "runs build ..." | The host runs another build | Recompile, rehost, then deploy |
 | Deploy says the app "refused a signed /voice" | The host has different Twilio values | Use the same four values on both sides |
 | Deploy names a TwiML App, SIP trunk or fallback URL | The number has one | Remove it in the Console, then deploy again |
-| Deploy says the number "routes its calls to" another region | The number's routing region is not the connection's `region` | Change one of them. Routing is on the number's Regional tab |
-| Deploy answers 401 on an `ie1` or `au1` package | The Auth Token is the US1 one | Use that region's Auth Token, on the host too |
+| Deploy says the number "routes its calls to" another region | The number's routing region is not the connection's `region` | Change one of them. Use Re-route in the number's [routing settings](https://www.twilio.com/docs/global-infrastructure/inbound-processing-console) |
+| Deploy answers 401 on an `ie1` or `au1` package | The Auth Token is the US1 one | Use that region's [Auth Token](https://www.twilio.com/docs/global-infrastructure/manage-regional-api-credentials), on the host too |
+| The Connect callback reports [error 64105](https://www.twilio.com/docs/api/errors/64105) | The WebSocket closed during the session | Read the host log. Check the proxy keeps an idle WebSocket open for a whole call |
 | Deploy says "the write's outcome is unknown" | The write timed out or the readback failed | Check the number in the Console, then run `--dry-run` |
 | The call reports an application error | Twilio could not reach `/voice` | Check `/healthz` from outside the host |
 | The call fails after `/voice` answered | ConversationRelay is off for the account, or the WebSocket was refused | Accept the addendum, then read the Twilio Debugger and the host log |
