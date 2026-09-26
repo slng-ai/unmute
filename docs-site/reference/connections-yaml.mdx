@@ -112,8 +112,9 @@ connections/twilio_voice.yaml: connection "twilio_voice" requires environment ke
 | LiveKit | `connector` | `twilio` | `account_sid`, `auth_token`, `from_number` |
 | Twilio | `conversation-relay` | `twilio` | `account_sid`, `auth_token`, `phone_number_sid`, `public_url` |
 
-On `conversation-relay`, `phone_number_sid` is for pointing the number at the
-app. The running app never reads it, so it is not asked of the process.
+On `conversation-relay`, `phone_number_sid` is read only by `unmute deploy`,
+when it points the number at the app. The running app never reads it, so it is
+not asked of the process.
 
 The SIP route uses standard SIP names rather than one vendor's, because the same
 generated code dials through any SIP carrier with them.

@@ -17,6 +17,7 @@ pushes it, and SLNG runs the agent. There is nothing to host and no
 **Twilio** writes a small Python app that Twilio ConversationRelay calls.
 Twilio does the listening and speaking, the app thinks and runs tools, and
 you host it. It answers inbound phone calls only, and has no `unmute dev`.
+Once it is hosted, `unmute deploy --target <name>` points your number at it.
 See [The Twilio ConversationRelay app](/targets/twilio).
 
 Those four are the only values `provider` accepts.

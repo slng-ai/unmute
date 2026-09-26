@@ -35,6 +35,10 @@ type Artifact struct {
 	// anything, and the emitted runbook prints the same value, so the two cannot
 	// disagree about what a package needs.
 	Requires Requirements
+	// ArtifactID is the twilio driver's build identity, the value its app.py
+	// serves on /healthz and its compile report records. Empty for every other
+	// target.
+	ArtifactID string
 }
 
 type File struct {
@@ -104,6 +108,7 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		if err != nil {
 			return Artifact{}, fmt.Errorf("generate %s twilio: %w", resolved.Name, err)
 		}
+		artifact.ArtifactID = emitted.ArtifactID
 		return withManifestReport(artifact, agent)
 	case ir.ProviderSlng:
 		// No withTelephonyReport: unmute writes slng no carrier state, so there is

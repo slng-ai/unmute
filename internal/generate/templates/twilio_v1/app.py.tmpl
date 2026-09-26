@@ -82,6 +82,11 @@ WSS_PLACEHOLDER = "__PUBLIC_WSS_ORIGIN__"
 CALL_SID = re.compile(r"CA[0-9a-f]{32}")
 SESSION_ID = re.compile(r"VX[0-9a-f]{32}")
 HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>'
+# Which build this is, served on /healthz so `unmute deploy` can refuse to route
+# a number at a different one. An Unmute drift check, not a Twilio API and not
+# an attestation. Hashed from the rest of this file, the TwiML, the pins, the
+# image and the tools; never from a credential or the public origin.
+ARTIFACT_ID = {{pyq .ArtifactID}}
 {{- if .VertexHelper}}
 {{.VertexHelper}}
 {{- end}}
@@ -956,10 +961,11 @@ def build_app(client: Any = None) -> web.Application:
 
     async def healthz(request: web.Request) -> web.Response:
         # 503 while draining, or when every slot is held by a handler that
-        # outlived its call: the process can take no call either way.
+        # outlived its call: the process can take no call either way. A 200
+        # does not promise a free slot: /voice may still answer <Hangup/>.
         if slots.draining or slots.orphaned >= slots.limit:
-            return web.json_response({"ok": False}, status=503)
-        return web.json_response({"ok": True})
+            return web.json_response({"ok": False, "artifact_id": ARTIFACT_ID}, status=503)
+        return web.json_response({"ok": True, "artifact_id": ARTIFACT_ID})
 
     async def voice(request: web.Request) -> web.Response:
         # https://www.twilio.com/docs/usage/security: the exact URL Twilio
