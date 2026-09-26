@@ -459,10 +459,10 @@ func (c twilioConfig) checkRouting(phoneNumber string) error {
 	}
 	if got := cmp.Or(routing.VoiceRegion, "us1"); got != c.region {
 		return fmt.Errorf("number %s routes its calls to %s, and the connection names region %s, so a voice URL written there "+
-			"would never be used. Nothing was written. Set the number's routing region to %s in the Twilio Console "+
-			"(the number's Regional tab), or with POST https://routes.twilio.com/v2/PhoneNumbers/<number> VoiceRegion=%s, "+
+			"would never be used. Nothing was written. Re-route the number to %s in the Twilio Console "+
+			"(%s), or with POST https://routes.twilio.com/v2/PhoneNumbers/<number> VoiceRegion=%s, "+
 			"wait up to five minutes, then deploy again. Deploy never changes routing",
-			phoneNumber, got, c.region, c.region, c.region)
+			phoneNumber, got, c.region, c.region, target.TwilioDocs.InboundRouting, c.region)
 	}
 	return nil
 }
