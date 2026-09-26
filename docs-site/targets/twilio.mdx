@@ -202,6 +202,12 @@ true` and a `location`, the app calls Vertex AI with that API key. Without
 them, it calls the Gemini Developer API. Only the selected provider's SDK and
 key reach the project, so the other key may be missing on your machine.
 
+In the `unmute` console, switching the think provider loads that provider's
+starter: `gpt-5.6-luna` with its two params for OpenAI, or
+`gemini-3.1-flash-lite` with `thinking_level: MINIMAL` on the Developer API for
+Google. Add `vertexai` and `location` yourself. Picking the provider that is
+already bound keeps the binding as it is.
+
 ## What the package may carry
 
 | Section | What works |
@@ -374,9 +380,13 @@ Then call the number. That call is the only check of the speech path.
 
 ## What is not verified yet
 
-- A call through a Twilio number with this target.
-- The signed WebSocket handshake behind a real proxy.
-- How Twilio plays tokens already sent when an interrupt arrives.
+- A call behind a proxy other than a cloudflared quick tunnel.
+- How Twilio plays tokens already sent when an interrupt arrives. One live
+  interrupt was heard, on OpenAI.
+- `end_call` on a real call since the app waits for Twilio to close the socket.
+  The close order is tested offline only.
+- A second call refused while `max_sessions` calls are running. The refusal
+  is tested offline only.
 - A call in `ie1` or `au1`. The docs list ConversationRelay in both regions.
   They do not say whether Deepgram and ElevenLabs run there.
 - The Gemini Developer API path, with no `vertexai`, against a real key.
@@ -384,6 +394,9 @@ Then call the number. That call is the only check of the speech path.
 ## Where to go next
 
 <CardGroup cols={2}>
+  <Card title="Take a call with ConversationRelay" icon="phone-call" href="/telephony/twilio-conversation-relay">
+    The example package, from compile to a real call, on OpenAI or Gemini.
+  </Card>
   <Card title="Connections" icon="plug" href="/reference/connections-yaml">
     The route keys each transport takes.
   </Card>

@@ -1,0 +1,217 @@
+---
+title: "Take a call with Twilio ConversationRelay"
+description: "Compile an agent into a small app you host, point one Twilio number at it, and call it. Then switch the model from OpenAI to Gemini."
+sidebarTitle: "ConversationRelay route"
+---
+
+This is the `conversation-relay` transport with the `twilio` carrier, on the
+[Twilio target](/targets/twilio). Twilio answers the call, listens and speaks.
+A Python app that unmute compiles and you host does the thinking.
+
+```text
+caller -> your Twilio number -> POST /voice -> ConversationRelay <-> wss:// your app -> OpenAI or Gemini
+```
+
+Every command below uses the
+[twilio-conversation-relay example](https://github.com/slng-ai/unmute/tree/main/examples/twilio-conversation-relay):
+a front desk with one tool, `opening_hours`, and `end_call`. To start your own
+package in the same shape, run:
+
+```sh
+unmute init my-desk --target twilio
+```
+
+There is no `unmute dev` loop for this route. Twilio can only call a public
+https origin, so the first test is a real phone call.
+
+On this page:
+
+- [Before you start](#before-you-start) - accounts, the AI addendum, four values
+- [1. Compile](#1-compile) - validate and build the app
+- [2. Run and host the app](#2-run-and-host-the-app) - what the origin must do
+- [3. Point the number at it](#3-point-the-number-at-it) - `unmute deploy`
+- [4. Call it](#4-call-it) - the tool, an interruption, the hangup
+- [5. Switch to Gemini](#5-switch-to-gemini) - recompile, rehost, deploy again
+- [6. Put the old route back](#6-put-the-old-route-back) - the rollback snapshot
+- [Troubleshooting](#troubleshooting) - symptoms, causes and fixes
+
+## Before you start
+
+You need `unmute`, `uv` with Python 3.12 on the host, a Twilio account with a
+test voice number, and an `OPENAI_API_KEY`
+([Chat Completions](https://developers.openai.com/api/reference/resources/chat)).
+
+Turn ConversationRelay on for the account once, following Twilio's
+[onboarding guide](https://www.twilio.com/docs/voice/conversationrelay/onboarding).
+In the Console, open Voice, Settings, Privacy & Security, accept the Predictive
+and Generative AI/ML Features Addendum, and save. Skip the guide's TwiML App
+steps: this route sets the number's own voice webhook, and deploy refuses a
+number that has a TwiML App.
+
+The connection names four environment values:
+
+| Name | Value | Read by |
+|---|---|---|
+| `TWILIO_ACCOUNT_SID` | Account SID, on the Console home page | the app and deploy |
+| `TWILIO_AUTH_TOKEN` | Auth Token, next to it | the app and deploy |
+| `TWILIO_PUBLIC_URL` | the host's https origin, no path | the app and deploy |
+| `TWILIO_PHONE_NUMBER_SID` | the number's SID, `PN` and 32 characters | deploy only |
+
+## 1. Compile
+
+```sh
+unmute validate examples/twilio-conversation-relay
+unmute compile examples/twilio-conversation-relay
+```
+
+`build/twilio/` now holds `app.py`, the TwiML
+([`<ConversationRelay>`](https://www.twilio.com/docs/voice/twiml/connect/conversationrelay))
+the app answers `/voice` with, the tool handler, exact pins, a `Dockerfile` and
+a runbook. The app installs only the SDK of the model the agent thinks with.
+
+## 2. Run and host the app
+
+Copy `build/twilio/.env.example` to the package's `.env`, and fill it in. Then,
+from `build/twilio/`:
+
+```sh
+uv run --env-file ../../.env python app.py
+```
+
+Unmute does not host the app. The host must:
+
+- Serve it at a public https origin. Twilio calls `/voice` and
+  `/connect-action`, and opens a WebSocket to `/conversation`.
+- Pass WebSocket upgrades through, and keep the connection open for a whole call.
+- Forward the path and query unchanged. The app checks each
+  `X-Twilio-Signature` against `TWILIO_PUBLIC_URL` plus the exact path
+  ([webhook security](https://www.twilio.com/docs/usage/security)).
+- Run one process. `capacity.max_sessions` is how many calls it takes at once.
+
+`GET /healthz` answers with the build's `artifact_id`.
+
+## 3. Point the number at it
+
+```sh
+unmute deploy examples/twilio-conversation-relay --target twilio --dry-run
+unmute deploy examples/twilio-conversation-relay --target twilio
+```
+
+`--target` is required, because a bare `unmute deploy` is an SLNG deploy. Deploy
+checks the number, the host's `artifact_id` and a signed `/voice`, saves the old
+route to a private file, and sets `VoiceUrl` and `VoiceMethod` on that one
+number ([IncomingPhoneNumber](https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource)).
+It uploads nothing and places no call. Every check is on
+[the Twilio target page](/targets/twilio#point-the-number-at-it).
+
+## 4. Call it
+
+Call the number with a headset or the handset. A speakerphone makes the agent
+hear itself.
+
+1. Ask "Are you open on Friday?" The agent calls `opening_hours` and answers
+   from it.
+2. Talk over an answer. The agent stops, and keeps only what you heard.
+3. Say you are done. The agent says goodbye and ends the call.
+
+The reply travels as text tokens over the WebSocket
+([WebSocket messages](https://www.twilio.com/docs/voice/conversationrelay/websocket-messages)).
+Deepgram and ElevenLabs run inside Twilio
+([voice configuration](https://www.twilio.com/docs/voice/conversationrelay/voice-configuration)).
+The host's log names each call and event, never the transcript.
+
+## 5. Switch to Gemini
+
+In `agent.yaml`, replace the `reasoning:` entry under `models.think`:
+
+```yaml
+models:
+  think:
+    reasoning:
+      provider: google
+      model: gemini-3.1-flash-lite
+      params:
+        vertexai: true
+        location: eu
+        thinking_config:
+          thinking_level: MINIMAL
+```
+
+### Every key the Gemini binding takes
+
+<ParamField path="provider" type="google | gemini" required>
+  Gemini's native API. `gemini` is accepted as the same provider.
+</ParamField>
+
+<ParamField path="model" type="string" required>
+  The Gemini model id, passed through as written.
+</ParamField>
+
+<ParamField path="params.vertexai" type="boolean">
+  `true` sends the requests to Vertex AI. Omitted or `false` uses the Gemini
+  Developer API. It chooses the endpoint and is not sent with a request.
+</ParamField>
+
+<ParamField path="params.location" type="string">
+  The Vertex AI location, such as `eu`. Used only with `vertexai: true`.
+</ParamField>
+
+<ParamField path="params.thinking_config" type="object">
+  Sent with every request as written. The example uses
+  `thinking_level: MINIMAL`.
+</ParamField>
+
+OpenAI's `reasoning_effort` and `parallel_tool_calls` are refused on this
+binding, because a Gemini request has no such field.
+
+This calls Gemini's native `generateContent` with the
+[Google GenAI SDK](https://googleapis.github.io/python-genai/), on Vertex AI in
+the EU. It needs a `GOOGLE_API_KEY` that is a
+[Vertex AI API key](https://cloud.google.com/vertex-ai/generative-ai/docs/start/api-keys),
+and a model its [location](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations)
+serves. Without `vertexai` and `location`, the binding uses the Gemini Developer
+API, which is supported but not yet tested with a real key.
+
+Then recompile, stop the old app, start the new build at the same origin, and
+deploy again. The build's `artifact_id` changed, so deploy refuses the old build
+until it is replaced. One build runs at one origin. For both at once, use two
+origins and two numbers. The same holds for any change to the package.
+
+Twilio's own tutorials split the work the same way, for
+[OpenAI](https://www.twilio.com/en-us/blog/developers/tutorials/product/integrate-openai-twilio-voice-using-conversationrelay-python)
+and [Gemini](https://www.twilio.com/en-us/blog/developers/tutorials/product/integrate-google-gemini-twilio-voice-conversationrelay).
+The generated app also streams replies, checks every signature, and handles
+interruptions.
+
+## 6. Put the old route back
+
+Deploy printed the snapshot path. First check the number in the Console: "A call
+comes in" must still be a webhook to the snapshot's `new_voice_url` with
+`HTTP POST`, and the number must have no TwiML App, SIP trunk or fallback URL.
+If anything differs, somebody changed it since, so stop and ask. If it matches,
+set "A call comes in" back to the snapshot's `voice_url` and `voice_method`.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Deploy says the app "names no build" or "runs build ..." | The host runs another build | Recompile, rehost, then deploy |
+| Deploy says the app "refused a signed /voice" | The host has different Twilio values | Use the same four values on both sides |
+| Deploy names a TwiML App, SIP trunk or fallback URL | The number has one | Remove it in the Console, then deploy again |
+| Deploy says the number "routes its calls to" another region | The number's routing region is not the connection's `region` | Change one of them. Use Re-route in the number's [routing settings](https://www.twilio.com/docs/global-infrastructure/inbound-processing-console) |
+| Deploy answers 401 on an `ie1` or `au1` package | The Auth Token is the US1 one | Use that region's [Auth Token](https://www.twilio.com/docs/global-infrastructure/manage-regional-api-credentials), on the host too |
+| The Connect callback reports [error 64105](https://www.twilio.com/docs/api/errors/64105) | The WebSocket closed during the session | Read the host log. Check the proxy keeps an idle WebSocket open for a whole call |
+| Deploy says "the write's outcome is unknown" | The write timed out or the readback failed | Check the number in the Console, then run `--dry-run` |
+| The call reports an application error | Twilio could not reach `/voice` | Check `/healthz` from outside the host |
+| The call fails after `/voice` answered | ConversationRelay is off for the account, or the WebSocket was refused | Accept the addendum, then read the Twilio Debugger and the host log |
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="The Twilio target" icon="phone" href="/targets/twilio">
+    Every key the target takes, and everything it refuses.
+  </Card>
+  <Card title="unmute deploy" icon="upload" href="/reference/cli/deploy">
+    The command reference.
+  </Card>
+</CardGroup>

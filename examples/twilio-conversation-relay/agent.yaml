@@ -1,0 +1,77 @@
+# A front desk that answers the phone through Twilio ConversationRelay. One
+# agent, one inbound phone channel, one read-only tool and end_call. The README
+# shows how to switch the think model to Gemini.
+version: 1
+name: twilio-conversation-relay
+architecture: cascade
+entry_agent: desk
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-luna
+      params:
+        # Measured 2026-09-25: this model returns 400 on tool calls through
+        # Chat Completions unless reasoning_effort is none.
+        reasoning_effort: none
+        parallel_tool_calls: false
+  listen:
+    transcriber:
+      provider: deepgram
+      model: nova-3-general
+      language: en-US
+  speak:
+    voice:
+      provider: elevenlabs
+      model: flash_v2_5
+      voice: UgBBYS2sOqTuMpoF3BR0
+      language: en-US
+  turn:
+    relay:
+      params:
+        speechTimeout: 800
+        interruptSensitivity: medium
+        ignoreBackchannel: true
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - opening_hours
+      - end_call
+
+tools:
+  - opening_hours
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hello, how can I help with the desk today?"
+  interruption:
+    enabled: true
+
+channels:
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: false
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  peak_starts_per_second: 1
+  avg_session_duration: 3m
+
+# Both model keys are declared, so switching the think binding needs no other
+# edit. A compiled build reads only the key of the provider it thinks with.
+secrets:
+  - OPENAI_API_KEY
+  - GOOGLE_API_KEY
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_PHONE_NUMBER_SID
+  - TWILIO_PUBLIC_URL
