@@ -52,6 +52,7 @@ ENV_ACCOUNT_SID = "TWILIO_ACCOUNT_SID"
 ENV_AUTH_TOKEN = "TWILIO_AUTH_TOKEN"
 ENV_PUBLIC_URL = "TWILIO_PUBLIC_URL"
 ENV_MODEL_KEY = "GOOGLE_API_KEY"
+UPSTREAM_ENV: tuple[str, ...] = ()
 
 # Limits. Each one bounds something a caller or a provider could otherwise grow.
 MAX_SESSIONS = 5  # capacity.max_sessions: calls held at once
@@ -80,7 +81,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:c12bf19bd506c83b01a56d18cfe3ffe56d7ee9cf40e01bc235a007b4c16099bd"
+ARTIFACT_ID = "sha256:de4a5f3cfbad19a6f944b522e596dcb8884b043b1cf5eb20802afc8f3e08edd1"
 
 def _google_vertex_client(api_key, location):
     from google import genai as _google_genai
@@ -893,7 +894,8 @@ def raw_target(scope: Mapping[str, Any]) -> tuple[str, str]:
 
 
 def build_app(client: Any = None) -> FastAPI:
-    missing = [name for name in (ENV_ACCOUNT_SID, ENV_AUTH_TOKEN, ENV_PUBLIC_URL, ENV_MODEL_KEY) if not os.environ.get(name)]
+    required = (ENV_ACCOUNT_SID, ENV_AUTH_TOKEN, ENV_PUBLIC_URL, ENV_MODEL_KEY, *UPSTREAM_ENV)
+    missing = [name for name in required if not os.environ.get(name)]
     if missing:
         raise SystemExit("missing environment: " + ", ".join(missing))
     account_sid = os.environ[ENV_ACCOUNT_SID]
@@ -1386,7 +1388,7 @@ def opening_hours(day):
     return {"day": day, "open": bool(opens), "opens": opens, "closes": closes}
 === compile-report.json ===
 {
-  "artifact_id": "sha256:c12bf19bd506c83b01a56d18cfe3ffe56d7ee9cf40e01bc235a007b4c16099bd",
+  "artifact_id": "sha256:de4a5f3cfbad19a6f944b522e596dcb8884b043b1cf5eb20802afc8f3e08edd1",
   "bindings": [
     {
       "binding": {

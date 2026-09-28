@@ -24,6 +24,24 @@ var twilioCatalog = []Entry{
 		},
 	},
 	{
+		// The SLNG Context Router, over the same Chat Completions request as the
+		// openai row. The app builds its own client on the router's regional
+		// base_url, and sends the inline slng_config and the two identity
+		// headers with every request, so nothing router-specific rides the
+		// constructor.
+		Framework: Twilio, Role: Reason, Vendor: "slng",
+		Verified: SlngRouterVerified, Docs: SlngRouterDocs,
+		Install: InstallSpec{Package: "openai"},
+		Import:  "from openai import AsyncOpenAI",
+		Call: &CallSpec{
+			Class: "AsyncOpenAI", APIKeyArg: "api_key", APIKeyEnv: SlngRouterKeyEnv,
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Endpoint: FieldSpec{Arg: "base_url"},
+			Params:   ParamsKwargs,
+		},
+		Notes: []string{"SLNG Context Router over Chat Completions; params.world_part becomes base_url, slng_config and the forwarded params ride extra_body, and the identity headers ride extra_headers, per request"},
+	},
+	{
 		Framework: Twilio, Role: Reason, Vendor: "google", Aliases: []string{"gemini"},
 		Verified: TwilioTargetVerified, Docs: "https://ai.google.dev/api/generate-content",
 		Install: InstallSpec{Package: "google-genai"},

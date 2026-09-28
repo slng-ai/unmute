@@ -8,7 +8,7 @@ sequenceDiagram
     participant Caller
     participant Twilio
     participant App as app.py
-    participant Model as {{if .OpenAI}}OpenAI{{else}}Gemini{{end}}
+    participant Model as {{if .Router}}SLNG router{{else if .OpenAI}}OpenAI{{else}}Gemini{{end}}
     Caller->>Twilio: calls your number
     Twilio->>App: POST /voice (signed)
     App-->>Twilio: TwiML: Connect + ConversationRelay

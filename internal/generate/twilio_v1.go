@@ -66,6 +66,21 @@ type twilioData struct {
 	ManualSteps  []string
 	VertexHelper string
 	ArtifactID   string
+	Router       *twilioRouter // set when think is the SLNG Context Router
+}
+
+// twilioRouter is what the OpenAI brain adds to reach the SLNG Context Router:
+// the regional endpoint, the inline configuration, and the two identity
+// headers. The values come from the helpers every router target shares
+// (slng_router.go), so the twilio app sends what livekit and pipecat send.
+type twilioRouter struct {
+	BaseURL       string
+	Config        string   // the slng_config dict literal
+	Body          string   // the extra_body dict literal
+	Scope         string   // the cache scope sent as the agent id header
+	AgentHeader   string   // header names, owned by internal/target
+	SessionHeader string   //
+	UpstreamEnv   []string // the upstream credentials slng_config reads
 }
 
 type twilioTool struct {
@@ -227,6 +242,21 @@ func buildTwilioData(agent *ir.Agent, resolved ir.Target) (twilioData, error) {
 	if params == nil {
 		params = map[string]any{}
 	}
+	if think.Router() {
+		router, err := twilioRouterFor(agent, think)
+		if err != nil {
+			return twilioData{}, err
+		}
+		data.Router = router
+		data.OpenAI = true // the router speaks Chat Completions
+		// Only the folded fields stay request kwargs. world_part became the
+		// base URL, and everything else rides the body, the router's rule on
+		// every target.
+		params, _ = splitParams(slngConsumedParams(params), targetcap.SlngRequestBodyArg)
+		if params == nil {
+			params = map[string]any{}
+		}
+	}
 	// Dropped for the reason the shared warning gives: they configure a
 	// Responses client, and a Chat Completions request does not define them.
 	for _, name := range ir.ResponsesOnlyParams {
@@ -294,6 +324,24 @@ func buildTwilioData(agent *ir.Agent, resolved ir.Target) (twilioData, error) {
 		return twilioData{}, fmt.Errorf("twilio: connection %q must name account_sid, auth_token and public_url", resolved.Connection)
 	}
 	return data, nil
+}
+
+func twilioRouterFor(agent *ir.Agent, think ir.Binding) (*twilioRouter, error) {
+	base, ok := targetcap.SlngRouterBaseURL(slngWorldPart(think))
+	if !ok {
+		return nil, fmt.Errorf("twilio: think params.world_part %q is not a router world part", slngWorldPart(think))
+	}
+	config, err := slngConfigBody(think)
+	if err != nil {
+		return nil, fmt.Errorf("twilio: think: %w", err)
+	}
+	scope := targetcap.SlngScope(think.AgentID, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: agent.EntryAgent})
+	site := slngSite{ConfigFunc: "_slng_config", Scope: scope}
+	return &twilioRouter{
+		BaseURL: base, Config: config, Body: pyLiteral(slngRequestBody(site, think)), Scope: scope,
+		AgentHeader: targetcap.SlngAgentIDHeader, SessionHeader: targetcap.SlngSessionIDHeader,
+		UpstreamEnv: slngBindingCredentialEnvs(think),
+	}, nil
 }
 
 // twilioRelayXML writes the TwiML the app answers /voice with, as a template:
@@ -408,7 +456,11 @@ func twilioReport(data twilioData, files []File, bindings []ir.ForwardedBinding,
 	}
 	slices.Sort(generated)
 	required := []string{data.Env.AccountSID, data.Env.AuthToken, data.Env.PublicURL, data.ModelKeyEnv}
+	if data.Router != nil {
+		required = append(required, data.Router.UpstreamEnv...)
+	}
 	slices.Sort(required)
+	required = slices.Compact(required)
 	pins := map[string]string{}
 	for _, dep := range data.Deps {
 		if name, version, ok := strings.Cut(dep, "=="); ok {
@@ -416,19 +468,25 @@ func twilioReport(data twilioData, files []File, bindings []ir.ForwardedBinding,
 		}
 	}
 	api := "OpenAI Chat Completions (POST /v1/chat/completions, streamed)"
+	if data.Router != nil {
+		api = "SLNG Context Router, OpenAI Chat Completions at " + data.Router.BaseURL + " (streamed)"
+	}
 	if !data.OpenAI {
 		api = "Gemini generateContent (streamGenerateContent), Gemini Developer API"
 		if data.Vertex {
 			api = "Gemini generateContent (streamGenerateContent), Vertex AI " + data.Location + " with an API key, v1beta1"
 		}
 	}
-	path := "chat"
-	if !data.OpenAI {
-		path = cmp.Or(data.Location, "developer")
+	vendor, path := "openai", "chat"
+	switch {
+	case data.Router != nil:
+		vendor, path = "slng", "router"
+	case !data.OpenAI:
+		vendor, path = "google", cmp.Or(data.Location, "developer")
 	}
 	think := fmt.Sprintf("think %s: no real-model evidence for this model and path; run scripts/text_run_twilio.py --real", data.Model)
 	for _, run := range targetcap.TwilioVerifiedThink {
-		if run.Model == data.Model && run.Path == path && (run.Vendor == "openai") == data.OpenAI {
+		if run.Model == data.Model && run.Path == path && run.Vendor == vendor {
 			think = fmt.Sprintf("think %s: streamed reply, tool follow-up and next turn after an interrupt passed against the real API on %s", data.Model, run.Date)
 		}
 	}

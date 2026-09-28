@@ -68,6 +68,7 @@ capacity:
 
 secrets:
   - OPENAI_API_KEY
+  - SLNG_API_KEY
   - GOOGLE_API_KEY
   - TWILIO_ACCOUNT_SID
   - TWILIO_AUTH_TOKEN

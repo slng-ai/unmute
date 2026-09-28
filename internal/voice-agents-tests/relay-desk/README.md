@@ -11,6 +11,7 @@ It compiles to two target instances with one agent definition:
 |---|---|---|
 | `twilio-openai` | OpenAI `gpt-5.6-luna`, Chat Completions | `OPENAI_API_KEY` |
 | `twilio-gemini` | Gemini `gemini-3.1-flash-lite`, Vertex AI `eu` with an API key | `GOOGLE_API_KEY` |
+| `twilio-slng` | `gpt-5.6-luna` on OpenAI through the SLNG Context Router, `eu-west` | `SLNG_API_KEY`, `OPENAI_API_KEY` |
 
 ## Check it without a call
 

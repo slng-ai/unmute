@@ -50,6 +50,7 @@ ENV_ACCOUNT_SID = "TWILIO_ACCOUNT_SID"
 ENV_AUTH_TOKEN = "TWILIO_AUTH_TOKEN"
 ENV_PUBLIC_URL = "TWILIO_PUBLIC_URL"
 ENV_MODEL_KEY = "OPENAI_API_KEY"
+UPSTREAM_ENV: tuple[str, ...] = ()
 
 # Limits. Each one bounds something a caller or a provider could otherwise grow.
 MAX_SESSIONS = 2  # capacity.max_sessions: calls held at once
@@ -78,7 +79,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:bb2070749e9a483cdd85b5e65b482e7097b49244bc07661c8789e7ee4befbe73"
+ARTIFACT_ID = "sha256:9426431c607a426a584c17fc14d9a87b3a0ebf4a8839c80ed7d11c1f681b8b84"
 
 # --- tools ---------------------------------------------------------------------
 
@@ -224,7 +225,11 @@ class Cycle:
 def make_client() -> AsyncOpenAI:
     # No SDK retries: a retry would spend the caller's silence. A failed
     # response takes the failure path instead.
-    return AsyncOpenAI(api_key=os.environ[ENV_MODEL_KEY], max_retries=0, timeout=MODEL_TIMEOUT)
+    return AsyncOpenAI(
+        api_key=os.environ[ENV_MODEL_KEY],
+        max_retries=0,
+        timeout=MODEL_TIMEOUT,
+    )
 
 
 class Brain:
@@ -824,7 +829,8 @@ def raw_target(scope: Mapping[str, Any]) -> tuple[str, str]:
 
 
 def build_app(client: Any = None) -> FastAPI:
-    missing = [name for name in (ENV_ACCOUNT_SID, ENV_AUTH_TOKEN, ENV_PUBLIC_URL, ENV_MODEL_KEY) if not os.environ.get(name)]
+    required = (ENV_ACCOUNT_SID, ENV_AUTH_TOKEN, ENV_PUBLIC_URL, ENV_MODEL_KEY, *UPSTREAM_ENV)
+    missing = [name for name in required if not os.environ.get(name)]
     if missing:
         raise SystemExit("missing environment: " + ", ".join(missing))
     account_sid = os.environ[ENV_ACCOUNT_SID]
@@ -1300,7 +1306,7 @@ may carry a secret, so it is readable only by you.
 </Response>
 === compile-report.json ===
 {
-  "artifact_id": "sha256:bb2070749e9a483cdd85b5e65b482e7097b49244bc07661c8789e7ee4befbe73",
+  "artifact_id": "sha256:9426431c607a426a584c17fc14d9a87b3a0ebf4a8839c80ed7d11c1f681b8b84",
   "bindings": [
     {
       "binding": {

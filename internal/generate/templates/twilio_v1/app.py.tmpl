@@ -28,7 +28,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 {{- if .OpenAI}}
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI{{if .Router}}, DefaultAsyncHttpxClient{{end}}
 {{- else}}
 {{- if not .Vertex}}
 from google import genai
@@ -61,6 +61,17 @@ ENV_ACCOUNT_SID = {{pyq .Env.AccountSID}}
 ENV_AUTH_TOKEN = {{pyq .Env.AuthToken}}
 ENV_PUBLIC_URL = {{pyq .Env.PublicURL}}
 ENV_MODEL_KEY = {{pyq .ModelKeyEnv}}
+{{- with .Router}}
+# The SLNG Context Router answers the turns it judges repeatable from its cache
+# and calls the upstream model for the rest. These are the upstream's own credentials, which
+# the inline configuration names.
+UPSTREAM_ENV: tuple[str, ...] = ({{range .UpstreamEnv}}{{pyq .}}, {{end}})
+ROUTER_BASE_URL = {{pyq .BaseURL}}
+# This agent's cache scope, sent as {{.AgentHeader}} on every request.
+ROUTER_SCOPE = {{pyq .Scope}}
+{{- else}}
+UPSTREAM_ENV: tuple[str, ...] = ()
+{{- end}}
 
 # Limits. Each one bounds something a caller or a provider could otherwise grow.
 MAX_SESSIONS = {{.MaxSessions}}  # capacity.max_sessions: calls held at once
@@ -238,10 +249,53 @@ class Cycle:
         return "".join(self.sent)
 
 {{if .OpenAI}}
+{{- with .Router}}
+def _slng_config() -> dict[str, Any]:
+    """The router's inline configuration: which model it calls, and where.
+
+    Read on every request, so a missing credential fails at startup through
+    build_app's check rather than here. No value is written into this file.
+    """
+    return {{.Config}}
+
+
+async def _slng_log_provenance(response: Any) -> None:
+    """Say where this answer came from, once per think request.
+
+    The router states it only in response headers. httpx runs this hook before
+    the body is read, so it reads headers only, and it never raises: a raising
+    response hook would fail the request it only describes.
+    """
+    try:
+        scope = response.request.headers.get({{pyq .AgentHeader}})
+        if not scope:
+            return
+        # Field order is the contract every router target writes.
+        fields = ["scope=" + scope]
+        fields.append("source=" + response.headers.get("x-slng-response-source", "unknown"))
+        if response.headers.get("x-slng-cache-layer"):
+            fields.append("layer=" + response.headers["x-slng-cache-layer"])
+        if response.headers.get("x-slng-model"):
+            fields.append("model=" + response.headers["x-slng-model"])
+        fields.append("request_id=" + response.headers.get("x-slng-request-id", "unknown"))
+        log.info("slng router: " + " ".join(fields))
+    except Exception:  # noqa: BLE001 - a log line must never end a call
+        log.debug("could not read the router's provenance headers", exc_info=True)
+
+
+{{end}}
 def make_client() -> AsyncOpenAI:
     # No SDK retries: a retry would spend the caller's silence. A failed
     # response takes the failure path instead.
-    return AsyncOpenAI(api_key=os.environ[ENV_MODEL_KEY], max_retries=0, timeout=MODEL_TIMEOUT)
+    return AsyncOpenAI(
+        api_key=os.environ[ENV_MODEL_KEY],
+        {{- if .Router}}
+        base_url=ROUTER_BASE_URL,
+        http_client=DefaultAsyncHttpxClient(event_hooks={"response": [_slng_log_provenance]}),
+        {{- end}}
+        max_retries=0,
+        timeout=MODEL_TIMEOUT,
+    )
 
 
 class Brain:
@@ -270,6 +324,12 @@ class Brain:
             "stream": True,
             **MODEL_PARAMS,
         }
+        {{- with .Router}}
+        # The router reads its configuration from the body and the cache
+        # scope and the call's session from two headers, on every request.
+        request["extra_body"] = {{.Body}}
+        request["extra_headers"] = {{"{"}}{{pyq .AgentHeader}}: ROUTER_SCOPE, {{pyq .SessionHeader}}: call.session_id{{"}"}}
+        {{- end}}
         if self.tools:
             request["tools"] = self.tools
         slots: dict[int, dict[str, str]] = {}
@@ -975,7 +1035,8 @@ def raw_target(scope: Mapping[str, Any]) -> tuple[str, str]:
 
 
 def build_app(client: Any = None) -> FastAPI:
-    missing = [name for name in (ENV_ACCOUNT_SID, ENV_AUTH_TOKEN, ENV_PUBLIC_URL, ENV_MODEL_KEY) if not os.environ.get(name)]
+    required = (ENV_ACCOUNT_SID, ENV_AUTH_TOKEN, ENV_PUBLIC_URL, ENV_MODEL_KEY, *UPSTREAM_ENV)
+    missing = [name for name in required if not os.environ.get(name)]
     if missing:
         raise SystemExit("missing environment: " + ", ".join(missing))
     account_sid = os.environ[ENV_ACCOUNT_SID]

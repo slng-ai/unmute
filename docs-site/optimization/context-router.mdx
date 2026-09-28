@@ -124,12 +124,12 @@ support.
 
 The line is built from three response headers, which the generated project
 reads through a hook on its own HTTP client because neither framework surfaces
-them.
+them. The `twilio` target's app writes the same line, from the same hook.
 
 | Header | Values | Meaning |
 |---|---|---|
 | `x-slng-response-source` | `llm`, `cache` | which path answered this turn |
-| `x-slng-cache-layer` | `l1_exact`, `l2_exact`, absent on the model path | which cache layer answered |
+| `x-slng-cache-layer` | seen so far: `l1_exact`, `l2_exact`, `l1_full_input`, `l2_full_input`; absent on the model path | which cache layer answered |
 | `x-slng-model` | a model id, present only on the model path | which model answered |
 | `x-slng-request-id` | always present, errors included | quote this to support |
 

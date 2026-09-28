@@ -303,6 +303,12 @@ Then:
 The same rule holds for any change to the package: prompt, tool, speech or
 model. Recompile, rehost, then deploy.
 
+To think through the SLNG Context Router instead, which answers the turns it
+judges repeatable from its cache, bind `provider: slng` with an `agent_id` and an `upstream`,
+and declare `SLNG_API_KEY`. The binding is on
+[the Twilio target page](../../docs-site/targets/twilio.mdx), after the Gemini
+one.
+
 ## Use another Twilio region
 
 Twilio handles calls in US1 by default. To keep the calls in Ireland (IE1) or

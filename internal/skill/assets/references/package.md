@@ -688,7 +688,9 @@ What a twilio package may carry, and nothing else:
 
 - one cascade agent, and exactly one channel: `kind: telephony`,
   `inbound: true`, `outbound: false`;
-- think: `provider: openai` (Chat Completions) or `provider: google`
+- think: `provider: openai` (Chat Completions), `provider: slng` (the SLNG
+  Context Router over Chat Completions, any upstream except `vertex`; declare
+  `SLNG_API_KEY` and the upstream's key), or `provider: google`
   (`gemini` also accepted; native `generateContent`). Params are forwarded to
   the request as written. `vertexai: true` with a `location` uses Vertex AI
   with the same `GOOGLE_API_KEY`; without them it is the Gemini Developer API.

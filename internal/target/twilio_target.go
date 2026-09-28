@@ -82,6 +82,7 @@ type TwilioThinkEvidence struct {
 var TwilioVerifiedThink = []TwilioThinkEvidence{
 	{Vendor: "openai", Model: "gpt-5.6-luna", Path: "chat", Date: "2026-09-25"},
 	{Vendor: "google", Model: "gemini-3.1-flash-lite", Path: "eu", Date: "2026-09-25"},
+	{Vendor: "slng", Model: "gpt-5.6-luna", Path: "router", Date: "2026-09-28"},
 }
 
 // The runtime limits are internal tested defaults, not authored fields.

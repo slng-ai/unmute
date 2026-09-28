@@ -66,12 +66,14 @@ class FakeOpenAI:
     def __init__(self, script: list[list[Any]]) -> None:
         self.script = list(script)
         self.requests: list[list[dict[str, Any]]] = []
+        self.raw: list[dict[str, Any]] = []  # every other request field, as sent
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
     async def create(self, **request: Any) -> Any:
         from openai.types.chat import ChatCompletionChunk
 
         self.requests.append(copy.deepcopy(request["messages"]))
+        self.raw.append({k: copy.deepcopy(v) for k, v in request.items() if k != "messages"})
         steps = self.script.pop(0) if self.script else []
 
         def chunk(delta: dict[str, Any]) -> Any:
@@ -444,6 +446,23 @@ async def streamed_reply_spacing_and_last(app: Any) -> None:
 
 
 @case
+async def router_request_carries_config_and_identity(app: Any) -> None:
+    if not hasattr(app, "ROUTER_SCOPE"):
+        return  # a direct binding: nothing router-shaped to check
+    async with env(app, [["Nine."], ["Ten."]]) as e:
+        relay = await e.relay()
+        for text in ("When do you open?", "And on Friday?"):
+            await relay.prompt(text)
+            await relay.reply()
+        for raw in e.fake.raw:
+            headers = {"X-Slng-Agent-Id": app.ROUTER_SCOPE, "X-Slng-Session-Id": SESSION}
+            check(raw.get("extra_headers") == headers, f"identity headers: {raw.get('extra_headers')}")
+            tiers = raw.get("extra_body", {}).get("slng_config", {}).get("tiers", {})
+            check(tiers.get("1", [{}])[0].get("model") == app.MODEL, f"slng_config does not name the model: {tiers}")
+            check("api_key" not in json.dumps(raw.get("extra_headers")), "a credential rode a header")
+
+
+@case
 async def identical_prompts_are_two_turns(app: Any) -> None:
     gate = asyncio.Event()
     async with env(app, [[gate, "one"], ["Yes."]]) as e:
@@ -732,8 +751,7 @@ async def shutdown_drains_then_ends(app: Any) -> None:
 # --- real cases ----------------------------------------------------------------
 
 
-def load_key(app: Any, env_file: Path) -> None:
-    name = app.ENV_MODEL_KEY
+def load_key(app: Any, env_file: Path, name: str) -> None:
     if os.environ.get(name):
         return
     for line in env_file.read_text().splitlines():
@@ -825,9 +843,12 @@ def main() -> None:
     import app  # noqa: E402 - the build directory is only importable now
 
     os.environ.setdefault(app.ENV_MODEL_KEY, "fake-model-key")
+    for name in app.UPSTREAM_ENV:
+        os.environ.setdefault(name, "fake-upstream-key")
     if args.real:
-        os.environ.pop(app.ENV_MODEL_KEY, None)
-        load_key(app, args.env_file)
+        for name in (app.ENV_MODEL_KEY, *app.UPSTREAM_ENV):
+            os.environ.pop(name, None)
+            load_key(app, args.env_file, name)
         print(f"real: {app.MODEL}")
         asyncio.run(real(app))
         print("real: pass")

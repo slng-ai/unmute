@@ -249,3 +249,57 @@ func TestTwilioContainer(t *testing.T) {
 		t.Error("the real local handler was not copied")
 	}
 }
+
+// A think binding on the SLNG Context Router keeps the Chat Completions brain
+// and adds only what the router needs: its regional endpoint, the inline
+// configuration and the forwarded params in the body, and the two identity
+// headers, on every request. The upstream key joins the startup check.
+func TestTwilioRouterThink(t *testing.T) {
+	artifact := twilioArtifact(t, filepath.Join("..", "voice-agents-tests", "relay-desk"), "twilio-slng")
+	app := artifactFile(t, artifact, "app.py")
+	for _, want := range []string{
+		`ENV_MODEL_KEY = "SLNG_API_KEY"`,
+		`UPSTREAM_ENV: tuple[str, ...] = ("OPENAI_API_KEY", )`,
+		`ROUTER_BASE_URL = "https://eu-west.context-router.slng.ai/v1"`,
+		`ROUTER_SCOPE = "relay-desk-v1:desk"`,
+		`base_url=ROUTER_BASE_URL,`,
+		`"slng_config": _slng_config()`,
+		`"reasoning_effort": "none"`,
+		`"X-Slng-Agent-Id": ROUTER_SCOPE, "X-Slng-Session-Id": call.session_id`,
+		`os.environ["OPENAI_API_KEY"]`,
+		`MODEL_PARAMS: dict[str, Any] = json.loads("{}")`,
+	} {
+		if !strings.Contains(app, want) {
+			t.Errorf("app.py lacks %s", want)
+		}
+	}
+	// The provenance line, held to the contract the other router targets keep
+	// (TestSlngRouterProvenanceLineHasOneOwner).
+	if strings.Count(app, "def _slng_log_provenance(") != 1 || !strings.Contains(app, "async def _slng_log_provenance(") ||
+		!strings.Contains(app, `"slng router: "`) || !strings.Contains(app, "except Exception:") ||
+		!strings.Contains(app, `event_hooks={"response": [_slng_log_provenance]}`) {
+		t.Error("app.py lacks the router's provenance hook")
+	}
+	at := -1
+	for _, key := range slngProvenanceKeys {
+		next := strings.Index(app, key)
+		if next < at {
+			t.Errorf("provenance field %s is missing or out of order", key)
+		}
+		at = next
+	}
+	var report struct {
+		RequiredEnv []string `json:"required_env"`
+	}
+	if err := json.Unmarshal([]byte(artifactFile(t, artifact, "compile-report.json")), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(report.RequiredEnv, "OPENAI_API_KEY") || !slices.Contains(report.RequiredEnv, "SLNG_API_KEY") {
+		t.Errorf("required_env = %v, want the router key and the upstream key", report.RequiredEnv)
+	}
+	// A direct binding carries none of it.
+	direct := artifactFile(t, twilioArtifact(t, filepath.Join("..", "voice-agents-tests", "relay-desk"), "twilio-openai"), "app.py")
+	if strings.Contains(direct, "ROUTER_") || strings.Contains(direct, "extra_body") {
+		t.Error("a direct openai binding emits router code")
+	}
+}

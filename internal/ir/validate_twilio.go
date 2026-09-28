@@ -30,6 +30,7 @@ var elevenLabsVoiceID = regexp.MustCompile(`^[A-Za-z0-9]{8,64}$`)
 // name would fight the app for the request.
 var twilioThinkOwned = map[string][]string{
 	"openai": {"messages", "model", "n", "stream", "stream_options", "tool_choice", "tools"},
+	"slng":   {"messages", "model", "n", "stream", "stream_options", "tool_choice", "tools"},
 	"google": {"automatic_function_calling", "config", "contents", "model", "system_instruction", "tool_config", "tools"},
 }
 
@@ -37,6 +38,7 @@ var twilioThinkOwned = map[string][]string{
 // reach a request that has no such field.
 var twilioThinkForeign = map[string][]string{
 	"openai": {"location", "thinking_config", "vertexai"},
+	"slng":   {"location", "thinking_config", "vertexai"},
 	"google": {"parallel_tool_calls", "reasoning_effort"},
 }
 
@@ -169,6 +171,11 @@ func validateTwilioThink(resolved Target, refuse func(string, ...any)) {
 		vendor := binding.Provider
 		if vendor == "gemini" {
 			vendor = "google"
+		}
+		// The vertex upstream sends a GCP key object, which needs a credential
+		// helper this app does not emit yet.
+		if binding.Router() && binding.Upstream != nil && binding.Upstream.Provider == "vertex" {
+			refuse("think.%s routes to upstream provider vertex, which this app has no credential helper for yet: use upstream openai, openai-compat, azure or bedrock, or compile to livekit or pipecat", name)
 		}
 		for _, key := range sortedKeys(binding.Params) {
 			switch {
