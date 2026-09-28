@@ -672,21 +672,18 @@ Pydantic AI also has its own providers for Anthropic, Gemini and others.
 
 ## What is not verified yet
 
-- A call behind a proxy other than a cloudflared quick tunnel.
+- A call behind a proxy other than Render and a cloudflared quick tunnel.
 - How Twilio plays tokens already sent when an interrupt arrives. One live
   interrupt was heard, on OpenAI.
-- `end_call` on a real call since the app waits for Twilio to close the socket.
-  The close order is tested offline only.
 - A second call refused while `max_sessions` calls are running. The refusal
   is tested offline only.
 - A call in `ie1` or `au1`. The docs list ConversationRelay in both regions.
   They do not say whether Deepgram and ElevenLabs run there.
 - The Gemini Developer API path, with no `vertexai`, against a real key.
-- Custom logic on a real call. The Pydantic AI example passes the offline
-  harness and a real model run, with a tool, an interrupt and a goodbye.
-- A hosted deploy. The FastAPI app passes the offline harness and a real
-  model run, but it has not run on Render or any other host yet, and the drain
-  on a real SIGTERM is tested in process only.
+- A real call on the built-in agent turn since the move to FastAPI. The one
+  hosted call so far ran custom logic.
+- The drain on a real SIGTERM, such as a redeploy during a call. It is tested
+  in process only.
 
 ## Where to go next
 

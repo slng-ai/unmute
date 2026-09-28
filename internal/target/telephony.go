@@ -441,7 +441,7 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	route = routes[relay]
 	for feature, evidence := range route.Features {
 		evidence.Verified = TwilioTargetVerified
-		evidence.Note = "built and offline-proven against a signed fake ConversationRelay client; no call has been placed through a Twilio number yet"
+		evidence.Note = "offline-proven against a signed fake ConversationRelay client; one real call through a Twilio number, to a Render host, reached speech, the end message and the action callback"
 		route.Features[feature] = evidence
 	}
 	route.RequiredEnvironment = []string{"account_sid", "auth_token", "phone_number_sid", "public_url"}

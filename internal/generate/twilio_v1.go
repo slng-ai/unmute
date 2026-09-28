@@ -507,7 +507,7 @@ func twilioReport(data twilioData, files []File, bindings []ir.ForwardedBinding,
 	evidence := []string{
 		think,
 		"ConversationRelay protocol: offline, against a signed fake client (scripts/text_run_twilio.py --fake)",
-		"real Twilio call: none yet; signed WebSocket handshake behind a proxy, playback and the action callback are unverified",
+		"real Twilio call: one, on a Render host with custom logic: the signed WebSocket handshake behind the proxy, speech both ways, the end message and the action callback; interrupt playback and the built-in turn on a real call are unverified",
 	}
 	out, err := json.MarshalIndent(twilioReportJSON{
 		Target: resolved.Name, Provider: string(resolved.Provider), ArtifactID: data.ArtifactID,

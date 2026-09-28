@@ -1449,7 +1449,7 @@ def opening_hours(day):
   "evidence": [
     "think gemini-3.1-flash-lite: streamed reply, tool follow-up and next turn after an interrupt passed against the real API on 2026-09-25",
     "ConversationRelay protocol: offline, against a signed fake client (scripts/text_run_twilio.py --fake)",
-    "real Twilio call: none yet; signed WebSocket handshake behind a proxy, playback and the action callback are unverified"
+    "real Twilio call: one, on a Render host with custom logic: the signed WebSocket handshake behind the proxy, speech both ways, the end message and the action callback; interrupt playback and the built-in turn on a real call are unverified"
   ],
   "files": [
     ".dockerignore",
@@ -1593,7 +1593,7 @@ def opening_hours(day):
       {
         "feature": "inbound",
         "tag": "provisional",
-        "note": "built and offline-proven against a signed fake ConversationRelay client; no call has been placed through a Twilio number yet",
+        "note": "offline-proven against a signed fake ConversationRelay client; one real call through a Twilio number, to a Render host, reached speech, the end message and the action callback",
         "docs": "https://www.twilio.com/docs/voice/twiml/connect/conversationrelay",
         "verified": "2026-09-25",
         "smoke": false
@@ -1601,7 +1601,7 @@ def opening_hours(day):
       {
         "feature": "route",
         "tag": "provisional",
-        "note": "built and offline-proven against a signed fake ConversationRelay client; no call has been placed through a Twilio number yet",
+        "note": "offline-proven against a signed fake ConversationRelay client; one real call through a Twilio number, to a Render host, reached speech, the end message and the action callback",
         "docs": "https://www.twilio.com/docs/voice/twiml/connect/conversationrelay",
         "verified": "2026-09-25",
         "smoke": false

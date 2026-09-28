@@ -28,18 +28,29 @@ On this page:
 
 - [Before you start](#before-you-start) - accounts, the AI addendum, four values
 - [1. Compile](#1-compile) - validate and build the app
-- [2. Run and host the app](#2-run-and-host-the-app) - what the origin must do
-- [3. Point the number at it](#3-point-the-number-at-it) - `unmute deploy`
-- [4. Call it](#4-call-it) - the tool, an interruption, the hangup
-- [5. Switch to Gemini](#5-switch-to-gemini) - recompile, rehost, deploy again
-- [6. Put the old route back](#6-put-the-old-route-back) - the rollback snapshot
+- [2. Try it on your laptop](#2-try-it-on-your-laptop) - the app behind a tunnel
+- [3. Host it on Render](#3-host-it-on-render) - straight from the build folder
+- [4. Check the number in the Twilio Console](#4-check-the-number-in-the-twilio-console) - its SID and voice settings
+- [5. Point the number at it](#5-point-the-number-at-it) - `unmute deploy`
+- [6. Call it](#6-call-it) - the tool, an interruption, the hangup
+- [7. Read the call back](#7-read-the-call-back) - the app's log and Twilio's call log
+- [8. Switch to Gemini](#8-switch-to-gemini) - recompile, rehost, deploy again
+- [9. Put the old route back](#9-put-the-old-route-back) - the rollback snapshot
+- [10. Clean up](#10-clean-up) - the service and the test repository
 - [Troubleshooting](#troubleshooting) - symptoms, causes and fixes
 
 ## Before you start
 
-You need `unmute`, `uv` with Python 3.12 on the host, a Twilio account with a
-test voice number, and an `OPENAI_API_KEY`
+You need `unmute`, `uv` with Python 3.12, a Twilio account with a test voice
+number, and an `OPENAI_API_KEY`
 ([Chat Completions](https://developers.openai.com/api/reference/resources/chat)).
+To host on Render as step 3 does, you also need the
+[GitHub CLI](https://cli.github.com/) and the
+[Render CLI](https://render.com/docs/cli), both logged in.
+
+Twilio has two consoles, and their menus differ. This page names both: the
+Twilio Console at `1console.twilio.com`, and the legacy Console at
+`console.twilio.com`. They show the same account.
 
 Turn ConversationRelay on for the account once, following Twilio's
 [onboarding guide](https://www.twilio.com/docs/voice/conversationrelay/onboarding).
@@ -69,7 +80,7 @@ unmute compile examples/twilio-conversation-relay
 the app answers `/voice` with, the tool handler, exact pins, a `Dockerfile` and
 a runbook. The app installs only the SDK of the model the agent thinks with.
 
-## 2. Run and host the app
+## 2. Try it on your laptop
 
 Copy `build/twilio/.env.example` to the package's `.env`, and fill it in. Then,
 from `build/twilio/`:
@@ -78,56 +89,229 @@ from `build/twilio/`:
 uv run --env-file ../../.env python app.py
 ```
 
-Unmute does not host the app. The host must:
+Twilio can only reach a public https origin, so put a tunnel in front of port
+8080. Either of these passes WebSockets through:
 
-- Serve it at a public https origin. Twilio calls `/voice` and
-  `/connect-action`, and opens a WebSocket to `/conversation`.
-- Pass WebSocket upgrades through, and keep the connection open for a whole call.
-- Forward the path and query unchanged. The app checks each
-  `X-Twilio-Signature` against `TWILIO_PUBLIC_URL` plus the exact path
-  ([webhook security](https://www.twilio.com/docs/usage/security)).
-- Run one process. `capacity.max_sessions` is how many calls it takes at once.
+```sh
+ngrok http 8080
+cloudflared tunnel --url http://localhost:8080
+```
 
-`GET /healthz` answers with the build's `artifact_id`.
+Set `TWILIO_PUBLIC_URL` to the tunnel's https origin, restart the app, and go on
+to step 4. A free tunnel gets a new origin each time it starts, so set the new
+one and deploy again after a restart.
 
-To try it from your laptop, run `ngrok http 8080` or
-`cloudflared tunnel --url http://localhost:8080`, and set `TWILIO_PUBLIC_URL`
-to the tunnel's origin. To host it for real, any host that runs a Dockerfile
-works. The Render Blueprint, the `hosting/` folder that keeps it across
-compiles, and the update loop are in
+## 3. Host it on Render
+
+Render builds a service from a Git repository
+([web services](https://render.com/docs/web-services)). The build folder is a
+complete project, so it can be that repository on its own. For your own
+package, commit `build/twilio/` with it instead, and point Render at that path.
+
+```mermaid
+flowchart LR
+    Build[build/twilio] -->|git push| Repo[private repo]
+    Repo -->|builds the Dockerfile| Render[Render service]
+    Render -->|https and wss| Twilio
+```
+
+1. Copy the compiled files into a new repository. Leave `.env` and local state
+   out:
+
+   ```sh
+   mkdir relay-test
+   rsync -a --exclude .venv --exclude uv.lock --exclude __pycache__ --exclude .env \
+     examples/twilio-conversation-relay/build/twilio/ relay-test/
+   cd relay-test
+   printf '.env\n.venv/\n__pycache__/\n' > .gitignore
+   git init -b main && git add -A && git commit -m "Compiled twilio target"
+   ```
+
+2. Push it as a private repository:
+
+   ```sh
+   gh repo create relay-test --private --source . --push
+   ```
+
+   Render reads it through its GitHub app. If that app does not reach every
+   repository of yours, add this one to it in the Render Dashboard.
+
+3. Create the service. The secret values come from your shell, so the command
+   line holds only their names:
+
+   ```sh
+   render services create --name relay-test --type web_service --runtime docker \
+     --repo https://github.com/<you>/relay-test --branch main \
+     --region frankfurt --plan starter --num-instances 1 \
+     --health-check-path /healthz --max-shutdown-delay 60 \
+     --env-var "TWILIO_ACCOUNT_SID=$TWILIO_ACCOUNT_SID" \
+     --env-var "TWILIO_AUTH_TOKEN=$TWILIO_AUTH_TOKEN" \
+     --env-var "OPENAI_API_KEY=$OPENAI_API_KEY" \
+     --env-var "TWILIO_PUBLIC_URL=https://relay-test.onrender.com" \
+     -o json --confirm
+   ```
+
+   Keep the `id` it prints, `srv-` and some characters. Check that the `url` it
+   prints is the one you set as `TWILIO_PUBLIC_URL`. Use a paid plan: a free
+   instance sleeps after 15 minutes without traffic
+   ([free instances](https://render.com/docs/free)), and Twilio does not wait
+   for it to wake.
+
+4. Wait until the deploy is live, then check the app from anywhere:
+
+   ```sh
+   render deploys list <service id> -o json
+   curl https://relay-test.onrender.com/healthz
+   ```
+
+   `/healthz` answers `{"ok":true,"artifact_id":"sha256:..."}`. The id matches
+   `artifact_id` in `build/twilio/compile-report.json`.
+
+A Blueprint does the same from a file you keep in the package: see
 [Host it on Render](/targets/twilio#host-it-on-render).
 
-## 3. Point the number at it
+## 4. Check the number in the Twilio Console
+
+Open the number:
+
+- Twilio Console: **Communications**, **Numbers & senders**, then the number.
+- Legacy Console: **Phone Numbers**, **Manage**, **Active numbers**, then the
+  number.
+
+Then check three things
+([respond to incoming calls](https://www.twilio.com/docs/voice/tutorials/how-to-respond-to-incoming-phone-calls)):
+
+1. Copy the number's **SID**, `PN` and 32 characters.
+2. Under **Voice Configuration**, the number has no TwiML App, no SIP trunk,
+   and no URL under "Primary handler fails". Deploy refuses a number with any
+   of them, and never clears one for you.
+3. In **Voice**, **Settings**, **Privacy & Security**, the Predictive and
+   Generative AI/ML Features Addendum is accepted
+   ([ConversationRelay onboarding](https://www.twilio.com/docs/voice/conversationrelay/onboarding)).
+
+The API gives the same three answers
+([IncomingPhoneNumber](https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource)).
+It prints the SID, then `None` three times for an eligible number:
+
+```sh
+curl -s -u "$TWILIO_ACCOUNT_SID:$TWILIO_AUTH_TOKEN" \
+  "https://api.twilio.com/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/IncomingPhoneNumbers.json?PhoneNumber=%2B<number>" \
+  | python3 -c "import json,sys; n=json.load(sys.stdin)['incoming_phone_numbers'][0]; print(n['sid'], n['voice_application_sid'], n['trunk_sid'], n['voice_fallback_url'])"
+```
+
+## 5. Point the number at it
+
+Set the four values deploy reads, from your shell or the package's `.env`:
+
+```sh
+export TWILIO_ACCOUNT_SID=AC...
+export TWILIO_AUTH_TOKEN=...
+export TWILIO_PHONE_NUMBER_SID=PN...
+export TWILIO_PUBLIC_URL=https://relay-test.onrender.com
+```
+
+Then run it twice, first as a dry run:
 
 ```sh
 unmute deploy examples/twilio-conversation-relay --target twilio --dry-run
 unmute deploy examples/twilio-conversation-relay --target twilio
 ```
 
-`--target` is required, because a bare `unmute deploy` is an SLNG deploy. Deploy
-checks the number, the host's `artifact_id` and a signed `/voice`, saves the old
-route to a private file, and sets `VoiceUrl` and `VoiceMethod` on that one
-number ([IncomingPhoneNumber](https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource)).
-It uploads nothing and places no call. Every check is on
+`--target` is required, because a bare `unmute deploy` is an SLNG deploy. The
+dry run makes every check and writes nothing. It checks:
+
+- the number;
+- its routing region;
+- that `/healthz` names this build;
+- that a `POST /voice` signed with your Auth Token returns this build's TwiML.
+
+The second run saves the old route to a private file, then sets `VoiceUrl` and
+`VoiceMethod` on that one number, and nothing else. It ends like this:
+
+```text
+twilio: routed +15005550006 (PN<sid>) to POST https://relay-test.onrender.com/voice
+twilio: old route saved to <config dir>/unmute/twilio-rollback/PN<sid>-<time>-<n>.json
+twilio: wrote build/twilio/deploy-report.json
+twilio: no call was placed; call +15005550006 to check speech, the WebSocket and the hangup
+```
+
+Keep the `old route saved to` path for step 9. Every check is on
 [the Twilio target page](/targets/twilio#point-the-number-at-it).
 
-## 4. Call it
+## 6. Call it
 
-Call the number with a headset or the handset. A speakerphone makes the agent
-hear itself.
+Watch the app's log in a second terminal:
 
-1. Ask "Are you open on Friday?" The agent calls `opening_hours` and answers
+```sh
+render logs -r <service id> --tail
+```
+
+Then call the number with the handset at your ear. A speakerphone makes the
+agent hear itself.
+
+1. ConversationRelay speaks the greeting.
+2. Ask "Are you open on Friday?" The agent calls `opening_hours` and answers
    from it.
-2. Talk over an answer. The agent stops, and keeps only what you heard.
-3. Say you are done. The agent says goodbye and ends the call.
+3. Talk over a long answer. The agent stops, and keeps only what you heard.
+4. Say you are done. The agent says goodbye and ends the call.
 
-The reply travels as text tokens over the WebSocket
-([WebSocket messages](https://www.twilio.com/docs/voice/conversationrelay/websocket-messages)).
-Deepgram and ElevenLabs run inside Twilio
-([voice configuration](https://www.twilio.com/docs/voice/conversationrelay/voice-configuration)).
-The host's log names each call and event, never the transcript.
+## 7. Read the call back
 
-## 5. Switch to Gemini
+### In the app's log
+
+```mermaid
+sequenceDiagram
+    participant Twilio
+    participant App as your app
+    Twilio->>App: POST /voice (signed)
+    App-->>Twilio: TwiML with ConversationRelay
+    Twilio->>App: WebSocket /conversation (signed)
+    Note over App: call_started
+    Twilio->>App: the caller's words, as text
+    App-->>Twilio: the reply, as text
+    Note over App: end, then call_closed
+    Twilio->>App: POST /connect-action
+    Note over App: session_ended status=ended
+```
+
+1. Twilio asks `/voice` what to do. The app answers with the
+   [`<ConversationRelay>`](https://www.twilio.com/docs/voice/twiml/connect/conversationrelay)
+   TwiML. Its attributes carry your `listen`, `speak` and `turn` settings and
+   the greeting.
+2. ConversationRelay opens the WebSocket, and the app logs `call_started`.
+3. ConversationRelay speaks, listens and decides when you finished. The app
+   sees only text
+   ([WebSocket messages](https://www.twilio.com/docs/voice/conversationrelay/websocket-messages)).
+   Each model request is one line in the log.
+4. When the agent ends the call, the app logs `end`. Twilio closes the socket,
+   and the app logs `call_closed`.
+5. Twilio then asks `/connect-action`, the app hangs up, and it logs
+   `session_ended status=ended error=` with no error.
+
+The log names each call and event, and never the transcript. Render also logs
+the WebSocket as one request lasting the whole call, with no response bytes.
+
+### In Twilio
+
+The call is in Twilio's call log with its SID, both numbers, status and
+duration
+([retrieve call logs](https://www.twilio.com/docs/voice/tutorials/how-to-retrieve-call-logs)):
+
+- Twilio Console: **Communications**, **Numbers & senders**, open the number,
+  and see its calls.
+- Legacy Console: open the number, then its **Calls Log** tab.
+
+Open a call for its [Call Summary](https://www.twilio.com/docs/voice/voice-insights/call-summary).
+If you do not see it, check which account the Console shows: a call belongs to
+the account that owns the number. The API reads one call by the `call=` SID in
+the app's log:
+
+```sh
+curl -s -u "$TWILIO_ACCOUNT_SID:$TWILIO_AUTH_TOKEN" \
+  "https://api.twilio.com/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/Calls/CA<sid>.json"
+```
+
+## 8. Switch to Gemini
 
 In `agent.yaml`, replace the `reasoning:` entry under `models.think`:
 
@@ -190,13 +374,26 @@ and [Gemini](https://www.twilio.com/en-us/blog/developers/tutorials/product/inte
 The generated app also streams replies, checks every signature, and handles
 interruptions.
 
-## 6. Put the old route back
+## 9. Put the old route back
 
 Deploy printed the snapshot path. First check the number in the Console: "A call
 comes in" must still be a webhook to the snapshot's `new_voice_url` with
 `HTTP POST`, and the number must have no TwiML App, SIP trunk or fallback URL.
 If anything differs, somebody changed it since, so stop and ask. If it matches,
 set "A call comes in" back to the snapshot's `voice_url` and `voice_method`.
+
+## 10. Clean up
+
+A Render service on a paid plan is billed while it exists. Delete it, and the
+test repository, when you are done:
+
+```sh
+render services delete <service id>
+gh repo delete <you>/relay-test
+```
+
+Deleting a repository needs the `delete_repo` scope on the GitHub CLI:
+`gh auth refresh -s delete_repo`.
 
 ## Troubleshooting
 
@@ -211,6 +408,9 @@ set "A call comes in" back to the snapshot's `voice_url` and `voice_method`.
 | Deploy says "the write's outcome is unknown" | The write timed out or the readback failed | Check the number in the Console, then run `--dry-run` |
 | The call reports an application error | Twilio could not reach `/voice` | Check `/healthz` from outside the host |
 | The call fails after `/voice` answered | ConversationRelay is off for the account, or the WebSocket was refused | Accept the addendum, then read the Twilio Debugger and the host log |
+| The call is missing from the Console | The Console shows another account | Switch to the account that owns the number, or read the call through the API as in step 7 |
+| `/healthz` does not answer on Render | The deploy is not live yet, or it failed | Run `render deploys list <service id>`, then `render logs -r <service id>` |
+| The first call after a quiet spell fails | A free instance was asleep | Use a paid instance type |
 
 ## Where to go next
 
