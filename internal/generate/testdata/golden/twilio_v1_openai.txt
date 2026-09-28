@@ -19,12 +19,15 @@ import os
 import re
 import threading
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
-from aiohttp import WSMsgType, web
+import uvicorn
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, create_model
 from twilio.request_validator import RequestValidator
@@ -75,7 +78,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:4886402ffc0031986356f06c7513c3be2ff63d9938e9093b5f5b0389d491cb46"
+ARTIFACT_ID = "sha256:bb2070749e9a483cdd85b5e65b482e7097b49244bc07661c8789e7ee4befbe73"
 
 # --- tools ---------------------------------------------------------------------
 
@@ -342,7 +345,7 @@ class Call:
     already sent cannot be recalled; ConversationRelay decides what it plays.
     """
 
-    def __init__(self, ws: web.WebSocketResponse, setup: dict[str, Any], client: Any, slots: "Slots") -> None:
+    def __init__(self, ws: WebSocket, setup: dict[str, Any], client: Any, slots: "Slots") -> None:
         self.ws = ws
         self.call_sid = setup["callSid"]
         self.session_id = setup["sessionId"]
@@ -386,7 +389,7 @@ class Call:
             self.spoken = cycle
             try:
                 await self.ws.send_json({"type": "text", "token": token, "last": last})
-            except (ConnectionError, RuntimeError):
+            except (WebSocketDisconnect, ConnectionError, RuntimeError):
                 # The peer is gone. Nothing more can be said on this call,
                 # and the reader is about to see the close.
                 self.closed = True
@@ -422,7 +425,7 @@ class Call:
             self.closed = True
             try:
                 await self.ws.send_json({"type": "end", "handoffData": json.dumps({"reasonCode": reason})})
-            except ConnectionError:
+            except (WebSocketDisconnect, ConnectionError, RuntimeError):
                 pass
         # Twilio closes the socket once it has taken the end message. Closing
         # it here first can reach Twilio before the end does, and the session
@@ -433,26 +436,30 @@ class Call:
 
     async def close_after(self, seconds: float) -> None:
         await asyncio.sleep(seconds)
-        await self.ws.close()
+        await close_quietly(self.ws)
 
     # --- the reader --------------------------------------------------------------
 
     async def read(self) -> None:
-        async for message in self.ws:
+        while True:
+            message = await receive(self.ws)
+            if message is None:
+                return
             if self.closed:
                 # The call has ended on our side. Only Twilio's close is left.
                 continue
-            if message.type != WSMsgType.TEXT:
+            text = message.get("text")
+            if text is None:
                 self.event("protocol_error", detail="non_text_frame")
-                await self.ws.close(code=1003)
+                await close_quietly(self.ws, 1003)
                 return
             try:
-                event = json.loads(message.data)
+                event = json.loads(text)
             except ValueError:
                 event = None
             if not isinstance(event, dict):
                 self.event("protocol_error", detail="malformed_json")
-                await self.ws.close(code=1007)
+                await close_quietly(self.ws, 1007)
                 return
             kind = event.get("type")
             if kind == "prompt":
@@ -703,9 +710,26 @@ class Call:
             self.slots.give_back()
 
 
-async def drain(ws: web.WebSocketResponse) -> None:
+async def receive(ws: WebSocket) -> Mapping[str, Any] | None:
+    """The next frame, or None once the peer has closed the socket."""
+    try:
+        message = await ws.receive()
+    except (WebSocketDisconnect, RuntimeError):
+        return None
+    return None if message["type"] == "websocket.disconnect" else message
+
+
+async def close_quietly(ws: WebSocket, code: int = 1000) -> None:
+    """Close the socket, unless it is already closed on either side."""
+    try:
+        await ws.close(code=code)
+    except (WebSocketDisconnect, ConnectionError, RuntimeError):
+        pass
+
+
+async def drain(ws: WebSocket) -> None:
     """Read and drop messages until the peer closes the socket."""
-    async for _ in ws:
+    while await receive(ws) is not None:
         pass
 
 
@@ -788,11 +812,18 @@ def render_twiml(origin: str, host: str) -> str:
     return '<?xml version="1.0" encoding="UTF-8"?>' + body
 
 
-def xml_response(body: str) -> web.Response:
-    return web.Response(text=body, content_type="text/xml")
+def xml_response(body: str) -> Response:
+    return Response(content=body, media_type="text/xml")
 
 
-def build_app(client: Any = None) -> web.Application:
+def raw_target(scope: Mapping[str, Any]) -> tuple[str, str]:
+    """The path and query exactly as the client sent them, which is what
+    Twilio signed. The decoded path Starlette builds URLs from is not."""
+    path = scope.get("raw_path") or scope["path"].encode()
+    return path.decode("latin-1"), scope.get("query_string", b"").decode("latin-1")
+
+
+def build_app(client: Any = None) -> FastAPI:
     missing = [name for name in (ENV_ACCOUNT_SID, ENV_AUTH_TOKEN, ENV_PUBLIC_URL, ENV_MODEL_KEY) if not os.environ.get(name)]
     if missing:
         raise SystemExit("missing environment: " + ", ".join(missing))
@@ -803,44 +834,53 @@ def build_app(client: Any = None) -> web.Application:
     slots = Slots(MAX_SESSIONS)
     calls: set[Call] = set()
     model_client = client or make_client()
+    app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
 
-    def signed(request: web.Request, urls: list[str], params: Any) -> bool:
-        signature = request.headers.get("X-Twilio-Signature", "")
+    def signed(headers: Any, urls: list[str], params: Any) -> bool:
+        signature = headers.get("X-Twilio-Signature", "")
         return bool(signature) and any(validator.validate(url, params, signature) for url in urls)
 
-    async def healthz(request: web.Request) -> web.Response:
+    def signed_url(request: Request) -> str:
+        # https://www.twilio.com/docs/usage/security: the exact URL Twilio
+        # requested, query included, built on the public origin, never on
+        # request headers a proxy can rewrite.
+        path, query = raw_target(request.scope)
+        return origin + path + ("?" + query if query else "")
+
+    @app.get("/healthz")
+    async def healthz() -> JSONResponse:
         # 503 while draining, or when every slot is held by a handler that
         # outlived its call: the process can take no call either way. A 200
         # does not promise a free slot: /voice may still answer <Hangup/>.
         if slots.draining or slots.orphaned >= slots.limit:
-            return web.json_response({"ok": False, "artifact_id": ARTIFACT_ID}, status=503)
-        return web.json_response({"ok": True, "artifact_id": ARTIFACT_ID})
+            return JSONResponse({"ok": False, "artifact_id": ARTIFACT_ID}, status_code=503)
+        return JSONResponse({"ok": True, "artifact_id": ARTIFACT_ID})
 
-    async def voice(request: web.Request) -> web.Response:
-        # https://www.twilio.com/docs/usage/security: the exact URL Twilio
-        # requested, query included, plus every form field.
-        form = await request.post()
-        if not signed(request, [origin + request.raw_path], form):
+    @app.post("/voice")
+    async def voice(request: Request) -> Response:
+        form = await request.form()
+        if not signed(request.headers, [signed_url(request)], form):
             log.warning("event=signature_rejected route=/voice")
-            raise web.HTTPForbidden()
+            return Response(status_code=403)
         if form.get("AccountSid") != account_sid:
             log.warning("event=account_rejected route=/voice")
-            raise web.HTTPForbidden()
+            return Response(status_code=403)
         if not slots.has_room():
             log.info("event=call_refused reason=%s", "draining" if slots.draining else "full")
             return xml_response(HANGUP_TWIML)
         return xml_response(twiml)
 
-    async def connect_action(request: web.Request) -> web.Response:
+    @app.post("/connect-action")
+    async def connect_action(request: Request) -> Response:
         # https://www.twilio.com/docs/voice/twiml/connect: Twilio asks here what
         # to do once the session ends. HandoffData is ignored: this app hands
         # the call to nobody. The answer is always to hang up.
-        form = await request.post()
-        if not signed(request, [origin + request.raw_path], form):
+        form = await request.form()
+        if not signed(request.headers, [signed_url(request)], form):
             log.warning("event=signature_rejected route=/connect-action")
-            raise web.HTTPForbidden()
+            return Response(status_code=403)
         if form.get("AccountSid") != account_sid:
-            raise web.HTTPForbidden()
+            return Response(status_code=403)
         log.info(
             "event=session_ended call=%s status=%s error=%s",
             str(form.get("CallSid", ""))[:34],
@@ -849,20 +889,23 @@ def build_app(client: Any = None) -> web.Application:
         )
         return xml_response(HANGUP_TWIML)
 
-    async def conversation(request: web.Request) -> web.StreamResponse:
+    @app.websocket("/conversation")
+    async def conversation(ws: WebSocket) -> None:
         # The handshake is signed over the wss URL with no form fields. Twilio
         # documents one variant: a trailing slash on the path.
-        path, _, query = request.raw_path.partition("?")
+        path, query = raw_target(ws.scope)
         suffix = "?" + query if query else ""
         urls = [f"wss://{host}{path}{suffix}", f"wss://{host}{path}/{suffix}"]
-        if not signed(request, urls, {}):
+        if not signed(ws.headers, urls, {}):
             log.warning("event=signature_rejected route=/conversation")
-            raise web.HTTPForbidden()
-        ws = web.WebSocketResponse(max_msg_size=MAX_WS_MESSAGE)
-        await ws.prepare(request)
+            # Closing before accept answers the handshake with HTTP 403.
+            await ws.close(code=1008)
+            return
+        await ws.accept()
         try:
-            first = await asyncio.wait_for(ws.receive(), SETUP_TIMEOUT)
-            setup = json.loads(first.data) if first.type == WSMsgType.TEXT else None
+            first = await asyncio.wait_for(receive(ws), SETUP_TIMEOUT)
+            text = first.get("text") if first is not None else None
+            setup = json.loads(text) if text is not None else None
         except (TimeoutError, ValueError):
             setup = None
         if (
@@ -873,19 +916,22 @@ def build_app(client: Any = None) -> web.Application:
             or not SESSION_ID.fullmatch(str(setup.get("sessionId", "")))
         ):
             log.warning("event=setup_rejected")
-            await ws.close(code=1008)
-            return ws
+            await close_quietly(ws, 1008)
+            return
         # Call state starts here, after the setup message proved the account.
         if not slots.take():
             log.info("event=call_refused reason=%s", "draining" if slots.draining else "full")
-            await ws.send_json({"type": "end", "handoffData": json.dumps({"reasonCode": "busy"})})
+            try:
+                await ws.send_json({"type": "end", "handoffData": json.dumps({"reasonCode": "busy"})})
+            except (WebSocketDisconnect, ConnectionError, RuntimeError):
+                return
             # As in Call.end: wait for Twilio to close, or the refusal fails as 64105.
             try:
                 await asyncio.wait_for(drain(ws), END_GRACE)
             except TimeoutError:
                 pass
-            await ws.close()
-            return ws
+            await close_quietly(ws)
+            return
         call = Call(ws, setup, model_client, slots)
         calls.add(call)
         call.event("call_started", direction=str(setup.get("direction", ""))[:16])
@@ -893,18 +939,18 @@ def build_app(client: Any = None) -> web.Application:
         try:
             await call.read()
         finally:
-            # Synchronous first: aiohttp may cancel this handler when the peer
-            # goes away, and the slot must be accounted for either way.
+            # Synchronous first: uvicorn cancels this handler when its
+            # graceful shutdown runs out, and the slot must be accounted for
+            # either way.
             call.close()
             calls.discard(call)
             owner.cancel()
             call.event("call_closed")
         await asyncio.gather(owner, return_exceptions=True)
-        return ws
 
-    async def on_shutdown(app: web.Application) -> None:
+    async def drain_calls() -> None:
         # Stop taking calls, give the current ones a bounded time, then end
-        # whatever is left.
+        # whatever is left and let Twilio close those sockets.
         slots.draining = True
         try:
             await asyncio.wait_for(slots.idle.wait(), DRAIN_TIMEOUT)
@@ -912,25 +958,52 @@ def build_app(client: Any = None) -> web.Application:
             pass
         for call in list(calls):
             await call.end("shutdown")
+        try:
+            await asyncio.wait_for(slots.idle.wait(), END_GRACE)
+        except TimeoutError:
+            pass
 
-    app = web.Application()
-    app.router.add_get("/healthz", healthz)
-    app.router.add_post("/voice", voice)
-    app.router.add_post("/connect-action", connect_action)
-    app.router.add_get("/conversation", conversation)
-    app.on_shutdown.append(on_shutdown)
+    app.state.drain_calls = drain_calls
     return app
+
+
+class RelayServer(uvicorn.Server):
+    """uvicorn, draining the calls before it closes anything.
+
+    On SIGTERM uvicorn closes every open WebSocket with 1012 first and runs the
+    app's lifespan shutdown last, which is too late to end a call cleanly. The
+    listeners are still open when shutdown() starts, so draining here keeps
+    /healthz answering 503 and /voice answering <Hangup/> while calls end.
+    """
+
+    def __init__(self, config: uvicorn.Config, drain: Any) -> None:
+        super().__init__(config)
+        self.drain = drain
+
+    async def shutdown(self, sockets: Any = None) -> None:
+        await self.drain()
+        await super().shutdown(sockets=sockets)
+
+
+def server_config(app: FastAPI, host: str, port: int) -> uvicorn.Config:
+    return uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        ws_max_size=MAX_WS_MESSAGE,
+        # After the drain, only sockets Twilio has not closed are left.
+        timeout_graceful_shutdown=int(END_GRACE) + 1,
+        # No access log: a request line carries the caller's call SID.
+        access_log=False,
+        log_config=None,
+    )
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    web.run_app(
-        build_app(),
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", "8080")),
-        shutdown_timeout=DRAIN_TIMEOUT + 5,
-        access_log=None,
-    )
+    app = build_app()
+    port = int(os.environ.get("PORT", "8080"))
+    RelayServer(server_config(app, "0.0.0.0", port), app.state.drain_calls).run()
 
 
 if __name__ == "__main__":
@@ -941,13 +1014,16 @@ name = "twilio-relay"
 version = "0.1.0"
 description = "Generated Twilio ConversationRelay voice agent (compiled by unmute)."
 requires-python = ">=3.12,<3.13"
-# Exact pins: the versions unmute last checked this app against. aiohttp also
-# arrives with twilio; it is named because app.py imports it.
+# Exact pins: the versions unmute last checked this app against. websockets
+# is what gives uvicorn its WebSocket support.
 dependencies = [
-    "aiohttp==3.14.3",
+    "fastapi==0.141.1",
     "openai==3.19.2",
     "pydantic==2.13.5",
+    "python-multipart==0.0.32",
     "twilio==9.11.1",
+    "uvicorn==0.54.0",
+    "websockets==16.1.1",
 ]
 
 [dependency-groups]
@@ -1087,6 +1163,22 @@ is busy: then `/voice` answers `<Hangup/>`. It answers 503 only while the app
 drains, or when every slot is held by a tool handler that outlived its call.
 Both answers carry `artifact_id`, the build this app is.
 
+### Host it
+
+Any host that runs the Dockerfile works: Render, Cloud Run, Fly, AWS and
+others. The host must give the app a public https origin that passes WebSocket
+upgrades through, the port in `PORT`, the four environment values, one
+instance, a health check on `/healthz`, and about 35 seconds from SIGTERM to
+SIGKILL. On SIGTERM the app stops taking calls, gives the running ones 20
+seconds, then ends them. Do not use an instance type that sleeps when idle:
+Twilio does not wait for it to wake.
+
+`unmute compile` deletes this folder and writes it again, keeping only `.env`.
+Keep a host's own file, such as `render.yaml`, in the package's
+`hosting/twilio/` folder. Every compile copies it here. To test from a
+laptop, run `ngrok http 8080` or `cloudflared tunnel --url http://localhost:8080`,
+and set `TWILIO_PUBLIC_URL` to the tunnel's origin.
+
 ## Point the number with unmute deploy
 
 `unmute deploy --target twilio` sets the number's webhook for you. Run it
@@ -1208,7 +1300,7 @@ may carry a secret, so it is readable only by you.
 </Response>
 === compile-report.json ===
 {
-  "artifact_id": "sha256:4886402ffc0031986356f06c7513c3be2ff63d9938e9093b5f5b0389d491cb46",
+  "artifact_id": "sha256:bb2070749e9a483cdd85b5e65b482e7097b49244bc07661c8789e7ee4befbe73",
   "bindings": [
     {
       "binding": {
@@ -1275,10 +1367,13 @@ may carry a secret, so it is readable only by you.
     "call_slots": 2,
     "max_tool_rounds": 8,
     "pins": {
-      "aiohttp": "3.14.3",
+      "fastapi": "0.141.1",
       "openai": "3.19.2",
       "pydantic": "2.13.5",
-      "twilio": "9.11.1"
+      "python-multipart": "0.0.32",
+      "twilio": "9.11.1",
+      "uvicorn": "0.54.0",
+      "websockets": "16.1.1"
     },
     "processes": 1,
     "python": "3.12",

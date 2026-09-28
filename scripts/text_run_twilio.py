@@ -1,7 +1,7 @@
 """Drive a compiled twilio target's app.py as ConversationRelay would, with no call.
 
-The app runs in-process on aiohttp's test server. A fake ConversationRelay
-client signs its requests with a fake auth token, the way Twilio signs them, and
+The app runs in-process on the app's own uvicorn server, on a free local port.
+A fake ConversationRelay client, on aiohttp, signs its requests with a fake auth token, the way Twilio signs them, and
 speaks the WebSocket protocol:
 
     https://www.twilio.com/docs/voice/conversationrelay/websocket-messages
@@ -247,7 +247,7 @@ class Env:
         self.client: Any = None
 
     async def __aenter__(self) -> Env:
-        from aiohttp.test_utils import TestClient, TestServer
+        import aiohttp
 
         self.saved = {name: getattr(self.app, name) for name in self.patches}
         for name, value in self.patches.items():
@@ -266,12 +266,21 @@ class Env:
 
         self.original = (self.app.Call, self.app.Slots)
         self.app.Call, self.app.Slots = RecordingCall, RecordingSlots
-        self.server = TestServer(self.app.build_app(client=self.fake))
-        self.client = TestClient(self.server)
-        await self.client.start_server()
+        asgi = self.app.build_app(client=self.fake)
+        self.server = self.app.RelayServer(self.app.server_config(asgi, "127.0.0.1", 0), asgi.state.drain_calls)
+        self.serving = asyncio.ensure_future(self.server.serve())
+        await until(lambda: self.server.started or self.serving.done(), 10)
+        port = self.server.servers[0].sockets[0].getsockname()[1]
+        self.client = aiohttp.ClientSession(base_url=f"http://127.0.0.1:{port}")
         return self
 
+    async def stop(self) -> None:
+        """Shut the server down the way SIGTERM does: drain first."""
+        self.server.should_exit = True
+        await self.serving
+
     async def __aexit__(self, *exc: Any) -> None:
+        await self.stop()
         await self.client.close()
         self.app.Call, self.app.Slots = self.original
         for name, value in self.saved.items():
@@ -349,7 +358,7 @@ def fake_for(app: Any, script: list[list[Any]]) -> Any:
 
 
 def env(app: Any, script: list[list[Any]] | None = None, **patches: Any) -> Env:
-    # A short drain, so the test server's shutdown does not wait out the
+    # A short drain, so the server's shutdown does not wait out the
     # default for a call a case left open.
     patches.setdefault("DRAIN_TIMEOUT", 0.2)
     # The same for a socket the fake never closes after an end message.
@@ -695,7 +704,9 @@ async def end_waits_for_twilio_to_close(app: Any) -> None:
 @case
 async def overload_is_refused(app: Any) -> None:
     async with env(app, MAX_SESSIONS=1, END_GRACE=2.0) as e:
-        await e.relay()
+        # Held, not dropped: a dropped socket is collected and closed, which
+        # gives the slot back before /voice is asked.
+        first = await e.relay()
         body = await (await e.post("/voice", {"AccountSid": ACCOUNT})).text()
         check("<Hangup/>" in body and "Connect" not in body, "/voice took a call past max_sessions")
         second = await e.relay(setup=False)
@@ -704,13 +715,14 @@ async def overload_is_refused(app: Any) -> None:
         check(end and end["type"] == "end" and "busy" in end["handoffData"], f"a second session was admitted: {end}")
         check(await second.stays_open(), "the busy refusal closed the socket before Twilio did")
         await second.ws.close()
+        await first.ws.close()
 
 
 @case
 async def shutdown_drains_then_ends(app: Any) -> None:
     async with env(app, DRAIN_TIMEOUT=0.2) as e:
         relay = await e.relay()
-        closing = asyncio.ensure_future(e.server.runner.shutdown())
+        closing = asyncio.ensure_future(e.stop())
         end = await relay.next()
         await closing
         check(end and end["type"] == "end" and "shutdown" in end["handoffData"], f"no shutdown end: {end}")

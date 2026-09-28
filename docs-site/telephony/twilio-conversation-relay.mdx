@@ -90,6 +90,13 @@ Unmute does not host the app. The host must:
 
 `GET /healthz` answers with the build's `artifact_id`.
 
+To try it from your laptop, run `ngrok http 8080` or
+`cloudflared tunnel --url http://localhost:8080`, and set `TWILIO_PUBLIC_URL`
+to the tunnel's origin. To host it for real, any host that runs a Dockerfile
+works. The Render Blueprint, the `hosting/` folder that keeps it across
+compiles, and the update loop are in
+[Host it on Render](/targets/twilio#host-it-on-render).
+
 ## 3. Point the number at it
 
 ```sh

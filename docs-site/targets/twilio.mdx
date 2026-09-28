@@ -39,8 +39,42 @@ sequenceDiagram
    [error 64105](https://www.twilio.com/docs/api/errors/64105). Twilio then
    asks `/connect-action`, and the app hangs up.
 
+## What Twilio runs and what you run
+
+Twilio does not host the agent. It hosts everything that touches audio, and
+your app handles text only.
+
+```mermaid
+flowchart LR
+    Caller -->|phone call| STT
+    subgraph T [Twilio runs this]
+        STT[speech to text] --> Turns[turn detection and barge-in]
+        TTS[text to speech]
+    end
+    Turns -->|words as text, wss| App
+    App -->|reply as text| TTS
+    TTS -->|speech| Caller
+    subgraph Y [you run this]
+        App[your app] --> Model[model and tools]
+    end
+```
+
+1. Twilio answers the call and turns the caller's speech into text.
+2. Twilio decides when the caller has finished a turn, and stops the agent
+   when the caller talks over it.
+3. Your app gets the text over one WebSocket. It runs the model and your tools,
+   and sends the reply back as text.
+4. Twilio speaks the reply.
+
+So the app you host is one small process that handles text only. It runs no
+audio pipeline, no media server and no Redis, so any container host can run
+it. With the `pipecat` and `livekit` targets you host that audio pipeline too.
+Twilio has no product that runs the model and the tools for you:
+ConversationRelay's `url` is always "the URL of your WebSocket server".
+
 On this page:
 
+- [What Twilio runs and what you run](#what-twilio-runs-and-what-you-run) - what you host, and why it is small
 - [The package](#the-package) - the shape, in full
 - [What the package may carry](#what-the-package-may-carry) - and what is refused
 - [What compiling writes](#what-compiling-writes) - the files
@@ -248,7 +282,7 @@ writes `build/<target>/`:
 
 | File | What it is |
 |---|---|
-| `app.py` | the whole app: routes, WebSocket, model, tools |
+| `app.py` | the whole app, on FastAPI and uvicorn: routes, WebSocket, model, tools |
 | `conversation-relay.xml.tmpl` | the TwiML `/voice` returns; `app.py` fills in your public origin at startup |
 | `tools/` | your local handlers, copied from the package |
 | `pyproject.toml` | exact dependency pins for Python 3.12 |
@@ -260,23 +294,121 @@ writes `build/<target>/`:
 
 The generated project has no unmute dependency and reads no YAML.
 
+`compile` deletes `build/<target>/` and writes it again, keeping only `.env`.
+A file you add there by hand is lost on the next compile. Put it in the
+package's `hosting/<target>/` folder instead, for example
+`hosting/twilio/render.yaml`. Every compile copies that folder into
+`build/<target>/` and lists each file as `copied`. A hosting file may not use a
+name compile writes, such as `app.py`, or `.env`: compile refuses it and
+changes nothing. A hosting file does not change the build's `artifact_id`.
+
 ## Host it
 
-unmute never uploads the app. You host it. There is no `unmute dev` loop,
-because Twilio can only call a public HTTPS origin.
+unmute never uploads the app. You host it, on any host that runs a Dockerfile.
+There is no `unmute dev` loop, because Twilio can only call a public HTTPS
+origin.
 
-1. Copy `build/<target>/.env.example` to `.env` and fill it in. The account
-   owner must have accepted the AI/ML addendum that turns ConversationRelay on
-   ([onboarding](https://www.twilio.com/docs/voice/conversationrelay/onboarding)).
-2. Run the app, with `uv run --env-file .env python app.py` or the Dockerfile.
-3. Put it behind HTTPS at a public origin, for example
-   `https://relay.example.com`, and set `TWILIO_PUBLIC_URL` to exactly that,
-   with no path.
+What the host must give the app:
+
+- a public **https** origin that passes WebSocket upgrades through, and keeps
+  an idle WebSocket open for a whole call;
+- the port in `PORT`. The app listens on `0.0.0.0:$PORT`, 8080 when it is unset;
+- the app's four environment values: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+  `TWILIO_PUBLIC_URL` and the model key;
+- **one** instance. Call slots and interruptions live in the process, so two
+  copies behind one number do not share them;
+- a health check on `GET /healthz`;
+- about 35 seconds between SIGTERM and SIGKILL. On SIGTERM the app stops taking
+  calls, waits up to 20 seconds for the calls it has, ends the rest, and gives
+  Twilio 5 seconds to close each socket.
+
+Set `TWILIO_PUBLIC_URL` to the exact origin Twilio calls, with no path, for
+example `https://relay.example.com`. The app checks every Twilio signature
+against it. The account owner must have accepted the AI/ML addendum that turns
+ConversationRelay on
+([onboarding](https://www.twilio.com/docs/voice/conversationrelay/onboarding)).
 
 `GET /healthz` answers 200 while the process is up, even when every call slot
 is busy. It answers 503 only while the app drains, or when a tool handler that
 outlived its call holds every slot. Both carry `artifact_id`, which names the
 build. A 200 does not mean a call will be taken.
+
+### Try it on your laptop first
+
+1. Copy `build/<target>/.env.example` to `.env` next to it, and fill it in.
+2. Start the app: `uv run --env-file .env python app.py`.
+3. Start a tunnel to port 8080. Either one passes WebSockets through:
+
+   ```sh
+   ngrok http 8080
+   cloudflared tunnel --url http://localhost:8080
+   ```
+
+4. Set `TWILIO_PUBLIC_URL` to the tunnel's https origin, and restart the app.
+5. Run `unmute deploy --target twilio` to point the number at it, then call.
+
+A free tunnel gets a new origin each time it starts. Set the new origin, restart
+the app and deploy again.
+
+### Host it on Render
+
+[Render](https://render.com/docs/web-services) builds the Dockerfile from your
+Git repository. So commit `build/<target>/` with the package, and keep `.env`
+out of Git. Add this Blueprint as `hosting/twilio/render.yaml`, with `rootDir`
+set to the build folder's path from the repository root:
+
+```yaml
+services:
+  - type: web
+    name: relay-desk
+    runtime: docker
+    rootDir: agents/relay-desk/build/twilio
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    numInstances: 1
+    healthCheckPath: /healthz
+    maxShutdownDelaySeconds: 60
+    autoDeployTrigger: commit
+    envVars:
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PUBLIC_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+```
+
+1. Run `unmute compile`, then commit and push the package with `build/`.
+2. In the Render Dashboard, create a Blueprint from the repository. Set its
+   Blueprint path to `agents/relay-desk/build/twilio/render.yaml`
+   ([Blueprints](https://render.com/docs/infrastructure-as-code)).
+3. Fill in the four values Render asks for. `TWILIO_PUBLIC_URL` is the
+   service's own origin, `https://<name>.onrender.com`.
+4. Wait for the deploy to go live, then check
+   `curl https://<name>.onrender.com/healthz`.
+5. Run `unmute deploy --target twilio`.
+
+Do not use Render's free instance type. It sleeps after 15 minutes with no
+traffic and takes about a minute to wake
+([free instances](https://render.com/docs/free)), and Twilio gives up on
+`/voice` long before that. `maxShutdownDelaySeconds: 60` covers the app's drain.
+
+### Update a hosted agent
+
+1. Change the package.
+2. Run `unmute compile`.
+3. Commit `build/<target>/` and push. Render builds and deploys the new build.
+4. Run `unmute deploy --target twilio`. It refuses until `/healthz` names the
+   new build's `artifact_id`. Then it confirms the number already routes to
+   `/voice`, and changes nothing on the number.
+
+A deploy on Render starts the new instance and waits for its health check.
+Only then does it move traffic and stop the old one
+([deploys](https://render.com/docs/deploys)). A call that is running on the old
+instance then gets the app's drain: up to 20 seconds to finish, then the agent
+ends it. Push when no call is running if you can.
 
 ## Point the number at it
 
@@ -390,6 +522,9 @@ Then call the number. That call is the only check of the speech path.
 - A call in `ie1` or `au1`. The docs list ConversationRelay in both regions.
   They do not say whether Deepgram and ElevenLabs run there.
 - The Gemini Developer API path, with no `vertexai`, against a real key.
+- A hosted deploy. The FastAPI app passes the offline harness and a real
+  model run, but it has not run on Render or any other host yet, and the drain
+  on a real SIGTERM is tested in process only.
 
 ## Where to go next
 

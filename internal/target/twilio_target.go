@@ -40,22 +40,26 @@ const TwilioPython = "3.12"
 
 // TwilioPins are the exact versions the emitted project installs. They are
 // internal pins and not an authoring surface: a package cannot move them, and
-// `pins:` on a twilio target is refused. aiohttp is already a dependency of the
-// twilio package; it is named because app.py imports it directly.
+// `pins:` on a twilio target is refused. The app is FastAPI on uvicorn. Plain
+// uvicorn has no WebSocket support of its own, so websockets is named, and
+// Starlette reads even a url-encoded form through python-multipart.
 //
 // The two model SDKs are listed here, but a project installs only the one its
 // think binding selects.
 var TwilioPins = map[string]string{
-	"aiohttp":      "3.14.3",
-	"google-genai": "2.25.0",
-	"openai":       "3.19.2",
-	"pydantic":     "2.13.5",
-	"twilio":       "9.11.1",
+	"fastapi":          "0.141.1",
+	"google-genai":     "2.25.0",
+	"openai":           "3.19.2",
+	"pydantic":         "2.13.5",
+	"python-multipart": "0.0.32",
+	"twilio":           "9.11.1",
+	"uvicorn":          "0.54.0",
+	"websockets":       "16.1.1",
 }
 
 // TwilioRuntimeDeps is the dependency set every twilio project installs, before
 // the one model SDK.
-var TwilioRuntimeDeps = []string{"aiohttp", "pydantic", "twilio"}
+var TwilioRuntimeDeps = []string{"fastapi", "pydantic", "python-multipart", "twilio", "uvicorn", "websockets"}
 
 // TwilioModelSDK names the package a think vendor needs.
 func TwilioModelSDK(vendor string) string {

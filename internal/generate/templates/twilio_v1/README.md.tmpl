@@ -91,6 +91,22 @@ is busy: then `/voice` answers `<Hangup/>`. It answers 503 only while the app
 drains, or when every slot is held by a tool handler that outlived its call.
 Both answers carry `artifact_id`, the build this app is.
 
+### Host it
+
+Any host that runs the Dockerfile works: Render, Cloud Run, Fly, AWS and
+others. The host must give the app a public https origin that passes WebSocket
+upgrades through, the port in `PORT`, the four environment values, one
+instance, a health check on `/healthz`, and about 35 seconds from SIGTERM to
+SIGKILL. On SIGTERM the app stops taking calls, gives the running ones 20
+seconds, then ends them. Do not use an instance type that sleeps when idle:
+Twilio does not wait for it to wake.
+
+`unmute compile` deletes this folder and writes it again, keeping only `.env`.
+Keep a host's own file, such as `render.yaml`, in the package's
+`hosting/{{.Target}}/` folder. Every compile copies it here. To test from a
+laptop, run `ngrok http 8080` or `cloudflared tunnel --url http://localhost:8080`,
+and set `{{.Env.PublicURL}}` to the tunnel's origin.
+
 ## Point the number with unmute deploy
 
 `unmute deploy --target {{.Target}}` sets the number's webhook for you. Run it

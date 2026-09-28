@@ -718,10 +718,21 @@ prefetch, webhook, MCP, knowledge and hosted tools, tool announce and
 turn fields, tracing, realtime and live, fallbacks, custom endpoints,
 `version`, `pins`, `deployment_region` and `warm_instances`.
 
-`unmute compile` writes `build/<target>/app.py`,
+`unmute compile` writes `build/<target>/app.py` (FastAPI on uvicorn),
 `conversation-relay.xml.tmpl`, `pyproject.toml`, `Dockerfile`,
 `.dockerignore`, `.env.example`, `README.md`, `compile-report.json` and
-`tools/`. The app reads the three Twilio names above plus the think model's
+`tools/`. It deletes and rewrites that folder, keeping only `.env`, so a host's
+config such as `render.yaml` goes in the package's `hosting/<target>/`: every
+compile copies it into `build/<target>/`, and refuses a hosting file named like
+a generated one. Twilio runs only the speech side, so the app is one small
+text-only process that any Dockerfile host runs: it needs `$PORT`, one
+instance, a `/healthz` health check, about 35 seconds from SIGTERM to SIGKILL
+for its drain, and an origin that passes WebSockets. For Render, commit
+`build/<target>/`, use a paid instance (a free one sleeps and Twilio does not
+wait), and set `TWILIO_PUBLIC_URL` to the service's `onrender.com` origin. To
+test locally, `ngrok http 8080` or `cloudflared tunnel --url
+http://localhost:8080`. An update is compile, commit, push, then `unmute deploy
+--target <name>`, which refuses until `/healthz` names the new build. The app reads the three Twilio names above plus the think model's
 key. `phone_number_sid` is deploy-only: the app never reads it. There is no
 `unmute dev` loop for this target, because Twilio can only call a public
 https origin. The user hosts the app; unmute never uploads it.

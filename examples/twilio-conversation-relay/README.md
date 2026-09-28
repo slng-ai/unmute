@@ -183,8 +183,17 @@ Unmute does not host the app. Any host works if it does all of this:
   `TWILIO_*` names above except the number SID, and the model key.
 
 For a first test, the app can run on your laptop behind a tunnel that gives an
-https origin and passes WebSockets through. Set `TWILIO_PUBLIC_URL` to the
+https origin and passes WebSockets through, such as `ngrok http 8080` or
+`cloudflared tunnel --url http://localhost:8080`. Set `TWILIO_PUBLIC_URL` to the
 tunnel's origin.
+
+Twilio runs the speech side of the call, so the app you host is one small
+process that handles text only: no audio pipeline, no media server. Any host
+that runs a Dockerfile works. To host it on Render, commit `build/twilio/`, put
+a Blueprint in `hosting/twilio/render.yaml` so every compile copies it next to
+the Dockerfile, and use a paid instance: a free one sleeps, and Twilio does not
+wait for it to wake. The Blueprint and the update loop are in
+[Host it on Render](../../docs-site/targets/twilio.mdx#host-it-on-render).
 
 Check it from anywhere:
 

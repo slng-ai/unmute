@@ -83,7 +83,7 @@ Two further questions sit in [internal/target/table.go](internal/target/table.go
 - **`EmitsProject(provider)`**: does this driver write something a person can run, pin and version at
   all? True for `livekit`, `pipecat` and `twilio`.
 
-Twilio is `EmitsProject: true`, `IsCode: false`. It emits a real project (an `aiohttp` app, a
+Twilio is `EmitsProject: true`, `IsCode: false`. It emits a real project (a FastAPI app on uvicorn, a
 `Dockerfile`, a `pyproject.toml`), so `EmitsProject` says yes. It runs on no framework, so `IsCode` says
 no: no LiveKit Agents or Pipecat version, no support window, no per-target `pins:`. This ripples through
 the tree: [internal/target/pace_test.go](internal/target/pace_test.go) used to branch on `EmitsProject`
@@ -161,7 +161,8 @@ Twilio has neither a version nor a support window, because it targets no framewo
 == false`.
 
 What twilio has instead is [`TwilioPins`](internal/target/twilio_target.go): an internal, exact pin list
-(`aiohttp`, `google-genai`, `openai`, `pydantic`, `twilio`) baked into the driver, which a package
+(`fastapi`, `google-genai`, `openai`, `pydantic`, `python-multipart`, `twilio`, `uvicorn`,
+`websockets`) baked into the driver, which a package
 cannot move. [internal/ir/validate_twilio.go](internal/ir/validate_twilio.go)'s
 `validateTwilioTargetValues` refuses `version:` and `pins:` on this target by name. LiveKit's
 `PinFloors` is a different thing again: a per-*plugin* floor an author may raise above, which twilio has
