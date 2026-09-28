@@ -38,3 +38,11 @@ targets:
           world_part: eu-west
           reasoning_effort: none
           parallel_tool_calls: false
+
+  # The same agent with the turn handed to logic/, a small Pydantic AI agent on
+  # the package's OpenAI binding. The app still owns the call.
+  twilio-logic:
+    provider: twilio
+    sdk_language: python
+    connection: twilio_relay
+    logic: logic/

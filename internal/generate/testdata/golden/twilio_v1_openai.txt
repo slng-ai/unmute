@@ -79,7 +79,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:9426431c607a426a584c17fc14d9a87b3a0ebf4a8839c80ed7d11c1f681b8b84"
+ARTIFACT_ID = "sha256:1a2f89b167c97be1aea6bc33872deb9c3115864a40daa64cde316113e7249de8"
 
 # --- tools ---------------------------------------------------------------------
 
@@ -334,8 +334,6 @@ def trim_history(history: list[Any], is_user_turn: Any) -> None:
         if is_user_turn(history[index]):
             del history[:index]
             return
-
-
 # --- one call ------------------------------------------------------------------
 
 
@@ -354,6 +352,7 @@ class Call:
         self.ws = ws
         self.call_sid = setup["callSid"]
         self.session_id = setup["sessionId"]
+        self.setup = setup
         self.brain = Brain(client)
         self.slots = slots
         self.generation = 0
@@ -582,12 +581,17 @@ class Call:
             reply = task.result()
             await self.finish(cycle)
             if not reply.calls and not cycle.sent and not reply.generated:
+                if self.ending:  # nothing to say, and asked to end: not a failure
+                    await self.end("end_call")
+                    return
                 await self.fail(cycle, "empty_response")
                 return
             self.failures = 0
             if not reply.calls:
                 cycle.entry = self.brain.commit(cycle, reply, [])
                 self.reconcile()
+                if self.ending:
+                    await self.end("end_call")
                 return
             rounds += 1
             results = await self.run_tools(reply.calls)
@@ -1183,9 +1187,7 @@ Twilio does not wait for it to wake.
 Keep a host's own file, such as `render.yaml`, in the package's
 `hosting/twilio/` folder. Every compile copies it here. To test from a
 laptop, run `ngrok http 8080` or `cloudflared tunnel --url http://localhost:8080`,
-and set `TWILIO_PUBLIC_URL` to the tunnel's origin.
-
-## Point the number with unmute deploy
+and set `TWILIO_PUBLIC_URL` to the tunnel's origin.## Point the number with unmute deploy
 
 `unmute deploy --target twilio` sets the number's webhook for you. Run it
 where the package is, after step 2. It reads these environment names, from the
@@ -1306,7 +1308,7 @@ may carry a secret, so it is readable only by you.
 </Response>
 === compile-report.json ===
 {
-  "artifact_id": "sha256:9426431c607a426a584c17fc14d9a87b3a0ebf4a8839c80ed7d11c1f681b8b84",
+  "artifact_id": "sha256:1a2f89b167c97be1aea6bc33872deb9c3115864a40daa64cde316113e7249de8",
   "bindings": [
     {
       "binding": {

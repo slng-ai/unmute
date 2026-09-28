@@ -309,6 +309,12 @@ and declare `SLNG_API_KEY`. The binding is on
 [the Twilio target page](../../docs-site/targets/twilio.mdx), after the Gemini
 one.
 
+To run the agent turn with your own code instead, for example a Pydantic AI
+agent, name a folder on the target with `logic: logic/`. Its `__init__.py`
+defines `async def respond(session)`, and compile copies it into the build
+without changing it. The contract and a worked Pydantic AI example are in
+[Bring your own agent logic](../../docs-site/targets/twilio.mdx#bring-your-own-agent-logic).
+
 ## Use another Twilio region
 
 Twilio handles calls in US1 by default. To keep the calls in Ireland (IE1) or

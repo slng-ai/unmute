@@ -760,3 +760,19 @@ write is never retried. To put the old route back from the snapshot, first check
 the number still points at the snapshot's `new_voice_url` with `POST` and has no
 TwiML App, trunk or fallback URL. If not, somebody changed it since, so stop.
 It places no call, so a real call is still the only check of speech.
+
+To replace the agent turn with the author's own code, the target names a
+folder: `logic: logic/` in targets.yaml. Its `__init__.py` defines
+`async def respond(session)`, which yields the reply as strings, and an
+optional `requirements.txt` there is added to the app's pins. The app keeps the
+call (signatures, interrupts, slots, drain, the failure line) and calls
+`respond()` once per caller turn. `session.history` is what the caller said and
+heard, as `{"role", "content"}` dicts ending with the turn to answer.
+`session.call` has the Twilio ids and numbers, `session.instructions` the
+package's prompt, `session.model` the think binding (`model`, `base_url`,
+`api_key`, `params`, router `extra_body`/`extra_headers`), `session.state` a
+per-call dict, and `session.end(reason)` ends the call after the reply. A turn
+has 30 seconds. Compile copies the folder as written, never formatted, and it
+counts in `artifact_id`. Every other target refuses `logic:`. A Pydantic AI
+agent on `session.model` is the worked example on the target page, and it is
+the way to reach any other OpenAI-compatible endpoint.

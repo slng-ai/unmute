@@ -277,3 +277,43 @@ func TestTwilioPlanKeepsTheNumberSIDDeployOnly(t *testing.T) {
 		t.Errorf("topology = %s %v, want one in-process application", plan.Coordination, plan.Services)
 	}
 }
+
+// A logic folder is held to what the app imports and installs, and only the
+// twilio target reads it.
+func TestTwilioLogicShape(t *testing.T) {
+	good := map[string]string{"__init__.py": "async def respond(session):\n    yield 'hi'\n"}
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{"accepted", good, ""},
+		{"missing folder", map[string]string{}, "is missing or empty"},
+		{"no package file", map[string]string{"agent.py": "async def respond(session): ..."}, "has no __init__.py"},
+		{"no respond", map[string]string{"__init__.py": "def reply(session): ...\n"}, "defines no async def respond(session)"},
+		{"installer option", map[string]string{"__init__.py": good["__init__.py"], "requirements.txt": "# pins\n-e ./local\n"}, "is an installer option"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := twilioAgent(t)
+			resolved := targetFor(agent, ProviderTwilio)
+			resolved.Logic = &Logic{Path: "logic/", Files: tc.files}
+			row := validateTwilio(t, agent, resolved)
+			got := strings.Join(row.Errors, "\n")
+			if tc.want == "" && got != "" || tc.want != "" && !strings.Contains(got, tc.want) {
+				t.Errorf("errors = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	// Every other target generates its own turn, so the field has no reader.
+	agent := twilioAgent(t)
+	other := targetFor(agent, ProviderTwilio)
+	other.Provider, other.Logic = ProviderLiveKit, &Logic{Path: "logic/", Files: good}
+	report, _ := Validate(agent, []Target{other}, targetcap.Default())
+	if got := strings.Join(reportFor(report, ProviderLiveKit).Errors, "\n"); !strings.Contains(got, "logic: is read by the twilio target only") {
+		t.Errorf("livekit with logic: errors = %q", got)
+	}
+	logic := &Logic{Files: map[string]string{"requirements.txt": "# a comment\npydantic-ai-slim[openai]==2.51.0  # pinned\n\nhttpx\n"}}
+	if got := strings.Join(logic.Requirements(), ","); got != "pydantic-ai-slim[openai]==2.51.0,httpx" {
+		t.Errorf("Requirements() = %q", got)
+	}
+}

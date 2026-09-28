@@ -44,6 +44,9 @@ type Artifact struct {
 type File struct {
 	Path    string
 	Content []byte
+	// Verbatim is the author's own code, copied as written: the write path
+	// formats it no more than it would edit it.
+	Verbatim bool
 }
 
 type GenerateReport struct {

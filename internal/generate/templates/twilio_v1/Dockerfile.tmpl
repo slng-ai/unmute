@@ -16,6 +16,9 @@ COPY app.py conversation-relay.xml.tmpl ./
 {{- if .LocalTools}}
 COPY tools/ ./tools/
 {{- end}}
+{{- if .Logic}}
+COPY logic/ ./logic/
+{{- end}}
 
 USER relay
 ENV PORT=8080 PYTHONUNBUFFERED=1

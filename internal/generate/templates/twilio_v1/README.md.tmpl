@@ -107,6 +107,16 @@ Keep a host's own file, such as `render.yaml`, in the package's
 laptop, run `ngrok http 8080` or `cloudflared tunnel --url http://localhost:8080`,
 and set `{{.Env.PublicURL}}` to the tunnel's origin.
 
+{{- if .Logic}}
+### Your own agent logic
+
+This build runs each agent turn in `logic/`, copied from the package's
+`{{.Logic.Path}}` folder as written. `app.py` calls its `respond(session)` once
+per caller turn and speaks what it yields. The app still owns the call:
+signatures, interruptions, call slots, the drain and the failure line. Change
+the logic in the package, not here: compile writes this folder again.
+
+{{end -}}
 ## Point the number with unmute deploy
 
 `unmute deploy --target {{.Target}}` sets the number's webhook for you. Run it

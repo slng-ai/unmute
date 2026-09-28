@@ -236,7 +236,7 @@ func writeArtifactFiles(warn io.Writer, outDir string, files []generate.File) (e
 			return err
 		}
 		content := file.Content
-		if strings.HasSuffix(file.Path, ".py") {
+		if strings.HasSuffix(file.Path, ".py") && !file.Verbatim {
 			formatted, found, unparseable, failure := formatPython(content)
 			content, ruffMissing = formatted, ruffMissing || !found
 			switch {

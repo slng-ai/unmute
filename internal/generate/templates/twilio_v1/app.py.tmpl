@@ -40,6 +40,9 @@ from twilio.request_validator import RequestValidator
 {{range .LocalTools}}
 import tools.{{.Name}}
 {{- end}}
+{{- if .Logic}}
+import logic
+{{- end}}
 
 log = logging.getLogger("relay")
 
@@ -542,6 +545,113 @@ def trim_history(history: list[Any], is_user_turn: Any) -> None:
             return
 
 
+{{- if .Logic}}
+# --- custom logic --------------------------------------------------------------
+
+
+@dataclass
+class ModelSettings:
+    """The package's think binding, for logic that calls a model itself."""
+
+    model: str
+    base_url: str | None  # None means the provider's own endpoint
+    api_key: str
+    params: dict[str, Any]  # forwarded request params, as the package wrote them
+    extra_body: dict[str, Any]  # what the SLNG router reads from the body
+    extra_headers: dict[str, str]  # and from the headers
+
+
+class Session:
+    """What logic.respond() gets, one per call.
+
+    The app owns the call: the protocol, interrupts, call slots and shutdown.
+    respond() owns the turn: it reads the conversation and yields the reply.
+    """
+
+    def __init__(self, call: "Call", history: list[dict[str, Any]]) -> None:
+        self._call = call
+        self._history = history
+        setup = call.setup
+        self.call: dict[str, Any] = {
+            "call_sid": call.call_sid,
+            "session_id": call.session_id,
+            "from": str(setup.get("from", "")),
+            "to": str(setup.get("to", "")),
+            "direction": str(setup.get("direction", "")),
+            "custom_parameters": dict(setup.get("customParameters") or {}),
+        }
+        self.instructions = INSTRUCTIONS
+        self.model = ModelSettings(
+            model=MODEL,
+            base_url={{if .Router}}ROUTER_BASE_URL{{else}}None{{end}},
+            api_key=os.environ[ENV_MODEL_KEY],
+            params=dict(MODEL_PARAMS),
+            {{- with .Router}}
+            extra_body={{.Body}},
+            extra_headers={{"{"}}{{pyq .AgentHeader}}: ROUTER_SCOPE, {{pyq .SessionHeader}}: call.session_id{{"}"}},
+            {{- else}}
+            extra_body={},
+            extra_headers={},
+            {{- end}}
+        )
+        self.state: dict[str, Any] = {}  # yours, kept for the whole call
+
+    @property
+    def history(self) -> list[dict[str, str]]:
+        """What the caller said and heard, oldest first; the last entry is the
+        turn to answer. A reply the caller interrupted holds only what they
+        heard. A copy, so changing it changes nothing here."""
+        return [{"role": e["role"], "content": e["content"]} for e in self._history if e["content"]]
+
+    def end(self, reason: str = "done") -> None:
+        """End the call once this reply has been sent."""
+        self._call.ending = True
+        self._call.event("logic_end", reason=str(reason)[:32])
+
+
+class LogicBrain:
+    """The turn, handed to the package's own logic.respond(session).
+
+    It fills the same six methods as the model brains, so the call loop, its
+    interrupts and its failure path are the same code for both. respond()
+    runs its own tools, so a reply here never carries a tool call.
+    """
+
+    def __init__(self, client: Any) -> None:
+        self.history: list[dict[str, Any]] = []
+        self.session: Session | None = None
+
+    def user(self, text: str) -> None:
+        self.history.append({"role": "user", "content": text})
+
+    def assistant_text(self, text: str) -> dict[str, Any]:
+        entry = {"role": "assistant", "content": text}
+        self.history.append(entry)
+        return entry
+
+    async def stream(self, call: "Call", cycle: Cycle) -> Reply:
+        if self.session is None:
+            self.session = Session(call, self.history)
+        generated: list[str] = []
+        async for piece in logic.respond(self.session):
+            if not isinstance(piece, str):
+                raise TypeError("logic.respond() must yield str")
+            if piece:
+                generated.append(piece)
+                await call.speak(cycle, piece)
+        return Reply(calls=[], generated="".join(generated))
+
+    def commit(self, cycle: Cycle, reply: Reply, results: list[tuple[ToolCall, Any]]) -> Any:
+        return self.assistant_text(cycle.text)
+
+    def set_text(self, entry: dict[str, Any], text: str) -> None:
+        entry["content"] = text
+
+    def trim(self) -> None:
+        trim_history(self.history, lambda e: e["role"] == "user")
+
+
+{{end}}
 # --- one call ------------------------------------------------------------------
 
 
@@ -560,7 +670,8 @@ class Call:
         self.ws = ws
         self.call_sid = setup["callSid"]
         self.session_id = setup["sessionId"]
-        self.brain = Brain(client)
+        self.setup = setup
+        self.brain = {{if .Logic}}LogicBrain{{else}}Brain{{end}}(client)
         self.slots = slots
         self.generation = 0
         self.send_lock = asyncio.Lock()
@@ -788,12 +899,17 @@ class Call:
             reply = task.result()
             await self.finish(cycle)
             if not reply.calls and not cycle.sent and not reply.generated:
+                if self.ending:  # nothing to say, and asked to end: not a failure
+                    await self.end("end_call")
+                    return
                 await self.fail(cycle, "empty_response")
                 return
             self.failures = 0
             if not reply.calls:
                 cycle.entry = self.brain.commit(cycle, reply, [])
                 self.reconcile()
+                if self.ending:
+                    await self.end("end_call")
                 return
             rounds += 1
             results = await self.run_tools(reply.calls)

@@ -67,6 +67,7 @@ type twilioData struct {
 	VertexHelper string
 	ArtifactID   string
 	Router       *twilioRouter // set when think is the SLNG Context Router
+	Logic        *ir.Logic     // set when the author's own respond() runs the turn
 }
 
 // twilioRouter is what the OpenAI brain adds to reach the SLNG Context Router:
@@ -161,6 +162,11 @@ func renderTwilioFiles(agent *ir.Agent, resolved ir.Target, data twilioData) ([]
 	for _, tool := range data.LocalTools {
 		files = append(files, File{Path: filepath.ToSlash(filepath.Join("tools", tool.Name+".py")), Content: []byte(tool.Source)})
 	}
+	if data.Logic != nil {
+		for _, name := range slices.Sorted(maps.Keys(data.Logic.Files)) {
+			files = append(files, File{Path: "logic/" + filepath.ToSlash(name), Content: []byte(data.Logic.Files[name]), Verbatim: true})
+		}
+	}
 	return files, nil
 }
 
@@ -169,7 +175,8 @@ func renderTwilioFiles(agent *ir.Agent, resolved ir.Target, data twilioData) ([]
 // Twilio API and not an attestation: a host can report any string it likes.
 //
 // It hashes the files that decide behaviour (the app, its TwiML, its pins,
-// its image and the tool handlers), sorted by path, and nothing else. The
+// its image, the tool handlers and any custom logic), sorted by path, and
+// nothing else. The
 // README, .env.example and the compile report are left out, so a docs change
 // needs no rehost. No hashed file holds a credential or the public origin:
 // both are environment names here, and values only on the host.
@@ -178,7 +185,8 @@ func twilioArtifactID(files []File) string {
 	for _, file := range files {
 		switch {
 		case file.Path == "app.py", file.Path == "pyproject.toml", file.Path == "Dockerfile",
-			file.Path == ".dockerignore", file.Path == TwilioRelayTemplate, strings.HasPrefix(file.Path, "tools/"):
+			file.Path == ".dockerignore", file.Path == TwilioRelayTemplate, strings.HasPrefix(file.Path, "tools/"),
+			strings.HasPrefix(file.Path, "logic/"):
 			hashed = append(hashed, file)
 		}
 	}
@@ -309,6 +317,12 @@ func buildTwilioData(agent *ir.Agent, resolved ir.Target) (twilioData, error) {
 	slices.Sort(data.Deps)
 	slices.Sort(deps)
 	data.Deps = append(data.Deps, slices.Compact(deps)...)
+	// The logic's own requirements come last and as written: they are the
+	// author's, and a clash with a pin above is for the installer to report.
+	if resolved.Logic != nil {
+		data.Logic = resolved.Logic
+		data.Deps = append(data.Deps, resolved.Logic.Requirements()...)
+	}
 
 	if plan := resolved.Telephony; plan != nil {
 		data.Env = twilioEnv{

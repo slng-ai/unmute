@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"flag"
 	"os"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -301,5 +302,57 @@ func TestTwilioRouterThink(t *testing.T) {
 	direct := artifactFile(t, twilioArtifact(t, filepath.Join("..", "voice-agents-tests", "relay-desk"), "twilio-openai"), "app.py")
 	if strings.Contains(direct, "ROUTER_") || strings.Contains(direct, "extra_body") {
 		t.Error("a direct openai binding emits router code")
+	}
+}
+
+// A target with logic: hands the turn to the author's respond(). The folder is
+// copied as written, its requirements join the pins, the image copies it, and
+// it counts in artifact_id, because it decides what a call does.
+func TestTwilioLogicTarget(t *testing.T) {
+	pkg, err := spec.Load(relayDesk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["twilio-logic"]
+	artifact, err := Generate(agent, resolved, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := artifactFile(t, artifact, "app.py")
+	for _, want := range []string{"import logic", "self.brain = LogicBrain(client)", "async for piece in logic.respond(self.session):"} {
+		if !strings.Contains(app, want) {
+			t.Errorf("app.py lacks %s", want)
+		}
+	}
+	var copied bool
+	for _, file := range artifact.Files {
+		if file.Path == "logic/__init__.py" {
+			copied = file.Verbatim && string(file.Content) == resolved.Logic.Files["__init__.py"]
+		}
+	}
+	if !copied {
+		t.Error("logic/__init__.py is not copied verbatim")
+	}
+	if !strings.Contains(artifactFile(t, artifact, "pyproject.toml"), `"pydantic-ai-slim[openai]==2.51.0"`) {
+		t.Error("the logic's requirement is not in pyproject.toml")
+	}
+	if !strings.Contains(artifactFile(t, artifact, "Dockerfile"), "COPY logic/ ./logic/") {
+		t.Error("the image does not copy logic/")
+	}
+	resolved.Logic = &ir.Logic{Path: resolved.Logic.Path, Files: maps.Clone(resolved.Logic.Files)}
+	resolved.Logic.Files["__init__.py"] += "\n# changed\n"
+	changed, err := Generate(agent, resolved, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.ArtifactID == artifact.ArtifactID {
+		t.Error("a change to the logic did not change artifact_id")
+	}
+	if strings.Contains(artifactFile(t, twilioArtifact(t, relayDesk, "twilio-openai"), "app.py"), "LogicBrain") {
+		t.Error("a target without logic emits the logic brain")
 	}
 }

@@ -81,6 +81,7 @@ On this page:
 - [Host it](#host-it) - run the app at a public origin
 - [Point the number at it](#point-the-number-at-it) - with `unmute deploy`, or by hand
 - [How the app behaves](#how-the-app-behaves) - signatures, calls at once, interruptions, tools
+- [Bring your own agent logic](#bring-your-own-agent-logic) - replace the turn with your own code
 - [What is not verified yet](#what-is-not-verified-yet) - read before you rely on it
 
 ## The package
@@ -189,6 +190,11 @@ is for pointing the number at the app; the app itself never reads it.
 <ParamField path="models" type="model entry name to a model definition">
   Per target overrides of named `agent.yaml` entries, for example to think with
   Gemini on one target and OpenAI on another.
+</ParamField>
+
+<ParamField path="logic" type="folder path">
+  A folder of your own Python that runs each agent turn in place of the
+  generated one. See [Bring your own agent logic](#bring-your-own-agent-logic).
 </ParamField>
 
 ### Every key the connection takes
@@ -309,6 +315,7 @@ writes `build/<target>/`:
 | `app.py` | the whole app, on FastAPI and uvicorn: routes, WebSocket, model, tools |
 | `conversation-relay.xml.tmpl` | the TwiML `/voice` returns; `app.py` fills in your public origin at startup |
 | `tools/` | your local handlers, copied from the package |
+| `logic/` | your own agent logic, copied as written, when the target names `logic:` |
 | `pyproject.toml` | exact dependency pins for Python 3.12 |
 | `Dockerfile` | a non-root image running one process |
 | `.dockerignore` | keeps `.env` and local state out of the image |
@@ -534,6 +541,135 @@ Then call the number. That call is the only check of the speech path.
 - **Failures.** A failed or timed-out model response gets one short fixed line.
   Three in a row end the call.
 
+## Bring your own agent logic
+
+The app you host is yours, so the agent turn can be too. Point the target at a
+folder of your own Python:
+
+```yaml targets.yaml
+targets:
+  twilio:
+    provider: twilio
+    connection: twilio_relay
+    logic: logic/
+```
+
+```python logic/__init__.py
+async def respond(session):
+    """Stream the reply to the caller's last words."""
+    yield "Hello from my own agent."
+```
+
+```mermaid
+flowchart LR
+    Twilio -->|caller's words| App[app.py]
+    App -->|session| Logic["your respond()"]
+    Logic -->|reply, piece by piece| App
+    App -->|text to speak| Twilio
+```
+
+1. Twilio sends the caller's words. The app adds them to the call's history.
+2. The app calls `respond(session)`, once per caller turn.
+3. Each string `respond()` yields is spoken as it arrives.
+4. When the caller talks over the reply, the app stops `respond()` and cuts
+   the reply in the history to what the caller heard.
+
+The app still owns the call: Twilio's signatures and protocol, interruptions,
+call slots, the drain on shutdown, and the fixed line when a turn fails.
+`respond()` owns the turn, and it runs its own tools. Compile copies the folder
+into `build/<target>/logic/` exactly as written and never changes it. The
+folder counts in the build's `artifact_id`, so `unmute deploy` refuses a host
+that runs older logic.
+
+What `session` holds:
+
+| Field | What it is |
+|---|---|
+| `history` | the conversation as a list of `{"role": "user" \| "assistant", "content": str}`, oldest first. The last entry is the turn to answer. An interrupted reply holds only what the caller heard. It is a copy. |
+| `call` | `call_sid`, `session_id`, `from`, `to`, `direction` and `custom_parameters`, from Twilio's setup message |
+| `instructions` | the package's instructions |
+| `model` | the package's think binding: `model`, `base_url` (the SLNG router's, or `None`), `api_key`, `params`, and the router's `extra_body` and `extra_headers` |
+| `state` | a dict of your own, kept for the whole call |
+| `end(reason)` | ends the call once this reply has been sent, like `end_call` |
+
+Rules the app holds `respond()` to:
+
+- It must be `async def respond(session)` in the folder's `__init__.py`, and
+  yield strings.
+- A turn has 30 seconds. A turn that raises, times out or yields nothing gets
+  the fixed failure line. Three failures in a row end the call.
+- `end()` ends the call right after the reply, so keep the goodbye in the
+  reply before it.
+- `requirements.txt` in the folder, one requirement per line, is added to the
+  app's pinned dependencies. A pin that clashes with the app's own pins fails
+  at install, with the installer's message.
+
+`think:` stays required, so the package still validates on its own, and
+`respond()` may ignore it. Or it can use `session.model` to call the model the
+package names. This is a whole agent in Pydantic AI, with a tool and a
+goodbye, on the package's own binding:
+
+```python logic/__init__.py
+from pydantic_ai import Agent
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
+from pydantic_ai.providers.openai import OpenAIProvider
+
+from tools.opening_hours import opening_hours as read_hours
+
+
+def build(session):
+    m = session.model
+    model = OpenAIChatModel(m.model, provider=OpenAIProvider(base_url=m.base_url, api_key=m.api_key))
+    settings = OpenAIChatModelSettings(extra_body={**m.params, **m.extra_body}, extra_headers=m.extra_headers)
+    agent = Agent(model, instructions=session.instructions, model_settings=settings)
+
+    @agent.tool_plain
+    def opening_hours(day: str) -> dict:
+        """Return the front desk's opening hours for one day of the week."""
+        return read_hours(day)
+
+    @agent.tool_plain
+    def end_call() -> str:
+        """End the call once the caller says they are done."""
+        session.end("caller_done")
+        return "The call ends after this reply."
+
+    return agent
+
+
+def to_messages(history):
+    return [
+        ModelRequest(parts=[UserPromptPart(content=e["content"])]) if e["role"] == "user"
+        else ModelResponse(parts=[TextPart(content=e["content"])])
+        for e in history
+    ]
+
+
+async def respond(session):
+    if "agent" not in session.state:
+        session.state["agent"] = build(session)
+    *earlier, last = session.history
+    async with session.state["agent"].run_stream(last["content"], message_history=to_messages(earlier)) as run:
+        async for piece in run.stream_text(delta=True, debounce_by=None):
+            yield piece
+```
+
+```text logic/requirements.txt
+pydantic-ai-slim[openai]==2.51.0
+```
+
+The history is rebuilt from `session.history` every turn, so an interrupted
+reply counts only as far as the caller heard it. `debounce_by=None` speaks
+each piece as it arrives instead of in batches. Pydantic AI prints a banner at
+import; set `PYDANTIC_AI_NO_BANNER=1` on the host to keep it out of the log.
+
+With `provider: slng` on think, the same code calls the model through the SLNG
+Context Router: `base_url` and the router's body and headers come in
+`session.model`. For any other endpoint that speaks Chat Completions, such as
+vLLM, Ollama or OpenRouter, set `base_url` and `api_key` yourself in `build()`.
+Pydantic AI also has its own providers for Anthropic, Gemini and others.
+
 ## What is not verified yet
 
 - A call behind a proxy other than a cloudflared quick tunnel.
@@ -546,6 +682,8 @@ Then call the number. That call is the only check of the speech path.
 - A call in `ie1` or `au1`. The docs list ConversationRelay in both regions.
   They do not say whether Deepgram and ElevenLabs run there.
 - The Gemini Developer API path, with no `vertexai`, against a real key.
+- Custom logic on a real call. The Pydantic AI example passes the offline
+  harness and a real model run, with a tool, an interrupt and a goodbye.
 - A hosted deploy. The FastAPI app passes the offline harness and a real
   model run, but it has not run on Render or any other host yet, and the drain
   on a real SIGTERM is tested in process only.

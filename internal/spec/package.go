@@ -17,6 +17,9 @@ type Package struct {
 	Root     string            `json:"-" yaml:"-"`
 	Markdown map[string]string `json:"-" yaml:"-"`
 	Handlers map[string]string `json:"-" yaml:"-"` // local tool handler sources, by path
+	// LogicFiles holds each custom logic folder a target names, by folder, then
+	// by path inside it.
+	LogicFiles map[string]map[string]string `json:"-" yaml:"-"`
 	// Documents holds each knowledge base document, keyed by the path it takes
 	// inside the artifact (knowledge/<base>/<file>). []byte, not string, because
 	// a PDF is binary, and read but never parsed: the compiler has no PDF parser
@@ -895,6 +898,11 @@ type Target struct {
 	DeploymentRegion Regions             `json:"deployment_region,omitempty" yaml:"deployment_region,omitempty"` // where the platform deploys the agent: one region or several (N18, widened by N32)
 	WarmInstances    int                 `json:"warm_instances,omitempty" yaml:"warm_instances,omitempty"`       // instances the platform holds ready, so a call is not waiting on a cold container
 	Models           map[string]ModelDef `json:"models,omitempty" yaml:"models,omitempty"`                       // per-target overrides (N15), keyed by model name / listen / turn
+	// Logic names a folder of the author's own Python that replaces the agent
+	// turn: its __init__.py defines async respond(session), which streams the
+	// reply. The twilio target only. The folder is the author's, so compile
+	// copies it into the build and never writes it.
+	Logic string `json:"logic,omitempty" yaml:"logic,omitempty"`
 
 	// Moved fields, kept on the decode struct so a package written the old way
 	// still parses and can be refused with a message naming the new home rather

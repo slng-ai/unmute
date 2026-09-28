@@ -72,6 +72,7 @@ func validateTwilioTarget(agent *Agent, resolved Target, row *TargetValidation) 
 	validateTwilioConversation(agent, refuse)
 	validateTwilioSpeech(agent, resolved, refuse)
 	validateTwilioThink(resolved, refuse)
+	validateTwilioLogic(resolved.Logic, refuse)
 	for _, name := range sortedKeys(agent.Tools) {
 		validateTwilioTool(name, agent.Tools[name], refuse)
 	}
@@ -184,6 +185,33 @@ func validateTwilioThink(resolved Target, refuse func(string, ...any)) {
 			case slices.Contains(twilioThinkForeign[vendor], key):
 				refuse("think.%s sets params.%s, which %s requests do not take: remove it; it belongs to the other think provider", name, key, vendor)
 			}
+		}
+	}
+}
+
+// twilioRespond is the one definition the app imports from custom logic.
+var twilioRespond = regexp.MustCompile(`(?m)^async def respond\(`)
+
+// validateTwilioLogic holds a custom logic folder to what the app can import
+// and install. It checks the shape only: whether the code works is for the
+// harness and a call to say.
+func validateTwilioLogic(logic *Logic, refuse func(string, ...any)) {
+	if logic == nil {
+		return
+	}
+	init, ok := logic.Files["__init__.py"]
+	switch {
+	case len(logic.Files) == 0:
+		refuse("logic %q is missing or empty: create the folder with an __init__.py that defines async def respond(session)", logic.Path)
+		return
+	case !ok:
+		refuse("logic %q has no __init__.py: the app imports the folder as the logic package, so respond() must be defined in %s/__init__.py", logic.Path, logic.Path)
+	case !twilioRespond.MatchString(init):
+		refuse("logic %q/__init__.py defines no async def respond(session) at top level: the app calls it once per caller turn and speaks what it yields", logic.Path)
+	}
+	for _, line := range logic.Requirements() {
+		if strings.HasPrefix(line, "-") {
+			refuse("logic %q/requirements.txt line %q is an installer option: list one requirement per line, such as pydantic-ai-slim[openai]==1.0.0", logic.Path, line)
 		}
 	}
 }

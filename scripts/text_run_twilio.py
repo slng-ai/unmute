@@ -351,8 +351,31 @@ CASES = []
 
 
 def case(function: Any) -> Any:
+    """A case that scripts the model SDK, so it runs on a model build."""
+    function.kind = "model"
     CASES.append(function)
     return function
+
+
+def protocol_case(function: Any) -> Any:
+    """A case that never reaches the turn, so it runs on every build."""
+    case(function).kind = "protocol"
+    return function
+
+
+def logic_case(function: Any) -> Any:
+    """A case that replaces logic.respond, so it runs on a custom logic build."""
+    case(function).kind = "logic"
+    return function
+
+
+@contextlib.contextmanager
+def using_logic(app: Any, respond: Any) -> Any:
+    saved, app.logic.respond = app.logic.respond, respond
+    try:
+        yield
+    finally:
+        app.logic.respond = saved
 
 
 def fake_for(app: Any, script: list[list[Any]]) -> Any:
@@ -368,7 +391,7 @@ def env(app: Any, script: list[list[Any]] | None = None, **patches: Any) -> Env:
     return Env(app, fake_for(app, script or []), patches)
 
 
-@case
+@protocol_case
 async def health_and_signed_voice(app: Any) -> None:
     async with env(app) as e:
         health = await e.client.get("/healthz")
@@ -386,7 +409,7 @@ async def health_and_signed_voice(app: Any) -> None:
         check(with_query.status == 200, "a signed query string was refused")
 
 
-@case
+@protocol_case
 async def voice_signature_rejections(app: Any) -> None:
     async with env(app) as e:
         form = {"AccountSid": ACCOUNT, "CallSid": CALL}
@@ -408,7 +431,7 @@ async def voice_signature_rejections(app: Any) -> None:
         check(action.status == 200 and "<Hangup/>" in body and "Connect" not in body, "connect-action did not hang up")
 
 
-@case
+@protocol_case
 async def websocket_handshake_and_setup(app: Any) -> None:
     from aiohttp import WSServerHandshakeError
 
@@ -720,7 +743,7 @@ async def end_waits_for_twilio_to_close(app: Any) -> None:
         check(await relay.next(2.0) is None, "the app never closed a socket Twilio left open")
 
 
-@case
+@protocol_case
 async def overload_is_refused(app: Any) -> None:
     async with env(app, MAX_SESSIONS=1, END_GRACE=2.0) as e:
         # Held, not dropped: a dropped socket is collected and closed, which
@@ -737,7 +760,7 @@ async def overload_is_refused(app: Any) -> None:
         await first.ws.close()
 
 
-@case
+@protocol_case
 async def shutdown_drains_then_ends(app: Any) -> None:
     async with env(app, DRAIN_TIMEOUT=0.2) as e:
         relay = await e.relay()
@@ -748,7 +771,126 @@ async def shutdown_drains_then_ends(app: Any) -> None:
         check(e.slots[0].draining, "admission stayed open during shutdown")
 
 
+@logic_case
+async def logic_reply_streams_with_last(app: Any) -> None:
+    seen: list[Any] = []
+
+    async def respond(session: Any) -> Any:
+        seen.append(session.history)
+        for piece in ("The desk ", "opens ", "at nine."):
+            yield piece
+
+    with using_logic(app, respond):
+        async with env(app) as e:
+            relay = await e.relay()
+            await relay.prompt("When do you open?")
+            tokens = await relay.reply()
+            check(text_of(tokens) == "The desk opens at nine.", f"reply: {text_of(tokens)!r}")
+            check([t["last"] for t in tokens] == [False, False, True], "last=true is not on the last piece only")
+            want = [{"role": "user", "content": "When do you open?"}]
+            if app.GREETING:
+                want.insert(0, {"role": "assistant", "content": app.GREETING})
+            check(seen == [want], f"respond() saw {seen}")
+            session = e.calls[0].brain.session
+            check(session.call["call_sid"] == CALL and session.call["session_id"] == SESSION, "call ids")
+            check(session.call["from"] == "+15005550006" and session.call["custom_parameters"] == {}, "setup fields")
+            check(session.instructions == app.INSTRUCTIONS and session.model.model == app.MODEL, "package settings")
+
+
+@logic_case
+async def logic_interrupt_keeps_what_was_heard(app: Any) -> None:
+    gate = asyncio.Event()
+    cancelled: list[bool] = []
+    seen: list[Any] = []
+
+    async def respond(session: Any) -> Any:
+        seen.append(session.history)
+        if len(seen) > 1:
+            yield "Sure."
+            return
+        try:
+            yield "One two. "
+            yield "Three four. "
+            await gate.wait()
+            yield "Never sent."
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+
+    with using_logic(app, respond):
+        async with env(app) as e:
+            relay = await e.relay()
+            await relay.prompt("Count for me.")
+            first = await relay.next()
+            check(first and first["token"] == "One two. ", f"first piece: {first}")
+            await relay.interrupt("One two.")
+            await until(lambda: cancelled)
+            await relay.quiet(0.3)
+            await relay.prompt("Stop.")
+            await relay.reply()
+            heard = [h for h in seen[1] if h["role"] == "assistant" and h["content"] != app.GREETING]
+            check(heard == [{"role": "assistant", "content": "One two."}], f"history after the interrupt: {seen[1]}")
+
+
+@logic_case
+async def logic_error_takes_the_failure_path(app: Any) -> None:
+    async def respond(session: Any) -> Any:
+        raise RuntimeError("the agent broke")
+        yield ""  # an async generator, as respond() must be
+
+    with using_logic(app, respond):
+        async with env(app) as e:
+            relay = await e.relay()
+            await relay.prompt("Hello?")
+            check(text_of(await relay.reply()) == app.FAILURE_LINE, "no failure line after respond() raised")
+
+
+@logic_case
+async def logic_end_ends_the_call(app: Any) -> None:
+    async def respond(session: Any) -> Any:
+        session.end("caller_done")
+        yield "Goodbye."
+
+    with using_logic(app, respond):
+        async with env(app) as e:
+            relay = await e.relay()
+            await relay.prompt("That's all.")
+            check(text_of(await relay.reply()) == "Goodbye.", "the goodbye was not spoken")
+            end = await relay.next()
+            check(end and end["type"] == "end", f"session.end() sent no end: {end}")
+            await relay.ws.close()
+
+
 # --- real cases ----------------------------------------------------------------
+
+
+async def real_logic(app: Any) -> None:
+    """The package's own logic against the real model: a tool answer, an
+    interrupt, the next turn, and a goodbye that ends the call."""
+    async with Env(app, None, {"DRAIN_TIMEOUT": 0.2}) as e:
+        relay = await e.relay()
+        await relay.prompt("What time do you open on Monday?")
+        monday = text_of(await relay.reply(timeout=40))
+        check("nine" in monday.lower() or "9" in monday, f"no Monday hours: {monday!r}")
+        print(f"  tool answer: {monday!r}")
+
+        await relay.prompt("Tell me a long story about the building's history.")
+        first = await relay.next(timeout=40)
+        check(first and first["type"] == "text", "no token to interrupt")
+        await relay.interrupt(first["token"])
+        await relay.quiet(1.0)
+        await relay.prompt("Sorry, what about Friday?")
+        friday = text_of(await relay.reply(timeout=40))
+        check(friday.strip(), "no answer after the interrupt")
+        print(f"  next turn after interrupt: {friday!r}")
+        story = [h for h in e.calls[0].brain.history if h["role"] == "assistant"][-2]["content"]
+        check(len(story) < 400, f"the interrupted story was kept whole: {story!r}")
+
+        await relay.prompt("That's all, thank you. Goodbye.")
+        await relay.reply(timeout=40)
+        end = await relay.next(timeout=10)
+        check(end and end["type"] == "end", f"the goodbye did not end the call: {end}")
+        print("  goodbye ended the call through session.end()")
 
 
 def load_key(app: Any, env_file: Path, name: str) -> None:
@@ -850,21 +992,25 @@ def main() -> None:
             os.environ.pop(name, None)
             load_key(app, args.env_file, name)
         print(f"real: {app.MODEL}")
-        asyncio.run(real(app))
+        asyncio.run(real_logic(app) if hasattr(app, "LogicBrain") else real(app))
         print("real: pass")
         return
 
-    failed = 0
+    ran = failed = 0
+    logic_build = hasattr(app, "LogicBrain")
     for function in CASES:
         if args.case and function.__name__ not in args.case:
             continue
+        if function.kind == ("logic" if not logic_build else "model"):
+            continue
+        ran += 1
         try:
             asyncio.run(asyncio.wait_for(function(app), 15))
             print(f"pass  {function.__name__}")
         except Exception as error:  # noqa: BLE001 - every failure is reported, then counted
             failed += 1
             print(f"FAIL  {function.__name__}: {type(error).__name__}: {error}")
-    print(f"{len(CASES) - failed if not args.case else '-'} passed, {failed} failed")
+    print(f"{ran - failed} passed, {failed} failed")
     sys.exit(1 if failed else 0)
 
 

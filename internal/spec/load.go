@@ -100,6 +100,9 @@ func Load(dir string) (*Package, error) {
 	if err := pkg.readConnections(); err != nil {
 		return nil, err
 	}
+	if err := pkg.readLogic(); err != nil {
+		return nil, err
+	}
 
 	if err := pkg.flattenTasks(); err != nil {
 		return nil, err
@@ -219,6 +222,56 @@ func (p *Package) readKnowledge() error {
 			}
 			p.Documents[path.Join("knowledge", name, entry.Name())] = content
 		}
+	}
+	return nil
+}
+
+// readLogic reads every custom logic folder a target names. What the files must
+// hold is validation's to say, so a missing or empty folder is left empty here
+// and refused there with the target's name. A cache folder is skipped: it is
+// the interpreter's, not the author's.
+func (p *Package) readLogic() error {
+	root, err := os.OpenRoot(p.Root)
+	if err != nil {
+		return fmt.Errorf("package path: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	for _, name := range slices.Sorted(maps.Keys(p.Targets)) {
+		dir := filepath.Clean(p.Targets[name].Logic)
+		if p.Targets[name].Logic == "" || p.LogicFiles[dir] != nil {
+			continue
+		}
+		files := map[string]string{}
+		err := fs.WalkDir(root.FS(), filepath.ToSlash(dir), func(at string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				if at != filepath.ToSlash(dir) && (entry.Name() == "__pycache__" || strings.HasPrefix(entry.Name(), ".")) {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if strings.HasPrefix(entry.Name(), ".") || strings.HasSuffix(entry.Name(), ".pyc") {
+				return nil // an editor's or the interpreter's, not part of the logic
+			}
+			if !entry.Type().IsRegular() {
+				return fmt.Errorf("%s is not a regular file", at)
+			}
+			content, err := fs.ReadFile(root.FS(), at)
+			if err != nil {
+				return err
+			}
+			files[strings.TrimPrefix(at, filepath.ToSlash(dir)+"/")] = string(content)
+			return nil
+		})
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("targets.yaml: target %q logic %q: %w", name, p.Targets[name].Logic, err)
+		}
+		if p.LogicFiles == nil {
+			p.LogicFiles = map[string]map[string]string{}
+		}
+		p.LogicFiles[dir] = files
 	}
 	return nil
 }
