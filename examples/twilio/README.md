@@ -30,10 +30,16 @@ ConversationRelay. Fill in `.env` with `SLNG_API_KEY`, `OPENAI_API_KEY`,
 as `TWILIO_PUBLIC_URL`. Uncomment and fill in `TWILIO_PHONE_NUMBER_SID` for
 deploy. Never commit this file.
 
+Compilation creates local files; it does not publish a running service. Upload
+`examples/twilio/build/twilio/` to your host, excluding `.env`, or push the
+generated project to a deployment repository connected to a container service.
+The [hosting walkthrough](../../docs-site/telephony/twilio-conversation-relay.mdx#4-host-the-application)
+shows the steps, including a Render example and a VM alternative.
+
 Host the generated app on a service of your choice with public HTTPS, secure
 WebSockets, one process/instance, and at least 35 seconds of shutdown grace.
 Keep it available when calls arrive; a sleeping service can miss calls.
-From the build folder, use Python 3.12 and `uv`:
+For a local run from the build folder, use Python 3.12 and `uv`:
 
 ```sh
 cd examples/twilio/build/twilio
@@ -47,10 +53,13 @@ docker build -t twilio-agent .
 docker run --env-file ../../.env -e PORT=8080 -p 8080:8080 --stop-timeout 35 twilio-agent
 ```
 
-The app uses port 8080 by default (`PORT` changes it). Supply those environment
+These commands run wherever you execute them; running them locally does not
+publish the app. The app uses port 8080 by default (`PORT` changes it). Supply those environment
 values on your host and configure its proxy to pass WebSocket upgrades and
 keep connections open for the duration of calls. `TWILIO_PUBLIC_URL` must match
-the externally visible origin exactly, with no path. For a laptop test, expose
+the externally visible origin exactly, with no path. Put the same origin in
+your local `examples/twilio/.env` so deploy routes the number to that host.
+For a laptop test, expose
 port 8080 through an HTTPS/WebSocket tunnel and use its origin.
 
 Once the public app answers, return to the repository root:

@@ -243,7 +243,10 @@ changes nothing. A hosting file does not change the build's `artifact_id`.
 
 Use a container service, VM, or other Python host of your choice. The
 [walkthrough](/telephony/twilio-conversation-relay#4-host-the-application)
-provides Docker and Python commands. The host must supply:
+walks through uploading the compiled project, deploying a container on Render
+as one example, running on a VM, and testing through a local tunnel. Compile
+creates files on your computer; your host deploys those files; `unmute deploy`
+then points the number at the running app. The host must supply:
 
 - Public HTTPS and WSS, with WebSocket upgrades and connections kept open for a whole call.
 - The exact public origin in `TWILIO_PUBLIC_URL`, without a path. Signature checks use this URL.
