@@ -14,7 +14,7 @@ Write, validate, read the error, fix, repeat. Then run it and listen.
 | `unmute validate [dir]` | load, build, and check against every declared target |
 | `unmute compile [dir]` | validate, then write `build/<target>/` for each code target |
 | `unmute dev [dir]` | compile, run locally, and let you talk to the agent |
-| `unmute deploy [dir]` | validate, compile, and push a slng target to SLNG. The push is the `unmute-deploy` skill |
+| `unmute deploy [dir]` | validate, compile, and push an SLNG target; `--target twilio` checks a hosted app and routes an existing number |
 | `unmute pull [dir]` | fetch each SLNG-hosted tool's definition into the package |
 | `unmute skill install` | write this skill into a project |
 
@@ -23,13 +23,12 @@ so you can `cd` into a package and run them with no argument. Passing a
 directory still works and still wins, and it is the right form when you are not
 inside the package.
 
-Four commands take an author from nothing to a voice. `deploy` is how a slng
-package leaves the machine, and it is SLNG only: a livekit or pipecat target
-compiles to a project that platform deploys with its own tool. `pull` is the
-only command that needs an SLNG credential, and it is needed only by a package
-that references a tool the platform hosts: `validate` and `compile` work
-offline, which is what lets CI build such a package. `skill` is off every path:
-it writes this bundle into a project and does nothing else.
+`deploy` pushes an SLNG package using the `unmute-deploy` skill. With
+`--target twilio`, it checks an application the user has hosted and points an
+existing Twilio number at it. LiveKit and Pipecat projects use their platform's
+deployment tools. `validate` and `compile` work offline; deployment and fetching
+hosted tools require the relevant provider credentials. `skill` installs this
+bundle into a project.
 
 ```sh
 unmute skill install
@@ -74,7 +73,8 @@ Review local changes before using `--force`.
 
 ## Start with init
 
-`unmute init` asks no questions and writes the same starter package every time.
+`unmute init my-agent` writes the default starter without a wizard.
+`unmute init my-agent --target twilio` writes the SLNG Context Router phone starter.
 
 ```sh
 unmute init my-agent
@@ -86,9 +86,9 @@ and a `tools/end_call.yaml` so the agent can hang up from its first run. Edit
 what it wrote rather than starting from an empty directory.
 
 The scaffold declares **one** target, `livekit`, named after its provider. One
-target means what you test is what you deploy, and it means you do not pass
-`--target` on a scaffolded package: there is nothing to choose between. Add a
-second target later, by hand, when the package needs one.
+target means what you test is what you deploy. Validation and compilation need
+no `--target` for a single-target package. Twilio deployment always needs
+`--target twilio`, because bare `unmute deploy` selects SLNG deployment.
 
 `unmute init` refuses to write into a directory that already exists and is not
 empty. That is deliberate, not a bug to route around.
@@ -170,15 +170,21 @@ turns the check off. There is no such flag.
 unmute compile
 ```
 
-Writes one directory per code target: `build/livekit/`, `build/pipecat/`. Each
-holds a Python project, a `Dockerfile`, an `.env.example`, Compose files, a
-deploy manifest, a compile report, and a `README.md` runbook written for that
-build.
+Writes a standalone Python project under `build/<target>/` for LiveKit,
+Pipecat, or Twilio. Read that build's `README.md` for its run command and
+required services. The SLNG target emits its deployment body instead.
 
 **Never edit `build/`.** It is rewritten on every compile. Change the package.
 
-A provider is a target only when a driver emits a runnable project for it.
-Pipecat and LiveKit are the two. Naming anything else is refused at validate.
+For Twilio, host the app at a public HTTPS/WSS origin, then run:
+
+```sh
+unmute deploy --target twilio --dry-run
+unmute deploy --target twilio
+```
+
+The command does not host the app or buy a number. See
+[the Twilio package reference](package.md#the-twilio-target).
 
 ## Talk to it
 

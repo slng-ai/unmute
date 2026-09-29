@@ -1,19 +1,22 @@
 # A front desk that answers the phone through Twilio ConversationRelay. One
 # agent, one inbound phone channel, one read-only tool and end_call. The README
-# shows how to switch the think model to Gemini.
+# shows direct OpenAI and Gemini alternatives to the SLNG Context Router.
 version: 1
-name: twilio
+name: twilio-desk
 architecture: cascade
 entry_agent: desk
 
 models:
   think:
     reasoning:
-      provider: openai
+      provider: slng
       model: gpt-5.6-luna
+      agent_id: twilio-v1
+      upstream:
+        provider: openai
       params:
-        # Measured 2026-09-25: this model returns 400 on tool calls through
-        # Chat Completions unless reasoning_effort is none.
+        world_part: eu-west
+        # This model requires reasoning_effort: none for Chat Completions tools.
         reasoning_effort: none
         parallel_tool_calls: false
   listen:
@@ -66,9 +69,10 @@ capacity:
   peak_starts_per_second: 1
   avg_session_duration: 3m
 
-# Both model keys are declared, so switching the think binding needs no other
-# edit. A compiled build reads only the key of the provider it thinks with.
+# The default uses SLNG and OpenAI; GOOGLE_API_KEY supports the README alternative.
+# A compiled build reads only the keys its binding needs.
 secrets:
+  - SLNG_API_KEY
   - OPENAI_API_KEY
   - GOOGLE_API_KEY
   - TWILIO_ACCOUNT_SID

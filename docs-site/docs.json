@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "Unmute",
-  "description": "A declarative standard for voice agents. Describe the agent once, compile it to Pipecat, LiveKit, or SLNG.",
+  "description": "A declarative standard for voice agents. Describe the agent once, compile it to SLNG, LiveKit, Pipecat, or Twilio.",
   "colors": {
     "primary": "#8A7300",
     "light": "#F7E98A",
@@ -196,11 +196,11 @@
         "icon": "gauge",
         "pages": [
           "optimization/overview",
+          "optimization/context-router",
+          "optimization/execution-layer",
           "optimization/latency",
           "optimization/prefetch",
           "optimization/turn-taking",
-          "optimization/execution-layer",
-          "optimization/context-router",
           "optimization/regional-infrastructure"
         ]
       },
@@ -248,9 +248,9 @@
             "icon": "boxes",
             "root": "targets/overview",
             "pages": [
-              "targets/pipecat",
-              "targets/livekit",
               "targets/slng",
+              "targets/livekit",
+              "targets/pipecat",
               "targets/twilio"
             ]
           },

@@ -96,7 +96,8 @@ See [Pipecat support](/targets/pipecat) for model and transport limits.
 `compile` validates the selected target before writing
 `my-agent/build/pipecat/`. It needs no hosting login. Validation checks the
 package and known capabilities; it does not make a successful provider request.
-`unmute deploy` currently pushes SLNG targets only.
+`unmute deploy` publishes SLNG agents or connects Twilio numbers. Pipecat uses
+its own deployment command.
 
 | Generated file | Role |
 |---|---|

@@ -4,8 +4,8 @@ description: "The four stages between your package and what each target runs."
 ---
 
 Unmute is a compiler. You write one package. It reads that package, resolves it
-against one target, and writes what the target runs: a Python project for
-Pipecat or LiveKit, a deployment body for SLNG.
+against one target, and writes what the target runs: a deployment body for SLNG, a Python project for LiveKit or Pipecat, or a
+FastAPI app for Twilio ConversationRelay.
 
 Nothing of Unmute is left in what it writes.
 
@@ -60,6 +60,13 @@ package, as in `unmute compile my-agent`, or leave the argument out to compile
 the directory you are standing in.
 
 <CodeGroup>
+```text SLNG
+build/slng/
+├── agent.json          # the deployment body unmute deploy pushes
+├── tools/              # one JSON body per tool
+└── README.md           # the runbook for this build
+```
+
 ```text Pipecat
 build/pipecat/
 ├── bot.py              # the agent
@@ -89,12 +96,7 @@ build/livekit/
 └── compile-report.json
 ```
 
-```text SLNG
-build/slng/
-├── agent.json          # the deployment body unmute deploy pushes
-├── tools/              # one JSON body per tool
-└── README.md           # the runbook for this build
-```
+
 </CodeGroup>
 
 A code target is a normal Python project. You can read it, run it, and deploy
@@ -102,6 +104,11 @@ it. It does not import Unmute.
 
 On SLNG there is nothing to run yourself: `unmute deploy` pushes `agent.json`
 and SLNG runs the agent.
+
+For Twilio, host the generated FastAPI app on a provider of your choice, then
+`unmute deploy --target twilio` connects your number to its HTTPS webhook.
+Twilio opens a secure WebSocket to the app for the conversation. Follow the
+[first-call walkthrough](/telephony/twilio-conversation-relay).
 
 <Warning>
   Treat `build/` as output. Edit the package and compile again. Anything you

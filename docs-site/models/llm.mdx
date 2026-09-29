@@ -10,7 +10,9 @@ description: "The think binding: every key it takes, the vendors each target can
   [Context Router](/optimization/context-router) answers the turns it judges
   repeatable and calls your model for the rest. The model stays yours to
   choose, and so does the provider that serves it, so one `SLNG_API_KEY` can
-  sit in front of any host you already use.
+  sit in front of a supported upstream. Declare its key too: upstream
+  credentials are forwarded to SLNG. Keep `agent_id` stable for cache reuse;
+  change it when prompt changes invalidate old answers.
 </Note>
 
 On this page:
@@ -27,13 +29,24 @@ On this page:
 
 ## Quickstart
 
+Set the agent's `think: reasoning` to use this binding, or keep the existing
+binding name when replacing its configuration.
+
 ```yaml agent.yaml
+secrets:
+  - SLNG_API_KEY
+  - OPENAI_API_KEY
+
 models:
   think:
     reasoning:
-      provider: openai
+      provider: slng
+      agent_id: my-agent-v1
+      upstream:
+        provider: openai
       model: gpt-5.6-terra
       params:
+        world_part: eu-west
         reasoning_effort: "none"
 ```
 
@@ -385,6 +398,14 @@ chain that loops back on itself, is refused too, naming the loop.
 What that one block compiles to depends on the target:
 
 <CodeGroup>
+```json SLNG
+// on the push body, in the same shape the primary binding uses: the driver
+// joins each entry's provider and model. See /targets/slng#model-names.
+"fallbacks": {
+  "llm": ["<provider>/<model>", "<provider>/<model>"]
+}
+```
+
 ```python LiveKit
 # one constructor call, wrapped in llm.FallbackAdapter
 llm=llm.FallbackAdapter(
@@ -406,16 +427,10 @@ llm=llm.FallbackAdapter(
 pipecat: the Pipecat driver does not emit generated fallback yet
 ```
 
-```json SLNG
-// on the push body, in the same shape the primary binding uses: the driver
-// joins each entry's provider and model. See /targets/slng#model-names.
-"fallbacks": {
-  "llm": ["<provider>/<model>", "<provider>/<model>"]
-}
-```
+
 </CodeGroup>
 
-Pipecat does not emit a generated fallback yet, so validating the same package
+Pipecat does not emit a generated fallback, so validating the same package
 against a Pipecat target refuses it. The SLNG list uses the same
 [vendor/model shape](/targets/slng#model-names) as the primary binding.
 
@@ -444,7 +459,7 @@ it to the think binding those prompts run on.
 
 ### The package compiles for LiveKit and is refused for Pipecat
 
-Pipecat does not emit generated fallback yet. **Fix:** remove `fallback:` from
+Pipecat does not emit generated fallback. **Fix:** remove `fallback:` from
 the `think` section, or keep that package on LiveKit or slng.
 
 ### A provider is refused and the message lists other names

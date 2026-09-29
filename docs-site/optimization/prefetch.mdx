@@ -246,7 +246,8 @@ Behind all of it is one plain fact. The model remembers nothing between turns,
 so every token in the prompt is paid again on every turn. Routing a value to
 the one place that needs it keeps it off that bill everywhere else. A turn the
 [Context Router](/optimization/context-router) judges repeatable can answer
-from cache instead of paying at all, and that is a package's own opt-in.
+from cache instead of calling the upstream model. Twilio starters already
+select the router; add its binding to other packages as described in the guide.
 
 ## Troubleshooting
 

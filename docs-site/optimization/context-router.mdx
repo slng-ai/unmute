@@ -10,10 +10,12 @@ calls your model and answers as normal. You keep your model, your provider,
 and your bill for the turns that reach it, and gain speed on the turns that
 repeat.
 
-This is the one SLNG optimization you opt into. Listening and speaking are
-already optimised behind their bindings, as
-[Execution Layer](/optimization/execution-layer) explains. Thinking is not,
-until you make this change.
+Use SLNG Context Router as the default LLM optimization path.
+`unmute init my-agent --target twilio` and the shipped Twilio example already
+select it. Other target starters use a direct reasoning binding; follow the
+steps below to add the router. Twilio handles speech itself. On LiveKit and
+Pipecat, SLNG speech bindings use the
+[Execution Layer](/optimization/execution-layer).
 
 On this page:
 
@@ -52,6 +54,7 @@ Then compile and run as usual. Nothing else in your package changes.
 ```yaml agent.yaml
 secrets:
   - SLNG_API_KEY
+  - OPENAI_API_KEY
 
 models:
   think:
@@ -66,7 +69,10 @@ models:
         reasoning_effort: "none"
 ```
 
-That is the whole edit. Everything else in your package stays as it is: prompts,
+Keep the existing think binding name when applying this example. If you name
+it `reasoning`, set the agent's `think: reasoning` to select it.
+
+Everything else in your package stays as it is: prompts,
 tools, agents, tasks, task groups, greetings, channels, capacity.
 
 ## Every key a router binding takes
@@ -176,12 +182,8 @@ optimized-salon-concierge-v13:task.verify_customer
 optimized-salon-concierge-v13:task.manage_booking
 ```
 
-That is not decoration. The cache key is the last exchange. It does not include
-the system prompt, so two agents sharing one scope can be served each other's
-answers. An early build without per-prompt scopes hit exactly this: after a
-handoff, the receiving agent's opening line was served the previous agent's
-cached answer, with no model call at all. One scope per prompt is what the
-router's own contract asks for, and that is what unmute sends now.
+The cache key is the last exchange, not the system prompt. Separate scopes
+prevent agents with different instructions from sharing cached answers.
 
 The names come from your package and nothing else, so the same package always
 compiles to the same scopes on either target, and a wording change never moves
@@ -249,10 +251,14 @@ the request and a package has to name whose they are.
 | `vertex` | `credentials_env`, `location` | `project` |
 | `bedrock` | `access_key_id_env`, `secret_access_key_env`, `region`, `model_id` | `session_token_env` |
 
-The `openai` and `openai-compat` rows have been exercised against the live
-router. `azure`, `vertex` and `bedrock` come from the router team's published
-field list and have not been run here, so treat your first call on one of
-those as the test.
+The `openai` and `openai-compat` upstreams have been exercised against the live
+router. `azure`, `vertex`, and `bedrock` configuration follows the published
+contract; these upstreams have not been run live in Unmute's validation.
+
+Upstream support also depends on the target. The Twilio app supports `openai`,
+`openai-compat`, `azure`, and `bedrock`; it does not support the router's `vertex`
+credentials. Verify your selected upstream with a real model request before
+connecting a production number.
 
 On `openai` the compiler supplies the URL and the `OPENAI_API_KEY` name, so
 the block is one line, `upstream: {provider: openai}`. Any other upstream
@@ -372,7 +378,7 @@ reads two names and forwards the rest:
 </ParamField>
 
 <ParamField path="any other key under params" type="forwarded">
-  Forwarded, in the request body, on both targets.
+  Forwarded in the request body on LiveKit, Pipecat, and Twilio.
 </ParamField>
 
 The router passes a key it does not recognise straight to your upstream. That
@@ -384,11 +390,11 @@ through to OpenRouter.
 
 ## Trying it on a package you already have
 
-No shipped example binds to the router today.
-[`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
-reaches Google Vertex directly, which makes it a starting point rather than a
-finished demonstration. It has several prompt sites, so pointing its think
-binding at the router gives you one scope per site to look at.
+[`examples/twilio`](https://github.com/slng-ai/unmute/tree/main/examples/twilio)
+uses SLNG Context Router with an OpenAI upstream. Follow the
+[Twilio walkthrough](/telephony/twilio-conversation-relay) to host it and connect
+a phone number. For an existing LiveKit or Pipecat package, apply the binding
+above; each agent and task receives its own cache scope.
 
 To see the router's own contribution on your own agent, compile it once with
 the think profile bound directly to the upstream vendor and once bound to the

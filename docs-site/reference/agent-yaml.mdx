@@ -1116,12 +1116,12 @@ exactly one execution block says how it runs.
 
 | Execution block | Fields |
 |---|---|
+| `slng` | a published tool name, or the [legacy hash block](/build/tools/hosted#the-legacy-form-still-loads) |
 | `local` | optional `handler`; omitted means `tools/<tool-name>.py`. Optional `dependencies`, exact `name==version` pins for a SLNG per-tool environment; refused on LiveKit and Pipecat, which build one dependency list for the whole project |
 | `webhook` | `url_env` is required on LiveKit and Pipecat; `base_url` is a legacy literal HTTPS base that neither code target reads. SLNG refuses authored webhooks; optional `path` and `auth`; a non-empty path starts with `/` |
 | `mcp` | required `url_env`; optional `server` (the platform's name for it, when it differs from this tool's name), `transport`, `auth`, and non-empty unique `tools` entries |
 | `builtin` | required `id`; optional `instructions` |
 | `knowledge` | required `base`, naming an entry in [`knowledge:`](#knowledge) |
-| `slng` | a published tool name, or the [legacy hash block](/build/tools/hosted#the-legacy-form-still-loads) |
 | `client` | no fields; write `client: {}`; gated on every target today |
 | `provider_hosted` | no fields; write `provider_hosted: {}`; gated on every target today |
 

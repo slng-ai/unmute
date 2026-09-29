@@ -130,7 +130,7 @@ Measure your own route rather than assuming this holds for you; see
 <Accordion title="The ids the scaffold and examples use">
 | Where | `model:` |
 |---|---|
-| `unmute init`, and every example, `hotel-concierge` on the `slng` target included | `deepgram/nova:3` |
+| LiveKit and Pipecat starters and examples, plus `hotel-concierge` on the `slng` target | `deepgram/nova:3` |
 | the SLNG-hosted English copy, which runs in `us-central`, `au` and `in` only, so an `slng` package deploying to `eu-central` cannot name it | `slng/deepgram/nova:3-en` |
 
 Those are the only exact ids the docs name, because they are the ones the
@@ -199,6 +199,13 @@ models:
 What that one block compiles to depends on the target:
 
 <CodeGroup>
+```json SLNG
+// on the push body, in the same vendor/model shape the primary binding uses
+"fallbacks": {
+  "stt": ["slng/deepgram/nova:3", "deepgram/nova-3"]
+}
+```
+
 ```python LiveKit
 # one constructor call, wrapped in stt.FallbackAdapter
 stt=stt.FallbackAdapter(
@@ -214,15 +221,10 @@ stt=stt.FallbackAdapter(
 pipecat: the Pipecat driver does not emit listen fallback yet
 ```
 
-```json SLNG
-// on the push body, in the same vendor/model shape the primary binding uses
-"fallbacks": {
-  "stt": ["slng/deepgram/nova:3", "deepgram/nova-3"]
-}
-```
+
 </CodeGroup>
 
-Pipecat does not emit a generated fallback yet, so validating the same package
+Pipecat does not emit a generated fallback, so validating the same package
 against a Pipecat target refuses it. The SLNG list uses the same
 [vendor/model shape](/targets/slng#model-names) as the primary binding.
 
@@ -252,7 +254,7 @@ finished. **Fix:** move them; see [Turn detection](/models/turn-detection).
 
 ### The package compiles for LiveKit and is refused for Pipecat
 
-Pipecat does not emit listen fallback yet. **Fix:** remove `fallback:` from
+Pipecat does not emit listen fallback. **Fix:** remove `fallback:` from
 the `listen` section, or keep that package on LiveKit or slng.
 
 

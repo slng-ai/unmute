@@ -287,7 +287,7 @@ The YAML format and `--editor` still support explicitly empty lists.
 
 <ParamField path="models.think[].provider" type="string" required>
   The exact provider value used by the agent's think profile, such as
-  `openai` or `slng`. See [LLM providers](/models/llm) for target support.
+  `slng` or `openai`. See [LLM providers](/models/llm) for target support.
   Match the configured provider, including when it routes to another service.
   Provider names are strings, not a fixed manifest enum.
 </ParamField>
@@ -381,8 +381,8 @@ models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no
   for that provider.
 </ParamField>
 
-<ParamField path="regions.deployments[].provider" type="livekit | pipecat | slng | twilio" required>
-  Exactly one of `livekit`, `pipecat`, `slng`, or `twilio`. Match the target's
+<ParamField path="regions.deployments[].provider" type="slng | livekit | pipecat | twilio" required>
+  Exactly one of `slng`, `livekit`, `pipecat`, or `twilio`. Match the target's
   `provider`, not its instance name. There is no default. A `twilio` target
   takes no `deployment_region`, because you host its one process yourself.
 </ParamField>
@@ -406,7 +406,7 @@ models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no
 </ParamField>
 
 <ParamField path="targets.allow" type="string[]" required>
-  Any subset of `livekit`, `pipecat`, `slng`, and `twilio`. These are deployment
+  Any subset of `slng`, `livekit`, `pipecat`, and `twilio`. These are deployment
   providers, not target instance names. An empty list allows no target.
   Every target declared in the package is checked, even when a command
   selects only one of them.

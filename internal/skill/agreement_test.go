@@ -495,8 +495,8 @@ func TestLiveSurfacesAgree(t *testing.T) {
 		"serves one agent", "no `tasks`", "`handoffs`", "`escalations`",
 		"listens, speaks and decides the turn itself",
 		"`conversation.interruption`",
-		"carries no call state yet", "no traced worker yet",
-		"start and close a server connection yet",
+		"carries no call state", "no traced worker",
+		"start and close a server connection",
 		"browser route in this version", "must be at OpenAI",
 		// Named as the architecture rather than as a binding, because that is
 		// what the refusals themselves now say and what the author edits.
