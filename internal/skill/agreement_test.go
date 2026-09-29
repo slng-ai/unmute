@@ -1550,7 +1550,9 @@ func TestRouterSurfacesSayOnlyWhatWasMeasured(t *testing.T) {
 		// short. "caches repeated turns" is an over-claim in a one-line pointer
 		// just as much as in a page, and the shorter true version is no longer:
 		// "caches the turns it judges repeatable".
-		if strings.Contains(strings.ToLower(content), "cache") {
+		// __pycache__ is Python's bytecode folder, named in a command, not a
+		// claim about the router.
+		if strings.Contains(strings.ReplaceAll(strings.ToLower(content), "__pycache__", ""), "cache") {
 			qualified := false
 			for _, marker := range []string{
 				"judges", "a fault", "never cache", "some repeats", "decides which",

@@ -83,7 +83,7 @@ Two further questions sit in [internal/target/table.go](internal/target/table.go
 - **`EmitsProject(provider)`**: does this driver write something a person can run, pin and version at
   all? True for `livekit`, `pipecat` and `twilio`.
 
-Twilio is `EmitsProject: true`, `IsCode: false`. It emits a real project (an `aiohttp` app, a
+Twilio is `EmitsProject: true`, `IsCode: false`. It emits a real project (a FastAPI app on uvicorn, a
 `Dockerfile`, a `pyproject.toml`), so `EmitsProject` says yes. It runs on no framework, so `IsCode` says
 no: no LiveKit Agents or Pipecat version, no support window, no per-target `pins:`. This ripples through
 the tree: [internal/target/pace_test.go](internal/target/pace_test.go) used to branch on `EmitsProject`
@@ -161,7 +161,8 @@ Twilio has neither a version nor a support window, because it targets no framewo
 == false`.
 
 What twilio has instead is [`TwilioPins`](internal/target/twilio_target.go): an internal, exact pin list
-(`aiohttp`, `google-genai`, `openai`, `pydantic`, `twilio`) baked into the driver, which a package
+(`fastapi`, `google-genai`, `openai`, `pydantic`, `python-multipart`, `twilio`, `uvicorn`,
+`websockets`) baked into the driver, which a package
 cannot move. [internal/ir/validate_twilio.go](internal/ir/validate_twilio.go)'s
 `validateTwilioTargetValues` refuses `version:` and `pins:` on this target by name. LiveKit's
 `PinFloors` is a different thing again: a per-*plugin* floor an author may raise above, which twilio has
@@ -300,7 +301,7 @@ its own gate:
    (`TestSkillBundleNamesRealCommands`).
 
 Twilio's are [README.md.tmpl](internal/generate/templates/twilio_v1/README.md.tmpl), the public
-example's [README](examples/twilio-conversation-relay/README.md) and the acceptance package's
+example's [README](examples/twilio/README.md) and the acceptance package's
 [README](internal/voice-agents-tests/relay-desk/README.md), the walkthrough
 [docs-site/telephony/twilio-conversation-relay.mdx](docs-site/telephony/twilio-conversation-relay.mdx),
 [docs-site/targets/twilio.mdx](docs-site/targets/twilio.mdx), and the "The twilio target" section of
@@ -353,8 +354,8 @@ size rather than a wide surface with half of it unverified.
 Read from [internal/target/twilio_target.go](internal/target/twilio_target.go),
 [internal/ir/validate_twilio.go](internal/ir/validate_twilio.go),
 [internal/generate/twilio_v1.go](internal/generate/twilio_v1.go) and
-[internal/generate/templates/twilio_v1/](internal/generate/templates/twilio_v1/). No real Twilio call
-has been made against it.
+[internal/generate/templates/twilio_v1/](internal/generate/templates/twilio_v1/). Real calls have been
+made on the custom logic build, hosted on Render.
 
 - **One cascade agent.** `architecture: cascade` only, one entry in `agents:`. `ir.validateTwilioTarget`
   refuses a second agent, any `controls:`, `variables:` or `shapes:`: no second agent or task exists to
@@ -362,11 +363,11 @@ has been made against it.
 - **One inbound phone channel.** Kind `telephony`, `inbound: true`, `outbound: false`
   (`validateTwilioChannels`).
 - **Speech is ConversationRelay's job.** Listen, speak and turn taking become attributes on one
-  `<ConversationRelay>` element (`twilioRelayXML`). A `models.turn` entry carries settings only
-  (`speechTimeout`, `interruptSensitivity`, `ignoreBackchannel`, checked by `CheckTwilioTurnParam`). A
-  turn model, placement, endpointing delay or pace is refused by name (`validateTwilioSpeech`).
-- **Thinking is one HTTP call.** OpenAI Chat Completions (`AsyncOpenAI`) or native Gemini
-  `generateContent` (`genai.Client`, including Vertex AI), chosen by the bound vendor.
+  `<ConversationRelay>` element (`twilioRelayXML`). Listen, speak and turn `params` are the attributes
+  in `TwilioParams`, checked by `CheckTwilioParam`. A `models.turn` entry carries settings only. A turn
+  model, placement, endpointing delay or pace is refused by name (`validateTwilioSpeech`).
+- **Thinking is one HTTP call.** The SLNG Context Router or OpenAI Chat Completions (`AsyncOpenAI`), or
+  native Gemini `generateContent` (`genai.Client`, including Vertex AI), chosen by the bound vendor.
   `validateTwilioThink` refuses a request parameter the app's request shape does not have.
 - **Tools are local handlers, plus one builtin.** `execution: local` and `execution: builtin`
   (`end_call`) only, everything else refused by name. A local tool's schema must be a flat object of
@@ -380,15 +381,35 @@ has been made against it.
 - **`unmute dev` refuses it.** Twilio only reaches a public origin, so there is no local browser loop to
   serve.
 
+### Adding a Twilio service
+
+Every Twilio service is TwiML, so a new one is one of two kinds.
+
+- **Around the agent's session:** a `<ConversationRelay>` attribute, or a verb before `<Connect>` such
+  as `<Start><Recording>`. It is a package field, checked in `validate_twilio.go` (an attribute is one
+  row in `TwilioParams`) and written in `twilioRelayXML`.
+- **After the session:** a verb that needs the call to itself, such as `<Dial>` or `<Pay>`. The agent
+  ends its session with a reason (`Call.end(reason, **data)`), Twilio posts `/connect-action`, and
+  `next_step` in `app.py.tmpl` answers. A built-in service is one `NEXT_STEPS` row keyed by that reason.
+  A verb with its own `action` gets its own route, signed through the same `signed()` helper and
+  `AccountSid` check as every other route. A service that returns to the agent answers with
+  `handoff.resume(note)`: the history is parked by call SID in-process, and the new session adopts it.
+
+Each kind adds its case to `scripts/text_run_twilio.py --fake`: the TwiML it writes, and for an
+after-session step, the handoff it reads and the resume if it has one. Custom logic already reaches
+every service through `next_twiml()` and `session.twilio`, so a built-in one is worth adding when a
+package shape can say it, as `escalations:` would for `<Dial>`.
+
 The acceptance package is
 [internal/voice-agents-tests/relay-desk](internal/voice-agents-tests/relay-desk): one agent, one phone
-channel, one read-only local tool (`opening_hours`) plus `end_call`, and two target instances
-(`twilio-openai` and `twilio-gemini`, the latter on Vertex AI in `eu`). It is not a public example. It
+channel, one read-only local tool (`opening_hours`) plus `end_call`, and four target instances:
+`twilio-openai`, `twilio-gemini` on Vertex AI in `eu`, `twilio-slng` on the Context Router, and
+`twilio-logic`, a Pydantic AI agent in `logic/` with a `next_twiml()` hold. It is not a public example. It
 is what this repository dials against to prove the target's whole first-release surface, held to one
 bar: it validates and generates on every target it declares.
 
 The public example,
-[examples/twilio-conversation-relay](examples/twilio-conversation-relay), is the same desk with one
+[examples/twilio](examples/twilio), is the same desk with one
 `twilio` target on OpenAI. Its README carries the Gemini block to paste in, and
 `TestTwilioExampleCompilesOnBothThinkProviders` compiles that exact block, so the page cannot drift
 from a binding that builds.

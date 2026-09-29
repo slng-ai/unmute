@@ -2,7 +2,7 @@
 # agent, one inbound phone channel, one read-only tool and end_call. The README
 # shows how to switch the think model to Gemini.
 version: 1
-name: twilio-conversation-relay
+name: twilio
 architecture: cascade
 entry_agent: desk
 

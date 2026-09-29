@@ -30,6 +30,7 @@ var elevenLabsVoiceID = regexp.MustCompile(`^[A-Za-z0-9]{8,64}$`)
 // name would fight the app for the request.
 var twilioThinkOwned = map[string][]string{
 	"openai": {"messages", "model", "n", "stream", "stream_options", "tool_choice", "tools"},
+	"slng":   {"messages", "model", "n", "stream", "stream_options", "tool_choice", "tools"},
 	"google": {"automatic_function_calling", "config", "contents", "model", "system_instruction", "tool_config", "tools"},
 }
 
@@ -37,6 +38,7 @@ var twilioThinkOwned = map[string][]string{
 // reach a request that has no such field.
 var twilioThinkForeign = map[string][]string{
 	"openai": {"location", "thinking_config", "vertexai"},
+	"slng":   {"location", "thinking_config", "vertexai"},
 	"google": {"parallel_tool_calls", "reasoning_effort"},
 }
 
@@ -70,6 +72,7 @@ func validateTwilioTarget(agent *Agent, resolved Target, row *TargetValidation) 
 	validateTwilioConversation(agent, refuse)
 	validateTwilioSpeech(agent, resolved, refuse)
 	validateTwilioThink(resolved, refuse)
+	validateTwilioLogic(resolved.Logic, refuse)
 	for _, name := range sortedKeys(agent.Tools) {
 		validateTwilioTool(name, agent.Tools[name], refuse)
 	}
@@ -130,14 +133,14 @@ func validateTwilioConversation(agent *Agent, refuse func(string, ...any)) {
 // validateTwilioSpeech checks the listen, speak and turn bindings, which all
 // become attributes on one <ConversationRelay> element.
 func validateTwilioSpeech(agent *Agent, resolved Target, refuse func(string, ...any)) {
-	if binding := resolved.Models.Listen; binding != nil && len(binding.Params) > 0 {
-		refuse("forwards no listen params to ConversationRelay, and this binding sets %s: remove them", strings.Join(sortedKeys(binding.Params), ", "))
+	speechModel := ""
+	if binding := resolved.Models.Listen; binding != nil {
+		speechModel = binding.Model
+		checkTwilioParams(targetcap.Listen, "listen", binding.Params, speechModel, refuse)
 	}
 	for _, name := range sortedKeys(resolved.Models.Speak) {
 		binding := resolved.Models.Speak[name]
-		if len(binding.Params) > 0 {
-			refuse("forwards no speak params to ConversationRelay, and speak.%s sets %s: remove them", name, strings.Join(sortedKeys(binding.Params), ", "))
-		}
+		checkTwilioParams(targetcap.Speak, "speak."+name, binding.Params, speechModel, refuse)
 		voice := binding.Voice
 		if voice == "" {
 			voice = binding.VoiceID
@@ -153,8 +156,14 @@ func validateTwilioSpeech(agent *Agent, resolved Target, refuse func(string, ...
 	if turn.Provider != "" || turn.Model != "" || turn.Placement != "" || turn.EndpointEnv != "" {
 		refuse("has ConversationRelay decide the turn, so the turn entry carries settings only: remove provider, model, placement and endpoint_env from models.turn")
 	}
-	for _, key := range sortedKeys(turn.Params) {
-		if err := targetcap.CheckTwilioTurnParam(key, turn.Params[key]); err != nil {
+	checkTwilioParams(targetcap.Turn, "turn", turn.Params, speechModel, refuse)
+}
+
+// checkTwilioParams refuses every setting in params that is not a
+// ConversationRelay attribute for role, or holds a value Twilio rejects.
+func checkTwilioParams(role targetcap.Role, where string, params map[string]any, speechModel string, refuse func(string, ...any)) {
+	for _, key := range sortedKeys(params) {
+		if err := targetcap.CheckTwilioParam(role, where, key, params[key], speechModel); err != nil {
 			refuse("%s", strings.TrimPrefix(err.Error(), "twilio target "))
 		}
 	}
@@ -170,6 +179,11 @@ func validateTwilioThink(resolved Target, refuse func(string, ...any)) {
 		if vendor == "gemini" {
 			vendor = "google"
 		}
+		// The vertex upstream sends a GCP key object, which needs a credential
+		// helper this app does not emit yet.
+		if binding.Router() && binding.Upstream != nil && binding.Upstream.Provider == "vertex" {
+			refuse("think.%s routes to upstream provider vertex, which this app has no credential helper for yet: use upstream openai, openai-compat, azure or bedrock, or compile to livekit or pipecat", name)
+		}
 		for _, key := range sortedKeys(binding.Params) {
 			switch {
 			case slices.Contains(twilioThinkOwned[vendor], key):
@@ -177,6 +191,33 @@ func validateTwilioThink(resolved Target, refuse func(string, ...any)) {
 			case slices.Contains(twilioThinkForeign[vendor], key):
 				refuse("think.%s sets params.%s, which %s requests do not take: remove it; it belongs to the other think provider", name, key, vendor)
 			}
+		}
+	}
+}
+
+// twilioRespond is the one definition the app imports from custom logic.
+var twilioRespond = regexp.MustCompile(`(?m)^async def respond\(`)
+
+// validateTwilioLogic holds a custom logic folder to what the app can import
+// and install. It checks the shape only: whether the code works is for the
+// harness and a call to say.
+func validateTwilioLogic(logic *Logic, refuse func(string, ...any)) {
+	if logic == nil {
+		return
+	}
+	init, ok := logic.Files["__init__.py"]
+	switch {
+	case len(logic.Files) == 0:
+		refuse("logic %q is missing or empty: create the folder with an __init__.py that defines async def respond(session)", logic.Path)
+		return
+	case !ok:
+		refuse("logic %q has no __init__.py: the app imports the folder as the logic package, so respond() must be defined in %s/__init__.py", logic.Path, logic.Path)
+	case !twilioRespond.MatchString(init):
+		refuse("logic %q/__init__.py defines no async def respond(session) at top level: the app calls it once per caller turn and speaks what it yields", logic.Path)
+	}
+	for _, line := range logic.Requirements() {
+		if strings.HasPrefix(line, "-") {
+			refuse("logic %q/requirements.txt line %q is an installer option: list one requirement per line, such as pydantic-ai-slim[openai]==1.0.0", logic.Path, line)
 		}
 	}
 }

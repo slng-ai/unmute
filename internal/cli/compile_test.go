@@ -588,3 +588,78 @@ func TestCompileNamesTheLiveModelAndItsBackendInTheReport(t *testing.T) {
 		})
 	}
 }
+
+// A host's config lives in hosting/<target>/ and reaches build/<target>/ on
+// every compile, byte for byte. A name the compiler writes or keeps is refused
+// before the old build is touched, and the file never moves the artifact id.
+func TestCompileCopiesTheHostingFolder(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "twilio"))); err != nil {
+		t.Fatal(err)
+	}
+	hosting := filepath.Join(dir, "hosting", "twilio")
+	blueprint := "services:\n  - type: web   # kept exactly as written\n"
+	for name, body := range map[string]string{"render.yaml": blueprint, "scripts/start.sh": "#!/bin/sh\n"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(hosting, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(hosting, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	build := filepath.Join(dir, "build", "twilio")
+	reportID := func() string {
+		body, err := os.ReadFile(filepath.Join(build, "compile-report.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var report struct {
+			ArtifactID string `json:"artifact_id"`
+		}
+		if err := json.Unmarshal(body, &report); err != nil || report.ArtifactID == "" {
+			t.Fatalf("report has no artifact id: %v", err)
+		}
+		return report.ArtifactID
+	}
+
+	out, errOut, err := runCompileCommand(t, dir, "--target", "twilio")
+	if err != nil {
+		t.Fatalf("compile: %v\n%s", err, errOut)
+	}
+	if !strings.Contains(out, "copied") || !strings.Contains(out, "render.yaml") {
+		t.Errorf("compile does not list the copied file:\n%s", out)
+	}
+	first := reportID()
+	// A second compile keeps the file, and a change to it alone keeps the id.
+	if err := os.WriteFile(filepath.Join(hosting, "render.yaml"), []byte(blueprint+"# changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, errOut, err := runCompileCommand(t, dir, "--target", "twilio"); err != nil {
+		t.Fatalf("recompile: %v\n%s", err, errOut)
+	}
+	got, _ := os.ReadFile(filepath.Join(build, "render.yaml"))
+	if string(got) != blueprint+"# changed\n" {
+		t.Errorf("build/twilio/render.yaml = %q", got)
+	}
+	if info, err := os.Stat(filepath.Join(build, "scripts", "start.sh")); err != nil || info.Mode().Perm()&0o100 == 0 {
+		t.Errorf("scripts/start.sh lost or not executable: %v", err)
+	}
+	if reportID() != first {
+		t.Error("a hosting file changed the artifact id")
+	}
+
+	// A generated name or a kept one is refused, and the build stays.
+	for _, name := range []string{"app.py", ".env"} {
+		if err := os.WriteFile(filepath.Join(hosting, name), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := runCompileCommand(t, dir, "--target", "twilio")
+		if err == nil || !strings.Contains(err.Error(), "hosting/twilio/"+name+": build/twilio/"+name+" is a file unmute writes or keeps") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(build, "render.yaml")); err != nil {
+			t.Errorf("%s: a refused compile touched the old build", name)
+		}
+		_ = os.Remove(filepath.Join(hosting, name))
+	}
+}

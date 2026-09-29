@@ -1550,6 +1550,9 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 		Models:            resolveBindings(agent, used, raw.Models),
 		Destinations:      destinations,
 	}
+	if raw.Logic != "" {
+		built.Logic = &Logic{Path: raw.Logic, Files: pkg.LogicFiles[filepath.Clean(raw.Logic)]}
+	}
 	if agent.Manifest != nil {
 		built.ManifestModels = make(map[string]ModelDef, len(raw.Models))
 		for name, override := range raw.Models {

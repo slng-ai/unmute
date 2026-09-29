@@ -1,4 +1,4 @@
-# twilio-conversation-relay
+# twilio
 
 A front desk that answers a Twilio phone number. Twilio ConversationRelay
 listens and speaks. A small Python app you host does the thinking, runs one
@@ -33,24 +33,26 @@ On this page:
 ## Quickstart
 
 ```sh
-unmute validate examples/twilio-conversation-relay
-unmute compile examples/twilio-conversation-relay
-cp examples/twilio-conversation-relay/build/twilio/.env.example \
-   examples/twilio-conversation-relay/.env        # then fill it in
+unmute validate examples/twilio
+unmute compile examples/twilio
+cp examples/twilio/build/twilio/.env.example \
+   examples/twilio/.env        # then fill it in
 
 # on the host, from the build folder:
-cd examples/twilio-conversation-relay/build/twilio
+cd examples/twilio/build/twilio
 uv run --env-file ../../.env python app.py
 
 # back where the package is, once the origin answers:
-unmute deploy examples/twilio-conversation-relay --target twilio --dry-run
-unmute deploy examples/twilio-conversation-relay --target twilio
+unmute deploy examples/twilio --target twilio --dry-run
+unmute deploy examples/twilio --target twilio
 ```
 
 Then call the number. Each step is explained below.
 
 To start your own package the same way, `unmute init my-desk --target twilio`
-writes this shape with a starter prompt and only `end_call`.
+writes this shape with a starter prompt and only `end_call`. It thinks through
+the SLNG Context Router in front of the same OpenAI model, so it reads
+`SLNG_API_KEY` as well as `OPENAI_API_KEY`.
 
 ## How a call flows
 
@@ -82,6 +84,11 @@ sequenceDiagram
    ([WebSocket messages](https://www.twilio.com/docs/voice/conversationrelay/websocket-messages)).
 5. When the session ends, Twilio calls `/connect-action` and the app hangs up.
 
+Twilio reaches `/voice` because the number's **A call comes in** is a webhook to
+`https://<your host>/voice`, `HTTP POST`. That one setting is all the routing
+there is, and `unmute deploy` writes it. The TwiML is the app's answer on each
+call. It is never stored in Twilio, and no TwiML Bin or TwiML App is involved.
+
 The app owns the conversation and the model call. Twilio owns the phone line and
 the speech. Twilio's own tutorials show the same split for
 [OpenAI](https://www.twilio.com/en-us/blog/developers/tutorials/product/integrate-openai-twilio-voice-using-conversationrelay-python)
@@ -112,7 +119,7 @@ Skip the guide's TwiML App steps. This package points the number's own voice
 webhook at the app, and `unmute deploy` refuses a number that has a TwiML App.
 
 Collect four values from the Console. Their names are the connection's, in
-`connections/twilio_relay.yaml`:
+`connections/twilio.yaml`:
 
 | Name | Where it comes from | Who reads it |
 |---|---|---|
@@ -124,8 +131,8 @@ Collect four values from the Console. Their names are the connection's, in
 ## Compile and run the app
 
 ```sh
-unmute validate examples/twilio-conversation-relay
-unmute compile examples/twilio-conversation-relay
+unmute validate examples/twilio
+unmute compile examples/twilio
 ```
 
 `compile` writes a standalone app to `build/twilio/`: `app.py`, the TwiML
@@ -137,8 +144,8 @@ Put the values in the package's `.env`. The generated `.env.example` lists every
 name the app reads:
 
 ```sh
-cp examples/twilio-conversation-relay/build/twilio/.env.example \
-   examples/twilio-conversation-relay/.env
+cp examples/twilio/build/twilio/.env.example \
+   examples/twilio/.env
 ```
 
 Fill in `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PUBLIC_URL` and
@@ -148,15 +155,15 @@ commit `.env`.
 Start the app from the build folder:
 
 ```sh
-cd examples/twilio-conversation-relay/build/twilio
+cd examples/twilio/build/twilio
 uv run --env-file ../../.env python app.py
 ```
 
 Or as an image:
 
 ```sh
-docker build -t twilio-conversation-relay .
-docker run --env-file ../../.env -p 8080:8080 twilio-conversation-relay
+docker build -t twilio-agent .
+docker run --env-file ../../.env -p 8080:8080 twilio-agent
 ```
 
 The app listens on port 8080 (`PORT` changes it). It refuses to start while a
@@ -183,8 +190,17 @@ Unmute does not host the app. Any host works if it does all of this:
   `TWILIO_*` names above except the number SID, and the model key.
 
 For a first test, the app can run on your laptop behind a tunnel that gives an
-https origin and passes WebSockets through. Set `TWILIO_PUBLIC_URL` to the
+https origin and passes WebSockets through, such as `ngrok http 8080` or
+`cloudflared tunnel --url http://localhost:8080`. Set `TWILIO_PUBLIC_URL` to the
 tunnel's origin.
+
+Twilio runs the speech side of the call, so the app you host is one small
+process that handles text only: no audio pipeline, no media server. Any host
+that runs a Dockerfile works. To host it on Render, commit `build/twilio/`, put
+a Blueprint in `hosting/twilio/render.yaml` so every compile copies it next to
+the Dockerfile, and use a paid instance: a free one sleeps, and Twilio does not
+wait for it to wake. The Blueprint and the update loop are in
+[Host it on Render](../../docs-site/targets/twilio.mdx#host-it-on-render).
 
 Check it from anywhere:
 
@@ -195,8 +211,8 @@ curl https://relay.example.com/healthz
 ## Point the number at it
 
 ```sh
-unmute deploy examples/twilio-conversation-relay --target twilio --dry-run
-unmute deploy examples/twilio-conversation-relay --target twilio
+unmute deploy examples/twilio --target twilio --dry-run
+unmute deploy examples/twilio --target twilio
 ```
 
 `--target twilio` is required. A bare `unmute deploy` means an SLNG deploy.
@@ -228,6 +244,11 @@ twilio: no call was placed; call +15005550006 to check speech, the WebSocket and
 
 Deploy never places a call. `call_verified` in the report stays `false`: only a
 real call checks the speech path.
+
+To route by hand instead, open the number in the Console. Under **Voice
+Configuration**, set **A call comes in** to **Webhook**,
+`https://<your host>/voice`, **HTTP POST**, and save. That is all deploy writes,
+but by hand nothing checks the host runs this build, so check `/healthz` first.
 
 ## Make the call
 
@@ -279,7 +300,7 @@ real key yet.
 
 Then:
 
-1. `unmute compile examples/twilio-conversation-relay`. The new build installs
+1. `unmute compile examples/twilio`. The new build installs
    `google-genai` in place of `openai`, and reads `GOOGLE_API_KEY` in place of
    `OPENAI_API_KEY`. Put the key in `.env` and in the host's environment.
 2. Stop the old app and start the new build at the same origin. Only one build
@@ -294,10 +315,26 @@ Then:
 The same rule holds for any change to the package: prompt, tool, speech or
 model. Recompile, rehost, then deploy.
 
+To think through the SLNG Context Router instead, which answers the turns it
+judges repeatable from its cache, bind `provider: slng` with an `agent_id` and an `upstream`,
+and declare `SLNG_API_KEY`. The binding is on
+[the Twilio target page](../../docs-site/targets/twilio.mdx), after the Gemini
+one.
+
+To run the agent turn with your own code instead, for example a Pydantic AI
+agent, name a folder on the target with `logic: logic/`. Its `__init__.py`
+defines `async def respond(session)`, and compile copies it into the build
+without changing it. The contract and a worked Pydantic AI example are in
+[Bring your own agent logic](../../docs-site/targets/twilio.mdx#bring-your-own-agent-logic).
+The same folder can define `next_twiml(handoff)`, which answers Twilio with any
+TwiML once the agent's session ends, for example `<Dial>` to a person, and can
+hand the caller back to the agent. See
+[Other Twilio services after the session](../../docs-site/targets/twilio.mdx#other-twilio-services-after-the-session).
+
 ## Use another Twilio region
 
 Twilio handles calls in US1 by default. To keep the calls in Ireland (IE1) or
-Australia (AU1), name the region in `connections/twilio_relay.yaml`:
+Australia (AU1), name the region in `connections/twilio.yaml`:
 
 ```yaml
 transport: conversation-relay
@@ -349,8 +386,8 @@ carry a secret, so only you can read it.
 | `tools/opening_hours.yaml` | The tool's flat input and output schemas. |
 | `handlers/opening_hours.py` | The handler: a fixed weekly table. |
 | `tools/end_call.yaml` | The builtin that ends the call. |
-| `targets.yaml` | One `twilio` target on the `twilio_relay` connection. |
-| `connections/twilio_relay.yaml` | Transport `conversation-relay`, carrier `twilio`, and the four environment names. |
+| `targets.yaml` | One `twilio` target on the `twilio` connection. |
+| `connections/twilio.yaml` | Transport `conversation-relay`, carrier `twilio`, and the four environment names. |
 
 ## What it does not do
 
@@ -360,8 +397,10 @@ with the reason:
 - One agent. No tasks, handoffs, transfers or saved state.
 - Local tools with flat inputs and outputs, and `end_call`. No webhook, MCP or
   hosted tools.
-- Deepgram and ElevenLabs inside ConversationRelay. Turn settings are
-  `speechTimeout`, `interruptSensitivity` and `ignoreBackchannel` only.
+- Deepgram and ElevenLabs inside ConversationRelay. Listen, speak and turn
+  `params` are the ConversationRelay attributes the
+  [target page](../../docs-site/targets/twilio.mdx#every-conversationrelay-attribute)
+  lists, and no others.
 - OpenAI Chat Completions or Gemini `generateContent`. No fallback model, no
   custom endpoint, no tracing.
 - One process. No autoscaling.

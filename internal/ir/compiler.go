@@ -2,6 +2,7 @@ package ir
 
 import (
 	"slices"
+	"strings"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
 	targetcap "github.com/slng-ai/unmute/internal/target"
@@ -1093,6 +1094,27 @@ type Target struct {
 	Models            Bindings            `json:"models" yaml:"models"`
 	Destinations      map[string]string   `json:"destinations,omitempty" yaml:"destinations,omitempty"`
 	Telephony         *TelephonyPlan      `json:"telephony,omitempty" yaml:"telephony,omitempty"`
+	Logic             *Logic              `json:"logic,omitempty" yaml:"logic,omitempty"`
+}
+
+// Logic is a target's custom agent logic: the author's folder, copied into the
+// build as logic/, whose respond() replaces the generated agent turn.
+type Logic struct {
+	Path  string            `json:"path" yaml:"path"`
+	Files map[string]string `json:"files" yaml:"files"` // path inside the folder -> content
+}
+
+// Requirements are the requirement lines of the folder's requirements.txt,
+// blank lines and comments dropped, in file order.
+func (l *Logic) Requirements() []string {
+	var lines []string
+	for line := range strings.SplitSeq(l.Files["requirements.txt"], "\n") {
+		line, _, _ = strings.Cut(line, "#")
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
 }
 
 type Provider string

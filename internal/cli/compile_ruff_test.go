@@ -122,3 +122,24 @@ func TestWriteArtifactFailsOnlyOnInvalidPython(t *testing.T) {
 		t.Fatalf("valid Python must be written formatted: %q %v", written, readErr)
 	}
 }
+
+// The author's own code is copied as written: not formatted, and not judged,
+// because a broken file there is theirs to see at import, not a generator
+// defect.
+func TestWriteArtifactLeavesVerbatimPythonAlone(t *testing.T) {
+	if _, err := exec.LookPath("ruff"); err != nil {
+		t.Skip("ruff not installed")
+	}
+	out := filepath.Join(t.TempDir(), "build")
+	files := []generate.File{
+		{Path: "logic/__init__.py", Content: []byte("x  =  1\n"), Verbatim: true},
+		{Path: "logic/draft.py", Content: []byte("def broken(:\n"), Verbatim: true},
+	}
+	if err := writeArtifactFiles(nil, out, files); err != nil {
+		t.Fatalf("verbatim files must not fail the compile: %v", err)
+	}
+	written, err := os.ReadFile(filepath.Join(out, "logic", "__init__.py"))
+	if err != nil || string(written) != "x  =  1\n" {
+		t.Fatalf("a verbatim file was changed: %q %v", written, err)
+	}
+}

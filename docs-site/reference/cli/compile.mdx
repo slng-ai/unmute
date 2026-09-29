@@ -45,6 +45,31 @@ A package with tools, knowledge files, tracing, or a phone route writes more:
 Output goes to `<package>/build/<target-instance-name>/`. With no `--target`,
 every declared target is compiled. `--target` is repeatable.
 
+## Files you keep next to the build
+
+`compile` deletes `build/<target>/` and writes it again. It keeps `.env`, a
+LiveKit Cloud `livekit*.toml` and tool `samples/*.json`, and nothing else. For
+any other file you want next to the generated ones, such as a host's
+`render.yaml` or `fly.toml`, use the package's `hosting/<target>/` folder:
+
+```text
+my-agent/
+  hosting/
+    livekit/
+      fly.toml
+```
+
+Every compile copies that folder into `build/<target>/`, with its subfolders,
+and prints each file:
+
+```text
+copied my-agent/build/livekit/fly.toml
+```
+
+A hosting file may not share a name with a generated or kept file. Compile
+refuses one, names it, and leaves the old build as it was. Hosting files are
+copied byte for byte, and they do not change the build's `artifact_id`.
+
 ## The report
 
 The compiler does not print what it decided. It writes that to

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/slng-ai/unmute/internal/generate"
@@ -73,11 +75,15 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 		switch artifact.Kind {
 		case generate.CodeTarget, generate.BodyTarget:
 			outDir := filepath.Join(dir, "build", resolved.Name)
-			if err := writeArtifactFiles(cmd.ErrOrStderr(), outDir, artifact.Files); err != nil {
+			copied, err := writeTargetBuild(cmd.ErrOrStderr(), dir, resolved.Name, artifact.Files)
+			if err != nil {
 				return fmt.Errorf("compile %s: %w", dir, err)
 			}
 			for _, file := range artifact.Files {
 				fmt.Fprintln(out, u.Dim("generated"), dimPath(u, filepath.Join(outDir, file.Path)))
+			}
+			for _, path := range copied {
+				fmt.Fprintln(out, u.Dim("copied"), dimPath(u, path))
 			}
 		default:
 			return fmt.Errorf("compile %s: target %q produced artifact kind %q, which this command does not know how to write",
@@ -124,6 +130,82 @@ func loadPackage(dir string, names []string) (*ir.Agent, []ir.Target, error) {
 //     produces a file matching it.
 var preservedPatterns = []string{".env", "livekit*.toml", filepath.Join("samples", "*.json")}
 
+// writeTargetBuild writes one target's generated files to build/<target>/,
+// then copies the package's hosting/<target>/ folder over them. It returns the
+// paths it copied.
+func writeTargetBuild(warn io.Writer, pkgDir, targetName string, files []generate.File) ([]string, error) {
+	outDir := filepath.Join(pkgDir, "build", targetName)
+	hosting, err := readHosting(pkgDir, targetName, files)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeArtifactFiles(warn, outDir, files); err != nil {
+		return nil, err
+	}
+	if err := restorePreserved(outDir, hosting); err != nil {
+		return nil, err
+	}
+	copied := make([]string, 0, len(hosting))
+	for _, file := range hosting {
+		copied = append(copied, file.path)
+	}
+	return copied, nil
+}
+
+// readHosting reads <package>/hosting/<target>/, the files an author keeps
+// next to the generated ones: a host's config such as render.yaml or fly.toml.
+// build/<target>/ is deleted on every compile, so a file put there by hand is
+// lost, and this folder is where such a file lives instead. It is read before
+// anything is deleted, so a refusal leaves the old build as it was.
+//
+// A hosting file never replaces a generated file or a kept one (.env and the
+// rest of preservedPatterns): that would change what the build runs without
+// the compiler knowing. It is copied byte for byte, never formatted, and it is
+// not part of the artifact id, because the app never reads it.
+func readHosting(pkgDir, targetName string, generated []generate.File) ([]preservedFile, error) {
+	root := filepath.Join(pkgDir, "hosting", targetName)
+	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	owned := make(map[string]bool, len(generated))
+	for _, file := range generated {
+		owned[filepath.Clean(file.Path)] = true
+	}
+	outDir := filepath.Join(pkgDir, "build", targetName)
+	var hosting []preservedFile
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		shown := filepath.Join("hosting", targetName, rel)
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("%s: not a regular file; copy the file itself into hosting/", shown)
+		}
+		kept := slices.ContainsFunc(preservedPatterns, func(pattern string) bool {
+			matched, _ := filepath.Match(pattern, rel)
+			return matched
+		})
+		if owned[rel] || kept {
+			return fmt.Errorf("%s: build/%s/%s is a file unmute writes or keeps; rename the hosting file", shown, targetName, rel)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		hosting = append(hosting, preservedFile{path: filepath.Join(outDir, rel), content: content, mode: info.Mode().Perm()})
+		return nil
+	})
+	return hosting, err
+}
+
 type preservedFile struct {
 	path    string
 	content []byte
@@ -154,7 +236,7 @@ func writeArtifactFiles(warn io.Writer, outDir string, files []generate.File) (e
 			return err
 		}
 		content := file.Content
-		if strings.HasSuffix(file.Path, ".py") {
+		if strings.HasSuffix(file.Path, ".py") && !file.Verbatim {
 			formatted, found, unparseable, failure := formatPython(content)
 			content, ruffMissing = formatted, ruffMissing || !found
 			switch {

@@ -1,5 +1,5 @@
 ---
-title: "The Twilio ConversationRelay app"
+title: "The Twilio target"
 description: "What unmute compile writes for a twilio target, what the package may carry, how to host the app, and how unmute deploy points a number at it."
 sidebarTitle: "Twilio"
 ---
@@ -37,16 +37,71 @@ sequenceDiagram
 5. To end the session, the app sends `end` and waits up to five seconds for
    Twilio to close the WebSocket. Closing it first can fail the session with
    [error 64105](https://www.twilio.com/docs/api/errors/64105). Twilio then
-   asks `/connect-action`, and the app hangs up.
+   asks `/connect-action` what the call does next. The app hangs up, unless
+   your own logic [answers with other TwiML](#other-twilio-services-after-the-session).
+
+## What Twilio runs and what you run
+
+Twilio does not host the agent. It hosts everything that touches audio, and
+your app handles text only.
+
+```mermaid
+flowchart LR
+    Caller -->|phone call| STT
+    subgraph T [Twilio runs this]
+        STT[speech to text] --> Turns[turn detection and barge-in]
+        TTS[text to speech]
+    end
+    Turns -->|words as text, wss| App
+    App -->|reply as text| TTS
+    TTS -->|speech| Caller
+    subgraph Y [you run this]
+        App[your app: the agent and your tools]
+    end
+    subgraph P [your model provider runs this]
+        Model[SLNG Context Router, OpenAI or Gemini]
+    end
+    App -->|https| Model
+```
+
+1. Twilio answers the call and turns the caller's speech into text.
+2. Twilio decides when the caller has finished a turn, and stops the agent
+   when the caller talks over it.
+3. Your app gets the text over one WebSocket. It keeps the conversation, calls
+   the model, runs your tools, and sends the reply back as text.
+4. The model is a hosted API. The app calls it over HTTPS, and nothing of it
+   runs on your host.
+5. Twilio speaks the reply.
+
+The names follow these layers. The target is `twilio`: the app you deploy. On
+every call the app answers Twilio with
+[TwiML](https://www.twilio.com/docs/voice/twiml), the markup that tells Twilio
+what to do with a call. ConversationRelay is one TwiML verb in that answer, the
+one the agent talks through, so it names only the voice route:
+`transport: conversation-relay`. Other TwiML verbs, such as `<Dial>` or
+`<Pay>`, are other Twilio services the same app can answer with.
+
+So the app you host is one small process that handles text only. It runs no
+audio pipeline, no media server and no Redis, so any container host can run
+it. With the `pipecat` and `livekit` targets you host that audio pipeline too.
+Twilio has no product that runs the model and the tools for you:
+ConversationRelay's `url` is always "the URL of your WebSocket server". The
+SLNG Context Router does not remove the app either. It answers model requests
+only, and does not speak ConversationRelay's protocol. To run nothing
+yourself, use the [SLNG target](/targets/slng), where SLNG hosts the whole
+agent.
 
 On this page:
 
+- [What Twilio runs and what you run](#what-twilio-runs-and-what-you-run) - what you host, and why it is small
 - [The package](#the-package) - the shape, in full
 - [What the package may carry](#what-the-package-may-carry) - and what is refused
 - [What compiling writes](#what-compiling-writes) - the files
 - [Host it](#host-it) - run the app at a public origin
 - [Point the number at it](#point-the-number-at-it) - with `unmute deploy`, or by hand
 - [How the app behaves](#how-the-app-behaves) - signatures, calls at once, interruptions, tools
+- [Bring your own agent logic](#bring-your-own-agent-logic) - replace the turn with your own code
+- [Other Twilio services after the session](#other-twilio-services-after-the-session) - any TwiML after the agent, then back to it
 - [What is not verified yet](#what-is-not-verified-yet) - read before you rely on it
 
 ## The package
@@ -121,10 +176,10 @@ targets:
   twilio:
     provider: twilio
     sdk_language: python
-    connection: twilio_relay
+    connection: twilio
 ```
 
-```yaml connections/twilio_relay.yaml
+```yaml connections/twilio.yaml
 transport: conversation-relay
 carrier: twilio
 environment:
@@ -155,6 +210,11 @@ is for pointing the number at the app; the app itself never reads it.
 <ParamField path="models" type="model entry name to a model definition">
   Per target overrides of named `agent.yaml` entries, for example to think with
   Gemini on one target and OpenAI on another.
+</ParamField>
+
+<ParamField path="logic" type="folder path">
+  A folder of your own Python that runs each agent turn in place of the
+  generated one. See [Bring your own agent logic](#bring-your-own-agent-logic).
 </ParamField>
 
 ### Every key the connection takes
@@ -202,8 +262,39 @@ true` and a `location`, the app calls Vertex AI with that API key. Without
 them, it calls the Gemini Developer API. Only the selected provider's SDK and
 key reach the project, so the other key may be missing on your machine.
 
-In the `unmute` console, switching the think provider loads that provider's
-starter: `gpt-5.6-luna` with its two params for OpenAI, or
+To think through the [SLNG Context Router](/optimization/context-router),
+bind `provider: slng`. The router answers the turns it judges repeatable from
+its cache, and calls your model for the rest:
+
+```yaml
+    reasoning:
+      provider: slng
+      model: gpt-5.6-luna
+      agent_id: relay-desk-v1
+      upstream:
+        provider: openai
+      params:
+        world_part: eu-west
+        reasoning_effort: none
+```
+
+and declare `SLNG_API_KEY` beside the upstream's own key, here
+`OPENAI_API_KEY`. SLNG hosts the router, so there is nothing to deploy for it
+and nothing to set up on SLNG first. The app calls the router's regional
+endpoint with Chat Completions. It sends the router's configuration and your params in the request
+body, and the cache scope and the call's session in two headers, on every
+request. Your upstream key travels in that body, because the
+router calls OpenAI for you: it is sent to SLNG on every request. Each think
+request writes one `slng router:` log line that says whether the cache or the
+model answered. The cache key does not include the system prompt, so bump
+`agent_id` (`relay-desk-v2`) after a prompt change that should make old
+answers wrong. The upstream `vertex` is refused on
+this target for now, because the app has no helper yet for its GCP key.
+
+`unmute init <name> --target twilio` starts on this router binding, in
+`eu-west`, with `agent_id` set to the package name plus `-v1`. In the `unmute`
+console, switching the think provider loads that provider's starter: the
+router binding for SLNG, `gpt-5.6-luna` with its two params for OpenAI, or
 `gemini-3.1-flash-lite` with `thinking_level: MINIMAL` on the Developer API for
 Google. Add `vertexai` and `location` yourself. Picking the provider that is
 already bound keeps the binding as it is.
@@ -214,10 +305,10 @@ already bound keeps the binding as it is.
 |---|---|
 | agents | one agent |
 | channels | exactly one: `kind: telephony`, `inbound: true`, `outbound: false` |
-| think | `openai` (Chat Completions) or `google` / `gemini` (native `generateContent`); `params` are sent as written |
-| listen | `deepgram`, with a model such as `nova-3-general` and an optional `language` |
-| speak | `elevenlabs`, with `model`, a bare voice id in `voice`, and an optional `language` |
-| turn | optional, `params` only: `speechTimeout` (600 to 5000 ms), `interruptSensitivity` (`high`, `medium`, `low`), `ignoreBackchannel` |
+| think | `slng` (the Context Router), `openai` (Chat Completions) or `google` / `gemini` (native `generateContent`); `params` are sent as written |
+| listen | `deepgram`, with a model such as `nova-3-general`, an optional `language`, and the `params` `hints` and `deepgramSmartFormat` |
+| speak | `elevenlabs`, with `model`, a bare voice id in `voice`, an optional `language`, and the `params` `elevenlabsTextNormalization` |
+| turn | optional, `params` only: `speechTimeout` (600 to 5000 ms), `interruptSensitivity` (`high`, `medium`, `low`), `ignoreBackchannel`, and `eotThreshold` (0.5 to 0.9, listen model `flux` only) |
 | greeting | a fixed `text` with `speaks_first: agent`, or `speaks_first: user` with no text |
 | interruption | `enabled: true` or `false`, and `protect: [greeting]` |
 | tools | local handlers with flat `input` and `output` schemas of `string`, `integer`, `number` and `boolean` fields, and the builtin `end_call` |
@@ -225,6 +316,71 @@ already bound keeps the binding as it is.
 The app builds ConversationRelay's `voice` attribute as `<voice id>-<model>`,
 for example `UgBBYS2sOqTuMpoF3BR0-flash_v2_5`. Write the id alone; a voice
 that already has the suffix is refused.
+
+### Every ConversationRelay attribute
+
+Each row is one attribute of
+[`<ConversationRelay>`](https://www.twilio.com/docs/voice/twiml/connect/conversationrelay),
+and where its value comes from. A setting under `params` has the attribute's
+own name.
+
+```yaml
+models:
+  listen:
+    transcriber:
+      provider: deepgram
+      model: nova-3-general
+      params:
+        hints:
+          - relay desk
+          - opening hours
+        deepgramSmartFormat: true
+  speak:
+    voice:
+      provider: elevenlabs
+      model: flash_v2_5
+      voice: UgBBYS2sOqTuMpoF3BR0
+      params:
+        elevenlabsTextNormalization: auto
+```
+
+<ParamField path="hints" type="list of strings">
+  Words or phrases the caller may say. The app joins them with commas, so a
+  phrase may not hold a comma.
+</ParamField>
+
+<ParamField path="deepgramSmartFormat" type="boolean">
+  Deepgram's Smart Format on the transcript. Twilio's default is `true`.
+</ParamField>
+
+<ParamField path="elevenlabsTextNormalization" type="string">
+  `on`, `auto` or `off`. Twilio's default is `off`.
+</ParamField>
+
+<ParamField path="eotThreshold" type="number">
+  Under `models.turn` params. How sure the model must be that the caller has
+  finished, from 0.5 to 0.9. Twilio uses it only when the listen model is
+  `flux`, so any other model refuses it.
+</ParamField>
+
+| Attribute | Set from |
+|---|---|
+| `url` | the app's public origin, `wss://<host>/conversation` |
+| `welcomeGreeting`, `welcomeGreetingInterruptible` | `conversation.greeting`, and `protect: [greeting]` |
+| `transcriptionProvider`, `speechModel`, `transcriptionLanguage` | the listen binding |
+| `ttsProvider`, `voice`, `ttsLanguage` | the speak binding |
+| `interruptible`, `reportInputDuringAgentSpeech` | `conversation.interruption.enabled` |
+| `interruptSensitivity`, `speechTimeout`, `ignoreBackchannel`, `eotThreshold` | turn `params` |
+| `hints`, `deepgramSmartFormat` | listen `params` |
+| `elevenlabsTextNormalization` | speak `params` |
+| `preemptible`, `dtmfDetection` | always `false`: the app sends no preemptible text and reads no keypad digits |
+| `language`, `<Language>` | not written: the two per-side languages cover one language |
+| `partialPrompts` | not written: the app answers final prompts only |
+| `events` | not written: Twilio does not document the event payloads |
+| `intelligenceService`, `conversationConfiguration`, `conversationId` | not written: these connect other Twilio products |
+| `debug` | not written |
+
+Google and Amazon speech are not offered yet. Deepgram and ElevenLabs are.
 
 Everything else is refused before a file is written. Each refusal says what to
 do instead. The refused list:
@@ -248,9 +404,10 @@ writes `build/<target>/`:
 
 | File | What it is |
 |---|---|
-| `app.py` | the whole app: routes, WebSocket, model, tools |
+| `app.py` | the whole app, on FastAPI and uvicorn: routes, WebSocket, model, tools |
 | `conversation-relay.xml.tmpl` | the TwiML `/voice` returns; `app.py` fills in your public origin at startup |
 | `tools/` | your local handlers, copied from the package |
+| `logic/` | your own agent logic, copied as written, when the target names `logic:` |
 | `pyproject.toml` | exact dependency pins for Python 3.12 |
 | `Dockerfile` | a non-root image running one process |
 | `.dockerignore` | keeps `.env` and local state out of the image |
@@ -260,23 +417,121 @@ writes `build/<target>/`:
 
 The generated project has no unmute dependency and reads no YAML.
 
+`compile` deletes `build/<target>/` and writes it again, keeping only `.env`.
+A file you add there by hand is lost on the next compile. Put it in the
+package's `hosting/<target>/` folder instead, for example
+`hosting/twilio/render.yaml`. Every compile copies that folder into
+`build/<target>/` and lists each file as `copied`. A hosting file may not use a
+name compile writes, such as `app.py`, or `.env`: compile refuses it and
+changes nothing. A hosting file does not change the build's `artifact_id`.
+
 ## Host it
 
-unmute never uploads the app. You host it. There is no `unmute dev` loop,
-because Twilio can only call a public HTTPS origin.
+unmute never uploads the app. You host it, on any host that runs a Dockerfile.
+There is no `unmute dev` loop, because Twilio can only call a public HTTPS
+origin.
 
-1. Copy `build/<target>/.env.example` to `.env` and fill it in. The account
-   owner must have accepted the AI/ML addendum that turns ConversationRelay on
-   ([onboarding](https://www.twilio.com/docs/voice/conversationrelay/onboarding)).
-2. Run the app, with `uv run --env-file .env python app.py` or the Dockerfile.
-3. Put it behind HTTPS at a public origin, for example
-   `https://relay.example.com`, and set `TWILIO_PUBLIC_URL` to exactly that,
-   with no path.
+What the host must give the app:
+
+- a public **https** origin that passes WebSocket upgrades through, and keeps
+  an idle WebSocket open for a whole call;
+- the port in `PORT`. The app listens on `0.0.0.0:$PORT`, 8080 when it is unset;
+- the app's four environment values: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+  `TWILIO_PUBLIC_URL` and the model key;
+- **one** instance. Call slots and interruptions live in the process, so two
+  copies behind one number do not share them;
+- a health check on `GET /healthz`;
+- about 35 seconds between SIGTERM and SIGKILL. On SIGTERM the app stops taking
+  calls, waits up to 20 seconds for the calls it has, ends the rest, and gives
+  Twilio 5 seconds to close each socket.
+
+Set `TWILIO_PUBLIC_URL` to the exact origin Twilio calls, with no path, for
+example `https://relay.example.com`. The app checks every Twilio signature
+against it. The account owner must have accepted the AI/ML addendum that turns
+ConversationRelay on
+([onboarding](https://www.twilio.com/docs/voice/conversationrelay/onboarding)).
 
 `GET /healthz` answers 200 while the process is up, even when every call slot
 is busy. It answers 503 only while the app drains, or when a tool handler that
 outlived its call holds every slot. Both carry `artifact_id`, which names the
 build. A 200 does not mean a call will be taken.
+
+### Try it on your laptop first
+
+1. Copy `build/<target>/.env.example` to `.env` next to it, and fill it in.
+2. Start the app: `uv run --env-file .env python app.py`.
+3. Start a tunnel to port 8080. Either one passes WebSockets through:
+
+   ```sh
+   ngrok http 8080
+   cloudflared tunnel --url http://localhost:8080
+   ```
+
+4. Set `TWILIO_PUBLIC_URL` to the tunnel's https origin, and restart the app.
+5. Run `unmute deploy --target twilio` to point the number at it, then call.
+
+A free tunnel gets a new origin each time it starts. Set the new origin, restart
+the app and deploy again.
+
+### Host it on Render
+
+[Render](https://render.com/docs/web-services) builds the Dockerfile from your
+Git repository. So commit `build/<target>/` with the package, and keep `.env`
+out of Git. Add this Blueprint as `hosting/twilio/render.yaml`, with `rootDir`
+set to the build folder's path from the repository root:
+
+```yaml
+services:
+  - type: web
+    name: relay-desk
+    runtime: docker
+    rootDir: agents/relay-desk/build/twilio
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    numInstances: 1
+    healthCheckPath: /healthz
+    maxShutdownDelaySeconds: 60
+    autoDeployTrigger: commit
+    envVars:
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PUBLIC_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+```
+
+1. Run `unmute compile`, then commit and push the package with `build/`.
+2. In the Render Dashboard, create a Blueprint from the repository. Set its
+   Blueprint path to `agents/relay-desk/build/twilio/render.yaml`
+   ([Blueprints](https://render.com/docs/infrastructure-as-code)).
+3. Fill in the four values Render asks for. `TWILIO_PUBLIC_URL` is the
+   service's own origin, `https://<name>.onrender.com`.
+4. Wait for the deploy to go live, then check
+   `curl https://<name>.onrender.com/healthz`.
+5. Run `unmute deploy --target twilio`.
+
+Do not use Render's free instance type. It sleeps after 15 minutes with no
+traffic and takes about a minute to wake
+([free instances](https://render.com/docs/free)), and Twilio gives up on
+`/voice` long before that. `maxShutdownDelaySeconds: 60` covers the app's drain.
+
+### Update a hosted agent
+
+1. Change the package.
+2. Run `unmute compile`.
+3. Commit `build/<target>/` and push. Render builds and deploys the new build.
+4. Run `unmute deploy --target twilio`. It refuses until `/healthz` names the
+   new build's `artifact_id`. Then it confirms the number already routes to
+   `/voice`, and changes nothing on the number.
+
+A deploy on Render starts the new instance and waits for its health check.
+Only then does it move traffic and stop the old one
+([deploys](https://render.com/docs/deploys)). A call that is running on the old
+instance then gets the app's drain: up to 20 seconds to finish, then the agent
+ends it. Push when no call is running if you can.
 
 ## Point the number at it
 
@@ -378,18 +633,280 @@ Then call the number. That call is the only check of the speech path.
 - **Failures.** A failed or timed-out model response gets one short fixed line.
   Three in a row end the call.
 
+### How the app is secured
+
+Three checks stand between the internet and your agent:
+
+1. `/voice` and `/connect-action` check `X-Twilio-Signature` over the exact URL
+   on `TWILIO_PUBLIC_URL`, and check that `AccountSid` is your account
+   ([webhook security](https://www.twilio.com/docs/usage/security)).
+2. The WebSocket handshake on `/conversation` is signed the same way, over the
+   `wss://` URL with no form fields
+   ([ConversationRelay onboarding](https://www.twilio.com/docs/voice/conversationrelay/onboarding)).
+   An unsigned handshake gets HTTP 403 before the socket opens.
+3. The first message must be Twilio's `setup`, for your account, with a valid
+   call SID and session ID. No call state exists before it.
+
+The Auth Token is the one shared secret. To rotate it, set the new token on
+the host and restart the app. Twilio publishes no fixed IP ranges for its
+webhooks
+([webhooks security](https://www.twilio.com/docs/usage/webhooks/webhooks-security)),
+so an IP allow list is not an option: the signature is the protection. Serve
+the app over HTTPS only, which every host on this page does.
+
+## Bring your own agent logic
+
+The app you host is yours, so the agent turn can be too. Point the target at a
+folder of your own Python:
+
+```yaml targets.yaml
+targets:
+  twilio:
+    provider: twilio
+    connection: twilio
+    logic: logic/
+```
+
+```python logic/__init__.py
+async def respond(session):
+    """Stream the reply to the caller's last words."""
+    yield "Hello from my own agent."
+```
+
+```mermaid
+flowchart LR
+    Twilio -->|caller's words| App[app.py]
+    App -->|session| Logic["your respond()"]
+    Logic -->|reply, piece by piece| App
+    App -->|text to speak| Twilio
+```
+
+1. Twilio sends the caller's words. The app adds them to the call's history.
+2. The app calls `respond(session)`, once per caller turn.
+3. Each string `respond()` yields is spoken as it arrives.
+4. When the caller talks over the reply, the app stops `respond()` and cuts
+   the reply in the history to what the caller heard.
+
+The app still owns the call: Twilio's signatures and protocol, interruptions,
+call slots, the drain on shutdown, and the fixed line when a turn fails.
+`respond()` owns the turn, and it runs its own tools. Compile copies the folder
+into `build/<target>/logic/` exactly as written and never changes it. The
+folder counts in the build's `artifact_id`, so `unmute deploy` refuses a host
+that runs older logic.
+
+What `session` holds:
+
+| Field | What it is |
+|---|---|
+| `history` | the conversation as a list of `{"role": "user" \| "assistant", "content": str}`, oldest first. The last entry is the turn to answer. An interrupted reply holds only what the caller heard. It is a copy. |
+| `call` | `call_sid`, `session_id`, `from`, `to`, `direction` and `custom_parameters`, from Twilio's setup message |
+| `instructions` | the package's instructions |
+| `model` | the package's think binding: `model`, `base_url` (the SLNG router's, or `None`), `api_key`, `params`, and the router's `extra_body` and `extra_headers` |
+| `state` | a dict of your own, kept for the whole call |
+| `end(reason, **data)` | ends the session once this reply has been sent, like `end_call`. `reason` and `data` reach [`next_twiml()`](#other-twilio-services-after-the-session) |
+| `twilio` | a Twilio REST client on your account and region, for any Twilio API during the call. It is synchronous, so call it through `asyncio.to_thread` |
+
+Rules the app holds `respond()` to:
+
+- It must be `async def respond(session)` in the folder's `__init__.py`, and
+  yield strings.
+- A turn has 30 seconds. A turn that raises, times out or yields nothing gets
+  the fixed failure line. Three failures in a row end the call.
+- `end()` ends the call right after the reply, so keep the goodbye in the
+  reply before it.
+- `requirements.txt` in the folder, one requirement per line, is added to the
+  app's pinned dependencies. A pin that clashes with the app's own pins fails
+  at install, with the installer's message.
+
+`think:` stays required, so the package still validates on its own, and
+`respond()` may ignore it. Or it can use `session.model` to call the model the
+package names. This is a whole agent in Pydantic AI, with a tool and a
+goodbye, on the package's own binding:
+
+```python logic/__init__.py
+from pydantic_ai import Agent
+from pydantic_ai.messages import (
+    FunctionToolResultEvent,
+    ModelRequest,
+    ModelResponse,
+    PartDeltaEvent,
+    PartStartEvent,
+    TextPart,
+    TextPartDelta,
+    UserPromptPart,
+)
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
+from pydantic_ai.providers.openai import OpenAIProvider
+
+from tools.opening_hours import opening_hours as read_hours
+
+
+def build(session):
+    m = session.model
+    model = OpenAIChatModel(m.model, provider=OpenAIProvider(base_url=m.base_url, api_key=m.api_key))
+    settings = OpenAIChatModelSettings(extra_body={**m.params, **m.extra_body}, extra_headers=m.extra_headers)
+    agent = Agent(model, instructions=session.instructions, model_settings=settings)
+
+    @agent.tool_plain
+    def opening_hours(day: str) -> dict:
+        """Return the front desk's opening hours for one day of the week."""
+        return read_hours(day)
+
+    @agent.tool_plain
+    def end_call() -> str:
+        """End the call once the caller says they are done."""
+        session.end("caller_done")
+        return "The call ends after this reply."
+
+    return agent
+
+
+def to_messages(history):
+    return [
+        ModelRequest(parts=[UserPromptPart(content=e["content"])]) if e["role"] == "user"
+        else ModelResponse(parts=[TextPart(content=e["content"])])
+        for e in history
+    ]
+
+
+async def respond(session):
+    if "agent" not in session.state:
+        session.state["agent"] = build(session)
+    *earlier, last = session.history
+    spoke = False
+    async with session.state["agent"].run_stream_events(last["content"], message_history=to_messages(earlier)) as events:
+        async for event in events:
+            piece = ""
+            if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
+                piece = event.part.content
+            elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                piece = event.delta.content_delta
+            elif isinstance(event, FunctionToolResultEvent) and event.part.tool_name == "end_call" and spoke:
+                return  # the goodbye is said: stop before the model is asked again
+            if piece:
+                spoke = True
+                yield piece
+```
+
+```text logic/requirements.txt
+pydantic-ai-slim[openai]==2.51.0
+```
+
+The history is rebuilt from `session.history` every turn, so an interrupted
+reply counts only as far as the caller heard it. Two choices here keep
+`end_call` working:
+
+- `run_stream_events()`, not `run_stream()`. `run_stream()` takes the first
+  text as the final answer, so a goodbye followed by `end_call` in the same
+  response never runs the tool. The events run the whole loop, tools included,
+  and still hand over each piece of text as it arrives.
+- Stop once `end_call` has run after something was said. Otherwise the model
+  is asked again after the tool, and it says goodbye twice or answers with
+  nothing, which gets the failure line.
+
+Say in the instructions that the call only ends when the model calls
+`end_call`, in the same reply as its goodbye. Without that line, some
+goodbyes come with no call to `end_call`, and the caller has to hang up.
+Pydantic AI prints a banner at import; set `PYDANTIC_AI_NO_BANNER=1` on the
+host to keep it out of the log.
+
+With `provider: slng` on think, the same code calls the model through the SLNG
+Context Router: `base_url` and the router's body and headers come in
+`session.model`. For any other endpoint that speaks Chat Completions, such as
+vLLM, Ollama or OpenRouter, set `base_url` and `api_key` yourself in `build()`.
+Pydantic AI also has its own providers for Anthropic, Gemini and others.
+
+## Other Twilio services after the session
+
+When the agent's session ends, Twilio asks the app what the call does next.
+The answer can be any TwiML: put the caller through with `<Dial>`, queue them
+for a person with `<Enqueue>`, take a card with `<Pay>`, or play a line. It can
+also hand the caller back to the agent, with the conversation kept.
+
+```mermaid
+sequenceDiagram
+    participant Twilio
+    participant App as your app
+    participant Logic as your next_twiml()
+    App->>Twilio: end, with reason and data
+    Twilio->>App: POST /connect-action (signed)
+    App->>Logic: handoff
+    Logic-->>App: TwiML, or handoff.resume()
+    App-->>Twilio: the TwiML
+    Twilio->>App: new WebSocket, if it was a resume
+    App->>App: the parked conversation carries on
+```
+
+1. Your logic calls `session.end("hold")`. The app sends `end` with
+   `{"reasonCode": "hold"}` as the handoff data, and keeps the call's history
+   aside.
+2. Twilio posts to `/connect-action`. The app checks the signature, as on
+   every route.
+3. The app calls `next_twiml(handoff)` in your `logic/__init__.py`.
+4. Your function returns TwiML as a string. `None` means hang up.
+5. If it returned `handoff.resume(note, greeting=...)`, Twilio runs any verbs
+   you put first, then opens a new session. ConversationRelay speaks the
+   greeting, and the app adds it to the kept history. The agent answers the
+   caller's next words with the whole conversation in front of it.
+
+```python logic/__init__.py
+import os
+
+
+def next_twiml(handoff):
+    if handoff.reason == "hold":
+        return handoff.resume(
+            "a short hold", before="<Say>Please hold.</Say>", greeting="Thanks for holding."
+        )
+    if handoff.reason == "transfer":
+        # A number you set on the host, never one the model or the caller chose.
+        return f"<Response><Dial>{os.environ['FRONT_DESK_NUMBER']}</Dial></Response>"
+    return None  # hang up
+```
+
+What `handoff` holds:
+
+| Field | What it is |
+|---|---|
+| `reason` | the reason `session.end()` sent. The app's own reasons are `end_call`, `busy` and `shutdown`. It is empty when the session ended without an `end` |
+| `data` | the other keyword arguments `session.end()` sent |
+| `call` | `call_sid`, `from`, `to` and `direction` |
+| `status` | Twilio's `SessionStatus`: `completed`, `ended` or `failed` |
+| `twilio` | the same REST client as `session.twilio` |
+| `resume(note, before="", greeting="")` | TwiML that hands the caller back to the agent. `before` is TwiML verbs Twilio runs first. `greeting` is the line the caller hears on coming back; without one, the agent waits for the caller. The note reaches logic as `session.call["custom_parameters"]["resume"]` |
+
+Rules the app holds `next_twiml()` to:
+
+- It may be `def` or `async def`. Twilio waits 15 seconds for the answer, so an
+  `async` one gets 10 and a slow one should hand work to a thread.
+- The answer must be well-formed XML. An exception, a non-string or broken XML
+  is logged, and the call hangs up.
+- The kept history waits 10 minutes, in this process only. A resume that
+  reaches another copy of the app starts a fresh conversation. Run one copy
+  per number, as for calls at once.
+- Never put card numbers or other secrets in `session.end()` data: it travels
+  through Twilio as the session's handoff data.
+- Build TwiML from values you trust. A number to dial, or text to put in the
+  XML, that came from the model or the caller needs checking and escaping first.
+- A resume never asks the model to speak and never puts words in the caller's
+  mouth. An invented caller turn is where the model stopped calling `end_call`.
+
 ## What is not verified yet
 
-- A call behind a proxy other than a cloudflared quick tunnel.
+- A call behind a proxy other than Render and a cloudflared quick tunnel.
 - How Twilio plays tokens already sent when an interrupt arrives. One live
   interrupt was heard, on OpenAI.
-- `end_call` on a real call since the app waits for Twilio to close the socket.
-  The close order is tested offline only.
 - A second call refused while `max_sessions` calls are running. The refusal
   is tested offline only.
 - A call in `ie1` or `au1`. The docs list ConversationRelay in both regions.
   They do not say whether Deepgram and ElevenLabs run there.
 - The Gemini Developer API path, with no `vertexai`, against a real key.
+- A real call on the built-in agent turn since the move to FastAPI. The one
+  hosted call so far ran custom logic.
+- The drain on a real SIGTERM, such as a redeploy during a call. It is tested
+  in process only.
+- A resume with a `greeting` on a real call. A resume without one has been
+  heard on a real call.
 
 ## Where to go next
 

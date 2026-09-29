@@ -2,7 +2,7 @@ targets:
   twilio-openai:
     provider: twilio
     sdk_language: python
-    connection: twilio_relay
+    connection: twilio
 
   # The same agent thinking on Gemini through Vertex AI in the EU, the path the
   # repository's GOOGLE_API_KEY reaches. Without vertexai the binding would use
@@ -10,7 +10,7 @@ targets:
   twilio-gemini:
     provider: twilio
     sdk_language: python
-    connection: twilio_relay
+    connection: twilio
     models:
       reasoning:
         provider: google
@@ -20,3 +20,29 @@ targets:
           location: eu
           thinking_config:
             thinking_level: MINIMAL
+
+  # The same agent thinking through the SLNG Context Router, which calls
+  # gpt-5.6-luna on OpenAI for it and answers repeated turns from its cache.
+  twilio-slng:
+    provider: twilio
+    sdk_language: python
+    connection: twilio
+    models:
+      reasoning:
+        provider: slng
+        model: gpt-5.6-luna
+        agent_id: relay-desk-v1
+        upstream:
+          provider: openai
+        params:
+          world_part: eu-west
+          reasoning_effort: none
+          parallel_tool_calls: false
+
+  # The same agent with the turn handed to logic/, a small Pydantic AI agent on
+  # the package's OpenAI binding. The app still owns the call.
+  twilio-logic:
+    provider: twilio
+    sdk_language: python
+    connection: twilio
+    logic: logic/

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -41,7 +42,7 @@ var relayDesk = filepath.Join("..", "voice-agents-tests", "relay-desk")
 // Vertex in the acceptance package. Everything the driver writes is in them.
 func TestTwilioGolden(t *testing.T) {
 	for _, tc := range []struct{ dir, instance, golden string }{
-		{filepath.Join("..", "testdata", "twilio_relay"), "twilio", "twilio_v1_openai.txt"},
+		{filepath.Join("..", "testdata", "twilio"), "twilio", "twilio_v1_openai.txt"},
 		{relayDesk, "twilio-gemini", "twilio_v1_gemini_vertex.txt"},
 	} {
 		t.Run(tc.golden, func(t *testing.T) {
@@ -76,7 +77,7 @@ func TestTwilioGolden(t *testing.T) {
 func TestTwilioRegionReachesTheRunbook(t *testing.T) {
 	for _, region := range []string{"", "us1", "ie1", "au1"} {
 		t.Run(region, func(t *testing.T) {
-			pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio_relay"))
+			pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -99,6 +100,15 @@ func TestTwilioRegionReachesTheRunbook(t *testing.T) {
 			}
 			if regional && (!strings.Contains(readme, note) || !strings.Contains(readme, "`TWILIO_AUTH_TOKEN` must be that\n   region's Auth Token")) {
 				t.Errorf("region %q: runbook does not name the region and its token:\n%s", region, readme)
+			}
+			// The app's REST client calls the same region the number lives in.
+			app := artifactFile(t, artifact, "app.py")
+			want := `TWILIO_REGION: str | None = None`
+			if regional {
+				want = `TWILIO_EDGE: str | None = "` + target.TwilioRegionEdges[region] + `"`
+			}
+			if !strings.Contains(app, want) {
+				t.Errorf("region %q: app.py lacks %s", region, want)
 			}
 		})
 	}
@@ -148,7 +158,7 @@ func TestTwilioArtifactCarriesOnlyTheSelectedProvider(t *testing.T) {
 // The TwiML template is XML a parser reads back exactly, with the greeting's
 // quotes and ampersand intact, and every native setting the package asks for.
 func TestTwilioTwiMLTemplate(t *testing.T) {
-	artifact := twilioArtifact(t, filepath.Join("..", "testdata", "twilio_relay"), "twilio")
+	artifact := twilioArtifact(t, filepath.Join("..", "testdata", "twilio"), "twilio")
 	var doc struct {
 		Connect struct {
 			Action string `xml:"action,attr"`
@@ -199,7 +209,7 @@ func TestTwilioTwiMLTemplate(t *testing.T) {
 // Disabled interruption and a protected greeting map onto the documented
 // attribute values.
 func TestTwilioInterruptionSettings(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio_relay"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,6 +239,38 @@ func TestTwilioInterruptionSettings(t *testing.T) {
 	}
 }
 
+// Listen, speak and turn params land on <ConversationRelay> as the attribute
+// of the same name, a hints list joined with commas.
+func TestTwilioBindingParamsBecomeAttributes(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["twilio"]
+	listen := *resolved.Models.Listen
+	listen.Model = "flux"
+	listen.Params = map[string]any{"hints": []any{"relay desk", "opening hours"}, "deepgramSmartFormat": false}
+	resolved.Models.Listen = &listen
+	voice := agent.Agents[agent.EntryAgent].Voice
+	speak := resolved.Models.Speak[voice]
+	speak.Params = map[string]any{"elevenlabsTextNormalization": "auto"}
+	resolved.Models.Speak = map[string]ir.Binding{voice: speak}
+	resolved.Models.Turn = &ir.Binding{Params: map[string]any{"eotThreshold": 0.7}}
+	out, err := twilioRelayXML(agent, resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`hints="relay desk,opening hours"`, `deepgramSmartFormat="false"`, `elevenlabsTextNormalization="auto"`, `eotThreshold="0.7"`} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("TwiML lacks %s:\n%s", want, out)
+		}
+	}
+}
+
 // The container runs one process as a non-root user, and neither dotenv files
 // nor local state enter the build context.
 func TestTwilioContainer(t *testing.T) {
@@ -247,5 +289,111 @@ func TestTwilioContainer(t *testing.T) {
 	}
 	if !strings.Contains(artifactFile(t, artifact, "tools/opening_hours.py"), "def opening_hours(") {
 		t.Error("the real local handler was not copied")
+	}
+}
+
+// A think binding on the SLNG Context Router keeps the Chat Completions brain
+// and adds only what the router needs: its regional endpoint, the inline
+// configuration and the forwarded params in the body, and the two identity
+// headers, on every request. The upstream key joins the startup check.
+func TestTwilioRouterThink(t *testing.T) {
+	artifact := twilioArtifact(t, filepath.Join("..", "voice-agents-tests", "relay-desk"), "twilio-slng")
+	app := artifactFile(t, artifact, "app.py")
+	for _, want := range []string{
+		`ENV_MODEL_KEY = "SLNG_API_KEY"`,
+		`UPSTREAM_ENV: tuple[str, ...] = ("OPENAI_API_KEY", )`,
+		`ROUTER_BASE_URL = "https://eu-west.context-router.slng.ai/v1"`,
+		`ROUTER_SCOPE = "relay-desk-v1:desk"`,
+		`base_url=ROUTER_BASE_URL,`,
+		`"slng_config": _slng_config()`,
+		`"reasoning_effort": "none"`,
+		`"X-Slng-Agent-Id": ROUTER_SCOPE, "X-Slng-Session-Id": call.session_id`,
+		`os.environ["OPENAI_API_KEY"]`,
+		`MODEL_PARAMS: dict[str, Any] = json.loads("{}")`,
+	} {
+		if !strings.Contains(app, want) {
+			t.Errorf("app.py lacks %s", want)
+		}
+	}
+	// The provenance line, held to the contract the other router targets keep
+	// (TestSlngRouterProvenanceLineHasOneOwner).
+	if strings.Count(app, "def _slng_log_provenance(") != 1 || !strings.Contains(app, "async def _slng_log_provenance(") ||
+		!strings.Contains(app, `"slng router: "`) || !strings.Contains(app, "except Exception:") ||
+		!strings.Contains(app, `event_hooks={"response": [_slng_log_provenance]}`) {
+		t.Error("app.py lacks the router's provenance hook")
+	}
+	at := -1
+	for _, key := range slngProvenanceKeys {
+		next := strings.Index(app, key)
+		if next < at {
+			t.Errorf("provenance field %s is missing or out of order", key)
+		}
+		at = next
+	}
+	var report struct {
+		RequiredEnv []string `json:"required_env"`
+	}
+	if err := json.Unmarshal([]byte(artifactFile(t, artifact, "compile-report.json")), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(report.RequiredEnv, "OPENAI_API_KEY") || !slices.Contains(report.RequiredEnv, "SLNG_API_KEY") {
+		t.Errorf("required_env = %v, want the router key and the upstream key", report.RequiredEnv)
+	}
+	// A direct binding carries none of it.
+	direct := artifactFile(t, twilioArtifact(t, filepath.Join("..", "voice-agents-tests", "relay-desk"), "twilio-openai"), "app.py")
+	if strings.Contains(direct, "ROUTER_") || strings.Contains(direct, "extra_body") {
+		t.Error("a direct openai binding emits router code")
+	}
+}
+
+// A target with logic: hands the turn to the author's respond(). The folder is
+// copied as written, its requirements join the pins, the image copies it, and
+// it counts in artifact_id, because it decides what a call does.
+func TestTwilioLogicTarget(t *testing.T) {
+	pkg, err := spec.Load(relayDesk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["twilio-logic"]
+	artifact, err := Generate(agent, resolved, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := artifactFile(t, artifact, "app.py")
+	for _, want := range []string{"import logic", "self.brain = brain if resumed else LogicBrain(client)", "async for piece in logic.respond(self.session):"} {
+		if !strings.Contains(app, want) {
+			t.Errorf("app.py lacks %s", want)
+		}
+	}
+	var copied bool
+	for _, file := range artifact.Files {
+		if file.Path == "logic/__init__.py" {
+			copied = file.Verbatim && string(file.Content) == resolved.Logic.Files["__init__.py"]
+		}
+	}
+	if !copied {
+		t.Error("logic/__init__.py is not copied verbatim")
+	}
+	if !strings.Contains(artifactFile(t, artifact, "pyproject.toml"), `"pydantic-ai-slim[openai]==2.51.0"`) {
+		t.Error("the logic's requirement is not in pyproject.toml")
+	}
+	if !strings.Contains(artifactFile(t, artifact, "Dockerfile"), "COPY logic/ ./logic/") {
+		t.Error("the image does not copy logic/")
+	}
+	resolved.Logic = &ir.Logic{Path: resolved.Logic.Path, Files: maps.Clone(resolved.Logic.Files)}
+	resolved.Logic.Files["__init__.py"] += "\n# changed\n"
+	changed, err := Generate(agent, resolved, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.ArtifactID == artifact.ArtifactID {
+		t.Error("a change to the logic did not change artifact_id")
+	}
+	if strings.Contains(artifactFile(t, twilioArtifact(t, relayDesk, "twilio-openai"), "app.py"), "LogicBrain") {
+		t.Error("a target without logic emits the logic brain")
 	}
 }

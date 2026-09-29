@@ -91,7 +91,7 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 		warnf(cmd.ErrOrStderr(), "%s\n", warning)
 	}
 	outDir := filepath.Join(root, "build", resolved.Name)
-	if err := writeArtifactFiles(cmd.ErrOrStderr(), outDir, artifact.Files); err != nil {
+	if _, err := writeTargetBuild(cmd.ErrOrStderr(), root, resolved.Name, artifact.Files); err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
 	}
 	composeFile := filepath.Join(outDir, "compose.dev.yaml")

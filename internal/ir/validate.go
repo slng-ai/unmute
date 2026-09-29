@@ -887,6 +887,10 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	}
 	if provider == targetcap.Twilio {
 		validateTwilioTarget(agent, resolved, row)
+	} else if resolved.Logic != nil {
+		row.Errors = add(row.Errors, fmt.Sprintf(
+			"logic: is read by the twilio target only, whose app hands each turn to your own respond(); %s generates its own agent turn: remove logic, or compile to twilio",
+			resolved.Provider))
 	}
 	if agent.Tracing != nil {
 		applyCapability(caps, tracingCapability(agent.Tracing.Provider), provider, row)

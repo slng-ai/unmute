@@ -840,10 +840,42 @@ func TestTwilioTurnParams(t *testing.T) {
 		{"interruptSensitivity", "loud", false},
 		{"ignoreBackchannel", true, true},
 		{"ignoreBackchannel", "yes", false},
-		{"eotThreshold", 0.7, false},
+		{"eotThreshold", 0.7, false}, // the listen model is not flux
 	} {
-		if err := CheckTwilioTurnParam(tc.name, tc.value); (err == nil) != tc.ok {
+		if err := CheckTwilioParam(Turn, "turn", tc.name, tc.value, "nova-3-general"); (err == nil) != tc.ok {
 			t.Errorf("%s=%v: err=%v, want ok=%v", tc.name, tc.value, err, tc.ok)
 		}
+	}
+}
+
+// The listen and speak attributes, and the one turn attribute that applies to
+// a single speech model.
+func TestTwilioParams(t *testing.T) {
+	for _, tc := range []struct {
+		role  Role
+		name  string
+		value any
+		model string
+		ok    bool
+	}{
+		{Listen, "hints", []any{"Unmute", "front desk"}, "nova-3-general", true},
+		{Listen, "hints", []any{"one, two"}, "nova-3-general", false},
+		{Listen, "hints", []any{}, "nova-3-general", false},
+		{Listen, "hints", "Unmute", "nova-3-general", false},
+		{Listen, "deepgramSmartFormat", false, "nova-3-general", true},
+		{Listen, "keywords", []any{"x"}, "nova-3-general", false},
+		{Speak, "elevenlabsTextNormalization", "auto", "", true},
+		{Speak, "elevenlabsTextNormalization", "yes", "", false},
+		{Turn, "eotThreshold", 0.7, "flux", true},
+		{Turn, "eotThreshold", 1, "flux", false},
+		{Turn, "eotThreshold", 0.4, "flux", false},
+		{Reason, "hints", []any{"x"}, "", false},
+	} {
+		if err := CheckTwilioParam(tc.role, string(tc.role), tc.name, tc.value, tc.model); (err == nil) != tc.ok {
+			t.Errorf("%s.%s=%v on %q: err=%v, want ok=%v", tc.role, tc.name, tc.value, tc.model, err, tc.ok)
+		}
+	}
+	if got := TwilioAttr([]any{"Unmute", " front desk "}); got != "Unmute,front desk" {
+		t.Errorf("hints attribute = %q", got)
 	}
 }

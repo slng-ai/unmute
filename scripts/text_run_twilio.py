@@ -1,7 +1,7 @@
 """Drive a compiled twilio target's app.py as ConversationRelay would, with no call.
 
-The app runs in-process on aiohttp's test server. A fake ConversationRelay
-client signs its requests with a fake auth token, the way Twilio signs them, and
+The app runs in-process on the app's own uvicorn server, on a free local port.
+A fake ConversationRelay client, on aiohttp, signs its requests with a fake auth token, the way Twilio signs them, and
 speaks the WebSocket protocol:
 
     https://www.twilio.com/docs/voice/conversationrelay/websocket-messages
@@ -66,12 +66,14 @@ class FakeOpenAI:
     def __init__(self, script: list[list[Any]]) -> None:
         self.script = list(script)
         self.requests: list[list[dict[str, Any]]] = []
+        self.raw: list[dict[str, Any]] = []  # every other request field, as sent
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
     async def create(self, **request: Any) -> Any:
         from openai.types.chat import ChatCompletionChunk
 
         self.requests.append(copy.deepcopy(request["messages"]))
+        self.raw.append({k: copy.deepcopy(v) for k, v in request.items() if k != "messages"})
         steps = self.script.pop(0) if self.script else []
 
         def chunk(delta: dict[str, Any]) -> Any:
@@ -167,10 +169,10 @@ class Relay:
     async def send(self, message: dict[str, Any]) -> None:
         await self.ws.send_json(message)
 
-    async def setup(self, account: str = ACCOUNT) -> None:
+    async def setup(self, account: str = ACCOUNT, custom: dict[str, str] | None = None) -> None:
         await self.send(
             {"type": "setup", "sessionId": SESSION, "accountSid": account, "callSid": CALL,
-             "from": "+15005550006", "to": "+15005550001", "direction": "inbound", "customParameters": {}}
+             "from": "+15005550006", "to": "+15005550001", "direction": "inbound", "customParameters": custom or {}}
         )
 
     async def prompt(self, text: str, last: bool = True) -> None:
@@ -247,7 +249,7 @@ class Env:
         self.client: Any = None
 
     async def __aenter__(self) -> Env:
-        from aiohttp.test_utils import TestClient, TestServer
+        import aiohttp
 
         self.saved = {name: getattr(self.app, name) for name in self.patches}
         for name, value in self.patches.items():
@@ -266,12 +268,21 @@ class Env:
 
         self.original = (self.app.Call, self.app.Slots)
         self.app.Call, self.app.Slots = RecordingCall, RecordingSlots
-        self.server = TestServer(self.app.build_app(client=self.fake))
-        self.client = TestClient(self.server)
-        await self.client.start_server()
+        asgi = self.app.build_app(client=self.fake)
+        self.server = self.app.RelayServer(self.app.server_config(asgi, "127.0.0.1", 0), asgi.state.drain_calls)
+        self.serving = asyncio.ensure_future(self.server.serve())
+        await until(lambda: self.server.started or self.serving.done(), 10)
+        port = self.server.servers[0].sockets[0].getsockname()[1]
+        self.client = aiohttp.ClientSession(base_url=f"http://127.0.0.1:{port}")
         return self
 
+    async def stop(self) -> None:
+        """Shut the server down the way SIGTERM does: drain first."""
+        self.server.should_exit = True
+        await self.serving
+
     async def __aexit__(self, *exc: Any) -> None:
+        await self.stop()
         await self.client.close()
         self.app.Call, self.app.Slots = self.original
         for name, value in self.saved.items():
@@ -297,6 +308,22 @@ class Env:
 
     def history(self) -> list[Any]:
         return self.calls[-1].brain.history
+
+    async def next_step(self, handoff: str, status: str = "ended") -> str:
+        """Ask /connect-action what comes next, as Twilio does after an end."""
+        form = {"AccountSid": ACCOUNT, "CallSid": CALL, "From": "+15005550006", "To": "+15005550001",
+                "Direction": "inbound", "SessionStatus": status, "HandoffData": handoff}
+        response = await self.post("/connect-action", form)
+        check(response.status == 200, f"/connect-action returned {response.status}")
+        return await response.text()
+
+    async def resumed(self, note: str, greeting: str = "") -> Relay:
+        """The second session Twilio opens for a resume TwiML."""
+        count = len(self.calls)
+        relay = await self.relay(setup=False)
+        await relay.setup(custom={"resume": note, **({"greeting": greeting} if greeting else {})})
+        await until(lambda: len(self.calls) > count)
+        return relay
 
 
 def gemini(app: Any) -> bool:
@@ -340,8 +367,38 @@ CASES = []
 
 
 def case(function: Any) -> Any:
+    """A case that scripts the model SDK, so it runs on a model build."""
+    function.kind = "model"
     CASES.append(function)
     return function
+
+
+def protocol_case(function: Any) -> Any:
+    """A case that never reaches the turn, so it runs on every build."""
+    case(function).kind = "protocol"
+    return function
+
+
+def logic_case(function: Any) -> Any:
+    """A case that replaces logic.respond, so it runs on a custom logic build."""
+    case(function).kind = "logic"
+    return function
+
+
+@contextlib.contextmanager
+def using_logic(app: Any, respond: Any, next_twiml: Any = None) -> Any:
+    saved, app.logic.respond = app.logic.respond, respond
+    saved_step = getattr(app.logic, "next_twiml", None)
+    if next_twiml is not None:
+        app.logic.next_twiml = next_twiml
+    try:
+        yield
+    finally:
+        app.logic.respond = saved
+        if saved_step is not None:
+            app.logic.next_twiml = saved_step
+        elif hasattr(app.logic, "next_twiml"):
+            del app.logic.next_twiml
 
 
 def fake_for(app: Any, script: list[list[Any]]) -> Any:
@@ -349,7 +406,7 @@ def fake_for(app: Any, script: list[list[Any]]) -> Any:
 
 
 def env(app: Any, script: list[list[Any]] | None = None, **patches: Any) -> Env:
-    # A short drain, so the test server's shutdown does not wait out the
+    # A short drain, so the server's shutdown does not wait out the
     # default for a call a case left open.
     patches.setdefault("DRAIN_TIMEOUT", 0.2)
     # The same for a socket the fake never closes after an end message.
@@ -357,7 +414,7 @@ def env(app: Any, script: list[list[Any]] | None = None, **patches: Any) -> Env:
     return Env(app, fake_for(app, script or []), patches)
 
 
-@case
+@protocol_case
 async def health_and_signed_voice(app: Any) -> None:
     async with env(app) as e:
         health = await e.client.get("/healthz")
@@ -375,7 +432,7 @@ async def health_and_signed_voice(app: Any) -> None:
         check(with_query.status == 200, "a signed query string was refused")
 
 
-@case
+@protocol_case
 async def voice_signature_rejections(app: Any) -> None:
     async with env(app) as e:
         form = {"AccountSid": ACCOUNT, "CallSid": CALL}
@@ -397,7 +454,30 @@ async def voice_signature_rejections(app: Any) -> None:
         check(action.status == 200 and "<Hangup/>" in body and "Connect" not in body, "connect-action did not hang up")
 
 
-@case
+@protocol_case
+async def connect_action_picks_the_next_step(app: Any) -> None:
+    seen: list[Any] = []
+
+    def transfer(handoff: Any) -> str:
+        seen.append(handoff)
+        return handoff.resume("the transfer was not answered", before="<Say>One moment.</Say>")
+
+    steps = {"transfer": transfer, "say": lambda h: "<Response><Say>Bye</Say></Response>"}
+    async with env(app, NEXT_STEPS=steps) as e:
+        for handoff in ["not json", '["a list"]', '{"reasonCode": "nobody_knows"}', ""]:
+            body = await e.next_step(handoff)
+            check("<Hangup/>" in body and "Connect" not in body, f"{handoff!r} did not hang up: {body}")
+        check("<Say>Bye</Say>" in await e.next_step('{"reasonCode": "say"}'), "a built-in step was not answered")
+        body = await e.next_step('{"reasonCode": "transfer", "to": "desk"}')
+        check(seen and seen[0].reason == "transfer" and seen[0].data == {"to": "desk"}, f"handoff: {seen}")
+        check(seen[0].call["call_sid"] == CALL and seen[0].status == "ended", f"call: {seen[0].call}")
+        check('<Parameter name="resume" value="the transfer was not answered"' in body, f"no resume: {body}")
+        check("welcomeGreeting=" not in body and f'url="wss://{HOST}/conversation"' in body, f"resume TwiML: {body}")
+        check(body.index("<Say>One moment.</Say>") < body.index("<Connect"), f"before is not first: {body}")
+        check(f'action="{ORIGIN}/connect-action"' in body, "a resume must come back to /connect-action")
+
+
+@protocol_case
 async def websocket_handshake_and_setup(app: Any) -> None:
     from aiohttp import WSServerHandshakeError
 
@@ -432,6 +512,23 @@ async def streamed_reply_spacing_and_last(app: Any) -> None:
         first = [(r, t) for r, t in zip(roles(app, e.fake.requests[0]), texts(app, e.fake.requests[0])) if r != "system"]
         check(first[0][1] == app.GREETING, "the greeting is not the first history entry")
         check([r for r, _ in first][1:] == ["user"], "the greeting was not recorded exactly once")
+
+
+@case
+async def router_request_carries_config_and_identity(app: Any) -> None:
+    if not hasattr(app, "ROUTER_SCOPE"):
+        return  # a direct binding: nothing router-shaped to check
+    async with env(app, [["Nine."], ["Ten."]]) as e:
+        relay = await e.relay()
+        for text in ("When do you open?", "And on Friday?"):
+            await relay.prompt(text)
+            await relay.reply()
+        for raw in e.fake.raw:
+            headers = {"X-Slng-Agent-Id": app.ROUTER_SCOPE, "X-Slng-Session-Id": SESSION}
+            check(raw.get("extra_headers") == headers, f"identity headers: {raw.get('extra_headers')}")
+            tiers = raw.get("extra_body", {}).get("slng_config", {}).get("tiers", {})
+            check(tiers.get("1", [{}])[0].get("model") == app.MODEL, f"slng_config does not name the model: {tiers}")
+            check("api_key" not in json.dumps(raw.get("extra_headers")), "a credential rode a header")
 
 
 @case
@@ -693,9 +790,56 @@ async def end_waits_for_twilio_to_close(app: Any) -> None:
 
 
 @case
+async def resume_carries_the_conversation_on(app: Any) -> None:
+    script = [["Hello. "], ["Goodbye. ", call("end_call", {})], ["Sure."]]
+    back = "Sorry, nobody answered. What else can I do?"
+    steps = {"end_call": lambda h: h.resume("the transfer was not answered", greeting=back)}
+    async with env(app, script, NEXT_STEPS=steps) as e:
+        relay = await e.relay()
+        await relay.prompt("Hi")
+        await relay.reply()
+        await relay.prompt("Put me through")
+        await relay.reply()
+        end = await relay.next()
+        check(end and end["type"] == "end", f"no end: {end}")
+        await relay.ws.close()
+        body = await e.next_step(end["handoffData"])
+        check('name="resume"' in body and f'welcomeGreeting="{back}"' in body, f"the step did not resume: {body}")
+        again = await e.resumed("the transfer was not answered", greeting=back)
+        # ConversationRelay speaks the greeting; the model is not asked to.
+        check(await again.quiet(0.3) == [], "the app spoke on a resume")
+        await again.prompt("Can you try again?")
+        check(text_of(await again.reply()) == "Sure.", "the resumed call did not answer the caller")
+        said = texts(app, e.history())
+        check("Hi" in said and back in said, f"the resumed call lost the conversation or the greeting: {said}")
+        check(app.GREETING is None or said.count(app.GREETING) <= 1, "the first greeting was added twice")
+        await again.ws.close()
+
+
+@case
+async def resume_after_hangup_or_expiry_starts_fresh(app: Any) -> None:
+    for patches in [{}, {"PARK_SECONDS": -1.0}]:
+        # A hangup answer lets the history go; an expired park has none left.
+        steps = {} if not patches else {"end_call": lambda h: h.resume("late")}
+        async with env(app, [["Goodbye. ", call("end_call", {})]], NEXT_STEPS=steps, **patches) as e:
+            relay = await e.relay()
+            await relay.prompt("Bye")
+            await relay.reply()
+            end = await relay.next()
+            await relay.ws.close()
+            await e.next_step(end["handoffData"])
+            again = await e.resumed("late")
+            check(await again.quiet(0.3) == [], "a session with nothing parked spoke first")
+            check("Bye" not in texts(app, e.history()), f"history survived {patches or 'a hangup'}")
+            await again.ws.close()
+
+
+@protocol_case
 async def overload_is_refused(app: Any) -> None:
     async with env(app, MAX_SESSIONS=1, END_GRACE=2.0) as e:
-        await e.relay()
+        # Held, not dropped: a dropped socket is collected and closed, which
+        # gives the slot back before /voice is asked.
+        first = await e.relay()
         body = await (await e.post("/voice", {"AccountSid": ACCOUNT})).text()
         check("<Hangup/>" in body and "Connect" not in body, "/voice took a call past max_sessions")
         second = await e.relay(setup=False)
@@ -704,24 +848,218 @@ async def overload_is_refused(app: Any) -> None:
         check(end and end["type"] == "end" and "busy" in end["handoffData"], f"a second session was admitted: {end}")
         check(await second.stays_open(), "the busy refusal closed the socket before Twilio did")
         await second.ws.close()
+        await first.ws.close()
 
 
-@case
+@protocol_case
 async def shutdown_drains_then_ends(app: Any) -> None:
     async with env(app, DRAIN_TIMEOUT=0.2) as e:
         relay = await e.relay()
-        closing = asyncio.ensure_future(e.server.runner.shutdown())
+        closing = asyncio.ensure_future(e.stop())
         end = await relay.next()
         await closing
         check(end and end["type"] == "end" and "shutdown" in end["handoffData"], f"no shutdown end: {end}")
         check(e.slots[0].draining, "admission stayed open during shutdown")
 
 
+@logic_case
+async def logic_reply_streams_with_last(app: Any) -> None:
+    seen: list[Any] = []
+
+    async def respond(session: Any) -> Any:
+        seen.append(session.history)
+        for piece in ("The desk ", "opens ", "at nine."):
+            yield piece
+
+    with using_logic(app, respond):
+        async with env(app) as e:
+            relay = await e.relay()
+            await relay.prompt("When do you open?")
+            tokens = await relay.reply()
+            check(text_of(tokens) == "The desk opens at nine.", f"reply: {text_of(tokens)!r}")
+            check([t["last"] for t in tokens] == [False, False, True], "last=true is not on the last piece only")
+            want = [{"role": "user", "content": "When do you open?"}]
+            if app.GREETING:
+                want.insert(0, {"role": "assistant", "content": app.GREETING})
+            check(seen == [want], f"respond() saw {seen}")
+            session = e.calls[0].brain.session
+            check(session.call["call_sid"] == CALL and session.call["session_id"] == SESSION, "call ids")
+            check(session.call["from"] == "+15005550006" and session.call["custom_parameters"] == {}, "setup fields")
+            check(session.instructions == app.INSTRUCTIONS and session.model.model == app.MODEL, "package settings")
+
+
+@logic_case
+async def logic_interrupt_keeps_what_was_heard(app: Any) -> None:
+    gate = asyncio.Event()
+    cancelled: list[bool] = []
+    seen: list[Any] = []
+
+    async def respond(session: Any) -> Any:
+        seen.append(session.history)
+        if len(seen) > 1:
+            yield "Sure."
+            return
+        try:
+            yield "One two. "
+            yield "Three four. "
+            await gate.wait()
+            yield "Never sent."
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+
+    with using_logic(app, respond):
+        async with env(app) as e:
+            relay = await e.relay()
+            await relay.prompt("Count for me.")
+            first = await relay.next()
+            check(first and first["token"] == "One two. ", f"first piece: {first}")
+            await relay.interrupt("One two.")
+            await until(lambda: cancelled)
+            await relay.quiet(0.3)
+            await relay.prompt("Stop.")
+            await relay.reply()
+            heard = [h for h in seen[1] if h["role"] == "assistant" and h["content"] != app.GREETING]
+            check(heard == [{"role": "assistant", "content": "One two."}], f"history after the interrupt: {seen[1]}")
+
+
+@logic_case
+async def logic_error_takes_the_failure_path(app: Any) -> None:
+    async def respond(session: Any) -> Any:
+        raise RuntimeError("the agent broke")
+        yield ""  # an async generator, as respond() must be
+
+    with using_logic(app, respond):
+        async with env(app) as e:
+            relay = await e.relay()
+            await relay.prompt("Hello?")
+            check(text_of(await relay.reply()) == app.FAILURE_LINE, "no failure line after respond() raised")
+
+
+@logic_case
+async def logic_end_ends_the_call(app: Any) -> None:
+    async def respond(session: Any) -> Any:
+        session.end("caller_done")
+        yield "Goodbye."
+
+    with using_logic(app, respond):
+        async with env(app) as e:
+            relay = await e.relay()
+            await relay.prompt("That's all.")
+            check(text_of(await relay.reply()) == "Goodbye.", "the goodbye was not spoken")
+            end = await relay.next()
+            check(end and end["type"] == "end", f"session.end() sent no end: {end}")
+            await relay.ws.close()
+
+
+@logic_case
+async def logic_next_twiml_hands_the_caller_back(app: Any) -> None:
+    seen: list[Any] = []
+
+    async def respond(session: Any) -> Any:
+        session.state["turns"] = session.state.get("turns", 0) + 1
+        seen.append((session.history[-1]["content"], session.state["turns"], session))
+        if session.state["turns"] == 1:
+            session.end("hold", seconds=5)
+            yield "One moment."
+        else:
+            yield "Thanks for waiting."
+
+    async def next_twiml(handoff: Any) -> str:
+        check(handoff.reason == "hold" and handoff.data == {"seconds": 5}, f"handoff: {handoff}")
+        return handoff.resume("the hold music ended", greeting="Thanks for waiting.")
+
+    with using_logic(app, respond, next_twiml):
+        async with env(app) as e:
+            relay = await e.relay()
+            await relay.prompt("Hold on.")
+            await relay.reply()
+            end = await relay.next()
+            check(end and '"seconds": 5' in end["handoffData"], f"session.end data: {end}")
+            await relay.ws.close()
+            body = await e.next_step(end["handoffData"])
+            check('name="resume"' in body, f"next_twiml was not answered: {body}")
+            again = await e.resumed("the hold music ended", greeting="Thanks for waiting.")
+            await again.prompt("Still there?")
+            check(text_of(await again.reply()) == "Thanks for waiting.", "the resumed logic did not answer")
+            check(seen[1][1] == 2 and seen[1][0] == "Still there?", f"state or turn lost: {seen}")
+            session = seen[1][2]
+            check(session.call["custom_parameters"].get("resume") == "the hold music ended", "the note is not on session.call")
+            check({"role": "assistant", "content": "Thanks for waiting."} in session.history, "the greeting is not in history")
+            # One session object for the whole call, pointed at the new socket.
+            check(seen[1][2] is seen[0][2] and seen[1][2]._call is e.calls[-1], "the session was not kept and rebound")
+            await again.ws.close()
+
+
+@logic_case
+async def logic_next_twiml_failures_hang_up(app: Any) -> None:
+    async def respond(session: Any) -> Any:
+        yield "Hi."
+
+    def broken(handoff: Any) -> str:
+        raise RuntimeError("the step broke")
+
+    for hook, label in [(broken, "an exception"), (lambda h: "<Response><Say>", "bad XML"), (lambda h: 42, "not a str")]:
+        with using_logic(app, respond, hook):
+            async with env(app) as e:
+                body = await e.next_step('{"reasonCode": "end_call"}')
+                check("<Hangup/>" in body, f"{label} did not hang up: {body}")
+    with using_logic(app, respond, lambda h: "<Response><Say>Bye</Say></Response>"):
+        async with env(app) as e:
+            check("<Say>Bye</Say>" in await e.next_step('{"reasonCode": "end_call"}'), "next_twiml TwiML was replaced")
+
+
 # --- real cases ----------------------------------------------------------------
 
 
-def load_key(app: Any, env_file: Path) -> None:
-    name = app.ENV_MODEL_KEY
+async def real_logic(app: Any) -> None:
+    """The package's own logic against the real model: a tool answer, an
+    interrupt, the next turn, a hold that leaves and resumes the session when
+    the logic has next_twiml, and a goodbye that ends the call."""
+    async with Env(app, None, {"DRAIN_TIMEOUT": 0.2}) as e:
+        relay = await e.relay()
+        await relay.prompt("What time do you open on Monday?")
+        monday = text_of(await relay.reply(timeout=40))
+        check("nine" in monday.lower() or "9" in monday, f"no Monday hours: {monday!r}")
+        print(f"  tool answer: {monday!r}")
+
+        await relay.prompt("Tell me a long story about the building's history.")
+        first = await relay.next(timeout=40)
+        check(first and first["type"] == "text", "no token to interrupt")
+        await relay.interrupt(first["token"])
+        await relay.quiet(1.0)
+        await relay.prompt("Sorry, what about Friday?")
+        friday = text_of(await relay.reply(timeout=40))
+        check(friday.strip(), "no answer after the interrupt")
+        print(f"  next turn after interrupt: {friday!r}")
+        story = [h for h in e.calls[0].brain.history if h["role"] == "assistant"][-2]["content"]
+        check(len(story) < 400, f"the interrupted story was kept whole: {story!r}")
+
+        if hasattr(app.logic, "next_twiml"):
+            # The package's own step after the session: a hold, then back.
+            await relay.prompt("Can you hold on a second?")
+            await relay.reply(timeout=40)
+            end = await relay.next(timeout=10)
+            check(end and end["type"] == "end", f"the hold did not end the session: {end}")
+            await relay.ws.close()
+            body = await e.next_step(end["handoffData"])
+            check("<Say>" in body and 'name="resume"' in body, f"next_twiml did not hold and resume: {body}")
+            greeting = body.split('name="greeting" value="')[1].split('"')[0]
+            relay = await e.resumed("a short hold", greeting=greeting)
+            await relay.prompt("What was the very first thing I asked you on this call?")
+            back = text_of(await relay.reply(timeout=40))
+            check("monday" in back.lower(), f"the agent forgot the call after the hold: {back!r}")
+            print(f"  back after the hold: {back!r}")
+
+        await relay.prompt("That's all, thank you. Goodbye.")
+        await relay.reply(timeout=40)
+        end = await relay.next(timeout=10)
+        check(end and end["type"] == "end", f"the goodbye did not end the call: {end}")
+        check("caller_done" in end["handoffData"], f"the goodbye ended the wrong way: {end}")
+        print("  goodbye ended the call through session.end()")
+
+
+def load_key(app: Any, env_file: Path, name: str) -> None:
     if os.environ.get(name):
         return
     for line in env_file.read_text().splitlines():
@@ -813,25 +1151,32 @@ def main() -> None:
     import app  # noqa: E402 - the build directory is only importable now
 
     os.environ.setdefault(app.ENV_MODEL_KEY, "fake-model-key")
+    for name in app.UPSTREAM_ENV:
+        os.environ.setdefault(name, "fake-upstream-key")
     if args.real:
-        os.environ.pop(app.ENV_MODEL_KEY, None)
-        load_key(app, args.env_file)
+        for name in (app.ENV_MODEL_KEY, *app.UPSTREAM_ENV):
+            os.environ.pop(name, None)
+            load_key(app, args.env_file, name)
         print(f"real: {app.MODEL}")
-        asyncio.run(real(app))
+        asyncio.run(real_logic(app) if hasattr(app, "LogicBrain") else real(app))
         print("real: pass")
         return
 
-    failed = 0
+    ran = failed = 0
+    logic_build = hasattr(app, "LogicBrain")
     for function in CASES:
         if args.case and function.__name__ not in args.case:
             continue
+        if function.kind == ("logic" if not logic_build else "model"):
+            continue
+        ran += 1
         try:
             asyncio.run(asyncio.wait_for(function(app), 15))
             print(f"pass  {function.__name__}")
         except Exception as error:  # noqa: BLE001 - every failure is reported, then counted
             failed += 1
             print(f"FAIL  {function.__name__}: {type(error).__name__}: {error}")
-    print(f"{len(CASES) - failed if not args.case else '-'} passed, {failed} failed")
+    print(f"{ran - failed} passed, {failed} failed")
     sys.exit(1 if failed else 0)
 
 

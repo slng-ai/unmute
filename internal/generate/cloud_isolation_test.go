@@ -83,7 +83,7 @@ func telephonyRouteArtifact(t *testing.T, key target.TelephonyKey) (Artifact, er
 		instance = "livekit"
 	}
 	if key.Provider == target.Twilio {
-		fixture, instance = "twilio_relay", "twilio"
+		fixture, instance = "twilio", "twilio"
 		if pkg, err = spec.Load(filepath.Join("..", "testdata", fixture)); err != nil {
 			t.Fatal(err)
 		}

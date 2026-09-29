@@ -13,7 +13,7 @@ import (
 // test that breaks one thing knows the error came from the thing it broke.
 func twilioAgent(t *testing.T) *Agent {
 	t.Helper()
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "twilio_relay"))
+	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "twilio"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +126,8 @@ func TestTwilioRefusesWhatItDoesNotRun(t *testing.T) {
 			r.Models.Turn = &Binding{Provider: "local", Model: "silero"}
 		}, "carries settings only"},
 		{"unknown turn setting", func(_ *Agent, r *Target) {
-			r.Models.Turn = &Binding{Params: map[string]any{"eotThreshold": 0.7}}
-		}, `no turn setting "eotThreshold"`},
+			r.Models.Turn = &Binding{Params: map[string]any{"endpointing": 300}}
+		}, `no turn setting "endpointing"`},
 		{"speech timeout out of range", func(_ *Agent, r *Target) {
 			r.Models.Turn = &Binding{Params: map[string]any{"speechTimeout": 200}}
 		}, "from 600 to 5000"},
@@ -138,7 +138,7 @@ func TestTwilioRefusesWhatItDoesNotRun(t *testing.T) {
 		}, "not a bare ElevenLabs voice id"},
 		{"listen params", func(_ *Agent, r *Target) {
 			r.Models.Listen.Params = map[string]any{"smart_format": true}
-		}, "forwards no listen params"},
+		}, "has no listen setting \"smart_format\""},
 		{"unsupported listen vendor", func(_ *Agent, r *Target) {
 			r.Models.Listen.Provider = "slng"
 		}, "slng"},
@@ -236,7 +236,7 @@ func TestTwilioRegionReachesThePlan(t *testing.T) {
 		{"eu", "", `region "eu" is not a Twilio Region; use one of us1, ie1, au1`},
 	} {
 		t.Run(tc.region, func(t *testing.T) {
-			pkg, err := packagespec.Load(filepath.Join("..", "testdata", "twilio_relay"))
+			pkg, err := packagespec.Load(filepath.Join("..", "testdata", "twilio"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -275,5 +275,45 @@ func TestTwilioPlanKeepsTheNumberSIDDeployOnly(t *testing.T) {
 	}
 	if plan.Coordination != "in_process" || len(plan.Services) != 1 || plan.Services[0] != "application" {
 		t.Errorf("topology = %s %v, want one in-process application", plan.Coordination, plan.Services)
+	}
+}
+
+// A logic folder is held to what the app imports and installs, and only the
+// twilio target reads it.
+func TestTwilioLogicShape(t *testing.T) {
+	good := map[string]string{"__init__.py": "async def respond(session):\n    yield 'hi'\n"}
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{"accepted", good, ""},
+		{"missing folder", map[string]string{}, "is missing or empty"},
+		{"no package file", map[string]string{"agent.py": "async def respond(session): ..."}, "has no __init__.py"},
+		{"no respond", map[string]string{"__init__.py": "def reply(session): ...\n"}, "defines no async def respond(session)"},
+		{"installer option", map[string]string{"__init__.py": good["__init__.py"], "requirements.txt": "# pins\n-e ./local\n"}, "is an installer option"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := twilioAgent(t)
+			resolved := targetFor(agent, ProviderTwilio)
+			resolved.Logic = &Logic{Path: "logic/", Files: tc.files}
+			row := validateTwilio(t, agent, resolved)
+			got := strings.Join(row.Errors, "\n")
+			if tc.want == "" && got != "" || tc.want != "" && !strings.Contains(got, tc.want) {
+				t.Errorf("errors = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	// Every other target generates its own turn, so the field has no reader.
+	agent := twilioAgent(t)
+	other := targetFor(agent, ProviderTwilio)
+	other.Provider, other.Logic = ProviderLiveKit, &Logic{Path: "logic/", Files: good}
+	report, _ := Validate(agent, []Target{other}, targetcap.Default())
+	if got := strings.Join(reportFor(report, ProviderLiveKit).Errors, "\n"); !strings.Contains(got, "logic: is read by the twilio target only") {
+		t.Errorf("livekit with logic: errors = %q", got)
+	}
+	logic := &Logic{Files: map[string]string{"requirements.txt": "# a comment\npydantic-ai-slim[openai]==2.51.0  # pinned\n\nhttpx\n"}}
+	if got := strings.Join(logic.Requirements(), ","); got != "pydantic-ai-slim[openai]==2.51.0,httpx" {
+		t.Errorf("Requirements() = %q", got)
 	}
 }

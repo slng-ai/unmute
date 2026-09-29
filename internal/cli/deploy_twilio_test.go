@@ -92,7 +92,7 @@ func newFakeTwilio(t *testing.T) *fakeTwilio {
 
 func twilioFixtureArtifact(t *testing.T) generate.Artifact {
 	t.Helper()
-	pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio_relay"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func (f *fakeTwilio) serve(w http.ResponseWriter, r *http.Request) {
 func regionalPackage(t *testing.T, f *fakeTwilio, region string) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "twilio_relay"))); err != nil {
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "twilio"))); err != nil {
 		t.Fatal(err)
 	}
 	conn := filepath.Join(dir, "connections", "phone.yaml")
@@ -289,7 +289,7 @@ func TestTwilioDeployRefusesARoutingMismatch(t *testing.T) {
 			if tc.region == "us1" {
 				twilioAPIBase = f.srv.URL
 				dir = t.TempDir()
-				if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "twilio_relay"))); err != nil {
+				if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "twilio"))); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -339,7 +339,7 @@ type twilioRun struct {
 func deployTwilio(t *testing.T, f *fakeTwilio, env map[string]string, args ...string) twilioRun {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "twilio_relay"))); err != nil {
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "twilio"))); err != nil {
 		t.Fatal(err)
 	}
 	return deployTwilioIn(t, f, dir, env, args...)

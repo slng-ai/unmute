@@ -1,0 +1,2 @@
+# The logic folder's own requirements, added to the app's pinned ones.
+pydantic-ai-slim[openai]==2.51.0

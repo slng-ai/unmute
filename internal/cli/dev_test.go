@@ -378,7 +378,7 @@ func TestDevWithNoArgumentOutsideAPackageExplainsItself(t *testing.T) {
 // A twilio target has no browser loop, and `dev` says so before it writes or
 // starts anything, naming the runbook to follow instead.
 func TestDevRefusesATwilioTargetTruthfully(t *testing.T) {
-	_, err := run(t, "dev", filepath.Join("..", "testdata", "twilio_relay"), "--target", "twilio", "--no-open")
+	_, err := run(t, "dev", filepath.Join("..", "testdata", "twilio"), "--target", "twilio", "--no-open")
 	if err == nil {
 		t.Fatal("dev accepted a twilio target")
 	}

@@ -68,6 +68,12 @@ targets:
   to zero.
 </ParamField>
 
+<ParamField path="targets.<name>.logic" type="folder path">
+  A folder of your own Python whose `respond(session)` runs each agent turn.
+  Twilio only; every other target refuses it. See
+  [Bring your own agent logic](/targets/twilio#bring-your-own-agent-logic).
+</ParamField>
+
 <ParamField path="targets.<name>.models" type="map">
   Per-target model overrides. Accepts existing model entry names to model definitions. If
   omitted, use the package’s model entries without overrides.
