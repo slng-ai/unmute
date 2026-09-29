@@ -693,7 +693,10 @@ What a twilio package may carry, and nothing else:
   `inbound: true`, `outbound: false`;
 - think: `provider: openai` (Chat Completions), `provider: slng` (the SLNG
   Context Router over Chat Completions, any upstream except `vertex`; declare
-  `SLNG_API_KEY` and the upstream's key), or `provider: google`
+  `SLNG_API_KEY` and the upstream's key. SLNG hosts the router, so nothing is
+  deployed for it, and the upstream key is sent to SLNG inline on every
+  request. It is a model endpoint only: the user still hosts `app.py`, which
+  is the agent. An agent with nothing to host is the `slng` target), or `provider: google`
   (`gemini` also accepted; native `generateContent`). Params are forwarded to
   the request as written. `vertexai: true` with a `location` uses Vertex AI
   with the same `GOOGLE_API_KEY`; without them it is the Gemini Developer API.

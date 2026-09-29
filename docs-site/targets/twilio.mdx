@@ -56,16 +56,22 @@ flowchart LR
     App -->|reply as text| TTS
     TTS -->|speech| Caller
     subgraph Y [you run this]
-        App[your app] --> Model[model and tools]
+        App[your app: the agent and your tools]
     end
+    subgraph P [your model provider runs this]
+        Model[SLNG Context Router, OpenAI or Gemini]
+    end
+    App -->|https| Model
 ```
 
 1. Twilio answers the call and turns the caller's speech into text.
 2. Twilio decides when the caller has finished a turn, and stops the agent
    when the caller talks over it.
-3. Your app gets the text over one WebSocket. It runs the model and your tools,
-   and sends the reply back as text.
-4. Twilio speaks the reply.
+3. Your app gets the text over one WebSocket. It keeps the conversation, calls
+   the model, runs your tools, and sends the reply back as text.
+4. The model is a hosted API. The app calls it over HTTPS, and nothing of it
+   runs on your host.
+5. Twilio speaks the reply.
 
 The names follow these layers. The target is `twilio`: the app you deploy. On
 every call the app answers Twilio with
@@ -79,7 +85,11 @@ So the app you host is one small process that handles text only. It runs no
 audio pipeline, no media server and no Redis, so any container host can run
 it. With the `pipecat` and `livekit` targets you host that audio pipeline too.
 Twilio has no product that runs the model and the tools for you:
-ConversationRelay's `url` is always "the URL of your WebSocket server".
+ConversationRelay's `url` is always "the URL of your WebSocket server". The
+SLNG Context Router does not remove the app either. It answers model requests
+only, and does not speak ConversationRelay's protocol. To run nothing
+yourself, use the [SLNG target](/targets/slng), where SLNG hosts the whole
+agent.
 
 On this page:
 
@@ -269,11 +279,16 @@ its cache, and calls your model for the rest:
 ```
 
 and declare `SLNG_API_KEY` beside the upstream's own key, here
-`OPENAI_API_KEY`. The app calls the router's regional endpoint with Chat
-Completions. It sends the router's configuration and your params in the request
+`OPENAI_API_KEY`. SLNG hosts the router, so there is nothing to deploy for it
+and nothing to set up on SLNG first. The app calls the router's regional
+endpoint with Chat Completions. It sends the router's configuration and your params in the request
 body, and the cache scope and the call's session in two headers, on every
-request. Each think request writes one `slng router:` log line that says
-whether the cache or the model answered. The upstream `vertex` is refused on
+request. Your upstream key travels in that body, because the
+router calls OpenAI for you: it is sent to SLNG on every request. Each think
+request writes one `slng router:` log line that says whether the cache or the
+model answered. The cache key does not include the system prompt, so bump
+`agent_id` (`relay-desk-v2`) after a prompt change that should make old
+answers wrong. The upstream `vertex` is refused on
 this target for now, because the app has no helper yet for its GCP key.
 
 `unmute init <name> --target twilio` starts on this router binding, in
