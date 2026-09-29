@@ -33,6 +33,7 @@ Usage:
 Flags:
       --from-manifest   Choose a saved organization manifest.
   -h, --help            help for init
+      --target string   Scaffold for this target (livekit, pipecat or twilio) without the wizard. SLNG needs the wizard.
 
 $ unmute manifest --help
 Save organization contracts on this computer.

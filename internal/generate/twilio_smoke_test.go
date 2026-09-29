@@ -8,18 +8,25 @@ import (
 	"testing"
 )
 
-// TestTwilioSmoke proves both emitted apps are real Python: each installs from
+// TestTwilioSmoke proves the emitted apps are real Python: each installs from
 // its own pins, passes ruff, and passes every offline ConversationRelay case in
 // scripts/text_run_twilio.py against a scripted model built from the real SDK
-// types. No network beyond the package index, no key, no Twilio account.
+// types. No network beyond the package index, no key, no Twilio account. It
+// runs the acceptance package's two targets and the public example on both
+// think providers.
 func TestTwilioSmoke(t *testing.T) {
 	harness, err := filepath.Abs(filepath.Join("..", "..", "scripts", "text_run_twilio.py"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, instance := range []string{"twilio-openai", "twilio-gemini"} {
-		t.Run(instance, func(t *testing.T) {
-			artifact := twilioArtifact(t, relayDesk, instance)
+	for _, build := range []struct{ name, dir, instance string }{
+		{"relay-desk/twilio-openai", relayDesk, "twilio-openai"},
+		{"relay-desk/twilio-gemini", relayDesk, "twilio-gemini"},
+		{"example/openai", twilioExample, "twilio"},
+		{"example/gemini", twilioGeminiVariant(t), "twilio"},
+	} {
+		t.Run(build.name, func(t *testing.T) {
+			artifact := twilioArtifact(t, build.dir, build.instance)
 			dir := t.TempDir()
 			for _, file := range artifact.Files {
 				path := filepath.Join(dir, file.Path)

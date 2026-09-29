@@ -1,6 +1,6 @@
 # Working examples
 
-Four packages ship with the Unmute repository. **They live in that repository,
+Example packages ship with the Unmute repository. **They live in that repository,
 not in the user's project.** Check before you reach for one:
 
 ```sh
@@ -21,10 +21,12 @@ table below to know what shape you are aiming at.
 | one full release-readiness project | `examples/salon-concierge` | a verification task that runs on its own for an explicit phone correction and is reused by name as a task-group step, a booking task the group guarantees runs after it, two agents that hand the caller over, in-process tool state, Langfuse tracing, a cold manager transfer, browser audio, and an inbound phone route on each of its two targets; every tool is local Python, a knowledge lookup, or the `end_call` builtin, so it starts with no external tool server |
 | to show what the optimizations are worth | `examples/salon-concierge-single-prompt` | the same salon with none of them: one prompt, every tool on every turn, no variables and no pre-fetch. Model, transport and turn taking are held identical to `salon-concierge`, so the only difference left is the structure. **A baseline to read against, never a shape to copy.** If a user asks what tasks or pre-fetch actually buy, diff it against `examples/salon-concierge` |
 | an agent SLNG hosts | `examples/hotel-concierge` | everything the slng target accepts, in one hotel concierge line: two `slng:` tools by name (a code tool and a request tool), two named tools from one `mcp:` server, one `builtin:`, five template variables with defaults reaching the greeting and the prompt, an `inject:` that pins the hotel's identifier so the model never asks for it, a tool `announce:` and a think `fallback:`. No mirror: the slng target creates no tool. Emits no runnable project, so there is no `unmute dev`: `unmute deploy` pushes it and a web session or an attached phone number talks to it. A `local:` or `webhook:` block is refused there, so send those to pipecat or livekit |
+| an agent on a Twilio number, through ConversationRelay, on an app the user hosts | `examples/twilio-conversation-relay` | everything the twilio target accepts: one agent, one inbound phone channel, one read-only local tool with flat schemas, the `end_call` builtin, Deepgram and ElevenLabs inside ConversationRelay, and an OpenAI think binding. Its README shows the one Gemini block to paste in place of it. Emits a standalone app with no `unmute dev`: the user hosts it at a public https origin, and `unmute deploy <package> --target twilio` points one existing number at it. Recompile, rehost, then deploy after any change, because deploy checks the hosted build's `artifact_id` |
 
 The smallest thing that runs is not an example any more. `unmute init <name>`
 scaffolds it: one agent, browser audio, one builtin, no Twilio and no third-party
-account. Start a user there rather than at `salon-concierge`, which is a phone
+account. `unmute init <name> --target twilio` scaffolds the twilio target's
+starter instead. Start a user there rather than at `salon-concierge`, which is a phone
 package with two agents and tracing.
 
 ## How to use one, when you have them

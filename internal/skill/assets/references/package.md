@@ -680,6 +680,10 @@ the Twilio Region that handles the calls. Outside `us1`, `auth_token` must name
 that region's own Auth Token, and the number's routing region must match. No
 call has been placed in `ie1` or `au1` yet.
 
+`unmute init <name> --target twilio` writes this starter with no questions:
+the OpenAI binding below, Deepgram and ElevenLabs, one inbound phone channel,
+`end_call`, and the connection with the four `TWILIO_*` names.
+
 What a twilio package may carry, and nothing else:
 
 - one cascade agent, and exactly one channel: `kind: telephony`,
@@ -687,7 +691,10 @@ What a twilio package may carry, and nothing else:
 - think: `provider: openai` (Chat Completions) or `provider: google`
   (`gemini` also accepted; native `generateContent`). Params are forwarded to
   the request as written. `vertexai: true` with a `location` uses Vertex AI
-  with the same `GOOGLE_API_KEY`; without them it is the Gemini Developer API;
+  with the same `GOOGLE_API_KEY`; without them it is the Gemini Developer API.
+  To switch provider, replace model and params together: the other vendor's
+  params are refused, and its model id would fail on a call. The console does
+  this for you when the provider changes;
 - listen: `provider: deepgram` with a model such as `nova-3-general` and an
   optional `language`;
 - speak: `provider: elevenlabs` with `model` (for example `flash_v2_5`), a
@@ -729,7 +736,9 @@ returns this build's TwiML. It reads and writes the number in the connection's
 `region`, and refuses a number whose routing region differs; it never changes
 routing. It then saves the old route under the user config
 directory and sets only `VoiceUrl` and `VoiceMethod`. A missing or different
-`artifact_id` means recompile and rehost. It takes one twilio target per run,
+`artifact_id` means recompile and rehost, and every package change, including a
+switch of think provider, changes it. One build runs at one origin: two builds
+need two origins and two numbers. It takes one twilio target per run,
 and refuses `--profile`, `--agent-id`, `--label`, `--run-samples` and `--call`.
 A dry run writes nothing, not even the report. The outcome is `routed` only when
 the readback shows `/voice` with `POST` and the number still passes the checks,

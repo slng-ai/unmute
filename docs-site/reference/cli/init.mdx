@@ -10,6 +10,7 @@ organization saved on this computer.
 On this page:
 
 - [With a name](#with-a-name) - the starter package
+- [For another target](#for-another-target) - `--target`, with no questions
 - [With no name](#with-no-name) - the interactive console
 - [From a saved manifest](#from-a-saved-manifest) - the picker and guided setup
 - [It never writes into an occupied directory](#it-never-writes-into-an-occupied-directory)
@@ -39,6 +40,23 @@ The name is also the directory. Each created file is printed. `cd` into it and
 
 This is the whole command. It reads nothing saved on your computer and asks no
 questions, so the same six files appear every time.
+
+## For another target
+
+```sh
+unmute init my-relay --target twilio
+```
+
+`--target` takes `livekit`, `pipecat` or `twilio`. It writes the starter the
+console writes after you pick that target, and still asks nothing. An SLNG
+package needs a deployment region, and only the console asks for one, so
+`--target slng` is refused: run `unmute init` in a terminal and pick SLNG there.
+For `twilio` that is one inbound phone channel, Deepgram and ElevenLabs inside
+ConversationRelay, an OpenAI model, and `connections/phone.yaml` with the four
+`TWILIO_*` names. See [the Twilio target](/targets/twilio).
+
+`--target` needs a name, and it cannot be combined with `--from-manifest`,
+because a manifest picks the target itself.
 
 ## With no name
 
@@ -109,8 +127,8 @@ real one, and it is meant to be replaced.
 
 The target is **LiveKit Agents**, so `targets.yaml` holds one instance named
 `livekit`, `agent.yaml` carries a matching LiveKit turn detector, and
-`unmute compile` writes `build/livekit/`. Pipecat is equally supported; pick it
-in the interactive console, or edit the package by hand as
+`unmute compile` writes `build/livekit/`. Pipecat is equally supported. Pick it
+with `--target pipecat` or in the interactive console, or edit the package by hand as
 [Targets](/targets/overview) describes.
 
 ```yaml targets.yaml
@@ -151,6 +169,7 @@ Usage:
 Flags:
       --from-manifest   Choose a saved organization manifest.
   -h, --help            help for init
+      --target string   Scaffold for this target (livekit, pipecat or twilio) without the wizard. SLNG needs the wizard.
 ```
 
 ## Troubleshooting
@@ -162,6 +181,7 @@ Flags:
 | `configured default: read manifest ...` | The saved default names a manifest that is missing or invalid | Repair it with `unmute manifest edit <name> --editor`, or select another in the picker |
 | `manifest initialization needs an interactive terminal` | `--from-manifest` in a script or CI | Create the package in a terminal, or use plain `unmute init <name>` |
 | `agent name required` | No name outside a terminal | Pass the name |
+| `--target "..." is not a target` | A value outside the four targets | Use `livekit`, `pipecat`, `slng` or `twilio` |
 | The destination is not empty | The package already exists | Complete those files, or choose a fresh directory |
 
 ## Where to go next

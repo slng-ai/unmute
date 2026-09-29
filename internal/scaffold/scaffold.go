@@ -92,6 +92,9 @@ Everything you say is read out loud.
 	// streamed replies and tool follow-ups through Chat Completions on
 	// 2026-09-25, with reasoning_effort none.
 	TwilioReasonModel = "gpt-5.6-luna"
+	// TwilioGeminiModel is the Gemini model the twilio target was measured on,
+	// on the same day, with thinking_level MINIMAL.
+	TwilioGeminiModel = "gemini-3.1-flash-lite"
 	// RouterExampleModel is the second, and last, model identifier this
 	// repository teaches. It exists because the router example has to name a
 	// different model from the scaffold default to be worth reading: a matched
@@ -533,7 +536,7 @@ func (d *Data) SetTarget(provider string) {
 		d.Carrier = "twilio"
 		d.Channels = []Channel{{Name: "phone", Kind: "telephony", Inbound: true}}
 		d.Listen = Binding{Provider: "deepgram", Model: "nova-3-general", Language: "en-US"}
-		d.Reason = Binding{Provider: "openai", Model: TwilioReasonModel, Params: "reasoning_effort: \"none\"\nparallel_tool_calls: false"}
+		d.Reason = TwilioReasonStarter("openai")
 		d.Speak = Binding{Provider: "elevenlabs", Model: "flash_v2_5", Voice: "UgBBYS2sOqTuMpoF3BR0", Language: "en-US"}
 		return
 	}
@@ -568,6 +571,19 @@ func (d *Data) SetTarget(provider string) {
 	// is a transcription one and does not carry over to synthesis, so this half
 	// is consistency with the examples rather than a measured win.
 	d.Speak = Binding{Provider: "slng", Model: "deepgram/aura:2", Voice: "aura-2-thalia-en"}
+}
+
+// TwilioReasonStarter is the think binding a twilio package starts with for
+// one vendor, with the params that vendor's request was measured with. The
+// console loads it when the author switches the think provider, because the
+// other vendor's model and params would reach a request that cannot take them.
+// Google starts on the Gemini Developer API: vertexai and location are the
+// author's choice, and they need a Vertex key.
+func TwilioReasonStarter(vendor string) Binding {
+	if vendor == "google" || vendor == "gemini" {
+		return Binding{Provider: vendor, Model: TwilioGeminiModel, Params: "thinking_config:\n  thinking_level: MINIMAL"}
+	}
+	return Binding{Provider: "openai", Model: TwilioReasonModel, Params: "reasoning_effort: \"none\"\nparallel_tool_calls: false"}
 }
 
 // AgentNameFrom turns a folder name into a legal package name, or returns ""
@@ -611,7 +627,9 @@ func (d Data) withDefaults() Data {
 	if d.Channel == "" {
 		d.Channel = DefaultChannel
 	}
-	if d.Greeting == "" && !d.ModelGreeting {
+	// A caller who speaks first gets no greeting text: validation refuses text
+	// that nobody would say, so defaulting it wrote a package that failed.
+	if d.Greeting == "" && !d.ModelGreeting && d.SpeaksFirst != "user" {
 		d.Greeting = DefaultGreeting
 	}
 	if d.Instructions == "" {

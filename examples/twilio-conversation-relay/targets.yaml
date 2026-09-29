@@ -1,0 +1,7 @@
+targets:
+  # A ConversationRelay app you host. Twilio listens and speaks; the app
+  # thinks. Which model it thinks with is the agent's models.think binding.
+  twilio:
+    provider: twilio
+    sdk_language: python
+    connection: twilio_relay
