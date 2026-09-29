@@ -101,6 +101,15 @@ func TestTwilioRegionReachesTheRunbook(t *testing.T) {
 			if regional && (!strings.Contains(readme, note) || !strings.Contains(readme, "`TWILIO_AUTH_TOKEN` must be that\n   region's Auth Token")) {
 				t.Errorf("region %q: runbook does not name the region and its token:\n%s", region, readme)
 			}
+			// The app's REST client calls the same region the number lives in.
+			app := artifactFile(t, artifact, "app.py")
+			want := `TWILIO_REGION: str | None = None`
+			if regional {
+				want = `TWILIO_EDGE: str | None = "` + target.TwilioRegionEdges[region] + `"`
+			}
+			if !strings.Contains(app, want) {
+				t.Errorf("region %q: app.py lacks %s", region, want)
+			}
 		})
 	}
 }
@@ -355,7 +364,7 @@ func TestTwilioLogicTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := artifactFile(t, artifact, "app.py")
-	for _, want := range []string{"import logic", "self.brain = LogicBrain(client)", "async for piece in logic.respond(self.session):"} {
+	for _, want := range []string{"import logic", "self.brain = brain if resumed else LogicBrain(client)", "async for piece in logic.respond(self.session):"} {
 		if !strings.Contains(app, want) {
 			t.Errorf("app.py lacks %s", want)
 		}

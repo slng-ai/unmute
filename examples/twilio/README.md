@@ -314,6 +314,10 @@ agent, name a folder on the target with `logic: logic/`. Its `__init__.py`
 defines `async def respond(session)`, and compile copies it into the build
 without changing it. The contract and a worked Pydantic AI example are in
 [Bring your own agent logic](../../docs-site/targets/twilio.mdx#bring-your-own-agent-logic).
+The same folder can define `next_twiml(handoff)`, which answers Twilio with any
+TwiML once the agent's session ends, for example `<Dial>` to a person, and can
+hand the caller back to the agent. See
+[Other Twilio services after the session](../../docs-site/targets/twilio.mdx#other-twilio-services-after-the-session).
 
 ## Use another Twilio region
 

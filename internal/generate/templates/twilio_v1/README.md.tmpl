@@ -30,8 +30,9 @@ sequenceDiagram
    for, and streams the reply back as text.
 5. To end the session, the app sends `end` and waits up to five seconds for
    Twilio to close the WebSocket. Closing it first can fail the session with
-   [error 64105]({{.Docs.WebSocketEnded}}). Twilio then asks `/connect-action`,
-   and the app hangs up.
+   [error 64105]({{.Docs.WebSocketEnded}}). Twilio then asks `/connect-action`
+   what comes next, and the app hangs up{{if .Logic}} unless `logic/`'s
+   `next_twiml()` answers with other TwiML{{end}}.
 
 ## What is in this folder
 
@@ -115,6 +116,13 @@ This build runs each agent turn in `logic/`, copied from the package's
 per caller turn and speaks what it yields. The app still owns the call:
 signatures, interruptions, call slots, the drain and the failure line. Change
 the logic in the package, not here: compile writes this folder again.
+
+When `respond()` calls `session.end(reason, **data)`, the session ends and
+Twilio asks `/connect-action` what comes next. If `logic/__init__.py` defines
+`next_twiml(handoff)`, the app answers with the TwiML it returns: a `<Dial>`, a
+`<Pay>`, any verb. `handoff.resume(note)` hands the caller back to the agent
+with the conversation kept, for 10 minutes and in this process only.
+`session.twilio` is a Twilio REST client on this account and region.
 
 {{end -}}
 ## Point the number with unmute deploy

@@ -48,13 +48,13 @@ var (
 	twilioAPIBase = "https://api.twilio.com"
 	// twilioRegionHosts are the REST hosts outside US1. Each region keeps its
 	// own copy of a number's voice settings and takes only its own Auth Token.
-	// The host names an edge as well as the region: the older api.ie1 form
-	// stopped working on 2026-04-28.
-	// https://www.twilio.com/docs/global-infrastructure/api-domain-migration-guide
-	twilioRegionHosts = map[string]string{
-		"ie1": "https://api.dublin.ie1.twilio.com",
-		"au1": "https://api.sydney.au1.twilio.com",
-	}
+	twilioRegionHosts = func() map[string]string {
+		hosts := map[string]string{}
+		for region, edge := range target.TwilioRegionEdges {
+			hosts[region] = "https://api." + edge + "." + region + ".twilio.com"
+		}
+		return hosts
+	}()
 	// No redirect is followed: every request carries a credential or a
 	// signature, and neither should reach a host it was not addressed to.
 	twilioHTTP = &http.Client{

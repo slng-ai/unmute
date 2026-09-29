@@ -42,7 +42,21 @@ def build(session: Any) -> Agent:
         session.end("caller_done")
         return "The call ends after this reply."
 
+    @agent.tool_plain
+    def hold_the_line() -> str:
+        """Put the caller on a short hold when they ask you to hold on or wait."""
+        session.end("hold")
+        return "The caller hears a short hold message, then comes back to you."
+
     return agent
+
+
+def next_twiml(handoff: Any) -> str | None:
+    """What the call does after this session. A hold says one line with
+    Twilio's own voice and hands the caller back; anything else hangs up."""
+    if handoff.reason == "hold":
+        return handoff.resume("a short hold", before='<Say>Please hold.</Say><Pause length="2"/>')
+    return None
 
 
 def to_messages(history: list[dict[str, str]]) -> list[ModelMessage]:

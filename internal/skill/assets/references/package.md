@@ -775,8 +775,15 @@ heard, as `{"role", "content"}` dicts ending with the turn to answer.
 `session.call` has the Twilio ids and numbers, `session.instructions` the
 package's prompt, `session.model` the think binding (`model`, `base_url`,
 `api_key`, `params`, router `extra_body`/`extra_headers`), `session.state` a
-per-call dict, and `session.end(reason)` ends the call after the reply. A turn
-has 30 seconds. Compile copies the folder as written, never formatted, and it
+per-call dict, `session.twilio` a synchronous Twilio REST client on the
+account and region, and `session.end(reason, **data)` ends the session after
+the reply. Twilio then asks the app what comes next: an optional
+`next_twiml(handoff)` in the same `__init__.py` returns TwiML (any verb, such
+as `<Dial>` to a number from the host's env), `None` to hang up, or
+`handoff.resume(note, before="")` to hand the caller back to the agent with
+the history kept. `handoff` has `reason`, `data`, `call`, `status` and
+`twilio`. Never build TwiML from a model-chosen number or unescaped text, and
+never put a secret in `end()` data. A turn has 30 seconds. Compile copies the folder as written, never formatted, and it
 counts in `artifact_id`. Every other target refuses `logic:`. A Pydantic AI
 agent on `session.model` is the worked example on the target page, and it is
 the way to reach any other OpenAI-compatible endpoint.

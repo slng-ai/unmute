@@ -61,6 +61,7 @@ type twilioData struct {
 	Deps         []string
 	Env          twilioEnv
 	Region       string // the Twilio Region that handles the calls
+	RESTEdge     string // the edge the app's REST client uses, empty in US1
 	DeployEnv    []string
 	Docs         targetcap.TwilioDocLinks
 	ManualSteps  []string
@@ -331,6 +332,7 @@ func buildTwilioData(agent *ir.Agent, resolved ir.Target) (twilioData, error) {
 			PublicURL:  plan.Environment["public_url"],
 		}
 		data.Region = plan.Region
+		data.RESTEdge = targetcap.TwilioRegionEdges[plan.Region]
 		data.DeployEnv = plan.DeployEnvironment
 		data.ManualSteps = plan.ManualSteps
 	}

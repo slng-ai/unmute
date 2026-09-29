@@ -169,10 +169,10 @@ class Relay:
     async def send(self, message: dict[str, Any]) -> None:
         await self.ws.send_json(message)
 
-    async def setup(self, account: str = ACCOUNT) -> None:
+    async def setup(self, account: str = ACCOUNT, custom: dict[str, str] | None = None) -> None:
         await self.send(
             {"type": "setup", "sessionId": SESSION, "accountSid": account, "callSid": CALL,
-             "from": "+15005550006", "to": "+15005550001", "direction": "inbound", "customParameters": {}}
+             "from": "+15005550006", "to": "+15005550001", "direction": "inbound", "customParameters": custom or {}}
         )
 
     async def prompt(self, text: str, last: bool = True) -> None:
@@ -309,6 +309,22 @@ class Env:
     def history(self) -> list[Any]:
         return self.calls[-1].brain.history
 
+    async def next_step(self, handoff: str, status: str = "ended") -> str:
+        """Ask /connect-action what comes next, as Twilio does after an end."""
+        form = {"AccountSid": ACCOUNT, "CallSid": CALL, "From": "+15005550006", "To": "+15005550001",
+                "Direction": "inbound", "SessionStatus": status, "HandoffData": handoff}
+        response = await self.post("/connect-action", form)
+        check(response.status == 200, f"/connect-action returned {response.status}")
+        return await response.text()
+
+    async def resumed(self, note: str) -> Relay:
+        """The second session Twilio opens for a resume TwiML."""
+        count = len(self.calls)
+        relay = await self.relay(setup=False)
+        await relay.setup(custom={"resume": note})
+        await until(lambda: len(self.calls) > count)
+        return relay
+
 
 def gemini(app: Any) -> bool:
     return not hasattr(app, "AsyncOpenAI")
@@ -370,12 +386,19 @@ def logic_case(function: Any) -> Any:
 
 
 @contextlib.contextmanager
-def using_logic(app: Any, respond: Any) -> Any:
+def using_logic(app: Any, respond: Any, next_twiml: Any = None) -> Any:
     saved, app.logic.respond = app.logic.respond, respond
+    saved_step = getattr(app.logic, "next_twiml", None)
+    if next_twiml is not None:
+        app.logic.next_twiml = next_twiml
     try:
         yield
     finally:
         app.logic.respond = saved
+        if saved_step is not None:
+            app.logic.next_twiml = saved_step
+        elif hasattr(app.logic, "next_twiml"):
+            del app.logic.next_twiml
 
 
 def fake_for(app: Any, script: list[list[Any]]) -> Any:
@@ -429,6 +452,29 @@ async def voice_signature_rejections(app: Any) -> None:
         action = await e.post("/connect-action", {**form, "SessionStatus": "ended", "HandoffData": '{"x":1}'})
         body = await action.text()
         check(action.status == 200 and "<Hangup/>" in body and "Connect" not in body, "connect-action did not hang up")
+
+
+@protocol_case
+async def connect_action_picks_the_next_step(app: Any) -> None:
+    seen: list[Any] = []
+
+    def transfer(handoff: Any) -> str:
+        seen.append(handoff)
+        return handoff.resume("the transfer was not answered", before="<Say>One moment.</Say>")
+
+    steps = {"transfer": transfer, "say": lambda h: "<Response><Say>Bye</Say></Response>"}
+    async with env(app, NEXT_STEPS=steps) as e:
+        for handoff in ["not json", '["a list"]', '{"reasonCode": "nobody_knows"}', ""]:
+            body = await e.next_step(handoff)
+            check("<Hangup/>" in body and "Connect" not in body, f"{handoff!r} did not hang up: {body}")
+        check("<Say>Bye</Say>" in await e.next_step('{"reasonCode": "say"}'), "a built-in step was not answered")
+        body = await e.next_step('{"reasonCode": "transfer", "to": "desk"}')
+        check(seen and seen[0].reason == "transfer" and seen[0].data == {"to": "desk"}, f"handoff: {seen}")
+        check(seen[0].call["call_sid"] == CALL and seen[0].status == "ended", f"call: {seen[0].call}")
+        check('<Parameter name="resume" value="the transfer was not answered"' in body, f"no resume: {body}")
+        check("welcomeGreeting" not in body and f'url="wss://{HOST}/conversation"' in body, f"resume TwiML: {body}")
+        check(body.index("<Say>One moment.</Say>") < body.index("<Connect"), f"before is not first: {body}")
+        check(f'action="{ORIGIN}/connect-action"' in body, "a resume must come back to /connect-action")
 
 
 @protocol_case
@@ -743,6 +789,49 @@ async def end_waits_for_twilio_to_close(app: Any) -> None:
         check(await relay.next(2.0) is None, "the app never closed a socket Twilio left open")
 
 
+@case
+async def resume_carries_the_conversation_on(app: Any) -> None:
+    script = [["Hello. "], ["Goodbye. ", call("end_call", {})], ["Welcome back."]]
+    steps = {"end_call": lambda h: h.resume("the transfer was not answered")}
+    async with env(app, script, NEXT_STEPS=steps) as e:
+        relay = await e.relay()
+        await relay.prompt("Hi")
+        await relay.reply()
+        await relay.prompt("Put me through")
+        await relay.reply()
+        end = await relay.next()
+        check(end and end["type"] == "end", f"no end: {end}")
+        await relay.ws.close()
+        body = await e.next_step(end["handoffData"])
+        check('name="resume"' in body, f"the step did not resume: {body}")
+        again = await e.resumed("the transfer was not answered")
+        spoken = text_of(await again.reply())
+        check(spoken == "Welcome back.", f"the resumed agent did not speak first: {spoken!r}")
+        said = texts(app, e.history())
+        check("Hi" in said, f"the resumed call lost the conversation: {said}")
+        check(any("the transfer was not answered" in t for t in said), f"no resume note: {said}")
+        check(app.GREETING is None or said.count(app.GREETING) <= 1, "the greeting was added twice")
+        await again.ws.close()
+
+
+@case
+async def resume_after_hangup_or_expiry_starts_fresh(app: Any) -> None:
+    for patches in [{}, {"PARK_SECONDS": -1.0}]:
+        # A hangup answer lets the history go; an expired park has none left.
+        steps = {} if not patches else {"end_call": lambda h: h.resume("late")}
+        async with env(app, [["Goodbye. ", call("end_call", {})]], NEXT_STEPS=steps, **patches) as e:
+            relay = await e.relay()
+            await relay.prompt("Bye")
+            await relay.reply()
+            end = await relay.next()
+            await relay.ws.close()
+            await e.next_step(end["handoffData"])
+            again = await e.resumed("late")
+            check(await again.quiet(0.3) == [], "a session with nothing parked spoke first")
+            check("Bye" not in texts(app, e.history()), f"history survived {patches or 'a hangup'}")
+            await again.ws.close()
+
+
 @protocol_case
 async def overload_is_refused(app: Any) -> None:
     async with env(app, MAX_SESSIONS=1, END_GRACE=2.0) as e:
@@ -861,12 +950,66 @@ async def logic_end_ends_the_call(app: Any) -> None:
             await relay.ws.close()
 
 
+@logic_case
+async def logic_next_twiml_hands_the_caller_back(app: Any) -> None:
+    seen: list[Any] = []
+
+    async def respond(session: Any) -> Any:
+        session.state["turns"] = session.state.get("turns", 0) + 1
+        seen.append((session.history[-1]["content"], session.state["turns"], session))
+        if session.state["turns"] == 1:
+            session.end("hold", seconds=5)
+            yield "One moment."
+        else:
+            yield "Thanks for waiting."
+
+    async def next_twiml(handoff: Any) -> str:
+        check(handoff.reason == "hold" and handoff.data == {"seconds": 5}, f"handoff: {handoff}")
+        return handoff.resume("the hold music ended")
+
+    with using_logic(app, respond, next_twiml):
+        async with env(app) as e:
+            relay = await e.relay()
+            await relay.prompt("Hold on.")
+            await relay.reply()
+            end = await relay.next()
+            check(end and '"seconds": 5' in end["handoffData"], f"session.end data: {end}")
+            await relay.ws.close()
+            body = await e.next_step(end["handoffData"])
+            check('name="resume"' in body, f"next_twiml was not answered: {body}")
+            again = await e.resumed("the hold music ended")
+            check(text_of(await again.reply()) == "Thanks for waiting.", "the resumed logic did not speak")
+            check(seen[1][1] == 2 and "the hold music ended" in seen[1][0], f"state or note lost: {seen}")
+            # One session object for the whole call, pointed at the new socket.
+            check(seen[1][2] is seen[0][2] and seen[1][2]._call is e.calls[-1], "the session was not kept and rebound")
+            await again.ws.close()
+
+
+@logic_case
+async def logic_next_twiml_failures_hang_up(app: Any) -> None:
+    async def respond(session: Any) -> Any:
+        yield "Hi."
+
+    def broken(handoff: Any) -> str:
+        raise RuntimeError("the step broke")
+
+    for hook, label in [(broken, "an exception"), (lambda h: "<Response><Say>", "bad XML"), (lambda h: 42, "not a str")]:
+        with using_logic(app, respond, hook):
+            async with env(app) as e:
+                body = await e.next_step('{"reasonCode": "end_call"}')
+                check("<Hangup/>" in body, f"{label} did not hang up: {body}")
+    with using_logic(app, respond, lambda h: "<Response><Say>Bye</Say></Response>"):
+        async with env(app) as e:
+            check("<Say>Bye</Say>" in await e.next_step('{"reasonCode": "end_call"}'), "next_twiml TwiML was replaced")
+
+
 # --- real cases ----------------------------------------------------------------
 
 
 async def real_logic(app: Any) -> None:
     """The package's own logic against the real model: a tool answer, an
-    interrupt, the next turn, and a goodbye that ends the call."""
+    interrupt, the next turn, a hold that leaves and resumes the session when
+    the logic has next_twiml, and a goodbye that ends the call."""
     async with Env(app, None, {"DRAIN_TIMEOUT": 0.2}) as e:
         relay = await e.relay()
         await relay.prompt("What time do you open on Monday?")
@@ -886,10 +1029,25 @@ async def real_logic(app: Any) -> None:
         story = [h for h in e.calls[0].brain.history if h["role"] == "assistant"][-2]["content"]
         check(len(story) < 400, f"the interrupted story was kept whole: {story!r}")
 
+        if hasattr(app.logic, "next_twiml"):
+            # The package's own step after the session: a hold, then back.
+            await relay.prompt("Can you hold on a second?")
+            await relay.reply(timeout=40)
+            end = await relay.next(timeout=10)
+            check(end and end["type"] == "end", f"the hold did not end the session: {end}")
+            await relay.ws.close()
+            body = await e.next_step(end["handoffData"])
+            check("<Say>" in body and 'name="resume"' in body, f"next_twiml did not hold and resume: {body}")
+            relay = await e.resumed("a short hold")
+            back = text_of(await relay.reply(timeout=40))
+            check(back.strip(), "the agent said nothing after the hold")
+            print(f"  back after the hold: {back!r}")
+
         await relay.prompt("That's all, thank you. Goodbye.")
         await relay.reply(timeout=40)
         end = await relay.next(timeout=10)
         check(end and end["type"] == "end", f"the goodbye did not end the call: {end}")
+        check("caller_done" in end["handoffData"], f"the goodbye ended the wrong way: {end}")
         print("  goodbye ended the call through session.end()")
 
 

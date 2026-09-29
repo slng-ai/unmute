@@ -5,14 +5,14 @@ first-release surface of the `twilio` target and nothing that target refuses:
 one agent, one inbound phone channel, a read-only `opening_hours` tool and
 `end_call`.
 
-It compiles to two target instances with one agent definition:
+It compiles to four target instances with one agent definition:
 
 | Target | Thinks with | Key it reads |
 |---|---|---|
 | `twilio-openai` | OpenAI `gpt-5.6-luna`, Chat Completions | `OPENAI_API_KEY` |
 | `twilio-gemini` | Gemini `gemini-3.1-flash-lite`, Vertex AI `eu` with an API key | `GOOGLE_API_KEY` |
 | `twilio-slng` | `gpt-5.6-luna` on OpenAI through the SLNG Context Router, `eu-west` | `SLNG_API_KEY`, `OPENAI_API_KEY` |
-| `twilio-logic` | `logic/`, a small Pydantic AI agent, on the package's OpenAI binding | `OPENAI_API_KEY` |
+| `twilio-logic` | `logic/`, a small Pydantic AI agent, on the package's OpenAI binding. Asking it to hold on runs `next_twiml()`: a `<Say>`, then back to the agent | `OPENAI_API_KEY` |
 
 ## Check it without a call
 

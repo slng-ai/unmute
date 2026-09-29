@@ -12,15 +12,18 @@ Gemini generateContent and runs the package's local tools.
 """
 
 import asyncio
+import copy
 import inspect
 import json
 import logging
 import os
 import re
 import threading
+import time
 import xml.etree.ElementTree as ET
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
@@ -52,6 +55,10 @@ ENV_ACCOUNT_SID = "TWILIO_ACCOUNT_SID"
 ENV_AUTH_TOKEN = "TWILIO_AUTH_TOKEN"
 ENV_PUBLIC_URL = "TWILIO_PUBLIC_URL"
 ENV_MODEL_KEY = "GOOGLE_API_KEY"
+# The Twilio Region the connection names. Outside US1 the REST API has its own
+# host and takes only that region's Auth Token.
+TWILIO_REGION: str | None = None
+TWILIO_EDGE: str | None = None
 UPSTREAM_ENV: tuple[str, ...] = ()
 
 # Limits. Each one bounds something a caller or a provider could otherwise grow.
@@ -69,6 +76,9 @@ MAX_WS_MESSAGE = 64 * 1024
 MAX_RELAY_ERRORS = 5  # ConversationRelay error messages before the call ends
 MAX_UNEXPECTED = 20  # unknown or disabled events before the call ends
 MAX_FAILURES = 3  # failed model responses in a row before the call ends
+PARK_SECONDS = 600.0  # seconds a call's history waits for a step to hand the caller back
+NEXT_STEP_TIMEOUT = 10.0  # seconds an async next_twiml() may take; Twilio waits 15
+MAX_RESUME_NOTE = 500
 FAILURE_LINE = "Sorry, something went wrong on my side. Could you say that again?"
 
 HERE = Path(__file__).resolve().parent
@@ -81,7 +91,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:c64d09a1f470bb22591a807217fe22652f7d9db2404d39fe61765e166f0e1918"
+ARTIFACT_ID = "sha256:c5aa6bdc3a71c0d187309942ccd6de3b55c534a97b28565a60f739c1ae3d552e"
 
 def _google_vertex_client(api_key, location):
     from google import genai as _google_genai
@@ -413,13 +423,19 @@ class Call:
     already sent cannot be recalled; ConversationRelay decides what it plays.
     """
 
-    def __init__(self, ws: WebSocket, setup: dict[str, Any], client: Any, slots: "Slots") -> None:
+    def __init__(
+        self, ws: WebSocket, setup: dict[str, Any], client: Any, slots: "Slots", parked: "Parked", brain: Any = None
+    ) -> None:
         self.ws = ws
         self.call_sid = setup["callSid"]
         self.session_id = setup["sessionId"]
         self.setup = setup
-        self.brain = Brain(client)
+        # A parked brain is the call's history from before a step outside
+        # this session, which has now handed the caller back.
+        resumed = brain is not None
+        self.brain = brain if resumed else Brain(client)
         self.slots = slots
+        self.parked = parked
         self.generation = 0
         self.send_lock = asyncio.Lock()
         self.pending: list[str] = []
@@ -433,11 +449,13 @@ class Call:
         self.relay_errors = 0
         self.unexpected = 0
         self.ending = False
+        self.end_reason = "end_call"  # the handoffData an ending sends
+        self.end_data: dict[str, Any] = {}
         self.closed = False
         self.closer: asyncio.Task | None = None  # closes the socket if Twilio does not
         self.holding = False  # the slot outlives the call until a handler ends
         self.released = False
-        if GREETING:
+        if GREETING and not resumed:
             greeting = Cycle(generation=0, sent=[GREETING], done=True)
             greeting.entry = self.brain.assistant_text(GREETING)
             self.spoken = greeting
@@ -485,15 +503,27 @@ class Call:
         if cycle.sent:
             cycle.entry = self.brain.assistant_text(cycle.text)
 
-    async def end(self, reason: str) -> None:
-        """Hand the call back to Twilio, which then requests /connect-action."""
+    def resume(self, note: str) -> None:
+        """Carry on a parked conversation: the note is the turn to answer, so
+        the agent speaks first."""
+        self.event("resumed")
+        self.pending.append(f"(Back on the call after: {note[:MAX_RESUME_NOTE]})")
+        self.wake.set()
+
+    async def end(self, reason: str, **data: Any) -> None:
+        """Hand the call back to Twilio, which then requests /connect-action.
+
+        The history is parked first, so it is there before Twilio can ask
+        what comes next, in case that step hands the caller back."""
         if self.closed:
             return
         self.event("end", reason=reason)
+        self.parked.put(self.call_sid, self.brain)
+        handoff = json.dumps({**data, "reasonCode": reason}, default=str)
         async with self.send_lock:
             self.closed = True
             try:
-                await self.ws.send_json({"type": "end", "handoffData": json.dumps({"reasonCode": reason})})
+                await self.ws.send_json({"type": "end", "handoffData": handoff})
             except (WebSocketDisconnect, ConnectionError, RuntimeError):
                 pass
         # Twilio closes the socket once it has taken the end message. Closing
@@ -647,7 +677,7 @@ class Call:
             await self.finish(cycle)
             if not reply.calls and not cycle.sent and not reply.generated:
                 if self.ending:  # nothing to say, and asked to end: not a failure
-                    await self.end("end_call")
+                    await self.end(self.end_reason, **self.end_data)
                     return
                 await self.fail(cycle, "empty_response")
                 return
@@ -656,7 +686,7 @@ class Call:
                 cycle.entry = self.brain.commit(cycle, reply, [])
                 self.reconcile()
                 if self.ending:
-                    await self.end("end_call")
+                    await self.end(self.end_reason, **self.end_data)
                 return
             rounds += 1
             results = await self.run_tools(reply.calls)
@@ -668,7 +698,7 @@ class Call:
             cycle.entry = self.brain.commit(cycle, reply, results)
             self.reconcile()
             if self.ending:
-                await self.end("end_call")
+                await self.end(self.end_reason, **self.end_data)
                 return
             if self.pending:
                 self.take_pending()
@@ -852,6 +882,100 @@ class Slots:
             self.idle.set()
 
 
+# --- after the session ---------------------------------------------------------
+#
+# When a session ends, Twilio asks /connect-action what the call does next. The
+# answer is TwiML: any Twilio verb (Dial, Enqueue, Pay, Say...), or resume(),
+# which connects the caller to the agent again with the conversation kept.
+
+
+class Parked:
+    """The history of each call whose session ended, kept for a step that may
+    hand the caller back.
+
+    ponytail: in this process only, so the resumed session must reach the
+    same process. Several instances need sticky routing or a shared store.
+    """
+
+    def __init__(self) -> None:
+        self.brains: dict[str, tuple[float, Any]] = {}
+
+    def put(self, call_sid: str, brain: Any) -> None:
+        self.expire()
+        self.brains.pop(call_sid, None)
+        self.brains[call_sid] = (time.monotonic() + PARK_SECONDS, brain)
+        while len(self.brains) > MAX_SESSIONS * 4:
+            del self.brains[next(iter(self.brains))]  # the oldest goes first
+
+    def take(self, call_sid: str) -> Any:
+        self.expire()
+        entry = self.brains.pop(call_sid, None)
+        return entry[1] if entry else None
+
+    def drop(self, call_sid: str) -> None:
+        self.brains.pop(call_sid, None)
+
+    def expire(self) -> None:
+        now = time.monotonic()
+        for call_sid in [sid for sid, (until, _) in self.brains.items() if until < now]:
+            del self.brains[call_sid]
+
+
+class Resume(str):
+    """TwiML that connects the caller to the agent again. The app keeps the
+    call's history for it; any other answer lets the history go."""
+
+
+@dataclass
+class Handoff:
+    """What next_twiml() and a built-in step read at /connect-action."""
+
+    reason: str  # handoffData's reasonCode: end_call, busy, shutdown, or your own
+    data: dict[str, Any]  # the rest of handoffData, as session.end() sent it
+    call: dict[str, str]  # call_sid, from, to, direction
+    status: str  # SessionStatus: completed, ended or failed
+    resume: Callable[..., Resume] = field(repr=False)  # resume(note, before="") -> TwiML
+
+    @property
+    def twilio(self) -> Any:
+        """A Twilio REST client on this app's account. It is synchronous:
+        call it through asyncio.to_thread."""
+        return twilio_client()
+
+
+@cache
+def twilio_client() -> Any:
+    from twilio.rest import Client
+
+    return Client(
+        os.environ[ENV_ACCOUNT_SID], os.environ[ENV_AUTH_TOKEN], region=TWILIO_REGION, edge=TWILIO_EDGE
+    )
+
+
+def parse_handoff(raw: Any) -> tuple[str, dict[str, Any]]:
+    """handoffData is a string the app itself wrote. Anything else is none."""
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else None
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        return "", {}
+    return str(data.pop("reasonCode", "")), data
+
+
+# Built-in steps by reasonCode, each (handoff) -> TwiML. Empty today: every
+# reason the app sends hangs up. A Twilio service the package declares adds
+# its row here.
+NEXT_STEPS: dict[str, Callable[[Handoff], str]] = {}
+
+
+async def next_step(handoff: Handoff) -> str:
+    """The TwiML for what the call does after the session: the package's own
+    logic first, then a built-in step, then hang up."""
+    step = NEXT_STEPS.get(handoff.reason)
+    return step(handoff) if step is not None else HANGUP_TWIML
+
+
 def public_origin(value: str) -> tuple[str, str]:
     """Read the public URL as an https origin. Everything signed is built from
     it, never from request headers, because a proxy can rewrite those."""
@@ -872,7 +996,7 @@ def public_origin(value: str) -> tuple[str, str]:
     return f"https://{parts.netloc}", parts.netloc
 
 
-def render_twiml(origin: str, host: str) -> str:
+def relay_document(origin: str, host: str) -> ET.Element:
     root = ET.parse(HERE / "conversation-relay.xml.tmpl").getroot()
     connect = root.find("Connect")
     relay = connect.find("ConversationRelay") if connect is not None else None
@@ -880,10 +1004,30 @@ def render_twiml(origin: str, host: str) -> str:
         raise SystemExit("conversation-relay.xml.tmpl has no Connect/ConversationRelay element")
     connect.set("action", origin + "/connect-action")
     relay.set("url", f"wss://{host}/conversation")
-    body = ET.tostring(root, encoding="unicode")
+    body = to_twiml(root)
     if ORIGIN_PLACEHOLDER in body or WSS_PLACEHOLDER in body:
         raise SystemExit("conversation-relay.xml.tmpl still carries a placeholder after rendering")
-    return '<?xml version="1.0" encoding="UTF-8"?>' + body
+    return root
+
+
+def to_twiml(root: ET.Element) -> str:
+    return '<?xml version="1.0" encoding="UTF-8"?>' + ET.tostring(root, encoding="unicode")
+
+
+def resume_twiml(root: ET.Element, note: str, before: str = "") -> Resume:
+    """The same Connect, with no greeting, telling the new session to carry on
+    the parked conversation. The note reaches it as customParameters.resume.
+    before is TwiML verbs Twilio runs first, for example <Say>One moment.</Say>."""
+    root = copy.deepcopy(root)
+    for index, verb in enumerate(ET.fromstring(f"<Response>{before}</Response>")):
+        root.insert(index, verb)
+    relay = root.find("Connect/ConversationRelay")
+    if relay is None:  # relay_document checked it; this satisfies the type checker
+        raise RuntimeError("the TwiML lost its ConversationRelay")
+    relay.attrib.pop("welcomeGreeting", None)
+    relay.attrib.pop("welcomeGreetingInterruptible", None)
+    ET.SubElement(relay, "Parameter", name="resume", value=str(note)[:MAX_RESUME_NOTE] or "resume")
+    return Resume(to_twiml(root))
 
 
 def xml_response(body: str) -> Response:
@@ -905,8 +1049,10 @@ def build_app(client: Any = None) -> FastAPI:
     account_sid = os.environ[ENV_ACCOUNT_SID]
     validator = RequestValidator(os.environ[ENV_AUTH_TOKEN])
     origin, host = public_origin(os.environ[ENV_PUBLIC_URL])
-    twiml = render_twiml(origin, host)
+    document = relay_document(origin, host)
+    twiml = to_twiml(document)
     slots = Slots(MAX_SESSIONS)
+    parked = Parked()
     calls: set[Call] = set()
     model_client = client or make_client()
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
@@ -948,8 +1094,7 @@ def build_app(client: Any = None) -> FastAPI:
     @app.post("/connect-action")
     async def connect_action(request: Request) -> Response:
         # https://www.twilio.com/docs/voice/twiml/connect: Twilio asks here what
-        # to do once the session ends. HandoffData is ignored: this app hands
-        # the call to nobody. The answer is always to hang up.
+        # to do once the session ends, with the session's HandoffData.
         form = await request.form()
         if not signed(request.headers, [signed_url(request)], form):
             log.warning("event=signature_rejected route=/connect-action")
@@ -962,7 +1107,24 @@ def build_app(client: Any = None) -> FastAPI:
             str(form.get("SessionStatus", ""))[:16],
             str(form.get("ErrorCode", ""))[:8],
         )
-        return xml_response(HANGUP_TWIML)
+        reason, data = parse_handoff(form.get("HandoffData"))
+        call_sid = str(form.get("CallSid", ""))
+        handoff = Handoff(
+            reason=reason,
+            data=data,
+            call={
+                "call_sid": call_sid,
+                "from": str(form.get("From", "")),
+                "to": str(form.get("To", "")),
+                "direction": str(form.get("Direction", "")),
+            },
+            status=str(form.get("SessionStatus", "")),
+            resume=lambda note, before="": resume_twiml(document, note, before),
+        )
+        answer = await next_step(handoff)
+        if not isinstance(answer, Resume):
+            parked.drop(call_sid)
+        return xml_response(answer)
 
     @app.websocket("/conversation")
     async def conversation(ws: WebSocket) -> None:
@@ -1007,10 +1169,18 @@ def build_app(client: Any = None) -> FastAPI:
                 pass
             await close_quietly(ws)
             return
-        call = Call(ws, setup, model_client, slots)
+        custom = setup.get("customParameters")
+        note = custom.get("resume") if isinstance(custom, dict) else None
+        brain = parked.take(setup["callSid"]) if note is not None else None
+        call = Call(ws, setup, model_client, slots, parked, brain=brain)
         calls.add(call)
         call.event("call_started", direction=str(setup.get("direction", ""))[:16])
+        if note is not None and brain is None:
+            # Nothing parked: it expired, or another process held the call.
+            call.event("resume_missed")
         owner = asyncio.ensure_future(call.run())
+        if brain is not None:
+            call.resume(str(note))
         try:
             await call.read()
         finally:
@@ -1188,8 +1358,8 @@ sequenceDiagram
    for, and streams the reply back as text.
 5. To end the session, the app sends `end` and waits up to five seconds for
    Twilio to close the WebSocket. Closing it first can fail the session with
-   [error 64105](https://www.twilio.com/docs/api/errors/64105). Twilio then asks `/connect-action`,
-   and the app hangs up.
+   [error 64105](https://www.twilio.com/docs/api/errors/64105). Twilio then asks `/connect-action`
+   what comes next, and the app hangs up.
 
 ## What is in this folder
 
@@ -1390,7 +1560,7 @@ def opening_hours(day):
     return {"day": day, "open": bool(opens), "opens": opens, "closes": closes}
 === compile-report.json ===
 {
-  "artifact_id": "sha256:c64d09a1f470bb22591a807217fe22652f7d9db2404d39fe61765e166f0e1918",
+  "artifact_id": "sha256:c5aa6bdc3a71c0d187309942ccd6de3b55c534a97b28565a60f739c1ae3d552e",
   "bindings": [
     {
       "binding": {

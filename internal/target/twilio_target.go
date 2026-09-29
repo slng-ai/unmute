@@ -34,6 +34,12 @@ const TwilioTransport = "conversation-relay"
 // https://www.twilio.com/docs/global-infrastructure/understanding-twilio-regions
 var TwilioRegions = []string{"us1", "ie1", "au1"}
 
+// TwilioRegionEdges names the edge location each region outside US1 is reached
+// through. The REST host is api.<edge>.<region>.twilio.com: the older
+// api.<region> form stopped working on 2026-04-28.
+// https://www.twilio.com/docs/global-infrastructure/api-domain-migration-guide
+var TwilioRegionEdges = map[string]string{"ie1": "dublin", "au1": "sydney"}
+
 // TwilioPython is the interpreter line the emitted project and its container
 // use. Session 1 measured the providers on CPython 3.12.13.
 const TwilioPython = "3.12"

@@ -37,7 +37,8 @@ sequenceDiagram
 5. To end the session, the app sends `end` and waits up to five seconds for
    Twilio to close the WebSocket. Closing it first can fail the session with
    [error 64105](https://www.twilio.com/docs/api/errors/64105). Twilio then
-   asks `/connect-action`, and the app hangs up.
+   asks `/connect-action` what the call does next. The app hangs up, unless
+   your own logic [answers with other TwiML](#other-twilio-services-after-the-session).
 
 ## What Twilio runs and what you run
 
@@ -66,6 +67,14 @@ flowchart LR
    and sends the reply back as text.
 4. Twilio speaks the reply.
 
+The names follow these layers. The target is `twilio`: the app you deploy. On
+every call the app answers Twilio with
+[TwiML](https://www.twilio.com/docs/voice/twiml), the markup that tells Twilio
+what to do with a call. ConversationRelay is one TwiML verb in that answer, the
+one the agent talks through, so it names only the voice route:
+`transport: conversation-relay`. Other TwiML verbs, such as `<Dial>` or
+`<Pay>`, are other Twilio services the same app can answer with.
+
 So the app you host is one small process that handles text only. It runs no
 audio pipeline, no media server and no Redis, so any container host can run
 it. With the `pipecat` and `livekit` targets you host that audio pipeline too.
@@ -82,6 +91,7 @@ On this page:
 - [Point the number at it](#point-the-number-at-it) - with `unmute deploy`, or by hand
 - [How the app behaves](#how-the-app-behaves) - signatures, calls at once, interruptions, tools
 - [Bring your own agent logic](#bring-your-own-agent-logic) - replace the turn with your own code
+- [Other Twilio services after the session](#other-twilio-services-after-the-session) - any TwiML after the agent, then back to it
 - [What is not verified yet](#what-is-not-verified-yet) - read before you rely on it
 
 ## The package
@@ -606,6 +616,27 @@ Then call the number. That call is the only check of the speech path.
 - **Failures.** A failed or timed-out model response gets one short fixed line.
   Three in a row end the call.
 
+### How the app is secured
+
+Three checks stand between the internet and your agent:
+
+1. `/voice` and `/connect-action` check `X-Twilio-Signature` over the exact URL
+   on `TWILIO_PUBLIC_URL`, and check that `AccountSid` is your account
+   ([webhook security](https://www.twilio.com/docs/usage/security)).
+2. The WebSocket handshake on `/conversation` is signed the same way, over the
+   `wss://` URL with no form fields
+   ([ConversationRelay onboarding](https://www.twilio.com/docs/voice/conversationrelay/onboarding)).
+   An unsigned handshake gets HTTP 403 before the socket opens.
+3. The first message must be Twilio's `setup`, for your account, with a valid
+   call SID and session ID. No call state exists before it.
+
+The Auth Token is the one shared secret. To rotate it, set the new token on
+the host and restart the app. Twilio publishes no fixed IP ranges for its
+webhooks
+([webhooks security](https://www.twilio.com/docs/usage/webhooks/webhooks-security)),
+so an IP allow list is not an option: the signature is the protection. Serve
+the app over HTTPS only, which every host on this page does.
+
 ## Bring your own agent logic
 
 The app you host is yours, so the agent turn can be too. Point the target at a
@@ -655,7 +686,8 @@ What `session` holds:
 | `instructions` | the package's instructions |
 | `model` | the package's think binding: `model`, `base_url` (the SLNG router's, or `None`), `api_key`, `params`, and the router's `extra_body` and `extra_headers` |
 | `state` | a dict of your own, kept for the whole call |
-| `end(reason)` | ends the call once this reply has been sent, like `end_call` |
+| `end(reason, **data)` | ends the session once this reply has been sent, like `end_call`. `reason` and `data` reach [`next_twiml()`](#other-twilio-services-after-the-session) |
+| `twilio` | a Twilio REST client on your account and region, for any Twilio API during the call. It is synchronous, so call it through `asyncio.to_thread` |
 
 Rules the app holds `respond()` to:
 
@@ -735,6 +767,76 @@ Context Router: `base_url` and the router's body and headers come in
 vLLM, Ollama or OpenRouter, set `base_url` and `api_key` yourself in `build()`.
 Pydantic AI also has its own providers for Anthropic, Gemini and others.
 
+## Other Twilio services after the session
+
+When the agent's session ends, Twilio asks the app what the call does next.
+The answer can be any TwiML: put the caller through with `<Dial>`, queue them
+for a person with `<Enqueue>`, take a card with `<Pay>`, or play a line. It can
+also hand the caller back to the agent, with the conversation kept.
+
+```mermaid
+sequenceDiagram
+    participant Twilio
+    participant App as your app
+    participant Logic as your next_twiml()
+    App->>Twilio: end, with reason and data
+    Twilio->>App: POST /connect-action (signed)
+    App->>Logic: handoff
+    Logic-->>App: TwiML, or handoff.resume()
+    App-->>Twilio: the TwiML
+    Twilio->>App: new WebSocket, if it was a resume
+    App->>App: the parked conversation carries on
+```
+
+1. Your logic calls `session.end("hold")`. The app sends `end` with
+   `{"reasonCode": "hold"}` as the handoff data, and keeps the call's history
+   aside.
+2. Twilio posts to `/connect-action`. The app checks the signature, as on
+   every route.
+3. The app calls `next_twiml(handoff)` in your `logic/__init__.py`.
+4. Your function returns TwiML as a string. `None` means hang up.
+5. If it returned `handoff.resume(note)`, Twilio runs any verbs you put first,
+   then opens a new session. The agent gets the kept history plus the note as
+   the turn to answer, and it speaks first.
+
+```python logic/__init__.py
+import os
+
+
+def next_twiml(handoff):
+    if handoff.reason == "hold":
+        return handoff.resume("a short hold", before="<Say>Please hold.</Say>")
+    if handoff.reason == "transfer":
+        # A number you set on the host, never one the model or the caller chose.
+        return f"<Response><Dial>{os.environ['FRONT_DESK_NUMBER']}</Dial></Response>"
+    return None  # hang up
+```
+
+What `handoff` holds:
+
+| Field | What it is |
+|---|---|
+| `reason` | the reason `session.end()` sent. The app's own reasons are `end_call`, `busy` and `shutdown`. It is empty when the session ended without an `end` |
+| `data` | the other keyword arguments `session.end()` sent |
+| `call` | `call_sid`, `from`, `to` and `direction` |
+| `status` | Twilio's `SessionStatus`: `completed`, `ended` or `failed` |
+| `twilio` | the same REST client as `session.twilio` |
+| `resume(note, before="")` | TwiML that hands the caller back to the agent. `before` is TwiML verbs Twilio runs first |
+
+Rules the app holds `next_twiml()` to:
+
+- It may be `def` or `async def`. Twilio waits 15 seconds for the answer, so an
+  `async` one gets 10 and a slow one should hand work to a thread.
+- The answer must be well-formed XML. An exception, a non-string or broken XML
+  is logged, and the call hangs up.
+- The kept history waits 10 minutes, in this process only. A resume that
+  reaches another copy of the app starts a fresh conversation. Run one copy
+  per number, as for calls at once.
+- Never put card numbers or other secrets in `session.end()` data: it travels
+  through Twilio as the session's handoff data.
+- Build TwiML from values you trust. A number to dial, or text to put in the
+  XML, that came from the model or the caller needs checking and escaping first.
+
 ## What is not verified yet
 
 - A call behind a proxy other than Render and a cloudflared quick tunnel.
@@ -749,6 +851,8 @@ Pydantic AI also has its own providers for Anthropic, Gemini and others.
   hosted call so far ran custom logic.
 - The drain on a real SIGTERM, such as a redeploy during a call. It is tested
   in process only.
+- A resume from `next_twiml()` on a real call. It is tested in process, with
+  the real model.
 
 ## Where to go next
 
