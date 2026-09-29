@@ -89,7 +89,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:3e3ce0c17d3a312f94330c9780e46c61e59967ee1bc362d06768860285741155"
+ARTIFACT_ID = "sha256:43fd3f037c6fb1f0cab3f3373f50b66c218b84e6a0a90f4fd58edb3832700fc6"
 
 # --- tools ---------------------------------------------------------------------
 
@@ -438,12 +438,14 @@ class Call:
         if cycle.sent:
             cycle.entry = self.brain.assistant_text(cycle.text)
 
-    def resume(self, note: str) -> None:
-        """Carry on a parked conversation: the note is the turn to answer, so
-        the agent speaks first."""
+    def resume(self, greeting: str) -> None:
+        """Carry on a parked conversation. ConversationRelay speaks the
+        greeting itself, so it enters the history as said, like the first one."""
         self.event("resumed")
-        self.pending.append(f"(Back on the call after: {note[:MAX_RESUME_NOTE]})")
-        self.wake.set()
+        if greeting:
+            cycle = Cycle(generation=0, sent=[greeting], done=True)
+            cycle.entry = self.brain.assistant_text(greeting)
+            self.spoken = cycle
 
     async def end(self, reason: str, **data: Any) -> None:
         """Hand the call back to Twilio, which then requests /connect-action.
@@ -869,7 +871,7 @@ class Handoff:
     data: dict[str, Any]  # the rest of handoffData, as session.end() sent it
     call: dict[str, str]  # call_sid, from, to, direction
     status: str  # SessionStatus: completed, ended or failed
-    resume: Callable[..., Resume] = field(repr=False)  # resume(note, before="") -> TwiML
+    resume: Callable[..., Resume] = field(repr=False)  # resume(note, before="", greeting="") -> TwiML
 
     @property
     def twilio(self) -> Any:
@@ -949,10 +951,15 @@ def to_twiml(root: ET.Element) -> str:
     return '<?xml version="1.0" encoding="UTF-8"?>' + ET.tostring(root, encoding="unicode")
 
 
-def resume_twiml(root: ET.Element, note: str, before: str = "") -> Resume:
-    """The same Connect, with no greeting, telling the new session to carry on
-    the parked conversation. The note reaches it as customParameters.resume.
-    before is TwiML verbs Twilio runs first, for example <Say>One moment.</Say>."""
+def resume_twiml(root: ET.Element, note: str, before: str = "", greeting: str = "") -> Resume:
+    """The same Connect, telling the new session to carry on the parked
+    conversation. before is TwiML verbs Twilio runs first, for example
+    <Say>One moment.</Say>. greeting is the line ConversationRelay speaks as
+    the caller comes back; without one, the agent waits for the caller.
+
+    The model is not asked to speak here, and no turn is made up for it: a
+    turn the caller never said was where it stopped following its
+    instructions. The note reaches the new session as customParameters.resume."""
     root = copy.deepcopy(root)
     for index, verb in enumerate(ET.fromstring(f"<Response>{before}</Response>")):
         root.insert(index, verb)
@@ -960,8 +967,10 @@ def resume_twiml(root: ET.Element, note: str, before: str = "") -> Resume:
     if relay is None:  # relay_document checked it; this satisfies the type checker
         raise RuntimeError("the TwiML lost its ConversationRelay")
     relay.attrib.pop("welcomeGreeting", None)
-    relay.attrib.pop("welcomeGreetingInterruptible", None)
     ET.SubElement(relay, "Parameter", name="resume", value=str(note)[:MAX_RESUME_NOTE] or "resume")
+    if greeting:
+        relay.set("welcomeGreeting", greeting[:MAX_RESUME_NOTE])
+        ET.SubElement(relay, "Parameter", name="greeting", value=greeting[:MAX_RESUME_NOTE])
     return Resume(to_twiml(root))
 
 
@@ -1054,7 +1063,7 @@ def build_app(client: Any = None) -> FastAPI:
                 "direction": str(form.get("Direction", "")),
             },
             status=str(form.get("SessionStatus", "")),
-            resume=lambda note, before="": resume_twiml(document, note, before),
+            resume=lambda note, before="", greeting="": resume_twiml(document, note, before, greeting),
         )
         answer = await next_step(handoff)
         if not isinstance(answer, Resume):
@@ -1115,7 +1124,7 @@ def build_app(client: Any = None) -> FastAPI:
             call.event("resume_missed")
         owner = asyncio.ensure_future(call.run())
         if brain is not None:
-            call.resume(str(note))
+            call.resume(str(custom.get("greeting") or "") if isinstance(custom, dict) else "")
         try:
             await call.read()
         finally:
@@ -1478,7 +1487,7 @@ may carry a secret, so it is readable only by you.
 </Response>
 === compile-report.json ===
 {
-  "artifact_id": "sha256:3e3ce0c17d3a312f94330c9780e46c61e59967ee1bc362d06768860285741155",
+  "artifact_id": "sha256:43fd3f037c6fb1f0cab3f3373f50b66c218b84e6a0a90f4fd58edb3832700fc6",
   "bindings": [
     {
       "binding": {

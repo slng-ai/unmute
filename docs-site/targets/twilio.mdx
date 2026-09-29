@@ -710,7 +710,16 @@ goodbye, on the package's own binding:
 
 ```python logic/__init__.py
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+from pydantic_ai.messages import (
+    FunctionToolResultEvent,
+    ModelRequest,
+    ModelResponse,
+    PartDeltaEvent,
+    PartStartEvent,
+    TextPart,
+    TextPartDelta,
+    UserPromptPart,
+)
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -749,9 +758,19 @@ async def respond(session):
     if "agent" not in session.state:
         session.state["agent"] = build(session)
     *earlier, last = session.history
-    async with session.state["agent"].run_stream(last["content"], message_history=to_messages(earlier)) as run:
-        async for piece in run.stream_text(delta=True, debounce_by=None):
-            yield piece
+    spoke = False
+    async with session.state["agent"].run_stream_events(last["content"], message_history=to_messages(earlier)) as events:
+        async for event in events:
+            piece = ""
+            if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
+                piece = event.part.content
+            elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                piece = event.delta.content_delta
+            elif isinstance(event, FunctionToolResultEvent) and event.part.tool_name == "end_call" and spoke:
+                return  # the goodbye is said: stop before the model is asked again
+            if piece:
+                spoke = True
+                yield piece
 ```
 
 ```text logic/requirements.txt
@@ -759,9 +778,22 @@ pydantic-ai-slim[openai]==2.51.0
 ```
 
 The history is rebuilt from `session.history` every turn, so an interrupted
-reply counts only as far as the caller heard it. `debounce_by=None` speaks
-each piece as it arrives instead of in batches. Pydantic AI prints a banner at
-import; set `PYDANTIC_AI_NO_BANNER=1` on the host to keep it out of the log.
+reply counts only as far as the caller heard it. Two choices here keep
+`end_call` working:
+
+- `run_stream_events()`, not `run_stream()`. `run_stream()` takes the first
+  text as the final answer, so a goodbye followed by `end_call` in the same
+  response never runs the tool. The events run the whole loop, tools included,
+  and still hand over each piece of text as it arrives.
+- Stop once `end_call` has run after something was said. Otherwise the model
+  is asked again after the tool, and it says goodbye twice or answers with
+  nothing, which gets the failure line.
+
+Say in the instructions that the call only ends when the model calls
+`end_call`, in the same reply as its goodbye. Without that line, some
+goodbyes come with no call to `end_call`, and the caller has to hang up.
+Pydantic AI prints a banner at import; set `PYDANTIC_AI_NO_BANNER=1` on the
+host to keep it out of the log.
 
 With `provider: slng` on think, the same code calls the model through the SLNG
 Context Router: `base_url` and the router's body and headers come in
@@ -797,9 +829,10 @@ sequenceDiagram
    every route.
 3. The app calls `next_twiml(handoff)` in your `logic/__init__.py`.
 4. Your function returns TwiML as a string. `None` means hang up.
-5. If it returned `handoff.resume(note)`, Twilio runs any verbs you put first,
-   then opens a new session. The agent gets the kept history plus the note as
-   the turn to answer, and it speaks first.
+5. If it returned `handoff.resume(note, greeting=...)`, Twilio runs any verbs
+   you put first, then opens a new session. ConversationRelay speaks the
+   greeting, and the app adds it to the kept history. The agent answers the
+   caller's next words with the whole conversation in front of it.
 
 ```python logic/__init__.py
 import os
@@ -807,7 +840,9 @@ import os
 
 def next_twiml(handoff):
     if handoff.reason == "hold":
-        return handoff.resume("a short hold", before="<Say>Please hold.</Say>")
+        return handoff.resume(
+            "a short hold", before="<Say>Please hold.</Say>", greeting="Thanks for holding."
+        )
     if handoff.reason == "transfer":
         # A number you set on the host, never one the model or the caller chose.
         return f"<Response><Dial>{os.environ['FRONT_DESK_NUMBER']}</Dial></Response>"
@@ -823,7 +858,7 @@ What `handoff` holds:
 | `call` | `call_sid`, `from`, `to` and `direction` |
 | `status` | Twilio's `SessionStatus`: `completed`, `ended` or `failed` |
 | `twilio` | the same REST client as `session.twilio` |
-| `resume(note, before="")` | TwiML that hands the caller back to the agent. `before` is TwiML verbs Twilio runs first |
+| `resume(note, before="", greeting="")` | TwiML that hands the caller back to the agent. `before` is TwiML verbs Twilio runs first. `greeting` is the line the caller hears on coming back; without one, the agent waits for the caller. The note reaches logic as `session.call["custom_parameters"]["resume"]` |
 
 Rules the app holds `next_twiml()` to:
 
@@ -838,6 +873,8 @@ Rules the app holds `next_twiml()` to:
   through Twilio as the session's handoff data.
 - Build TwiML from values you trust. A number to dial, or text to put in the
   XML, that came from the model or the caller needs checking and escaping first.
+- A resume never asks the model to speak and never puts words in the caller's
+  mouth. An invented caller turn is where the model stopped calling `end_call`.
 
 ## What is not verified yet
 
@@ -853,8 +890,8 @@ Rules the app holds `next_twiml()` to:
   hosted call so far ran custom logic.
 - The drain on a real SIGTERM, such as a redeploy during a call. It is tested
   in process only.
-- A resume from `next_twiml()` on a real call. It is tested in process, with
-  the real model.
+- A resume with a `greeting` on a real call. A resume without one has been
+  heard on a real call.
 
 ## Where to go next
 

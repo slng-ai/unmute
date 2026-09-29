@@ -783,8 +783,14 @@ account and region, and `session.end(reason, **data)` ends the session after
 the reply. Twilio then asks the app what comes next: an optional
 `next_twiml(handoff)` in the same `__init__.py` returns TwiML (any verb, such
 as `<Dial>` to a number from the host's env), `None` to hang up, or
-`handoff.resume(note, before="")` to hand the caller back to the agent with
-the history kept. `handoff` has `reason`, `data`, `call`, `status` and
+`handoff.resume(note, before="", greeting="")` to hand the caller back to the
+agent with the history kept (ConversationRelay speaks `greeting`; the model is
+not asked to speak, and the note is in
+`session.call["custom_parameters"]["resume"]`). A Pydantic AI `respond()` must
+stream with `run_stream_events()`, not `run_stream()`, and stop after
+`end_call` once text was said, or the goodbye never ends the call. The
+instructions should say the call only ends when the model calls `end_call`,
+in the same reply as its goodbye. `handoff` has `reason`, `data`, `call`, `status` and
 `twilio`. Never build TwiML from a model-chosen number or unescaped text, and
 never put a secret in `end()` data. A turn has 30 seconds. Compile copies the folder as written, never formatted, and it
 counts in `artifact_id`. Every other target refuses `logic:`. A Pydantic AI

@@ -120,8 +120,10 @@ the logic in the package, not here: compile writes this folder again.
 When `respond()` calls `session.end(reason, **data)`, the session ends and
 Twilio asks `/connect-action` what comes next. If `logic/__init__.py` defines
 `next_twiml(handoff)`, the app answers with the TwiML it returns: a `<Dial>`, a
-`<Pay>`, any verb. `handoff.resume(note)` hands the caller back to the agent
-with the conversation kept, for 10 minutes and in this process only.
+`<Pay>`, any verb. `handoff.resume(note, greeting="...")` hands the caller back
+to the agent with the conversation kept, for 10 minutes and in this process
+only. ConversationRelay speaks the greeting; the model answers the caller's
+next words.
 `session.twilio` is a Twilio REST client on this account and region.
 
 {{end -}}

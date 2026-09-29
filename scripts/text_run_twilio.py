@@ -317,11 +317,11 @@ class Env:
         check(response.status == 200, f"/connect-action returned {response.status}")
         return await response.text()
 
-    async def resumed(self, note: str) -> Relay:
+    async def resumed(self, note: str, greeting: str = "") -> Relay:
         """The second session Twilio opens for a resume TwiML."""
         count = len(self.calls)
         relay = await self.relay(setup=False)
-        await relay.setup(custom={"resume": note})
+        await relay.setup(custom={"resume": note, **({"greeting": greeting} if greeting else {})})
         await until(lambda: len(self.calls) > count)
         return relay
 
@@ -472,7 +472,7 @@ async def connect_action_picks_the_next_step(app: Any) -> None:
         check(seen and seen[0].reason == "transfer" and seen[0].data == {"to": "desk"}, f"handoff: {seen}")
         check(seen[0].call["call_sid"] == CALL and seen[0].status == "ended", f"call: {seen[0].call}")
         check('<Parameter name="resume" value="the transfer was not answered"' in body, f"no resume: {body}")
-        check("welcomeGreeting" not in body and f'url="wss://{HOST}/conversation"' in body, f"resume TwiML: {body}")
+        check("welcomeGreeting=" not in body and f'url="wss://{HOST}/conversation"' in body, f"resume TwiML: {body}")
         check(body.index("<Say>One moment.</Say>") < body.index("<Connect"), f"before is not first: {body}")
         check(f'action="{ORIGIN}/connect-action"' in body, "a resume must come back to /connect-action")
 
@@ -791,8 +791,9 @@ async def end_waits_for_twilio_to_close(app: Any) -> None:
 
 @case
 async def resume_carries_the_conversation_on(app: Any) -> None:
-    script = [["Hello. "], ["Goodbye. ", call("end_call", {})], ["Welcome back."]]
-    steps = {"end_call": lambda h: h.resume("the transfer was not answered")}
+    script = [["Hello. "], ["Goodbye. ", call("end_call", {})], ["Sure."]]
+    back = "Sorry, nobody answered. What else can I do?"
+    steps = {"end_call": lambda h: h.resume("the transfer was not answered", greeting=back)}
     async with env(app, script, NEXT_STEPS=steps) as e:
         relay = await e.relay()
         await relay.prompt("Hi")
@@ -803,14 +804,15 @@ async def resume_carries_the_conversation_on(app: Any) -> None:
         check(end and end["type"] == "end", f"no end: {end}")
         await relay.ws.close()
         body = await e.next_step(end["handoffData"])
-        check('name="resume"' in body, f"the step did not resume: {body}")
-        again = await e.resumed("the transfer was not answered")
-        spoken = text_of(await again.reply())
-        check(spoken == "Welcome back.", f"the resumed agent did not speak first: {spoken!r}")
+        check('name="resume"' in body and f'welcomeGreeting="{back}"' in body, f"the step did not resume: {body}")
+        again = await e.resumed("the transfer was not answered", greeting=back)
+        # ConversationRelay speaks the greeting; the model is not asked to.
+        check(await again.quiet(0.3) == [], "the app spoke on a resume")
+        await again.prompt("Can you try again?")
+        check(text_of(await again.reply()) == "Sure.", "the resumed call did not answer the caller")
         said = texts(app, e.history())
-        check("Hi" in said, f"the resumed call lost the conversation: {said}")
-        check(any("the transfer was not answered" in t for t in said), f"no resume note: {said}")
-        check(app.GREETING is None or said.count(app.GREETING) <= 1, "the greeting was added twice")
+        check("Hi" in said and back in said, f"the resumed call lost the conversation or the greeting: {said}")
+        check(app.GREETING is None or said.count(app.GREETING) <= 1, "the first greeting was added twice")
         await again.ws.close()
 
 
@@ -965,7 +967,7 @@ async def logic_next_twiml_hands_the_caller_back(app: Any) -> None:
 
     async def next_twiml(handoff: Any) -> str:
         check(handoff.reason == "hold" and handoff.data == {"seconds": 5}, f"handoff: {handoff}")
-        return handoff.resume("the hold music ended")
+        return handoff.resume("the hold music ended", greeting="Thanks for waiting.")
 
     with using_logic(app, respond, next_twiml):
         async with env(app) as e:
@@ -977,9 +979,13 @@ async def logic_next_twiml_hands_the_caller_back(app: Any) -> None:
             await relay.ws.close()
             body = await e.next_step(end["handoffData"])
             check('name="resume"' in body, f"next_twiml was not answered: {body}")
-            again = await e.resumed("the hold music ended")
-            check(text_of(await again.reply()) == "Thanks for waiting.", "the resumed logic did not speak")
-            check(seen[1][1] == 2 and "the hold music ended" in seen[1][0], f"state or note lost: {seen}")
+            again = await e.resumed("the hold music ended", greeting="Thanks for waiting.")
+            await again.prompt("Still there?")
+            check(text_of(await again.reply()) == "Thanks for waiting.", "the resumed logic did not answer")
+            check(seen[1][1] == 2 and seen[1][0] == "Still there?", f"state or turn lost: {seen}")
+            session = seen[1][2]
+            check(session.call["custom_parameters"].get("resume") == "the hold music ended", "the note is not on session.call")
+            check({"role": "assistant", "content": "Thanks for waiting."} in session.history, "the greeting is not in history")
             # One session object for the whole call, pointed at the new socket.
             check(seen[1][2] is seen[0][2] and seen[1][2]._call is e.calls[-1], "the session was not kept and rebound")
             await again.ws.close()
@@ -1038,9 +1044,11 @@ async def real_logic(app: Any) -> None:
             await relay.ws.close()
             body = await e.next_step(end["handoffData"])
             check("<Say>" in body and 'name="resume"' in body, f"next_twiml did not hold and resume: {body}")
-            relay = await e.resumed("a short hold")
+            greeting = body.split('name="greeting" value="')[1].split('"')[0]
+            relay = await e.resumed("a short hold", greeting=greeting)
+            await relay.prompt("What was the very first thing I asked you on this call?")
             back = text_of(await relay.reply(timeout=40))
-            check(back.strip(), "the agent said nothing after the hold")
+            check("monday" in back.lower(), f"the agent forgot the call after the hold: {back!r}")
             print(f"  back after the hold: {back!r}")
 
         await relay.prompt("That's all, thank you. Goodbye.")
