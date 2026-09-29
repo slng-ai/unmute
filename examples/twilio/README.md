@@ -84,6 +84,11 @@ sequenceDiagram
    ([WebSocket messages](https://www.twilio.com/docs/voice/conversationrelay/websocket-messages)).
 5. When the session ends, Twilio calls `/connect-action` and the app hangs up.
 
+Twilio reaches `/voice` because the number's **A call comes in** is a webhook to
+`https://<your host>/voice`, `HTTP POST`. That one setting is all the routing
+there is, and `unmute deploy` writes it. The TwiML is the app's answer on each
+call. It is never stored in Twilio, and no TwiML Bin or TwiML App is involved.
+
 The app owns the conversation and the model call. Twilio owns the phone line and
 the speech. Twilio's own tutorials show the same split for
 [OpenAI](https://www.twilio.com/en-us/blog/developers/tutorials/product/integrate-openai-twilio-voice-using-conversationrelay-python)
@@ -239,6 +244,11 @@ twilio: no call was placed; call +15005550006 to check speech, the WebSocket and
 
 Deploy never places a call. `call_verified` in the report stays `false`: only a
 real call checks the speech path.
+
+To route by hand instead, open the number in the Console. Under **Voice
+Configuration**, set **A call comes in** to **Webhook**,
+`https://<your host>/voice`, **HTTP POST**, and save. That is all deploy writes,
+but by hand nothing checks the host runs this build, so check `/healthz` first.
 
 ## Make the call
 
