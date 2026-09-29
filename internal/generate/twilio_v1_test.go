@@ -42,7 +42,7 @@ var relayDesk = filepath.Join("..", "voice-agents-tests", "relay-desk")
 // Vertex in the acceptance package. Everything the driver writes is in them.
 func TestTwilioGolden(t *testing.T) {
 	for _, tc := range []struct{ dir, instance, golden string }{
-		{filepath.Join("..", "testdata", "twilio_relay"), "twilio", "twilio_v1_openai.txt"},
+		{filepath.Join("..", "testdata", "twilio"), "twilio", "twilio_v1_openai.txt"},
 		{relayDesk, "twilio-gemini", "twilio_v1_gemini_vertex.txt"},
 	} {
 		t.Run(tc.golden, func(t *testing.T) {
@@ -77,7 +77,7 @@ func TestTwilioGolden(t *testing.T) {
 func TestTwilioRegionReachesTheRunbook(t *testing.T) {
 	for _, region := range []string{"", "us1", "ie1", "au1"} {
 		t.Run(region, func(t *testing.T) {
-			pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio_relay"))
+			pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -149,7 +149,7 @@ func TestTwilioArtifactCarriesOnlyTheSelectedProvider(t *testing.T) {
 // The TwiML template is XML a parser reads back exactly, with the greeting's
 // quotes and ampersand intact, and every native setting the package asks for.
 func TestTwilioTwiMLTemplate(t *testing.T) {
-	artifact := twilioArtifact(t, filepath.Join("..", "testdata", "twilio_relay"), "twilio")
+	artifact := twilioArtifact(t, filepath.Join("..", "testdata", "twilio"), "twilio")
 	var doc struct {
 		Connect struct {
 			Action string `xml:"action,attr"`
@@ -200,7 +200,7 @@ func TestTwilioTwiMLTemplate(t *testing.T) {
 // Disabled interruption and a protected greeting map onto the documented
 // attribute values.
 func TestTwilioInterruptionSettings(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio_relay"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio"))
 	if err != nil {
 		t.Fatal(err)
 	}

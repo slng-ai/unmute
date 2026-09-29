@@ -4,4 +4,4 @@ targets:
   twilio:
     provider: twilio
     sdk_language: python
-    connection: twilio_relay
+    connection: twilio

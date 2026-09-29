@@ -1,4 +1,4 @@
-# twilio-conversation-relay
+# twilio
 
 A front desk that answers a Twilio phone number. Twilio ConversationRelay
 listens and speaks. A small Python app you host does the thinking, runs one
@@ -33,18 +33,18 @@ On this page:
 ## Quickstart
 
 ```sh
-unmute validate examples/twilio-conversation-relay
-unmute compile examples/twilio-conversation-relay
-cp examples/twilio-conversation-relay/build/twilio/.env.example \
-   examples/twilio-conversation-relay/.env        # then fill it in
+unmute validate examples/twilio
+unmute compile examples/twilio
+cp examples/twilio/build/twilio/.env.example \
+   examples/twilio/.env        # then fill it in
 
 # on the host, from the build folder:
-cd examples/twilio-conversation-relay/build/twilio
+cd examples/twilio/build/twilio
 uv run --env-file ../../.env python app.py
 
 # back where the package is, once the origin answers:
-unmute deploy examples/twilio-conversation-relay --target twilio --dry-run
-unmute deploy examples/twilio-conversation-relay --target twilio
+unmute deploy examples/twilio --target twilio --dry-run
+unmute deploy examples/twilio --target twilio
 ```
 
 Then call the number. Each step is explained below.
@@ -112,7 +112,7 @@ Skip the guide's TwiML App steps. This package points the number's own voice
 webhook at the app, and `unmute deploy` refuses a number that has a TwiML App.
 
 Collect four values from the Console. Their names are the connection's, in
-`connections/twilio_relay.yaml`:
+`connections/twilio.yaml`:
 
 | Name | Where it comes from | Who reads it |
 |---|---|---|
@@ -124,8 +124,8 @@ Collect four values from the Console. Their names are the connection's, in
 ## Compile and run the app
 
 ```sh
-unmute validate examples/twilio-conversation-relay
-unmute compile examples/twilio-conversation-relay
+unmute validate examples/twilio
+unmute compile examples/twilio
 ```
 
 `compile` writes a standalone app to `build/twilio/`: `app.py`, the TwiML
@@ -137,8 +137,8 @@ Put the values in the package's `.env`. The generated `.env.example` lists every
 name the app reads:
 
 ```sh
-cp examples/twilio-conversation-relay/build/twilio/.env.example \
-   examples/twilio-conversation-relay/.env
+cp examples/twilio/build/twilio/.env.example \
+   examples/twilio/.env
 ```
 
 Fill in `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PUBLIC_URL` and
@@ -148,15 +148,15 @@ commit `.env`.
 Start the app from the build folder:
 
 ```sh
-cd examples/twilio-conversation-relay/build/twilio
+cd examples/twilio/build/twilio
 uv run --env-file ../../.env python app.py
 ```
 
 Or as an image:
 
 ```sh
-docker build -t twilio-conversation-relay .
-docker run --env-file ../../.env -p 8080:8080 twilio-conversation-relay
+docker build -t twilio-agent .
+docker run --env-file ../../.env -p 8080:8080 twilio-agent
 ```
 
 The app listens on port 8080 (`PORT` changes it). It refuses to start while a
@@ -204,8 +204,8 @@ curl https://relay.example.com/healthz
 ## Point the number at it
 
 ```sh
-unmute deploy examples/twilio-conversation-relay --target twilio --dry-run
-unmute deploy examples/twilio-conversation-relay --target twilio
+unmute deploy examples/twilio --target twilio --dry-run
+unmute deploy examples/twilio --target twilio
 ```
 
 `--target twilio` is required. A bare `unmute deploy` means an SLNG deploy.
@@ -288,7 +288,7 @@ real key yet.
 
 Then:
 
-1. `unmute compile examples/twilio-conversation-relay`. The new build installs
+1. `unmute compile examples/twilio`. The new build installs
    `google-genai` in place of `openai`, and reads `GOOGLE_API_KEY` in place of
    `OPENAI_API_KEY`. Put the key in `.env` and in the host's environment.
 2. Stop the old app and start the new build at the same origin. Only one build
@@ -318,7 +318,7 @@ without changing it. The contract and a worked Pydantic AI example are in
 ## Use another Twilio region
 
 Twilio handles calls in US1 by default. To keep the calls in Ireland (IE1) or
-Australia (AU1), name the region in `connections/twilio_relay.yaml`:
+Australia (AU1), name the region in `connections/twilio.yaml`:
 
 ```yaml
 transport: conversation-relay
@@ -370,8 +370,8 @@ carry a secret, so only you can read it.
 | `tools/opening_hours.yaml` | The tool's flat input and output schemas. |
 | `handlers/opening_hours.py` | The handler: a fixed weekly table. |
 | `tools/end_call.yaml` | The builtin that ends the call. |
-| `targets.yaml` | One `twilio` target on the `twilio_relay` connection. |
-| `connections/twilio_relay.yaml` | Transport `conversation-relay`, carrier `twilio`, and the four environment names. |
+| `targets.yaml` | One `twilio` target on the `twilio` connection. |
+| `connections/twilio.yaml` | Transport `conversation-relay`, carrier `twilio`, and the four environment names. |
 
 ## What it does not do
 

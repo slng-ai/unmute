@@ -13,7 +13,7 @@ caller -> your Twilio number -> POST /voice -> ConversationRelay <-> wss:// your
 ```
 
 Every command below uses the
-[twilio-conversation-relay example](https://github.com/slng-ai/unmute/tree/main/examples/twilio-conversation-relay):
+[twilio example](https://github.com/slng-ai/unmute/tree/main/examples/twilio):
 a front desk with one tool, `opening_hours`, and `end_call`. To start your own
 package in the same shape, run:
 
@@ -71,8 +71,8 @@ The connection names four environment values:
 ## 1. Compile
 
 ```sh
-unmute validate examples/twilio-conversation-relay
-unmute compile examples/twilio-conversation-relay
+unmute validate examples/twilio
+unmute compile examples/twilio
 ```
 
 `build/twilio/` now holds `app.py`, the TwiML
@@ -121,7 +121,7 @@ flowchart LR
    ```sh
    mkdir relay-test
    rsync -a --exclude .venv --exclude uv.lock --exclude __pycache__ --exclude .env \
-     examples/twilio-conversation-relay/build/twilio/ relay-test/
+     examples/twilio/build/twilio/ relay-test/
    cd relay-test
    printf '.env\n.venv/\n__pycache__/\n' > .gitignore
    git init -b main && git add -A && git commit -m "Compiled twilio target"
@@ -213,8 +213,8 @@ export TWILIO_PUBLIC_URL=https://relay-test.onrender.com
 Then run it twice, first as a dry run:
 
 ```sh
-unmute deploy examples/twilio-conversation-relay --target twilio --dry-run
-unmute deploy examples/twilio-conversation-relay --target twilio
+unmute deploy examples/twilio --target twilio --dry-run
+unmute deploy examples/twilio --target twilio
 ```
 
 `--target` is required, because a bare `unmute deploy` is an SLNG deploy. The

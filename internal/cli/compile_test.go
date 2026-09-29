@@ -594,7 +594,7 @@ func TestCompileNamesTheLiveModelAndItsBackendInTheReport(t *testing.T) {
 // before the old build is touched, and the file never moves the artifact id.
 func TestCompileCopiesTheHostingFolder(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "twilio_relay"))); err != nil {
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "twilio"))); err != nil {
 		t.Fatal(err)
 	}
 	hosting := filepath.Join(dir, "hosting", "twilio")

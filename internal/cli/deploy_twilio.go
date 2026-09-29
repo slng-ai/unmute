@@ -342,7 +342,7 @@ func artifactContent(artifact generate.Artifact, path string) []byte {
 // No model key is read: the model runs on the host, not here.
 func twilioConfigFrom(resolved ir.Target, env []string) (twilioConfig, error) {
 	if resolved.Telephony == nil {
-		return twilioConfig{}, errors.New("no telephony plan; the connection must be a twilio_relay connection")
+		return twilioConfig{}, errors.New("no telephony plan; the connection must have transport: conversation-relay")
 	}
 	names := resolved.Telephony.Environment
 	var missing []string

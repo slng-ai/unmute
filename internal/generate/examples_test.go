@@ -1423,7 +1423,7 @@ func TestPublicExamplePackages(t *testing.T) {
 		"takeaway-orders",
 		// The one twilio target example: a ConversationRelay app the reader
 		// hosts, on a phone number and nothing else.
-		"twilio-conversation-relay",
+		"twilio",
 	}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)

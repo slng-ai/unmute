@@ -663,9 +663,9 @@ targets:
   twilio:
     provider: twilio
     sdk_language: python
-    connection: twilio_relay
+    connection: twilio
 
-# connections/twilio_relay.yaml
+# connections/twilio.yaml
 transport: conversation-relay
 carrier: twilio
 environment:

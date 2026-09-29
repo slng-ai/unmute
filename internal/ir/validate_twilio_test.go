@@ -13,7 +13,7 @@ import (
 // test that breaks one thing knows the error came from the thing it broke.
 func twilioAgent(t *testing.T) *Agent {
 	t.Helper()
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "twilio_relay"))
+	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "twilio"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestTwilioRegionReachesThePlan(t *testing.T) {
 		{"eu", "", `region "eu" is not a Twilio Region; use one of us1, ie1, au1`},
 	} {
 		t.Run(tc.region, func(t *testing.T) {
-			pkg, err := packagespec.Load(filepath.Join("..", "testdata", "twilio_relay"))
+			pkg, err := packagespec.Load(filepath.Join("..", "testdata", "twilio"))
 			if err != nil {
 				t.Fatal(err)
 			}

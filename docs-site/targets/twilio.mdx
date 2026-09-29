@@ -1,5 +1,5 @@
 ---
-title: "The Twilio ConversationRelay app"
+title: "The Twilio target"
 description: "What unmute compile writes for a twilio target, what the package may carry, how to host the app, and how unmute deploy points a number at it."
 sidebarTitle: "Twilio"
 ---
@@ -156,10 +156,10 @@ targets:
   twilio:
     provider: twilio
     sdk_language: python
-    connection: twilio_relay
+    connection: twilio
 ```
 
-```yaml connections/twilio_relay.yaml
+```yaml connections/twilio.yaml
 transport: conversation-relay
 carrier: twilio
 environment:
@@ -550,7 +550,7 @@ folder of your own Python:
 targets:
   twilio:
     provider: twilio
-    connection: twilio_relay
+    connection: twilio
     logic: logic/
 ```
 

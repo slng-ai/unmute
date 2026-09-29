@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-var twilioExample = filepath.Join("..", "..", "examples", "twilio-conversation-relay")
+var twilioExample = filepath.Join("..", "..", "examples", "twilio")
 
 // yamlFence is one ```yaml block of a README.
 var yamlFence = regexp.MustCompile("(?s)```yaml\n(.*?)```")

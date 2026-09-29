@@ -301,7 +301,7 @@ its own gate:
    (`TestSkillBundleNamesRealCommands`).
 
 Twilio's are [README.md.tmpl](internal/generate/templates/twilio_v1/README.md.tmpl), the public
-example's [README](examples/twilio-conversation-relay/README.md) and the acceptance package's
+example's [README](examples/twilio/README.md) and the acceptance package's
 [README](internal/voice-agents-tests/relay-desk/README.md), the walkthrough
 [docs-site/telephony/twilio-conversation-relay.mdx](docs-site/telephony/twilio-conversation-relay.mdx),
 [docs-site/targets/twilio.mdx](docs-site/targets/twilio.mdx), and the "The twilio target" section of
@@ -389,7 +389,7 @@ is what this repository dials against to prove the target's whole first-release 
 bar: it validates and generates on every target it declares.
 
 The public example,
-[examples/twilio-conversation-relay](examples/twilio-conversation-relay), is the same desk with one
+[examples/twilio](examples/twilio), is the same desk with one
 `twilio` target on OpenAI. Its README carries the Gemini block to paste in, and
 `TestTwilioExampleCompilesOnBothThinkProviders` compiles that exact block, so the page cannot drift
 from a binding that builds.

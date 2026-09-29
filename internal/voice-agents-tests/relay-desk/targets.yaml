@@ -2,7 +2,7 @@ targets:
   twilio-openai:
     provider: twilio
     sdk_language: python
-    connection: twilio_relay
+    connection: twilio
 
   # The same agent thinking on Gemini through Vertex AI in the EU, the path the
   # repository's GOOGLE_API_KEY reaches. Without vertexai the binding would use
@@ -10,7 +10,7 @@ targets:
   twilio-gemini:
     provider: twilio
     sdk_language: python
-    connection: twilio_relay
+    connection: twilio
     models:
       reasoning:
         provider: google
@@ -26,7 +26,7 @@ targets:
   twilio-slng:
     provider: twilio
     sdk_language: python
-    connection: twilio_relay
+    connection: twilio
     models:
       reasoning:
         provider: slng
@@ -44,5 +44,5 @@ targets:
   twilio-logic:
     provider: twilio
     sdk_language: python
-    connection: twilio_relay
+    connection: twilio
     logic: logic/
