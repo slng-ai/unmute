@@ -6,6 +6,10 @@ const (
 	LiveKit Provider = "livekit"
 	Pipecat Provider = "pipecat"
 	Slng    Provider = "slng"
+	// Twilio emits a standalone Python web app that Twilio ConversationRelay
+	// calls. ConversationRelay listens and speaks; the app thinks and runs
+	// tools. Its rows live in twilio_target.go.
+	Twilio Provider = "twilio"
 )
 
 // Providers is every target a package may name. A provider earns a place here by
@@ -18,7 +22,7 @@ const (
 // runnable project; slng emits a deployment body for a platform that runs the
 // agent, which is a complete output of a different shape (constitution 6.0.0).
 // What is still forbidden is a provider that validates and produces nothing.
-var Providers = []Provider{LiveKit, Pipecat, Slng}
+var Providers = []Provider{LiveKit, Pipecat, Slng, Twilio}
 
 // Retired names a provider this repository used to accept as a target. The
 // value is what to tell the author, because "unknown provider" is true and
@@ -32,6 +36,10 @@ var Retired = map[Provider]string{
 	"deepgram": "the deepgram target never emitted a runnable project and was retired on 2026-08-24; deepgram remains available as a model vendor, for example slng/deepgram/nova:3-en",
 }
 
+// IsCode reports whether a provider is a framework code target: a project built
+// on LiveKit Agents or Pipecat, with a framework version to pin and one worker
+// per session. The twilio target emits a project too, but on no framework, so it
+// is EmitsProject and not IsCode.
 func IsCode(provider Provider) bool {
 	return provider == LiveKit || provider == Pipecat
 }
@@ -42,8 +50,12 @@ func IsCode(provider Provider) bool {
 // and version here", which is what every caller was really asking. It is what
 // separates a target that has a `dev`, a framework version and dependency pins
 // from one that has none of the three.
+//
+// Twilio emits a runnable project that hosts the package's tools, so it answers
+// yes. It has no framework, so it has no version window and no author pins; the
+// framework half of the question is IsCode.
 func EmitsProject(provider Provider) bool {
-	return provider == LiveKit || provider == Pipecat
+	return provider == LiveKit || provider == Pipecat || provider == Twilio
 }
 
 type Tag string
@@ -257,7 +269,7 @@ func (t Table) Control(control TelephonyControl, provider Provider, transport, c
 // so nothing is fixed. SLNG has no per-tool setting at all and denies the field
 // outright, which is a different answer and stays in its own row.
 func FixedToolInterruption(provider Provider) string {
-	if provider == LiveKit {
+	if provider == LiveKit || provider == Twilio {
 		return "continue"
 	}
 	return ""
@@ -282,7 +294,7 @@ func (t Table) HistorySupport(history History, provider Provider) HistorySupport
 }
 
 func Default() Table {
-	return Table{
+	return addTwilio(Table{
 		Fields: map[Field]map[Provider]Capability{
 			FieldListenLocal: field(deny(Slng, slngNoPlacement("listen"))),
 			FieldSpeakLocal:  field(deny(Slng, slngNoPlacement("speak"))),
@@ -820,7 +832,7 @@ func Default() Table {
 		FallbackSlots: map[Provider]FallbackSlot{
 			LiveKit: FallbackComponent, Pipecat: FallbackGenerated, Slng: FallbackComponent,
 		},
-	}
+	})
 }
 
 // slngNoPlacement, slngNoTasks and slngNoHandoff each carry one reason shared by
@@ -933,10 +945,14 @@ func allow(provider Provider) override {
 // Leaving Slng out makes TestDefaultTableIsCompleteAndTyped, which already
 // existed, fail once per undecided row until a person writes an answer. No new
 // test buys 48 forced decisions.
+//
+// Twilio is left out the same way, and it is why this seeds IsCode and not
+// EmitsProject: twilio emits a project, and seeding it would grant it every row.
+// Its answers live in one block, twilioFields in twilio_target.go.
 func field(overrides ...override) map[Provider]Capability {
 	values := make(map[Provider]Capability, len(Providers))
 	for _, provider := range Providers {
-		if !EmitsProject(provider) {
+		if !IsCode(provider) {
 			continue
 		}
 		values[provider] = Capability{Tag: Core}

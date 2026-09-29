@@ -96,16 +96,21 @@ Both blocks have no fields, but YAML still needs an explicit body: write
 
 ## How each target treats a tool
 
-| Tool kind | LiveKit | Pipecat | SLNG |
-|---|---|---|---|
-| `webhook:` | yes | yes | yes |
-| `local:` | yes | yes | **no** |
-| `builtin:` | yes | yes | yes |
-| `mcp:` | yes | yes | yes |
-| `slng:` | yes | yes | yes |
-| `knowledge:` | yes | yes | **no** |
-| `client:` | no | no | no |
-| `provider_hosted:` | no | no | no |
+| Tool kind | LiveKit | Pipecat | SLNG | Twilio |
+|---|---|---|---|---|
+| `webhook:` | yes | yes | yes | **no** |
+| `local:` | yes | yes | **no** | yes |
+| `builtin:` | yes | yes | yes | yes |
+| `mcp:` | yes | yes | yes | **no** |
+| `slng:` | yes | yes | yes | **no** |
+| `knowledge:` | yes | yes | **no** | **no** |
+| `client:` | no | no | no | no |
+| `provider_hosted:` | no | no | no | no |
+
+On Twilio, a `local:` tool needs flat `input` and `output` schemas, and the only
+builtin is `end_call`. The target runs one agent with no tasks, and it refuses
+`announce` and `interruption: cancel`. [The Twilio target](/targets/twilio#what-the-package-may-carry)
+lists every refusal.
 
 The same tool file compiles to three different runtimes, and they do not all
 support the same things. This table is the capability table, which is what the

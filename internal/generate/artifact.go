@@ -95,6 +95,16 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		artifact.Notes.Notes = append(artifact.Notes.Notes, knowledgeNotes(agent)...)
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
 		return withManifestReport(artifact, agent)
+	case ir.ProviderTwilio:
+		emitted, err := GenerateTwilio(agent, resolved, report.ForwardedBindings, report.Sizing)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("generate %s twilio: %w", resolved.Name, err)
+		}
+		artifact.Files, err = withTelephonyReport(emitted.Files, artifact.Telephony)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("generate %s twilio: %w", resolved.Name, err)
+		}
+		return withManifestReport(artifact, agent)
 	case ir.ProviderSlng:
 		// No withTelephonyReport: unmute writes slng no carrier state, so there is
 		// no route plan to report and Telephony is nil above.
@@ -172,7 +182,7 @@ func targetDiagnostics(report ir.ValidateReport) string {
 
 func artifactKind(provider ir.Provider) ArtifactKind {
 	switch provider {
-	case ir.ProviderLiveKit, ir.ProviderPipecat:
+	case ir.ProviderLiveKit, ir.ProviderPipecat, ir.ProviderTwilio:
 		return CodeTarget
 	case ir.ProviderSlng:
 		return BodyTarget

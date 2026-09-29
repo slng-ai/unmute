@@ -3407,11 +3407,6 @@ func TestValidateWarnsOnTurnFieldsThatReachNothing(t *testing.T) {
 		want []string
 	}{
 		{
-			name:  "params",
-			model: ModelDef{Kind: KindTurn, Params: map[string]any{"alpha": 0.5}},
-			want:  []string{"alpha", "no target reads", "pace", "endpointing_delay"},
-		},
-		{
 			name:  "agent_id",
 			model: ModelDef{Kind: KindTurn, AgentID: "turn-v1"},
 			want:  []string{"agent_id", "no target reads", "think binding"},
@@ -3492,5 +3487,25 @@ func TestValidateWarnsOnASilentListenOpening(t *testing.T) {
 		if strings.Contains(warning, "opens by listening") {
 			t.Errorf("a step with an announce still warns: %s", warning)
 		}
+	}
+}
+
+// Turn params are dead on every target but twilio, which forwards them to
+// ConversationRelay, so the warning is per target and twilio never gets it.
+func TestTurnParamsWarnPerTarget(t *testing.T) {
+	agent := &Agent{Models: map[string]ModelDef{
+		"detector": {Kind: KindTurn, Params: map[string]any{"alpha": 0.5}},
+	}}
+	got := turnParamsWarning(agent, targetcap.LiveKit)
+	if len(got) != 1 {
+		t.Fatalf("livekit: want one warning, got %v", got)
+	}
+	for _, want := range []string{"alpha", "livekit target does not read", "pace", "endpointing_delay"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("warning does not name %q: %q", want, got[0])
+		}
+	}
+	if got := turnParamsWarning(agent, targetcap.Twilio); len(got) > 0 {
+		t.Errorf("twilio reads turn params, so it must not warn: %v", got)
 	}
 }

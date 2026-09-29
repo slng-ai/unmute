@@ -27,7 +27,7 @@ Open the first matching reference; load another only when needed.
 | `references/latency.md` | the brief is make it faster, it feels slow, or optimize the agent |
 | `references/telephony.md` | answering or placing a phone call |
 | `references/transfers.md` | sending a phone caller to a person |
-| `references/deploy.md` | hosting a compiled livekit or pipecat project; an slng push is the `unmute-deploy` skill |
+| `references/deploy.md` | hosting a compiled livekit or pipecat project; an slng push is the `unmute-deploy` skill; a twilio app is "The twilio target" in `references/package.md` |
 | `references/examples.md` | starting from the closest working package |
 
 ## Choose the structure before files

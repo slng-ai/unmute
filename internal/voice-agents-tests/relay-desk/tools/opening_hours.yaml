@@ -1,0 +1,33 @@
+description: >-
+  Return the front desk's opening hours for one day of the week. Read-only.
+
+input:
+  type: object
+  properties:
+    day:
+      type: string
+      description: The day of the week the caller asked about.
+      enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday]
+  required:
+    - day
+  additionalProperties: false
+
+output:
+  type: object
+  properties:
+    day:
+      type: string
+    open:
+      type: boolean
+    opens:
+      type: string
+      description: Opening time as HH:MM, empty when closed.
+    closes:
+      type: string
+      description: Closing time as HH:MM, empty when closed.
+  required: [day, open, opens, closes]
+
+local:
+  handler: handlers/opening_hours.py
+
+effect: returns_data

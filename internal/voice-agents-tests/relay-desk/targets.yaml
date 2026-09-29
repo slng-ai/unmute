@@ -1,0 +1,22 @@
+targets:
+  twilio-openai:
+    provider: twilio
+    sdk_language: python
+    connection: twilio_relay
+
+  # The same agent thinking on Gemini through Vertex AI in the EU, the path the
+  # repository's GOOGLE_API_KEY reaches. Without vertexai the binding would use
+  # the Gemini Developer API, which has no real-key evidence yet.
+  twilio-gemini:
+    provider: twilio
+    sdk_language: python
+    connection: twilio_relay
+    models:
+      reasoning:
+        provider: google
+        model: gemini-3.1-flash-lite
+        params:
+          vertexai: true
+          location: eu
+          thinking_config:
+            thinking_level: MINIMAL

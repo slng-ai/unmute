@@ -410,7 +410,8 @@ func noSlngTargetGuidance(selected []ir.Target) string {
 	return fmt.Sprintf("no slng target to deploy; this package declares %s\n"+
 		"  deploy pushes to SLNG, which hosts the agent itself. Add a target to targets.yaml:\n"+
 		"    targets:\n      slng:\n        provider: slng\n        deployment_region: eu-north\n"+
-		"  a livekit or pipecat target is compiled with `unmute compile` and deployed by that platform's own tool.", have)
+		"  a livekit or pipecat target is compiled with `unmute compile` and deployed by that platform's own tool.\n"+
+		"  a twilio target is compiled with `unmute compile` and hosted by you; its README says how.", have)
 }
 
 func missingPushToolGuidance() string {

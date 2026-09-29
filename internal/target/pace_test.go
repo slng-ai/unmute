@@ -11,8 +11,8 @@ import "testing"
 
 func TestEveryPaceHasACompleteRowForEveryTargetThatReadsOne(t *testing.T) {
 	for _, provider := range Providers {
-		if !EmitsProject(provider) {
-			// Slng owns its own turn taking, so it reads no profile. The capability
+		if !IsCode(provider) {
+			// Slng and twilio own no turn window, so they read no profile. The capability
 			// row denies FieldPace, which is the gate for that.
 			continue
 		}
@@ -86,7 +86,7 @@ func TestEveryPipecatFloorIsExactlyTheMeasuredValue(t *testing.T) {
 
 func TestUnsetPaceResolvesToBalancedRatherThanZero(t *testing.T) {
 	for _, provider := range Providers {
-		if !EmitsProject(provider) {
+		if !IsCode(provider) {
 			continue
 		}
 		if unset, balanced := ResolvePace(provider, ""), ResolvePace(provider, PaceBalanced); unset != balanced {
@@ -99,7 +99,7 @@ func TestFasterPacesAreActuallyFaster(t *testing.T) {
 	// A table where patient is snappier than snappy is a table someone typed in
 	// the wrong order, and nothing else here would catch it.
 	for _, provider := range Providers {
-		if !EmitsProject(provider) {
+		if !IsCode(provider) {
 			continue
 		}
 		snappy := ResolvePace(provider, PaceSnappy)

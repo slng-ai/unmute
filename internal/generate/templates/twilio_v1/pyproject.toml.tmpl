@@ -1,0 +1,18 @@
+[project]
+name = {{pyq .Project}}
+version = "0.1.0"
+description = "Generated Twilio ConversationRelay voice agent (compiled by unmute)."
+requires-python = ">={{.Python}},<3.13"
+# Exact pins: the versions unmute last checked this app against. aiohttp also
+# arrives with twilio; it is named because app.py imports it.
+dependencies = [
+{{- range .Deps}}
+    "{{.}}",
+{{- end}}
+]
+
+[dependency-groups]
+dev = ["ruff==0.15.7", "ty"]
+
+[tool.uv]
+package = false

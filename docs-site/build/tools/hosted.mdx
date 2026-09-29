@@ -207,7 +207,8 @@ unmute compile my-agent --target livekit
 ```
 
 The reference line is the portable part. `slng: check_order` is the same on
-all three targets, and nothing about the tool file changes between them.
+livekit, pipecat and slng, and nothing about the tool file changes between
+them. The twilio target refuses hosted tools.
 
 What does not travel is one package selecting slng **and** a code target at
 once. A code target needs a `turn:` binding to place its end-of-turn detector,

@@ -510,6 +510,15 @@ func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-
 			want: "environment variable name",
 		},
 		{
+			name: "region off a relay route",
+			mutate: func(pkg *packagespec.Package) {
+				connection := pkg.Connections["primary_phone"]
+				connection.Region = "ie1"
+				pkg.Connections["primary_phone"] = connection
+			},
+			want: "only a twilio conversation-relay route has a Twilio Region",
+		},
+		{
 			name: "missing route environment key",
 			mutate: func(pkg *packagespec.Package) {
 				enableTelephony(pkg)

@@ -4,8 +4,8 @@ description: "What a target is, what targets.yaml holds, and how one package com
 ---
 
 A target is where your agent runs. Unmute compiles one package into a native
-project for the target you pick: Pipecat, LiveKit, or SLNG. Two are code
-targets, and one is hosted.
+project for the target you pick: Pipecat, LiveKit, SLNG, or Twilio. Two are
+framework code targets, one is hosted, and one is a small phone app.
 
 **Pipecat** and **LiveKit** are code targets: `unmute compile` writes a
 Python project you own, host and run.
@@ -14,7 +14,12 @@ Python project you own, host and run.
 pushes it, and SLNG runs the agent. There is nothing to host and no
 `unmute dev`.
 
-Those three are the only values `provider` accepts.
+**Twilio** writes a small Python app that Twilio ConversationRelay calls.
+Twilio does the listening and speaking, the app thinks and runs tools, and
+you host it. It answers inbound phone calls only, and has no `unmute dev`.
+See [The Twilio ConversationRelay app](/targets/twilio).
+
+Those four are the only values `provider` accepts.
 
 On this page:
 
@@ -52,8 +57,8 @@ is yours: a package with two Twilio setups might call them `pipecat_twilio` and
 
 One is required everywhere. The rest depend on the provider you chose.
 
-<ParamField path="provider" type="livekit | pipecat | slng" required>
-  Which runtime this instance compiles for. Those three names are the whole
+<ParamField path="provider" type="livekit | pipecat | slng | twilio" required>
+  Which runtime this instance compiles for. Those four names are the whole
   list. `vapi` and `deepgram` were target names once, and both are now refused
   by name.
 </ParamField>
@@ -61,7 +66,8 @@ One is required everywhere. The rest depend on the provider you chose.
 <ParamField path="version" type="exact framework version">
   The framework release an emitted project pins, written with all three
   numbers. Required on `livekit` and `pipecat`. Refused on `slng`, which owns
-  the version its agents run on.
+  the version its agents run on, and on `twilio`, whose app runs on no
+  framework and pins its own packages.
 </ParamField>
 
 <ParamField path="sdk_language" type="python">
@@ -73,13 +79,13 @@ One is required everywhere. The rest depend on the provider you chose.
 <ParamField path="pins" type="package name to version">
   Package versions for the emitted LiveKit project, limited to names the
   LiveKit driver knows. Pipecat reads none of them, so leave it out there.
-  Refused on `slng`.
+  Refused on `slng` and `twilio`.
 </ParamField>
 
 <ParamField path="connection" type="connection file stem">
   The one [connection file](/reference/connections-yaml) carrying this target's
-  phone calls. Required once the package declares a phone channel on `livekit`
-  or `pipecat`, and refused when nothing in the package uses a phone route.
+  phone calls. Required once the package declares a phone channel on `livekit`,
+  `pipecat` or `twilio`, and refused when nothing in the package uses a phone route.
   Refused on `slng`, which has no carrier state in a package.
 </ParamField>
 
@@ -87,12 +93,13 @@ One is required everywhere. The rest depend on the provider you chose.
   LiveKit accepts `us-east`, `eu-central`, or `ap-south`, singly or in a duplicate-free list.
   Pipecat forwards one non-empty platform region. Both use platform placement when omitted.
   SLNG requires one of its [13 world parts](/targets/slng#targets-yaml); no default is inferred.
+  Twilio refuses it: you choose where its one process runs.
 </ParamField>
 
 <ParamField path="warm_instances" type="integer, zero or more" default="0">
   Instances the platform holds ready, so the first call after a quiet period is
-  not waiting for a container to start. Pipecat only: LiveKit and `slng` refuse
-  a stated pool. Left out means none, and the platform scales to zero when idle.
+  not waiting for a container to start. Pipecat only: LiveKit, `slng` and
+  `twilio` refuse a stated pool. Left out means none, and the platform scales to zero when idle.
 </ParamField>
 
 <ParamField path="models" type="model entry name to a model definition">
@@ -230,5 +237,8 @@ browser agent, either.
   </Card>
   <Card title="The SLNG deployment body" icon="cloud" href="/targets/slng">
     What `build/slng/` contains, and what SLNG runs for you.
+  </Card>
+  <Card title="The Twilio ConversationRelay app" icon="phone" href="/targets/twilio">
+    What a twilio target writes, and how to host it.
   </Card>
 </CardGroup>

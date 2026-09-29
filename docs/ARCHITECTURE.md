@@ -42,7 +42,7 @@ spec.Load -> ir.Build -> ir.Validate -> generate.Generate
                                   Target-native project
                                               |
                                               v
-                                      LiveKit or Pipecat
+                                LiveKit, Pipecat, SLNG or Twilio
 ```
 
 Four rules hold the boundary:
@@ -89,10 +89,18 @@ behavior is expressed in one framework.
   rooms, and job dispatch.
 - **Pipecat** emits `bot.py`. The generated process owns both its network
   endpoint and conversation pipeline.
+- **Twilio** emits `app.py`, a web app on no agent framework. Twilio
+  ConversationRelay owns speech and turn taking; the app owns the history, the
+  tools and call admission. Its facts and refusals live in
+  `internal/target/twilio_target.go` and `internal/ir/validate_twilio.go`.
+- **SLNG** emits a deployment body and a runbook, not a project. The platform
+  runs the agent.
 
-Both outputs are normal Python projects with pinned dependencies, a
-Dockerfile, a compile report, and a generated runbook. They can run without
-Unmute after compilation.
+The three project outputs are normal Python projects with pinned dependencies,
+a Dockerfile, a compile report, and a generated runbook. They can run without
+Unmute after compilation. `target.EmitsProject` answers "is there a project";
+`target.IsCode` answers "is it built on LiveKit or Pipecat", which is what a
+framework version, author pins and a worker per session need.
 
 ## Runtime topology
 
@@ -138,17 +146,39 @@ and WebSocket front door. Routes that need shared call coordination use Redis
 for bounded records such as call correlation, idempotency, transfers, and
 admission counters.
 
+### Twilio ConversationRelay
+
+```text
+Caller --PSTN--> Twilio ConversationRelay <--WSS text--> generated app.py
+                  (speech, turn taking)                   |- signed routes
+                                                          |- history and tools
+                                                          `- OpenAI or Gemini
+```
+
+One process and one replica. Admission is an in-process counter bounded by
+`capacity.max_sessions`, so there is no Redis and no shared store. Every
+request is checked against Twilio's signature, built from the configured
+public origin rather than request headers. The app keeps one reader and one
+response owner per call; a generation number drops speech an interrupt made
+obsolete. A tool handler is never cancelled, and its call slot stays taken
+until it really ends. The number's webhook is pointed at the app by the
+operator; nothing here writes to the Twilio account.
+
 ### Where a phone call is exercised
 
 Nowhere on the developer's machine. A phone call reaches an agent that is
-deployed, and every telephony route this compiler emits deploys to a managed
-platform:
+deployed:
 
 ```text
 LiveKit `sip`        LiveKit `connector`      LiveKit Cloud
 Pipecat `cloud-websocket`                     Pipecat Cloud
 Pipecat `daily-sip`                           Pipecat Cloud
+Twilio `conversation-relay`                   a public HTTPS host you run
 ```
+
+The twilio target has no browser loop at all: Twilio does its speech, and only
+reaches a public origin. `scripts/text_run_twilio.py` drives its protocol with a
+signed fake ConversationRelay client instead.
 
 So there is one local loop, the browser, and it is the whole of `unmute dev`. It
 exercises the prompt, the tools, the models and the turn-taking, and it stops

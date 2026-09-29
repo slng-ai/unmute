@@ -525,6 +525,7 @@ func createTargetOptions() []menuChoice {
 		string(targetcap.Pipecat): "Pipecat  ·  generated code project",
 		string(targetcap.LiveKit): "LiveKit  ·  generated code project",
 		string(targetcap.Slng):    "SLNG  ·  hosted, deployment body only",
+		string(targetcap.Twilio):  "Twilio  ·  ConversationRelay app you host, phone only",
 	})
 }
 
@@ -537,6 +538,7 @@ func maintainTargetOptions(current string) []menuChoice {
 		string(targetcap.Pipecat): "Pipecat",
 		string(targetcap.LiveKit): "LiveKit",
 		string(targetcap.Slng):    "SLNG",
+		string(targetcap.Twilio):  "Twilio",
 	})
 }
 
@@ -564,6 +566,8 @@ func targetLabel(provider string) string {
 		return "Pipecat"
 	case targetcap.Slng:
 		return "SLNG"
+	case targetcap.Twilio:
+		return "Twilio"
 	}
 	return provider
 }
@@ -2922,7 +2926,12 @@ func advancedTargetFields(data *scaffold.Data, regions *string) []advancedField 
 	region := advancedField{"Deployment region (optional)", "Where the platform deploys the agent; forwarded as declared. One region, or several separated by commas for one deployment per region (LiveKit only).", regions, validateBasic, func(value string) {
 		data.DeploymentRegions = parsePhrases(value)
 	}}
-	if !targetcap.EmitsProject(targetcap.Provider(data.Target)) {
+	// Twilio emits a project on no framework, so it takes no version, no pins
+	// and no region; the SDK language is the one setting it reads.
+	if targetcap.Provider(data.Target) == targetcap.Twilio {
+		return []advancedField{{"SDK language (optional)", "python is the only language the twilio target emits.", &data.SDKLanguage, validateBasic, nil}}
+	}
+	if !targetcap.IsCode(targetcap.Provider(data.Target)) {
 		return []advancedField{region}
 	}
 	return []advancedField{

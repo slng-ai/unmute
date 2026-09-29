@@ -16,8 +16,9 @@ If it is just an authenticated HTTP call, use
 [a webhook tool](/build/tools/webhook) instead. It needs no code from you and no
 code review.
 
-A `local:` handler works on livekit and pipecat. It is refused on an slng
-target: SLNG owns a tool's code, version and gate pipeline, so a handler of
+A `local:` handler works on livekit and pipecat, and on twilio when its `input`
+and `output` schemas are flat ([the Twilio target](/targets/twilio)). It is
+refused on an slng target: SLNG owns a tool's code, version and gate pipeline, so a handler of
 yours has nowhere to run there. Reference a tool your organisation already has
 on the platform with [`slng:`](/build/tools/hosted) instead.
 

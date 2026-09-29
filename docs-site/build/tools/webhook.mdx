@@ -15,8 +15,9 @@ Reach for a webhook when:
 If the work is logic rather than a request, or there is no API to call, write a
 [Python handler](/build/tools/python) instead.
 
-A `webhook:` tool works on livekit and pipecat. It is refused on an slng
-target: SLNG owns a tool's code, version and gate pipeline, so there is
+A `webhook:` tool works on livekit and pipecat. The twilio target refuses it:
+move the request into a [Python handler](/build/tools/python). It is also
+refused on an slng target: SLNG owns a tool's code, version and gate pipeline, so there is
 nowhere in a package for a URL and its credential to write to there.
 Reference a tool your organisation already has on the platform with
 [`slng:`](/build/tools/hosted) instead.

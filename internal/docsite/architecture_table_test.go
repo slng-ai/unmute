@@ -39,7 +39,7 @@ var architectureTableRows = []struct {
 }
 
 // The columns, in the order the header lists them.
-var architectureTableColumns = []target.Provider{target.LiveKit, target.Pipecat, target.Slng}
+var architectureTableColumns = []target.Provider{target.LiveKit, target.Pipecat, target.Slng, target.Twilio}
 
 var architectureRowPattern = regexp.MustCompile("^\\|\\s*(`[a-z]+`)\\s*\\|(.*)\\|\\s*$")
 

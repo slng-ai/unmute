@@ -374,3 +374,17 @@ func TestDevWithNoArgumentOutsideAPackageExplainsItself(t *testing.T) {
 		t.Fatalf("dev must explain itself, not print the cobra arity error: %v", err)
 	}
 }
+
+// A twilio target has no browser loop, and `dev` says so before it writes or
+// starts anything, naming the runbook to follow instead.
+func TestDevRefusesATwilioTargetTruthfully(t *testing.T) {
+	_, err := run(t, "dev", filepath.Join("..", "testdata", "twilio_relay"), "--target", "twilio", "--no-open")
+	if err == nil {
+		t.Fatal("dev accepted a twilio target")
+	}
+	for _, want := range []string{"no local browser loop", "public https origin", "build/twilio/README.md"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("dev refusal does not say %q: %v", want, err)
+		}
+	}
+}
