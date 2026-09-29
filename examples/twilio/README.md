@@ -91,6 +91,12 @@ no call. Twilio requires a reachable secure WebSocket service; FastAPI is
 Unmute's implementation choice. See the [target reference](../../docs-site/targets/twilio.mdx)
 for supported configuration and rollback.
 
+The example defaults to Twilio's United States region (`us1`). Ireland (`ie1`)
+and Australia (`au1`) are also supported; follow the
+[regional setup](../../docs-site/targets/twilio.mdx#regional-configuration)
+for the matching Auth Token, connection setting, and number routing. This
+selection is separate from the app host and SLNG's region.
+
 ## SLNG Context Router
 
 `agent.yaml` defaults to SLNG in `eu-west`, with OpenAI upstream. The router

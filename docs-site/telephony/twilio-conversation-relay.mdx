@@ -26,6 +26,12 @@ deploy the app to your host → connect the Twilio number**. You choose the host
 4. Use a number without a TwiML App, SIP trunk, or voice fallback URL. These
    conflict with the webhook; Unmute refuses to overwrite them.
 
+ConversationRelay supports **United States (`us1`, the default), Ireland
+(`ie1`), and Australia (`au1`)**. This is where Twilio processes calls, separate
+from your app host and SLNG's `world_part`. For Ireland, use the
+[regional setup steps](/targets/twilio#regional-configuration) before connecting
+the number. See [Twilio's regional support](https://www.twilio.com/docs/voice/twiml/connect).
+
 ## 2. Create an agent
 
 ```sh
