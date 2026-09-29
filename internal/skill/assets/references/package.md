@@ -681,8 +681,11 @@ that region's own Auth Token, and the number's routing region must match. No
 call has been placed in `ie1` or `au1` yet.
 
 `unmute init <name> --target twilio` writes this starter with no questions:
-the OpenAI binding below, Deepgram and ElevenLabs, one inbound phone channel,
-`end_call`, and the connection with the four `TWILIO_*` names.
+the OpenAI binding below behind the SLNG Context Router (`provider: slng`,
+`upstream: {provider: openai}`, `world_part: eu-west`, `agent_id: <name>-v1`,
+declaring `SLNG_API_KEY` and `OPENAI_API_KEY`), Deepgram and ElevenLabs, one
+inbound phone channel, `end_call`, and the connection with the four
+`TWILIO_*` names.
 
 What a twilio package may carry, and nothing else:
 

@@ -89,8 +89,15 @@ func TestInitTargetTwilioValidatesAndCompiles(t *testing.T) {
 	if out, err := run(t, "compile", dir); err != nil {
 		t.Fatalf("compile: %v\n%s", err, out)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "build", "twilio", "app.py")); err != nil {
-		t.Errorf("no twilio app: %v", err)
+	app, err := os.ReadFile(filepath.Join(dir, "build", "twilio", "app.py"))
+	if err != nil {
+		t.Fatalf("no twilio app: %v", err)
+	}
+	// The starter thinks through the SLNG Context Router, scoped to the package.
+	for _, want := range []string{`ROUTER_BASE_URL = "https://eu-west.context-router.slng.ai/v1"`, `ROUTER_SCOPE = "relay-v1:assistant"`} {
+		if !strings.Contains(string(app), want) {
+			t.Errorf("the starter app lacks %s", want)
+		}
 	}
 }
 

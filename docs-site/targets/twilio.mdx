@@ -276,8 +276,10 @@ request. Each think request writes one `slng router:` log line that says
 whether the cache or the model answered. The upstream `vertex` is refused on
 this target for now, because the app has no helper yet for its GCP key.
 
-In the `unmute` console, switching the think provider loads that provider's
-starter: `gpt-5.6-luna` with its two params for OpenAI, or
+`unmute init <name> --target twilio` starts on this router binding, in
+`eu-west`, with `agent_id` set to the package name plus `-v1`. In the `unmute`
+console, switching the think provider loads that provider's starter: the
+router binding for SLNG, `gpt-5.6-luna` with its two params for OpenAI, or
 `gemini-3.1-flash-lite` with `thinking_level: MINIMAL` on the Developer API for
 Google. Add `vertexai` and `location` yourself. Picking the provider that is
 already bound keeps the binding as it is.

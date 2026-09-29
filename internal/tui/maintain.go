@@ -486,7 +486,11 @@ func scaffoldBinding(def packagespec.ModelDef) scaffold.Binding {
 			setIfAbsent("speed", *def.Speed)
 		}
 	}
-	return scaffold.Binding{Provider: def.Provider, Model: def.Model, Voice: def.Voice, Language: def.Language, Params: jsonText(params)}
+	binding := scaffold.Binding{Provider: def.Provider, Model: def.Model, Voice: def.Voice, Language: def.Language, Params: jsonText(params), AgentID: def.AgentID}
+	if def.Upstream != nil {
+		binding.Upstream = jsonText(*def.Upstream)
+	}
+	return binding
 }
 
 func jsonText(value any) string {

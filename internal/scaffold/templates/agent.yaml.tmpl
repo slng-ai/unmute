@@ -236,6 +236,8 @@ knowledge:
       description: [[.ModelDescription]]
 [[if .Reason.Provider]]      provider: [[.Reason.Provider]]
 [[end]][[if .Reason.Model]]      model: [[quote .Reason.Model]]
+[[end]][[if .Reason.AgentID]]      agent_id: [[quote .Reason.AgentID]]
+[[end]][[if .Reason.Upstream]]      upstream:[[yamlBlock 8 .Reason.Upstream]]
 [[end]][[if .Reason.Params]]      # Forwarded to the provider as written. A reasoning model answering with
       # function tools on chat completions needs this exact value, or OpenAI
       # returns 400 on every turn.
@@ -246,6 +248,8 @@ knowledge:
       description: fallback reasoning model
 [[if .Binding.Provider]]      provider: [[.Binding.Provider]]
 [[end]][[if .Binding.Model]]      model: [[quote .Binding.Model]]
+[[end]][[if .Binding.AgentID]]      agent_id: [[quote .Binding.AgentID]]
+[[end]][[if .Binding.Upstream]]      upstream:[[yamlBlock 8 .Binding.Upstream]]
 [[end]][[if .Binding.Params]]      params:[[yamlBlock 8 .Binding.Params]]
 [[end]][[end]]  speak:
 [[range .AllAgents]]    [[.VoiceProfile]]:

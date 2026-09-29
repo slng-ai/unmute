@@ -52,8 +52,10 @@ console writes after you pick that target, and still asks nothing. An SLNG
 package needs a deployment region, and only the console asks for one, so
 `--target slng` is refused: run `unmute init` in a terminal and pick SLNG there.
 For `twilio` that is one inbound phone channel, Deepgram and ElevenLabs inside
-ConversationRelay, an OpenAI model, and `connections/phone.yaml` with the four
-`TWILIO_*` names. See [the Twilio target](/targets/twilio).
+ConversationRelay, an OpenAI model through the
+[SLNG Context Router](/optimization/context-router), and `connections/phone.yaml`
+with the four `TWILIO_*` names. The router's `agent_id` starts as the package
+name plus `-v1`. See [the Twilio target](/targets/twilio).
 
 `--target` needs a name, and it cannot be combined with `--from-manifest`,
 because a manifest picks the target itself.

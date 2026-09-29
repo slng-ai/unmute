@@ -6,7 +6,9 @@ package scaffold
 
 import (
 	"bytes"
+	"cmp"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -233,6 +235,11 @@ type Binding struct {
 	Voice    string
 	Language string // per-model BCP-47 tag (N16); listen/speak only, omitted when empty
 	Params   string
+	// AgentID and Upstream are a SLNG Context Router think binding's. Upstream
+	// is JSON text like Params. Both are carried for the reason every field
+	// here is: maintain rewrites agent.yaml from this struct.
+	AgentID  string
+	Upstream string
 }
 
 type Variable struct {
@@ -536,7 +543,7 @@ func (d *Data) SetTarget(provider string) {
 		d.Carrier = "twilio"
 		d.Channels = []Channel{{Name: "phone", Kind: "telephony", Inbound: true}}
 		d.Listen = Binding{Provider: "deepgram", Model: "nova-3-general", Language: "en-US"}
-		d.Reason = TwilioReasonStarter("openai")
+		d.Reason = TwilioReasonStarter("slng")
 		d.Speak = Binding{Provider: "elevenlabs", Model: "flash_v2_5", Voice: "UgBBYS2sOqTuMpoF3BR0", Language: "en-US"}
 		return
 	}
@@ -580,8 +587,17 @@ func (d *Data) SetTarget(provider string) {
 // Google starts on the Gemini Developer API: vertexai and location are the
 // author's choice, and they need a Vertex key.
 func TwilioReasonStarter(vendor string) Binding {
-	if vendor == "google" || vendor == "gemini" {
+	switch vendor {
+	case "google", "gemini":
 		return Binding{Provider: vendor, Model: TwilioGeminiModel, Params: "thinking_config:\n  thinking_level: MINIMAL"}
+	case "slng":
+		// The default: the SLNG Context Router in front of the same OpenAI
+		// model, the binding a hosted twilio call was first made on. agent_id is
+		// filled from the package name when the files are written.
+		return Binding{
+			Provider: "slng", Model: TwilioReasonModel, Upstream: `{"provider":"openai"}`,
+			Params: "world_part: eu-west\nreasoning_effort: \"none\"\nparallel_tool_calls: false",
+		}
 	}
 	return Binding{Provider: "openai", Model: TwilioReasonModel, Params: "reasoning_effort: \"none\"\nparallel_tool_calls: false"}
 }
@@ -669,6 +685,12 @@ func (d Data) withDefaults() Data {
 	}
 	if d.Connection == "" && d.UsesPhoneRoute() {
 		d.Connection = "phone"
+	}
+	// A router binding needs an agent_id. The starter one is the package's
+	// name with a version suffix, written once: after that the author owns it
+	// and bumps it after a prompt change they judge meaningful.
+	if d.Reason.Provider == "slng" && d.Reason.AgentID == "" {
+		d.Reason.AgentID = cmp.Or(d.AgentName, AgentNameFrom(d.Name), "agent") + "-v1"
 	}
 	return d
 }
@@ -974,6 +996,10 @@ func (d Data) DeclaredSecrets() []string {
 		if name != "" {
 			set[name] = true
 		}
+		// The router calls the upstream with the upstream's own credentials.
+		for _, name := range upstreamEnvs(binding.Upstream) {
+			set[name] = true
+		}
 	}
 	for _, tool := range d.Tools {
 		if tool.URLEnv != "" {
@@ -1000,6 +1026,28 @@ func (d Data) DeclaredSecrets() []string {
 		names = append(names, name)
 	}
 	slices.Sort(names)
+	return names
+}
+
+// upstreamEnvs names the credential variables a router binding's upstream is
+// called with, defaults included, from the router's own provider table.
+func upstreamEnvs(upstream string) []string {
+	var authored map[string]string
+	if upstream == "" || json.Unmarshal([]byte(upstream), &authored) != nil {
+		return nil
+	}
+	provider := authored["provider"]
+	delete(authored, "provider")
+	fields, ok := targetcap.SlngResolveUpstream(provider, authored)
+	if !ok {
+		return nil
+	}
+	var names []string
+	for _, field := range fields {
+		if field.Env {
+			names = append(names, field.Value)
+		}
+	}
 	return names
 }
 

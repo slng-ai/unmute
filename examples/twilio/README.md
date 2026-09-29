@@ -50,7 +50,9 @@ unmute deploy examples/twilio --target twilio
 Then call the number. Each step is explained below.
 
 To start your own package the same way, `unmute init my-desk --target twilio`
-writes this shape with a starter prompt and only `end_call`.
+writes this shape with a starter prompt and only `end_call`. It thinks through
+the SLNG Context Router in front of the same OpenAI model, so it reads
+`SLNG_API_KEY` as well as `OPENAI_API_KEY`.
 
 ## How a call flows
 

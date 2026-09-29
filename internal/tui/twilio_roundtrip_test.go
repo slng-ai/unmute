@@ -27,7 +27,8 @@ func TestTwilioPackagesRoundTripThroughMaintain(t *testing.T) {
 		name string
 		edit func(*scaffold.Data)
 	}{
-		{"openai starter", func(*scaffold.Data) {}},
+		{"router starter, the default", func(*scaffold.Data) {}},
+		{"openai starter", func(d *scaffold.Data) { d.Reason = scaffold.TwilioReasonStarter("openai") }},
 		{"gemini starter", func(d *scaffold.Data) { d.Reason = scaffold.TwilioReasonStarter("google") }},
 		{"gemini on vertex", func(d *scaffold.Data) {
 			d.Reason = scaffold.Binding{Provider: "google", Model: scaffold.TwilioGeminiModel,
@@ -57,6 +58,10 @@ func TestTwilioPackagesRoundTripThroughMaintain(t *testing.T) {
 			if got.Target != "twilio" || got.Reason.Provider != data.Reason.Provider || got.Reason.Model != data.Reason.Model || got.Listen != data.Listen || got.Speak != data.Speak ||
 				got.Transport != targetcap.TwilioTransport || got.Carrier != "twilio" || len(got.AllChannels()) != 1 {
 				t.Errorf("read back %+v\nwrote %+v", got, data)
+			}
+			// The router's own keys survive, the agent_id init filled in included.
+			if data.Reason.Provider == "slng" && (got.Reason.AgentID != "relay-v1" || got.Reason.Upstream != `{"provider":"openai"}`) {
+				t.Errorf("router binding read back as agent_id %q upstream %q", got.Reason.AgentID, got.Reason.Upstream)
 			}
 		})
 	}
