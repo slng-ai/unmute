@@ -4,15 +4,15 @@ description: "What a target is, what targets.yaml holds, and how one package com
 ---
 
 A target is where your agent runs. Unmute compiles one package into a native
-project for the target you pick: Pipecat, LiveKit, SLNG, or Twilio. Two are
+project for the target you pick: SLNG, LiveKit, Pipecat, or Twilio. Two are
 framework code targets, one is hosted, and one is a small phone app.
-
-**Pipecat** and **LiveKit** are code targets: `unmute compile` writes a
-Python project you own, host and run.
 
 **SLNG** is a hosted target: `unmute deploy` compiles a deployment body and
 pushes it, and SLNG runs the agent. There is nothing to host and no
 `unmute dev`.
+
+**Pipecat** and **LiveKit** are code targets: `unmute compile` writes a
+Python project you own, host and run.
 
 **Twilio** writes a small Python app that Twilio ConversationRelay calls.
 Twilio does the listening and speaking, the app thinks and runs tools, and
@@ -58,7 +58,7 @@ is yours: a package with two Twilio setups might call them `pipecat_twilio` and
 
 One is required everywhere. The rest depend on the provider you chose.
 
-<ParamField path="provider" type="livekit | pipecat | slng | twilio" required>
+<ParamField path="provider" type="slng | livekit | pipecat | twilio" required>
   Which runtime this instance compiles for. Those four names are the whole
   list. `vapi` and `deepgram` were target names once, and both are now refused
   by name.
@@ -230,14 +230,15 @@ browser agent, either.
 ## Where to go next
 
 <CardGroup cols={3}>
+  <Card title="The SLNG deployment body" icon="cloud" href="/targets/slng">
+    What `build/slng/` contains, and what SLNG runs for you.
+  </Card>
+
   <Card title="The Pipecat project" icon="boxes" href="/targets/pipecat">
     What `build/pipecat/` contains.
   </Card>
   <Card title="The LiveKit project" icon="boxes" href="/targets/livekit">
     What `build/livekit/` contains.
-  </Card>
-  <Card title="The SLNG deployment body" icon="cloud" href="/targets/slng">
-    What `build/slng/` contains, and what SLNG runs for you.
   </Card>
   <Card title="The Twilio ConversationRelay app" icon="phone" href="/targets/twilio">
     What a twilio target writes, and how to host it.

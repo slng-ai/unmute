@@ -50,7 +50,7 @@ every declared target is compiled. `--target` is repeatable.
 `compile` deletes `build/<target>/` and writes it again. It keeps `.env`, a
 LiveKit Cloud `livekit*.toml` and tool `samples/*.json`, and nothing else. For
 any other file you want next to the generated ones, such as a host's
-`render.yaml` or `fly.toml`, use the package's `hosting/<target>/` folder:
+service definition, use the package's `hosting/<target>/` folder:
 
 ```text
 my-agent/

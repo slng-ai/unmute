@@ -3,9 +3,9 @@ title: "Going live"
 description: "Create a package, choose a host, and deploy it with the right configuration and credentials."
 ---
 
-Deploy an Unmute package to LiveKit Cloud, Pipecat Cloud, or SLNG, then update
+Deploy an Unmute package to SLNG, LiveKit Cloud, or Pipecat Cloud, then update
 it from the same authored files. A Twilio target is an app you host yourself;
-[the Twilio target](/targets/twilio) covers hosting it and pointing a number
+[the Twilio walkthrough](/telephony/twilio-conversation-relay) covers hosting it and pointing a number
 at it. Validation checks your declarations;
 compilation turns them into what the selected target runs.
 
@@ -46,12 +46,15 @@ Then follow **one** hosting guide:
 
 | Destination | What you deploy | First deployment |
 |---|---|---|
+| [SLNG](/deploy/slng) | Compiled agent body | `unmute deploy --target slng` from the package |
 | [LiveKit Cloud](/deploy/livekit-cloud) | Generated Python project | `lk agent create` from `build/livekit/` |
 | [Pipecat Cloud](/deploy/pipecat-cloud) | Generated Python project | `pipecat cloud deploy` from `build/pipecat/` |
-| [SLNG](/deploy/slng) | Compiled agent body | `unmute deploy --target slng` from the package |
 
 The target guides supply the authentication, destination, region, and secret
-steps those commands need. `unmute deploy` currently pushes **SLNG only**.
+steps those commands need. For [Twilio](/telephony/twilio-conversation-relay),
+host the generated app first, then run `unmute deploy --target twilio` to
+connect the number. `unmute deploy` publishes SLNG agents or configures Twilio
+number routing; LiveKit and Pipecat use their platform commands.
 
 ## 1. Keep the package as the source
 
@@ -243,9 +246,9 @@ A rename is an identity change, and phone routing may still point at the old one
 
 | Target | What a rename changes |
 |---|---|
+| SLNG | The push resolves the new name; existing callers still use the old agent ID |
 | LiveKit | A package rename changes the dispatch name; the same build directory keeps its cloud agent ID in `livekit.toml` |
 | Pipecat | The manifest names a new agent and secret set; the old agent remains |
-| SLNG | The push resolves the new name; existing callers still use the old agent ID |
 
 Renaming a target also changes its build directory. On LiveKit, recover the
 existing agent config in that new directory before updating; compilation does

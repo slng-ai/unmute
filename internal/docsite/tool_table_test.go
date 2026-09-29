@@ -119,7 +119,7 @@ func TestToolKindTableMatchesCapabilities(t *testing.T) {
 	for _, line := range section(t, body, "## How each target treats a tool") {
 		if m := agentToolRowPattern.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
 			rows = append(rows, toolKindRow{
-				Kind: m[1], LiveKit: clean(m[2]), Pipecat: clean(m[3]), Slng: clean(m[4]), Twilio: clean(m[5]),
+				Kind: m[1], Slng: clean(m[2]), LiveKit: clean(m[3]), Pipecat: clean(m[4]), Twilio: clean(m[5]),
 			})
 		}
 	}
@@ -210,8 +210,8 @@ func TestToolTaskScopeTableMatchesCapabilities(t *testing.T) {
 			provider target.Provider
 			written  string
 		}{
-			{target.LiveKit, clean(m[2])},
-			{target.Pipecat, clean(m[3])},
+			{target.LiveKit, clean(m[3])},
+			{target.Pipecat, clean(m[4])},
 		} {
 			want := wordFor(table.Capability(field, check.provider).Tag)
 			written := check.written

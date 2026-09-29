@@ -238,10 +238,10 @@ it cannot carry in this version, because each is refused at validate:
   starts, so nothing may change them mid-call;
 - no `listen`, `speak` or `turn` sections, and no `conversation.interruption`:
   the model listens, speaks and decides the turn itself;
-- no `variables` and no `prefetch`: the live shape carries no call state yet;
-- no `tracing`: the live shape has no traced worker yet;
+- no `variables` and no `prefetch`: the live shape carries no call state;
+- no `tracing`: the live shape has no traced worker;
 - no `mcp` tool: nothing in the live shape can start and close a server
-  connection yet;
+  connection;
 - no telephony connection: a live model compiles for the browser route in this
   version;
 - no `temperature`, `language`, `speed`, `params`, `pace` or `endpoint_env` on

@@ -8,9 +8,9 @@ The SLNG Execution Layer is the layer SLNG's own speech models run on. It aims
 at the two things a voice call is judged on: how fast it answers, and what it
 costs per turn.
 
-`unmute init` binds SLNG for listening and speaking, and every shipped example
-does the same. That is a decision, not a placeholder. Bind SLNG for a speech
-role and you are on that layer.
+LiveKit and Pipecat starters bind SLNG for listening and speaking. Bind SLNG
+for a speech role and you are on that layer. Twilio handles speech through ConversationRelay. Its generated app uses SLNG
+Context Router for LLM optimization instead.
 
 Unmute does not measure any of this. Everything on this page is SLNG's published
 description of its own system, linked so you can read the source.
@@ -21,7 +21,7 @@ On this page:
 - [What the Execution Layer is](#what-the-execution-layer-is) - routing instead of calling everything
 - [The STT Performance Layer](#the-stt-performance-layer) - the stage on the way in
 - [TTS Path Optimization](#tts-path-optimization) - the stage on the way out
-- [The third role](#the-third-role) - thinking, which you opt into
+- [The third role](#the-third-role) - LLM optimization with Context Router
 
 ## What this means for your package
 
@@ -105,24 +105,20 @@ kind of output this stage is built for.
 
 ## The third role
 
-Everything above is about listening and speaking. Thinking has its own SLNG path,
-the [Context Router](/optimization/context-router), and it is the one place where the
-optimisation is something you opt into rather than something already behind the
-binding. It caches the turns your agent has answered before and serves them
-without calling your model, so a repeat it judges cacheable comes back in roughly
-a tenth of the time. It decides which turns those are, so some repeats still take
-the model path. You keep your own model and your own provider.
+Thinking uses [SLNG Context Router](/optimization/context-router). It serves
+turns the router judges reusable without calling the upstream model; other turns use
+your selected model and provider. This is the default LLM optimization path in
+the Twilio starter and example.
 
-It is a different trade from the two above. Speech optimisation costs you
-nothing and changes nothing you write. The router asks you for a `think`
-binding change, a stable cache id, and the decision to send your upstream
-credentials inline. The page explains all three.
+For a LiveKit or Pipecat starter, change the `think` binding to SLNG, choose a
+stable `agent_id`, and declare the upstream credentials. Those credentials
+travel to SLNG with each request. The Context Router guide covers the setup.
 
 ## Where to go next
 
 <Columns cols={2}>
   <Card title="Context Router" icon="gauge" href="/optimization/context-router">
-    The optimization you opt into: cache repeated turns on the `think` role.
+    Cache repeated turns on the `think` role.
   </Card>
   <Card title="SLNG models" icon="list" href="https://docs.slng.ai/models">
     The full catalog, with languages and regions.

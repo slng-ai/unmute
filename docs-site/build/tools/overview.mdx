@@ -88,22 +88,21 @@ livekit: LiveKit client tools are not proven by its driver
 pipecat: Pipecat provider-hosted tools are not proven by its driver
 ```
 
-They are listed here so you know the names mean nothing yet, and so a refusal you
-meet reads as a decision rather than a bug.
+These blocks are unsupported. Use a supported tool execution type instead.
 
 Both blocks have no fields, but YAML still needs an explicit body: write
 `client: {}` or `provider_hosted: {}`.
 
 ## How each target treats a tool
 
-| Tool kind | LiveKit | Pipecat | SLNG | Twilio |
+| Tool kind | SLNG | LiveKit | Pipecat | Twilio |
 |---|---|---|---|---|
 | `webhook:` | yes | yes | yes | **no** |
-| `local:` | yes | yes | **no** | yes |
+| `local:` | **no** | yes | yes | yes |
 | `builtin:` | yes | yes | yes | yes |
 | `mcp:` | yes | yes | yes | **no** |
 | `slng:` | yes | yes | yes | **no** |
-| `knowledge:` | yes | yes | **no** | **no** |
+| `knowledge:` | **no** | yes | yes | **no** |
 | `client:` | no | no | no | no |
 | `provider_hosted:` | no | no | no | no |
 
@@ -124,8 +123,8 @@ code, version and gate pipeline, and unmute creates no tool there. A tool your
 SLNG organisation already has is reached with `slng:`; a brand new one starts in
 the SLNG dashboard. Both blocks work exactly as before on LiveKit and Pipecat.
 
-**`slng:` needs nothing local, and works everywhere because the definition
-travels when it has to.** SLNG resolves a hosted reference by name at deploy
+**`slng:` works on SLNG, LiveKit, and Pipecat; Twilio refuses it.**
+SLNG resolves a hosted reference by name at deploy
 time: no mirror, no hash, no `unmute pull`. LiveKit and Pipecat build and run
 the tool themselves, so they need a real copy; `unmute pull` is what fetches
 one, and for a code tool its module, into your package, with no network
@@ -146,11 +145,11 @@ a decision rather than a bug.
 
 ### Attaching a tool to a task
 
-| Tool kind on a task | LiveKit | Pipecat | SLNG |
+| Tool kind on a task | SLNG | LiveKit | Pipecat |
 |---|---|---|---|
-| `mcp:` | yes | **no**, list it on the agent | yes |
-| `knowledge:` | yes | **no**, list it on the agent | **no** |
-| everything else | yes | yes | no tasks at all |
+| `mcp:` | yes | yes | **no**, list it on the agent |
+| `knowledge:` | **no** | yes | **no**, list it on the agent |
+| everything else | no tasks at all | yes | yes |
 
 A tool listed on a task rather than on an agent is a narrower thing, and two kinds
 are not available everywhere.
@@ -161,12 +160,12 @@ target writes one agent with one prompt, so it has no tasks to scope anything to
 
 ### The behavior fields
 
-| Field | LiveKit | Pipecat | SLNG |
+| Field | SLNG | LiveKit | Pipecat |
 |---|---|---|---|
 | `announce` | yes | yes | yes |
 | `inject` | yes | yes | yes |
 | `auth` | yes | yes | yes |
-| `interruption` other than `provider_default` | warns | yes | **no** |
+| `interruption` other than `provider_default` | **no** | warns | yes |
 
 LiveKit runs a tool to completion, so a per-tool interruption value has nothing to
 act on and it says so. SLNG owns its own turn taking and has no per-tool setting at

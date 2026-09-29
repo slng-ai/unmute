@@ -677,11 +677,10 @@ environment:
 
 The connection may also name `region: us1`, `ie1` or `au1` (default `us1`),
 the Twilio Region that handles the calls. Outside `us1`, `auth_token` must name
-that region's own Auth Token, and the number's routing region must match. No
-call has been placed in `ie1` or `au1` yet.
+that region's own Auth Token, and the number's routing region must match.
 
 `unmute init <name> --target twilio` writes this starter with no questions:
-the OpenAI binding below behind the SLNG Context Router (`provider: slng`,
+SLNG Context Router with OpenAI upstream (`provider: slng`,
 `upstream: {provider: openai}`, `world_part: eu-west`, `agent_id: <name>-v1`,
 declaring `SLNG_API_KEY` and `OPENAI_API_KEY`), Deepgram and ElevenLabs, one
 inbound phone channel, `end_call`, and the connection with the four
@@ -691,12 +690,13 @@ What a twilio package may carry, and nothing else:
 
 - one cascade agent, and exactly one channel: `kind: telephony`,
   `inbound: true`, `outbound: false`;
-- think: `provider: openai` (Chat Completions), `provider: slng` (the SLNG
+- think: `provider: slng` (the SLNG
   Context Router over Chat Completions, any upstream except `vertex`; declare
   `SLNG_API_KEY` and the upstream's key. SLNG hosts the router, so nothing is
   deployed for it, and the upstream key is sent to SLNG inline on every
   request. It is a model endpoint only: the user still hosts `app.py`, which
-  is the agent. An agent with nothing to host is the `slng` target), or `provider: google`
+  is the agent. An agent with nothing to host is the `slng` target),
+  `provider: openai` (Chat Completions), or `provider: google`
   (`gemini` also accepted; native `generateContent`). Params are forwarded to
   the request as written. `vertexai: true` with a `location` uses Vertex AI
   with the same `GOOGLE_API_KEY`; without them it is the Gemini Developer API.
@@ -733,21 +733,37 @@ turn fields, tracing, realtime and live, fallbacks, custom endpoints,
 `unmute compile` writes `build/<target>/app.py` (FastAPI on uvicorn),
 `conversation-relay.xml.tmpl`, `pyproject.toml`, `Dockerfile`,
 `.dockerignore`, `.env.example`, `README.md`, `compile-report.json` and
-`tools/`. It deletes and rewrites that folder, keeping only `.env`, so a host's
-config such as `render.yaml` goes in the package's `hosting/<target>/`: every
-compile copies it into `build/<target>/`, and refuses a hosting file named like
-a generated one. Twilio runs only the speech side, so the app is one small
-text-only process that any Dockerfile host runs: it needs `$PORT`, one
-instance, a `/healthz` health check, about 35 seconds from SIGTERM to SIGKILL
-for its drain, and an origin that passes WebSockets. For Render, commit
-`build/<target>/`, use a paid instance (a free one sleeps and Twilio does not
-wait), and set `TWILIO_PUBLIC_URL` to the service's `onrender.com` origin. To
-test locally, `ngrok http 8080` or `cloudflared tunnel --url
-http://localhost:8080`. An update is compile, commit, push, then `unmute deploy
---target <name>`, which refuses until `/healthz` names the new build. The app reads the three Twilio names above plus the think model's
-key. `phone_number_sid` is deploy-only: the app never reads it. There is no
-`unmute dev` loop for this target, because Twilio can only call a public
-https origin. The user hosts the app; unmute never uploads it.
+`tools/`. It replaces the build folder, preserving only `.env`. Keep hosting
+configuration in the source package's `hosting/<target>/` folder; compile
+copies it and refuses files that collide with generated names.
+
+Start with `unmute init my-agent --target twilio`, edit `instructions.md` for
+phone conversations, then validate and compile. Twilio requires a public
+secure WebSocket server; FastAPI is Unmute's implementation choice. The user
+chooses a container or Python host with HTTPS/WSS, long-lived connections,
+`PORT` (default 8080), one process/instance, `/healthz`, and about 35 seconds
+of shutdown grace. It must be available when calls arrive. Run the emitted
+Dockerfile or `uv run --env-file ../../.env python app.py` from `build/<target>/`.
+For a laptop trial, put `cloudflared tunnel --url http://localhost:8080` in
+front of the app. Set `TWILIO_PUBLIC_URL` to the exact public HTTPS origin,
+without a path, before starting the app. Update it and reroute when it changes.
+
+The app reads the account SID, Auth Token and public origin plus model keys.
+The default SLNG binding needs both `SLNG_API_KEY` and `OPENAI_API_KEY`;
+`phone_number_sid` is deploy-only. SLNG reuses answers it judges cacheable and
+calls the upstream for other turns. Change `agent_id` after prompt changes
+that should invalidate cached answers. Twilio handles speech; the router
+optimizes LLM requests and does not replace the hosted app. Keep SLNG first
+when presenting optimization choices.
+
+The user creates their Twilio account, gets a voice-capable number, and accepts
+Twilio's AI/ML addendum to enable ConversationRelay. The app answers the
+number's signed `POST /voice` with TwiML directing Twilio to
+`wss://<host>/conversation`. Twilio then exchanges text with the agent.
+There is no `unmute dev` loop for this target. Link the
+[first-call guide](https://unmute.ai/telephony/twilio-conversation-relay)
+for account setup and the complete sequence. An update is compile, upload the
+new build to the chosen host, then `unmute deploy --target <name>`.
 
 Once it is hosted, `unmute deploy --target <name>` points one existing number
 at `https://<origin>/voice`. Run it with `--dry-run` first. It reads
@@ -796,6 +812,5 @@ instructions should say the call only ends when the model calls `end_call`,
 in the same reply as its goodbye. `handoff` has `reason`, `data`, `call`, `status` and
 `twilio`. Never build TwiML from a model-chosen number or unescaped text, and
 never put a secret in `end()` data. A turn has 30 seconds. Compile copies the folder as written, never formatted, and it
-counts in `artifact_id`. Every other target refuses `logic:`. A Pydantic AI
-agent on `session.model` is the worked example on the target page, and it is
-the way to reach any other OpenAI-compatible endpoint.
+counts in `artifact_id`. Every other target refuses `logic:`. See the [custom agent logic reference](https://unmute.ai/targets/twilio#bring-your-own-agent-logic)
+for the `respond(session)` interface.
