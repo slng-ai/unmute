@@ -717,5 +717,24 @@ turn fields, tracing, realtime and live, fallbacks, custom endpoints,
 `tools/`. The app reads the three Twilio names above plus the think model's
 key. `phone_number_sid` is deploy-only: the app never reads it. There is no
 `unmute dev` loop for this target, because Twilio can only call a public
-https origin. The emitted README says how to host the app and point the
-number at `/voice`; unmute changes nothing in the Twilio account.
+https origin. The user hosts the app; unmute never uploads it.
+
+Once it is hosted, `unmute deploy --target <name>` points one existing number
+at `https://<origin>/voice`. Run it with `--dry-run` first. It reads
+`account_sid`, `auth_token`, `phone_number_sid` and `public_url` through the
+connection's environment names, and no model key. Before writing it checks the
+number (voice capable, no TwiML App, trunk or fallback URL), that the host's
+`/healthz` returns this build's `artifact_id`, and that a signed `POST /voice`
+returns this build's TwiML. It reads and writes the number in the connection's
+`region`, and refuses a number whose routing region differs; it never changes
+routing. It then saves the old route under the user config
+directory and sets only `VoiceUrl` and `VoiceMethod`. A missing or different
+`artifact_id` means recompile and rehost. It takes one twilio target per run,
+and refuses `--profile`, `--agent-id`, `--label`, `--run-samples` and `--call`.
+A dry run writes nothing, not even the report. The outcome is `routed` only when
+the readback shows `/voice` with `POST` and the number still passes the checks,
+`not_changed` only when Twilio refused the write, and `unknown` otherwise. The
+write is never retried. To put the old route back from the snapshot, first check
+the number still points at the snapshot's `new_voice_url` with `POST` and has no
+TwiML App, trunk or fallback URL. If not, somebody changed it since, so stop.
+It places no call, so a real call is still the only check of speech.

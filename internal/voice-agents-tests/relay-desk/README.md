@@ -27,6 +27,22 @@ the API must refuse.
 
 ## Call it
 
-Follow `build/<target>/README.md`: host the app at a public HTTPS origin, set
-`TWILIO_PUBLIC_URL`, and point a Twilio number's voice webhook at `/voice`.
-Nothing here has been called through a real number yet.
+1. Host one build at a public HTTPS origin, as `build/<target>/README.md` says,
+   with `TWILIO_PUBLIC_URL` set to that origin on the host.
+2. Put `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER_SID` and
+   `TWILIO_PUBLIC_URL` in this package's `.env`. No model key is needed here.
+3. Check, then point the number:
+
+   ```sh
+   unmute deploy internal/voice-agents-tests/relay-desk --target twilio-openai --dry-run
+   unmute deploy internal/voice-agents-tests/relay-desk --target twilio-openai
+   ```
+
+   It refuses when the host runs a different build, so recompile and rehost
+   after any change here. The old route is saved first; the runbook says how
+   to put it back.
+4. Call the number.
+
+The deploy path is tested against fake Twilio and fake host services only.
+Nothing here has been routed on a real account or called through a real
+number yet.

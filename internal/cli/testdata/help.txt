@@ -8,7 +8,7 @@ Usage:
 Available Commands:
   compile     Compile a v1 agent package to its resolved target artifacts.
   completion  Generate the autocompletion script for the specified shell
-  deploy      Compile a package and push it to SLNG.
+  deploy      Push a package to SLNG, or point a Twilio number at a twilio target you host.
   dev         Compile, run the agent locally, and talk to it in the browser.
   help        Help about any command
   init        Scaffold a new v1 agent package.
@@ -111,6 +111,8 @@ Validates the package, compiles each slng target, then pushes it with `voiceai a
 
 The credential is read from SLNG_API_KEY, falling back to VOICEAI_API_KEY and then to whatever profile `voiceai login` stored. The organisation a push resolved is always printed, because an environment key and a stored profile can belong to different ones.
 
+With --target naming one twilio target, deploy instead points an existing Twilio number at the app you already host for it. It checks the number, checks that the host's /healthz names this build, sends /voice one signed request and compares the TwiML, then sets only the number's VoiceUrl and VoiceMethod. It uploads nothing and places no call. The account SID, Auth Token, number SID and public URL are read from the environment names the connection declares. The old route is saved to a private file under your user config directory before anything is written.
+
 With no package-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
 
 Usage:
@@ -124,7 +126,7 @@ Flags:
       --label string      version label (default: the package name and a timestamp)
       --profile string    voiceai credential profile to check and push with
       --run-samples       run each tool's sample against your real dependencies
-      --target strings    slng target instance name (repeatable; default: every slng target)
+      --target strings    target instance name (repeatable for slng; default: every slng target; one twilio target per run)
 
 $ unmute dev --help
 Compile, run the agent locally, and talk to it in the browser.

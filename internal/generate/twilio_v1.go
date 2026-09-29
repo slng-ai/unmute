@@ -3,7 +3,10 @@ package generate
 import (
 	"bytes"
 	"cmp"
+	"crypto/sha256"
 	"embed"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -34,6 +37,10 @@ const (
 	twilioWSSOriginPlaceholder = "__PUBLIC_WSS_ORIGIN__"
 )
 
+// TwilioRelayTemplate is the emitted TwiML template's path. `unmute deploy`
+// reads it back out of the artifact to know what a hosted /voice must answer.
+const TwilioRelayTemplate = "conversation-relay.xml.tmpl"
+
 type twilioData struct {
 	Target       string
 	Project      string
@@ -58,6 +65,7 @@ type twilioData struct {
 	Docs         targetcap.TwilioDocLinks
 	ManualSteps  []string
 	VertexHelper string
+	ArtifactID   string
 }
 
 type twilioTool struct {
@@ -95,6 +103,26 @@ func GenerateTwilio(agent *ir.Agent, resolved ir.Target, bindings []ir.Forwarded
 	if err != nil {
 		return Artifact{}, err
 	}
+	files, err := renderTwilioFiles(agent, resolved, data)
+	if err != nil {
+		return Artifact{}, err
+	}
+	// Rendered twice: once with no id to hash, once to carry it. The hash never
+	// covers its own value, and the second render changes nothing else.
+	data.ArtifactID = twilioArtifactID(files)
+	files, err = renderTwilioFiles(agent, resolved, data)
+	if err != nil {
+		return Artifact{}, err
+	}
+	report, err := twilioReport(data, files, bindings, sizing, resolved)
+	if err != nil {
+		return Artifact{}, err
+	}
+	files = append(files, File{Path: "compile-report.json", Content: report})
+	return Artifact{Kind: CodeTarget, Files: files, ArtifactID: data.ArtifactID}, nil
+}
+
+func renderTwilioFiles(agent *ir.Agent, resolved ir.Target, data twilioData) ([]File, error) {
 	var files []File
 	for _, file := range []struct{ tmpl, path string }{
 		{"app.py.tmpl", "app.py"},
@@ -106,24 +134,50 @@ func GenerateTwilio(agent *ir.Agent, resolved ir.Target, bindings []ir.Forwarded
 	} {
 		content, err := renderTwilio(file.tmpl, data)
 		if err != nil {
-			return Artifact{}, err
+			return nil, err
 		}
 		files = append(files, File{Path: file.path, Content: content})
 	}
 	xmlTemplate, err := twilioRelayXML(agent, resolved)
 	if err != nil {
-		return Artifact{}, err
+		return nil, err
 	}
-	files = append(files, File{Path: "conversation-relay.xml.tmpl", Content: xmlTemplate})
+	files = append(files, File{Path: TwilioRelayTemplate, Content: xmlTemplate})
 	for _, tool := range data.LocalTools {
 		files = append(files, File{Path: filepath.ToSlash(filepath.Join("tools", tool.Name+".py")), Content: []byte(tool.Source)})
 	}
-	report, err := twilioReport(data, files, bindings, sizing, resolved)
-	if err != nil {
-		return Artifact{}, err
+	return files, nil
+}
+
+// twilioArtifactID names what a host runs, so `unmute deploy` can refuse to
+// route a number at a different build. It is an Unmute drift check, not a
+// Twilio API and not an attestation: a host can report any string it likes.
+//
+// It hashes the files that decide behaviour (the app, its TwiML, its pins,
+// its image and the tool handlers), sorted by path, and nothing else. The
+// README, .env.example and the compile report are left out, so a docs change
+// needs no rehost. No hashed file holds a credential or the public origin:
+// both are environment names here, and values only on the host.
+func twilioArtifactID(files []File) string {
+	var hashed []File
+	for _, file := range files {
+		switch {
+		case file.Path == "app.py", file.Path == "pyproject.toml", file.Path == "Dockerfile",
+			file.Path == ".dockerignore", file.Path == TwilioRelayTemplate, strings.HasPrefix(file.Path, "tools/"):
+			hashed = append(hashed, file)
+		}
 	}
-	files = append(files, File{Path: "compile-report.json", Content: report})
-	return Artifact{Kind: CodeTarget, Files: files}, nil
+	slices.SortFunc(hashed, func(a, b File) int { return strings.Compare(a.Path, b.Path) })
+	sum := sha256.New()
+	for _, file := range hashed {
+		var size [8]byte
+		binary.BigEndian.PutUint64(size[:], uint64(len(file.Content)))
+		sum.Write([]byte(file.Path))
+		sum.Write([]byte{0})
+		sum.Write(size[:])
+		sum.Write(file.Content)
+	}
+	return "sha256:" + hex.EncodeToString(sum.Sum(nil))
 }
 
 func renderTwilio(name string, data twilioData) ([]byte, error) {
@@ -323,6 +377,7 @@ func twilioRelayXML(agent *ir.Agent, resolved ir.Target) ([]byte, error) {
 type twilioReportJSON struct {
 	Target      string                `json:"target"`
 	Provider    string                `json:"provider"`
+	ArtifactID  string                `json:"artifact_id"`
 	Runtime     twilioRuntimeReport   `json:"runtime"`
 	Files       []string              `json:"files"`
 	RequiredEnv []string              `json:"required_env"`
@@ -383,7 +438,7 @@ func twilioReport(data twilioData, files []File, bindings []ir.ForwardedBinding,
 		"real Twilio call: none yet; signed WebSocket handshake behind a proxy, playback and the action callback are unverified",
 	}
 	out, err := json.MarshalIndent(twilioReportJSON{
-		Target: resolved.Name, Provider: string(resolved.Provider),
+		Target: resolved.Name, Provider: string(resolved.Provider), ArtifactID: data.ArtifactID,
 		Runtime: twilioRuntimeReport{
 			Python: data.Python, Pins: pins, ThinkAPI: api, Processes: 1, CallSlots: data.MaxSessions,
 			MaxToolRounds: data.MaxRounds, ToolDeadline: fmt.Sprintf("%ds", data.ToolDeadline),

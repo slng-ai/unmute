@@ -360,7 +360,9 @@ def env(app: Any, script: list[list[Any]] | None = None, **patches: Any) -> Env:
 @case
 async def health_and_signed_voice(app: Any) -> None:
     async with env(app) as e:
-        check((await e.client.get("/healthz")).status == 200, "healthz is not 200")
+        health = await e.client.get("/healthz")
+        check(health.status == 200, "healthz is not 200")
+        check((await health.json()).get("artifact_id") == app.ARTIFACT_ID, "healthz does not name this build")
         form = {"AccountSid": ACCOUNT, "CallSid": CALL, "From": "+15005550006"}
         response = await e.post("/voice", form)
         body = await response.text()
@@ -617,7 +619,9 @@ async def timeout_is_unknown_and_holds_the_slot(app: Any) -> None:
             check(slots.taken == 1 and slots.orphaned == 1, "the slot was released while the handler still runs")
             tools = [th for th in threading.enumerate() if th.name == "tool"]
             check(tools and all(th.daemon for th in tools), "a handler thread would block process exit")
-            check((await e.client.get("/healthz")).status == 503, "healthz is 200 with every slot held")
+            full = await e.client.get("/healthz")
+            check(full.status == 503, "healthz is 200 with every slot held")
+            check((await full.json()).get("artifact_id") == app.ARTIFACT_ID, "a 503 healthz does not name this build")
             release.set()
             await until(lambda: slots.taken == 0 and slots.orphaned == 0)
             check((await e.client.get("/healthz")).status == 200, "healthz did not recover")

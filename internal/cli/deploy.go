@@ -52,7 +52,7 @@ func newDeployCmd() *cobra.Command {
 	var opts deployOptions
 	cmd := &cobra.Command{
 		Use:   "deploy [package-dir]",
-		Short: "Compile a package and push it to SLNG.",
+		Short: "Push a package to SLNG, or point a Twilio number at a twilio target you host.",
 		Long: "Compile a package and push it to SLNG.\n\n" +
 			"Validates the package, compiles each slng target, then pushes it with " +
 			"`voiceai agents push`. Nothing on SLNG is created until every check passes, " +
@@ -61,6 +61,13 @@ func newDeployCmd() *cobra.Command {
 			target.SlngPushCredentialEnv + " and then to whatever profile `voiceai login` " +
 			"stored. The organisation a push resolved is always printed, because an " +
 			"environment key and a stored profile can belong to different ones.\n\n" +
+			"With --target naming one twilio target, deploy instead points an existing Twilio " +
+			"number at the app you already host for it. It checks the number, checks that the " +
+			"host's /healthz names this build, sends /voice one signed request and compares the " +
+			"TwiML, then sets only the number's VoiceUrl and VoiceMethod. It uploads nothing and " +
+			"places no call. The account SID, Auth Token, number SID and public URL are read from " +
+			"the environment names the connection declares. The old route is saved to a private " +
+			"file under your user config directory before anything is written.\n\n" +
 			"With no package-dir, the package is the current directory, so you can cd into " +
 			"an agent and run this with no arguments.",
 		Args: cobra.MaximumNArgs(1),
@@ -73,7 +80,7 @@ func newDeployCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringSliceVar(&opts.targets, "target", nil, "slng target instance name (repeatable; default: every slng target)")
+	f.StringSliceVar(&opts.targets, "target", nil, "target instance name (repeatable for slng; default: every slng target; one twilio target per run)")
 	f.BoolVar(&opts.dryRun, "dry-run", false, "check everything and report, changing nothing")
 	f.BoolVar(&opts.runSamples, "run-samples", false, "run each tool's sample against your real dependencies")
 	f.StringVar(&opts.agentID, "agent-id", "", "update this agent, when more than one has the package's name")
@@ -89,6 +96,15 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 	agent, selected, err := loadPackage(dir, opts.targets)
 	if err != nil {
 		return fmt.Errorf("deploy %s: %w", dir, err)
+	}
+	// A twilio target is routed, not pushed, and never needs voiceai or an SLNG
+	// key. Decided here, before either is looked up.
+	twilio, err := twilioDispatch(cmd, opts.targets, selected)
+	if err != nil {
+		return fmt.Errorf("deploy %s: %w", dir, err)
+	}
+	if twilio != nil {
+		return runTwilioDeploy(cmd, dir, agent, *twilio, opts.dryRun)
 	}
 	pushable := make([]ir.Target, 0, len(selected))
 	for _, resolved := range selected {
@@ -395,9 +411,10 @@ func printAttachedVersions(out io.Writer, name string, report deployReport) {
 }
 
 // noSlngTargetGuidance names what the package does declare and the block that
-// would make it deployable. `deploy` pushes to SLNG and nowhere else: the other
-// two targets emit a project somebody else's platform runs, which is
-// `unmute compile` plus that platform's own deploy step.
+// would make it deployable. `deploy` pushes to SLNG and nowhere else: livekit
+// and pipecat emit a project somebody else's platform runs, which is
+// `unmute compile` plus that platform's own deploy step. A twilio target is
+// hosted by the author, and deploy only routes a number to it when named.
 func noSlngTargetGuidance(selected []ir.Target) string {
 	declared := make([]string, 0, len(selected))
 	for _, resolved := range selected {
@@ -411,7 +428,8 @@ func noSlngTargetGuidance(selected []ir.Target) string {
 		"  deploy pushes to SLNG, which hosts the agent itself. Add a target to targets.yaml:\n"+
 		"    targets:\n      slng:\n        provider: slng\n        deployment_region: eu-north\n"+
 		"  a livekit or pipecat target is compiled with `unmute compile` and deployed by that platform's own tool.\n"+
-		"  a twilio target is compiled with `unmute compile` and hosted by you; its README says how.", have)
+		"  a twilio target is compiled with `unmute compile` and hosted by you; then\n"+
+		"  `unmute deploy --target <name>` points your Twilio number at it.", have)
 }
 
 func missingPushToolGuidance() string {

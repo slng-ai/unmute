@@ -1,6 +1,6 @@
 ---
 title: "The Twilio ConversationRelay app"
-description: "What unmute compile writes for a twilio target, what the package may carry, and how to host the app and point a number at it."
+description: "What unmute compile writes for a twilio target, what the package may carry, how to host the app, and how unmute deploy points a number at it."
 sidebarTitle: "Twilio"
 ---
 
@@ -44,7 +44,8 @@ On this page:
 - [The package](#the-package) - the shape, in full
 - [What the package may carry](#what-the-package-may-carry) - and what is refused
 - [What compiling writes](#what-compiling-writes) - the files
-- [Host it](#host-it) - the manual steps
+- [Host it](#host-it) - run the app at a public origin
+- [Point the number at it](#point-the-number-at-it) - with `unmute deploy`, or by hand
 - [How the app behaves](#how-the-app-behaves) - signatures, calls at once, interruptions, tools
 - [What is not verified yet](#what-is-not-verified-yet) - read before you rely on it
 
@@ -168,7 +169,7 @@ is for pointing the number at the app; the app itself never reads it.
 
 <ParamField path="environment" type="account_sid | auth_token | phone_number_sid | public_url to an env name" required>
   The four names the route needs. The app reads `account_sid`, `auth_token` and
-  `public_url`. `phone_number_sid` is for the deploy step only.
+  `public_url`. `phone_number_sid` is read only by `unmute deploy`.
 </ParamField>
 
 <ParamField path="region" type="us1 | ie1 | au1" default="us1">
@@ -255,8 +256,8 @@ The generated project has no unmute dependency and reads no YAML.
 
 ## Host it
 
-unmute changes nothing in your Twilio account in this release. There is no
-`unmute dev` loop either, because Twilio can only call a public HTTPS origin.
+unmute never uploads the app. You host it. There is no `unmute dev` loop,
+because Twilio can only call a public HTTPS origin.
 
 1. Copy `build/<target>/.env.example` to `.env` and fill it in. The account
    owner must have accepted the AI/ML addendum that turns ConversationRelay on
@@ -265,13 +266,79 @@ unmute changes nothing in your Twilio account in this release. There is no
 3. Put it behind HTTPS at a public origin, for example
    `https://relay.example.com`, and set `TWILIO_PUBLIC_URL` to exactly that,
    with no path.
-4. In the Twilio Console, open the number (Phone Numbers, Manage, Active
-   Numbers). Set "A call comes in" to Webhook, HTTP POST,
-   `https://<your origin>/voice`. A number on a SIP trunk ignores this setting,
-   so take it off the trunk first.
-5. Call the number.
 
-The emitted `README.md` repeats these steps with links to each Twilio page.
+`GET /healthz` answers 200 while the process is up, even when every call slot
+is busy. It answers 503 only while the app drains, or when a tool handler that
+outlived its call holds every slot. Both carry `artifact_id`, which names the
+build. A 200 does not mean a call will be taken.
+
+## Point the number at it
+
+```sh
+unmute deploy --target twilio --dry-run
+unmute deploy --target twilio
+```
+
+`unmute deploy` with one twilio target sets the voice webhook of one existing
+number. It uploads nothing, buys no number and places no call. It reads four
+environment names from the shell or the package `.env`: `TWILIO_ACCOUNT_SID`,
+`TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER_SID` and `TWILIO_PUBLIC_URL`, or
+whatever names your connection declares. It needs no model key.
+
+```mermaid
+flowchart TD
+    A[Read the number] --> B[Read /healthz]
+    B --> C[Signed POST /voice]
+    C --> D{Already routed?}
+    D -- no --> E[Save the old route]
+    E --> F[Set VoiceUrl and VoiceMethod]
+    F --> G[Read the number back]
+```
+
+1. It reads the number
+   ([IncomingPhoneNumber](https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource)).
+   It refuses a number that takes no voice calls, or that has a TwiML App, a
+   SIP trunk or a voice fallback URL. It never clears these for you. It reads
+   the copy of the number in the connection's `region`, and it refuses a
+   number whose calls another region handles. It never changes the routing.
+2. It reads `/healthz`. A missing or different `artifact_id` means the host
+   runs another build, so recompile and rehost first. The id is an unmute
+   check, not a Twilio feature.
+3. It sends `/voice` one request signed with your Auth Token, the way Twilio
+   signs a call ([webhook security](https://www.twilio.com/docs/usage/security)).
+   It compares the TwiML with this build's
+   ([Connect](https://www.twilio.com/docs/voice/twiml/connect)). A 503 or a
+   bare `<Hangup/>` means "busy, try again later". This proves the HTTP answer
+   only, not the WebSocket, the speech or the hangup callback.
+4. With `--dry-run`, it prints the change and stops. A dry run writes no file.
+   Without it, it stops if the number already points at
+   `https://<your origin>/voice` with `POST`.
+5. It reads the number again. It stops if the voice settings moved, or if the
+   number now fails a check from step 1. Then it saves the old voice URL and
+   method to a new private file under your user config directory, in
+   `unmute/twilio-rollback/`.
+6. It sets `VoiceUrl` and `VoiceMethod` only. SMS and every other setting keep
+   their values.
+7. It reads the number back, and writes `build/<target>/deploy-report.json`
+   with the outcome. `routed` means the number points at `/voice` with `POST`
+   and still passes every check from step 1. `not_changed` means Twilio refused
+   the write. Anything else, such as a timeout, is `unknown`, because the write
+   may still land. An `unknown` outcome exits 1 and prints the snapshot path.
+   Nothing is retried.
+
+Two deploys to one number at the same time are not supported.
+
+To route by hand instead, open the number in the Twilio Console (Phone Numbers,
+Manage, Active Numbers). Set "A call comes in" to Webhook, HTTP POST,
+`https://<your origin>/voice`.
+
+To put the old route back, first check the number in the Console. "A call comes
+in" must still be a webhook to the snapshot's `new_voice_url` with `HTTP POST`,
+and the number must have no TwiML App, SIP trunk or fallback URL. If anything
+differs, somebody changed the number since, so stop and ask. If it all matches,
+set "A call comes in" back to the snapshot's `voice_url` and `voice_method`.
+
+Then call the number. That call is the only check of the speech path.
 
 ## How the app behaves
 

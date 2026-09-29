@@ -161,8 +161,14 @@ request is checked against Twilio's signature, built from the configured
 public origin rather than request headers. The app keeps one reader and one
 response owner per call; a generation number drops speech an interrupt made
 obsolete. A tool handler is never cancelled, and its call slot stays taken
-until it really ends. The number's webhook is pointed at the app by the
-operator; nothing here writes to the Twilio account.
+until it really ends. `app.py` embeds an `artifact_id`, a hash of the files
+that decide behaviour, and `/healthz` returns it.
+
+The number's webhook is set by `unmute deploy --target <name>`, or by the
+operator in the Console. Deploy reads the number, compares the host's
+`artifact_id`, sends `/voice` one signed request, then writes `VoiceUrl` and
+`VoiceMethod` directly over the Twilio REST API and reads them back. It uploads
+nothing and places no call.
 
 ### Where a phone call is exercised
 
@@ -261,7 +267,9 @@ entries it needs, and its compile report names those as deferred rather than
 silently skipping them. Resolving a reference to a published tool, checking
 it, and discovering Vault requirements happen once, in `internal/cli`, when
 an author runs `unmute deploy`; that is the only place a credential is read
-or an account write happens. A committed mirror is the one exception, and it
+or an account write happens. SLNG writes always go through the `voiceai` CLI.
+The twilio target is the one direct write: `internal/cli/deploy_twilio.go`
+sets two fields of one Twilio number, with the author's Auth Token. A committed mirror is the one exception, and it
 narrows rather than widens the boundary: `internal/ir` checks it offline for
 a selected code target only, because that target builds and runs the tool
 itself, and a `slng`-only compile needs none.
