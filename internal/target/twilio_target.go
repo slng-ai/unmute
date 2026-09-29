@@ -103,53 +103,120 @@ var TwilioSpeechProviders = map[Role]map[string]string{
 	Speak:  {"elevenlabs": "ElevenLabs"},
 }
 
-// TwilioTurnParam is one ConversationRelay turn setting an author may write
-// under a settings-only models.turn entry. The name is the TwiML attribute.
-type TwilioTurnParam struct {
+// TwilioParam is one ConversationRelay attribute an author may write under a
+// listen, speak or turn binding's params. The name is the TwiML attribute.
+type TwilioParam struct {
 	Name   string
-	Kind   string // "int", "enum" or "bool"
-	Min    int
-	Max    int
+	Kind   string // "int", "number", "enum", "bool" or "phrases"
+	Min    float64
+	Max    float64
 	Values []string
+	// Needs names the one listen speechModel the attribute applies to, empty
+	// for any. Twilio ignores it on every other model, so it is refused there.
+	Needs string
 }
 
-// TwilioTurnParams is every turn setting this target forwards. Anything else is
-// refused, because a setting that reaches nothing changes nothing the author
-// can hear. Ranges are the documented ones.
-var TwilioTurnParams = []TwilioTurnParam{
-	{Name: "speechTimeout", Kind: "int", Min: 600, Max: 5000},
-	{Name: "interruptSensitivity", Kind: "enum", Values: []string{"high", "medium", "low"}},
-	{Name: "ignoreBackchannel", Kind: "bool"},
+// TwilioParams is every ConversationRelay attribute a binding's params may
+// set, by role. Anything else is refused, because a setting that reaches
+// nothing changes nothing the author can hear. Ranges are the documented ones.
+var TwilioParams = map[Role][]TwilioParam{
+	Listen: {
+		{Name: "hints", Kind: "phrases"},
+		{Name: "deepgramSmartFormat", Kind: "bool"},
+	},
+	Speak: {
+		{Name: "elevenlabsTextNormalization", Kind: "enum", Values: []string{"on", "auto", "off"}},
+	},
+	Turn: {
+		{Name: "speechTimeout", Kind: "int", Min: 600, Max: 5000},
+		{Name: "interruptSensitivity", Kind: "enum", Values: []string{"high", "medium", "low"}},
+		{Name: "ignoreBackchannel", Kind: "bool"},
+		{Name: "eotThreshold", Kind: "number", Min: 0.5, Max: 0.9, Needs: "flux"},
+	},
 }
 
-// CheckTwilioTurnParam checks one authored turn setting against its rule.
-func CheckTwilioTurnParam(name string, value any) error {
-	i := slices.IndexFunc(TwilioTurnParams, func(p TwilioTurnParam) bool { return p.Name == name })
+// CheckTwilioParam checks one authored setting against its rule. where names
+// the binding in the message, for example speak.voice. speechModel is the
+// listen binding's model, for the attributes that apply to one only.
+func CheckTwilioParam(role Role, where, name string, value any, speechModel string) error {
+	params := TwilioParams[role]
+	i := slices.IndexFunc(params, func(p TwilioParam) bool { return p.Name == name })
 	if i < 0 {
-		known := make([]string, 0, len(TwilioTurnParams))
-		for _, p := range TwilioTurnParams {
+		known := make([]string, 0, len(params))
+		for _, p := range params {
 			known = append(known, p.Name)
 		}
-		return fmt.Errorf("twilio target has no turn setting %q: write one of %s, or remove it", name, strings.Join(known, ", "))
+		if len(known) == 0 {
+			return fmt.Errorf("twilio target forwards no %s params to ConversationRelay, and this binding sets %s: remove it", where, name)
+		}
+		return fmt.Errorf("twilio target has no %s setting %q: write one of %s, or remove it", where, name, strings.Join(known, ", "))
 	}
-	param := TwilioTurnParams[i]
+	param := params[i]
+	if param.Needs != "" && speechModel != param.Needs {
+		return fmt.Errorf("twilio target %s setting %s applies only when the listen model is %s, and it is %q: remove it, or listen with %s", where, name, param.Needs, speechModel, param.Needs)
+	}
 	switch param.Kind {
 	case "int":
 		n, ok := wholeNumber(value)
+		if !ok || float64(n) < param.Min || float64(n) > param.Max {
+			return fmt.Errorf("twilio target %s setting %s is %v: write a whole number of milliseconds from %g to %g, or remove it", where, name, value, param.Min, param.Max)
+		}
+	case "number":
+		n, ok := number(value)
 		if !ok || n < param.Min || n > param.Max {
-			return fmt.Errorf("twilio target turn setting %s is %v: write a whole number of milliseconds from %d to %d, or remove it", name, value, param.Min, param.Max)
+			return fmt.Errorf("twilio target %s setting %s is %v: write a number from %g to %g, or remove it", where, name, value, param.Min, param.Max)
 		}
 	case "enum":
 		s, ok := value.(string)
 		if !ok || !slices.Contains(param.Values, s) {
-			return fmt.Errorf("twilio target turn setting %s is %v: write one of %s", name, value, strings.Join(param.Values, ", "))
+			return fmt.Errorf("twilio target %s setting %s is %v: write one of %s", where, name, value, strings.Join(param.Values, ", "))
 		}
 	case "bool":
 		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("twilio target turn setting %s is %v: write true or false", name, value)
+			return fmt.Errorf("twilio target %s setting %s is %v: write true or false", where, name, value)
+		}
+	case "phrases":
+		if _, ok := TwilioPhrases(value); !ok {
+			return fmt.Errorf("twilio target %s setting %s is %v: write a list of words or phrases, none holding a comma", where, name, value)
 		}
 	}
 	return nil
+}
+
+// TwilioAttr is the attribute value a checked setting is written as.
+func TwilioAttr(value any) string {
+	if phrases, ok := TwilioPhrases(value); ok {
+		return strings.Join(phrases, ",")
+	}
+	return fmt.Sprint(value)
+}
+
+// TwilioPhrases reads a hints list. Twilio takes one comma-separated string,
+// so a phrase holding a comma would split in two.
+func TwilioPhrases(value any) ([]string, bool) {
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 {
+		return nil, false
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		s = strings.TrimSpace(s)
+		if !ok || s == "" || strings.Contains(s, ",") {
+			return nil, false
+		}
+		out = append(out, s)
+	}
+	return out, true
+}
+
+// number reads a YAML number as a float.
+func number(value any) (float64, bool) {
+	if n, ok := wholeNumber(value); ok {
+		return float64(n), true
+	}
+	f, ok := value.(float64)
+	return f, ok
 }
 
 // wholeNumber reads a YAML number as an int only when it has no fraction.

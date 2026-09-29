@@ -697,15 +697,19 @@ What a twilio package may carry, and nothing else:
   To switch provider, replace model and params together: the other vendor's
   params are refused, and its model id would fail on a call. The console does
   this for you when the provider changes;
-- listen: `provider: deepgram` with a model such as `nova-3-general` and an
-  optional `language`;
+- listen: `provider: deepgram` with a model such as `nova-3-general`, an
+  optional `language`, and optional `params` named after the ConversationRelay
+  attribute: `hints` (a list of phrases, none holding a comma) and
+  `deepgramSmartFormat` (`true` or `false`);
 - speak: `provider: elevenlabs` with `model` (for example `flash_v2_5`), a
-  bare voice id in `voice`, and an optional `language`. The app builds
+  bare voice id in `voice`, an optional `language`, and optional
+  `params.elevenlabsTextNormalization` (`on`, `auto`, `off`). The app builds
   ConversationRelay's `voice` as `<voice id>-<model>`, so a voice that already
   has the suffix is refused;
 - an optional turn entry with `params` only: `speechTimeout` (whole
   milliseconds, 600 to 5000), `interruptSensitivity` (`high`, `medium`,
-  `low`), `ignoreBackchannel` (`true` or `false`). No provider or model;
+  `low`), `ignoreBackchannel` (`true` or `false`), and `eotThreshold` (0.5 to
+  0.9, only when the listen model is `flux`). No provider or model;
 - a fixed `conversation.greeting.text` with `speaks_first: agent`, or
   `speaks_first: user` with no text;
 - `conversation.interruption.enabled`, and `protect: [greeting]`;

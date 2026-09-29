@@ -81,7 +81,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:34a8cedbc8cfa9a2fa8f31d78047fa2bf5d11eba9302f67fc8d1fe7f9bfb34b2"
+ARTIFACT_ID = "sha256:c64d09a1f470bb22591a807217fe22652f7d9db2404d39fe61765e166f0e1918"
 
 def _google_vertex_client(api_key, location):
     from google import genai as _google_genai
@@ -1369,7 +1369,7 @@ may carry a secret, so it is readable only by you.
      app.py replaces __PUBLIC_ORIGIN__ and __PUBLIC_WSS_ORIGIN__ with the public origin at startup. -->
 <Response>
   <Connect action="__PUBLIC_ORIGIN__/connect-action" method="POST">
-    <ConversationRelay url="__PUBLIC_WSS_ORIGIN__/conversation" transcriptionProvider="Deepgram" speechModel="nova-3-general" transcriptionLanguage="en-US" ttsProvider="ElevenLabs" voice="UgBBYS2sOqTuMpoF3BR0-flash_v2_5" ttsLanguage="en-US" welcomeGreeting="Hello, how can I help with the desk today?" welcomeGreetingInterruptible="speech" interruptible="speech" reportInputDuringAgentSpeech="speech" preemptible="false" dtmfDetection="false" speechTimeout="800" interruptSensitivity="medium" ignoreBackchannel="true"></ConversationRelay>
+    <ConversationRelay url="__PUBLIC_WSS_ORIGIN__/conversation" transcriptionProvider="Deepgram" speechModel="nova-3-general" transcriptionLanguage="en-US" hints="relay desk,opening hours" deepgramSmartFormat="true" ttsProvider="ElevenLabs" voice="UgBBYS2sOqTuMpoF3BR0-flash_v2_5" ttsLanguage="en-US" elevenlabsTextNormalization="auto" welcomeGreeting="Hello, how can I help with the desk today?" welcomeGreetingInterruptible="speech" interruptible="speech" reportInputDuringAgentSpeech="speech" preemptible="false" dtmfDetection="false" speechTimeout="800" interruptSensitivity="medium" ignoreBackchannel="true"></ConversationRelay>
   </Connect>
   <Hangup></Hangup>
 </Response>
@@ -1390,12 +1390,19 @@ def opening_hours(day):
     return {"day": day, "open": bool(opens), "opens": opens, "closes": closes}
 === compile-report.json ===
 {
-  "artifact_id": "sha256:34a8cedbc8cfa9a2fa8f31d78047fa2bf5d11eba9302f67fc8d1fe7f9bfb34b2",
+  "artifact_id": "sha256:c64d09a1f470bb22591a807217fe22652f7d9db2404d39fe61765e166f0e1918",
   "bindings": [
     {
       "binding": {
         "language": "en-US",
         "model": "nova-3-general",
+        "params": {
+          "deepgramSmartFormat": true,
+          "hints": [
+            "relay desk",
+            "opening hours"
+          ]
+        },
         "placement": "api",
         "provider": "deepgram"
       },
@@ -1417,6 +1424,9 @@ def opening_hours(day):
       "binding": {
         "language": "en-US",
         "model": "flash_v2_5",
+        "params": {
+          "elevenlabsTextNormalization": "auto"
+        },
         "placement": "api",
         "provider": "elevenlabs",
         "voice": "UgBBYS2sOqTuMpoF3BR0"

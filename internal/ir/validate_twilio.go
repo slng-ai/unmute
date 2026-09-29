@@ -133,14 +133,14 @@ func validateTwilioConversation(agent *Agent, refuse func(string, ...any)) {
 // validateTwilioSpeech checks the listen, speak and turn bindings, which all
 // become attributes on one <ConversationRelay> element.
 func validateTwilioSpeech(agent *Agent, resolved Target, refuse func(string, ...any)) {
-	if binding := resolved.Models.Listen; binding != nil && len(binding.Params) > 0 {
-		refuse("forwards no listen params to ConversationRelay, and this binding sets %s: remove them", strings.Join(sortedKeys(binding.Params), ", "))
+	speechModel := ""
+	if binding := resolved.Models.Listen; binding != nil {
+		speechModel = binding.Model
+		checkTwilioParams(targetcap.Listen, "listen", binding.Params, speechModel, refuse)
 	}
 	for _, name := range sortedKeys(resolved.Models.Speak) {
 		binding := resolved.Models.Speak[name]
-		if len(binding.Params) > 0 {
-			refuse("forwards no speak params to ConversationRelay, and speak.%s sets %s: remove them", name, strings.Join(sortedKeys(binding.Params), ", "))
-		}
+		checkTwilioParams(targetcap.Speak, "speak."+name, binding.Params, speechModel, refuse)
 		voice := binding.Voice
 		if voice == "" {
 			voice = binding.VoiceID
@@ -156,8 +156,14 @@ func validateTwilioSpeech(agent *Agent, resolved Target, refuse func(string, ...
 	if turn.Provider != "" || turn.Model != "" || turn.Placement != "" || turn.EndpointEnv != "" {
 		refuse("has ConversationRelay decide the turn, so the turn entry carries settings only: remove provider, model, placement and endpoint_env from models.turn")
 	}
-	for _, key := range sortedKeys(turn.Params) {
-		if err := targetcap.CheckTwilioTurnParam(key, turn.Params[key]); err != nil {
+	checkTwilioParams(targetcap.Turn, "turn", turn.Params, speechModel, refuse)
+}
+
+// checkTwilioParams refuses every setting in params that is not a
+// ConversationRelay attribute for role, or holds a value Twilio rejects.
+func checkTwilioParams(role targetcap.Role, where string, params map[string]any, speechModel string, refuse func(string, ...any)) {
+	for _, key := range sortedKeys(params) {
+		if err := targetcap.CheckTwilioParam(role, where, key, params[key], speechModel); err != nil {
 			refuse("%s", strings.TrimPrefix(err.Error(), "twilio target "))
 		}
 	}

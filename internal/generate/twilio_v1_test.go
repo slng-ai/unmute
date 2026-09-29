@@ -230,6 +230,38 @@ func TestTwilioInterruptionSettings(t *testing.T) {
 	}
 }
 
+// Listen, speak and turn params land on <ConversationRelay> as the attribute
+// of the same name, a hints list joined with commas.
+func TestTwilioBindingParamsBecomeAttributes(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "twilio"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["twilio"]
+	listen := *resolved.Models.Listen
+	listen.Model = "flux"
+	listen.Params = map[string]any{"hints": []any{"relay desk", "opening hours"}, "deepgramSmartFormat": false}
+	resolved.Models.Listen = &listen
+	voice := agent.Agents[agent.EntryAgent].Voice
+	speak := resolved.Models.Speak[voice]
+	speak.Params = map[string]any{"elevenlabsTextNormalization": "auto"}
+	resolved.Models.Speak = map[string]ir.Binding{voice: speak}
+	resolved.Models.Turn = &ir.Binding{Params: map[string]any{"eotThreshold": 0.7}}
+	out, err := twilioRelayXML(agent, resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`hints="relay desk,opening hours"`, `deepgramSmartFormat="false"`, `elevenlabsTextNormalization="auto"`, `eotThreshold="0.7"`} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("TwiML lacks %s:\n%s", want, out)
+		}
+	}
+}
+
 // The container runs one process as a non-root user, and neither dotenv files
 // nor local state enter the build context.
 func TestTwilioContainer(t *testing.T) {

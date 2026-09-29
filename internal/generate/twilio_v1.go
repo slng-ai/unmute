@@ -370,10 +370,18 @@ func twilioRelayXML(agent *ir.Agent, resolved ir.Target) ([]byte, error) {
 		}
 	}
 	entry := agent.Agents[agent.EntryAgent]
+	params := func(role targetcap.Role, values map[string]any) {
+		for _, param := range targetcap.TwilioParams[role] {
+			if value, ok := values[param.Name]; ok {
+				set(param.Name, targetcap.TwilioAttr(value))
+			}
+		}
+	}
 	if listen := resolved.Models.Listen; listen != nil {
 		set("transcriptionProvider", targetcap.TwilioSpeechProviders[targetcap.Listen][listen.Provider])
 		set("speechModel", listen.Model)
 		set("transcriptionLanguage", listen.Language)
+		params(targetcap.Listen, listen.Params)
 	}
 	if speak, ok := resolved.Models.Speak[entry.Voice]; ok {
 		voice := speak.Voice
@@ -383,6 +391,7 @@ func twilioRelayXML(agent *ir.Agent, resolved ir.Target) ([]byte, error) {
 		set("ttsProvider", targetcap.TwilioSpeechProviders[targetcap.Speak][speak.Provider])
 		set("voice", voice+"-"+speak.Model)
 		set("ttsLanguage", speak.Language)
+		params(targetcap.Speak, speak.Params)
 	}
 	interruptible := "speech"
 	conversation := agent.Conversation
@@ -402,11 +411,7 @@ func twilioRelayXML(agent *ir.Agent, resolved ir.Target) ([]byte, error) {
 	set("preemptible", "false")
 	set("dtmfDetection", "false")
 	if turn := resolved.Models.Turn; turn != nil {
-		for _, param := range targetcap.TwilioTurnParams {
-			if value, ok := turn.Params[param.Name]; ok {
-				set(param.Name, fmt.Sprint(value))
-			}
-		}
+		params(targetcap.Turn, turn.Params)
 	}
 	type relay struct {
 		XMLName xml.Name

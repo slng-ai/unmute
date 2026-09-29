@@ -381,8 +381,10 @@ with the reason:
 - One agent. No tasks, handoffs, transfers or saved state.
 - Local tools with flat inputs and outputs, and `end_call`. No webhook, MCP or
   hosted tools.
-- Deepgram and ElevenLabs inside ConversationRelay. Turn settings are
-  `speechTimeout`, `interruptSensitivity` and `ignoreBackchannel` only.
+- Deepgram and ElevenLabs inside ConversationRelay. Listen, speak and turn
+  `params` are the ConversationRelay attributes the
+  [target page](../../docs-site/targets/twilio.mdx#every-conversationrelay-attribute)
+  lists, and no others.
 - OpenAI Chat Completions or Gemini `generateContent`. No fallback model, no
   custom endpoint, no tracing.
 - One process. No autoscaling.

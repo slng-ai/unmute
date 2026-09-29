@@ -278,10 +278,10 @@ already bound keeps the binding as it is.
 |---|---|
 | agents | one agent |
 | channels | exactly one: `kind: telephony`, `inbound: true`, `outbound: false` |
-| think | `openai` (Chat Completions) or `google` / `gemini` (native `generateContent`); `params` are sent as written |
-| listen | `deepgram`, with a model such as `nova-3-general` and an optional `language` |
-| speak | `elevenlabs`, with `model`, a bare voice id in `voice`, and an optional `language` |
-| turn | optional, `params` only: `speechTimeout` (600 to 5000 ms), `interruptSensitivity` (`high`, `medium`, `low`), `ignoreBackchannel` |
+| think | `slng` (the Context Router), `openai` (Chat Completions) or `google` / `gemini` (native `generateContent`); `params` are sent as written |
+| listen | `deepgram`, with a model such as `nova-3-general`, an optional `language`, and the `params` `hints` and `deepgramSmartFormat` |
+| speak | `elevenlabs`, with `model`, a bare voice id in `voice`, an optional `language`, and the `params` `elevenlabsTextNormalization` |
+| turn | optional, `params` only: `speechTimeout` (600 to 5000 ms), `interruptSensitivity` (`high`, `medium`, `low`), `ignoreBackchannel`, and `eotThreshold` (0.5 to 0.9, listen model `flux` only) |
 | greeting | a fixed `text` with `speaks_first: agent`, or `speaks_first: user` with no text |
 | interruption | `enabled: true` or `false`, and `protect: [greeting]` |
 | tools | local handlers with flat `input` and `output` schemas of `string`, `integer`, `number` and `boolean` fields, and the builtin `end_call` |
@@ -289,6 +289,71 @@ already bound keeps the binding as it is.
 The app builds ConversationRelay's `voice` attribute as `<voice id>-<model>`,
 for example `UgBBYS2sOqTuMpoF3BR0-flash_v2_5`. Write the id alone; a voice
 that already has the suffix is refused.
+
+### Every ConversationRelay attribute
+
+Each row is one attribute of
+[`<ConversationRelay>`](https://www.twilio.com/docs/voice/twiml/connect/conversationrelay),
+and where its value comes from. A setting under `params` has the attribute's
+own name.
+
+```yaml
+models:
+  listen:
+    transcriber:
+      provider: deepgram
+      model: nova-3-general
+      params:
+        hints:
+          - relay desk
+          - opening hours
+        deepgramSmartFormat: true
+  speak:
+    voice:
+      provider: elevenlabs
+      model: flash_v2_5
+      voice: UgBBYS2sOqTuMpoF3BR0
+      params:
+        elevenlabsTextNormalization: auto
+```
+
+<ParamField path="hints" type="list of strings">
+  Words or phrases the caller may say. The app joins them with commas, so a
+  phrase may not hold a comma.
+</ParamField>
+
+<ParamField path="deepgramSmartFormat" type="boolean">
+  Deepgram's Smart Format on the transcript. Twilio's default is `true`.
+</ParamField>
+
+<ParamField path="elevenlabsTextNormalization" type="string">
+  `on`, `auto` or `off`. Twilio's default is `off`.
+</ParamField>
+
+<ParamField path="eotThreshold" type="number">
+  Under `models.turn` params. How sure the model must be that the caller has
+  finished, from 0.5 to 0.9. Twilio uses it only when the listen model is
+  `flux`, so any other model refuses it.
+</ParamField>
+
+| Attribute | Set from |
+|---|---|
+| `url` | the app's public origin, `wss://<host>/conversation` |
+| `welcomeGreeting`, `welcomeGreetingInterruptible` | `conversation.greeting`, and `protect: [greeting]` |
+| `transcriptionProvider`, `speechModel`, `transcriptionLanguage` | the listen binding |
+| `ttsProvider`, `voice`, `ttsLanguage` | the speak binding |
+| `interruptible`, `reportInputDuringAgentSpeech` | `conversation.interruption.enabled` |
+| `interruptSensitivity`, `speechTimeout`, `ignoreBackchannel`, `eotThreshold` | turn `params` |
+| `hints`, `deepgramSmartFormat` | listen `params` |
+| `elevenlabsTextNormalization` | speak `params` |
+| `preemptible`, `dtmfDetection` | always `false`: the app sends no preemptible text and reads no keypad digits |
+| `language`, `<Language>` | not written: the two per-side languages cover one language |
+| `partialPrompts` | not written: the app answers final prompts only |
+| `events` | not written: Twilio does not document the event payloads |
+| `intelligenceService`, `conversationConfiguration`, `conversationId` | not written: these connect other Twilio products |
+| `debug` | not written |
+
+Google and Amazon speech are not offered yet. Deepgram and ElevenLabs are.
 
 Everything else is refused before a file is written. Each refusal says what to
 do instead. The refused list:

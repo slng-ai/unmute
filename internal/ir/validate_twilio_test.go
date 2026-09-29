@@ -126,8 +126,8 @@ func TestTwilioRefusesWhatItDoesNotRun(t *testing.T) {
 			r.Models.Turn = &Binding{Provider: "local", Model: "silero"}
 		}, "carries settings only"},
 		{"unknown turn setting", func(_ *Agent, r *Target) {
-			r.Models.Turn = &Binding{Params: map[string]any{"eotThreshold": 0.7}}
-		}, `no turn setting "eotThreshold"`},
+			r.Models.Turn = &Binding{Params: map[string]any{"endpointing": 300}}
+		}, `no turn setting "endpointing"`},
 		{"speech timeout out of range", func(_ *Agent, r *Target) {
 			r.Models.Turn = &Binding{Params: map[string]any{"speechTimeout": 200}}
 		}, "from 600 to 5000"},
@@ -138,7 +138,7 @@ func TestTwilioRefusesWhatItDoesNotRun(t *testing.T) {
 		}, "not a bare ElevenLabs voice id"},
 		{"listen params", func(_ *Agent, r *Target) {
 			r.Models.Listen.Params = map[string]any{"smart_format": true}
-		}, "forwards no listen params"},
+		}, "has no listen setting \"smart_format\""},
 		{"unsupported listen vendor", func(_ *Agent, r *Target) {
 			r.Models.Listen.Provider = "slng"
 		}, "slng"},

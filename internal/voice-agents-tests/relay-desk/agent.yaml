@@ -1,4 +1,4 @@
-# The Twilio ConversationRelay acceptance package. One agent, one inbound phone
+# The twilio target acceptance package. One agent, one inbound phone
 # channel, one read-only tool and end_call: the whole first-release surface of
 # the twilio target, and nothing it refuses.
 version: 1
@@ -21,12 +21,20 @@ models:
       provider: deepgram
       model: nova-3-general
       language: en-US
+      params:
+        # ConversationRelay's hints and deepgramSmartFormat attributes.
+        hints:
+          - relay desk
+          - opening hours
+        deepgramSmartFormat: true
   speak:
     voice:
       provider: elevenlabs
       model: flash_v2_5
       voice: UgBBYS2sOqTuMpoF3BR0
       language: en-US
+      params:
+        elevenlabsTextNormalization: auto
   turn:
     relay:
       params:
