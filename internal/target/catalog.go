@@ -158,6 +158,7 @@ func CheckGoogleParams(params map[string]any) error {
 // (providers.yaml) merges add-only on top of this; not implemented yet.
 func DefaultCatalog() Catalog {
 	var entries []Entry
+	entries = append(entries, agoraCatalog...)
 	entries = append(entries, pipecatCatalog...)
 	entries = append(entries, pipecatLiveCatalog...)
 	entries = append(entries, pipecatRealtimeCatalog...)

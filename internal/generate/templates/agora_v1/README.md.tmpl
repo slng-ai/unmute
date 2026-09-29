@@ -1,0 +1,93 @@
+# Run the Agora voice agent
+
+This project runs a local Python session service and browser demo. Agora
+Conversational AI runs the speech and reasoning pipeline, and Agora RTC carries
+the browser audio. Unmute is not needed at runtime.
+
+## Start locally
+
+Use Python 3.12 or newer. Your Agora project needs Conversational AI enabled,
+an App ID, an App Certificate, and access to the managed models below.
+
+```sh
+python -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Fill in AGORA_APP_ID and AGORA_APP_CERTIFICATE in .env.
+set -a
+. ./.env
+set +a
+python server.py
+```
+
+Open http://localhost:8080, allow the microphone, and start a conversation.
+The browser joins and publishes audio before the service starts the agent, so
+the fixed greeting can be heard. Start acceptance is not evidence of audible
+speech; the page reports connected after subscribing to agent audio.
+
+`AGORA_AREA` defaults to `us`; `eu` and `ap` are also accepted. It chooses the
+Agora API area. It is not a promise that all model inference remains in that
+region. This managed-model example does not support the CN area.
+
+## Supported package behavior
+
+- One agent, one browser realtime_audio channel, and a cascade pipeline.
+- Deepgram `nova-3` with language `en`, OpenAI `gpt-4o-mini`, and MiniMax
+  `speech_2_6_turbo` with an explicit voice. These use Agora-managed credentials;
+  no separate vendor API keys are needed. Voice availability is checked by the
+  service during a real conversation, not by the offline compiler.
+- System instructions, a fixed agent-first greeting, and an explicit interruption
+  setting. Enabled interruption uses Agora's start-of-speech policy.
+- `conversation.max_duration` accepts whole seconds from 1s to 600s; omission
+  uses 600s. The service enforces this deadline independently of the page.
+- Tools, MCP, tasks, handoffs, variables, telephony, video, speech-to-speech
+  models, custom model parameters, tracing, capacity and deployment settings
+  are refused by this initial target. They are adapter limits, not claims
+  about what Agora's products support.
+
+## Session lifecycle
+
+The local service permits five active or prepared sessions. An unused prepared
+session expires after 60 seconds. Each started session has its own RTC channel,
+browser token and unguessable control key. The browser receives no certificate.
+Ending the conversation closes the microphone, leaves RTC and requests agent
+cleanup. Repeated stop requests are safe, and failed stops are retried by the
+service while it is running. The cloud agent has a 30-second departure idle
+limit if its subscribed browser leaves.
+
+A failed or interrupted start may have reached the cloud without returning an
+agent ID. The browser leaves on failure, so the departure idle limit remains a
+fallback. A killed server cannot enforce its local deadline or retry a stop;
+this local demo is not a durable production session controller.
+
+The page ends the conversation before its RTC token lifetime is exhausted. It
+does not renew tokens or extend a session. Start a new conversation to continue.
+The browser SDK is loaded from a pinned jsDelivr URL and needs network access.
+
+## Container
+
+```sh
+docker build -t unmute-agora .
+docker run --rm --env-file .env -p 127.0.0.1:8080:8080 unmute-agora
+```
+
+Keep the loopback port binding. This sample uses same-origin localhost checks
+and session control keys, not application login or a production ingress. Do not
+expose it directly on the public internet. Run one process; sessions live in
+memory. Stop the container gracefully to request cleanup of active agents.
+
+`unmute dev` and `unmute deploy` do not launch this target. Run this generated
+project using the commands above. Recompile the source package to change the
+agent; edits to generated files may be overwritten.
+
+## Verify a real conversation
+
+Use headphones. Confirm the fixed greeting is audible, ask a question, interrupt
+a response if interruption is enabled, then end the conversation. Confirm the
+microphone is released and the session is stopped in Agora. Record the screen
+with sound for review without showing credentials. Offline tests and successful
+compilation do not verify model access, audio quality or a completed cloud call.
+
+The interactive starter scaffold does not create Agora packages yet. Copy
+`examples/agora-voice` and edit its authored files before compiling.

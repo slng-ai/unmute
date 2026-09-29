@@ -1,0 +1,74 @@
+---
+title: "The Agora Agents project"
+description: "Compile a browser voice agent into an Agora Agents Python service."
+sidebarTitle: "Agora"
+---
+
+The `agora` target emits a local Python session service and a browser client.
+Agora Conversational AI runs the speech pipeline, and Agora RTC carries the
+audio. The generated project runs without Unmute.
+
+Start with the [Agora voice example](https://github.com/slng-ai/unmute/tree/main/examples/agora-voice).
+It contains the agent package and the supported SDK pin.
+
+```sh
+unmute validate examples/agora-voice
+unmute compile examples/agora-voice
+```
+
+## What is generated
+
+`build/agora/` contains `server.py`, `settings.json`, `index.html`, `client.js`,
+`requirements.txt`, a Dockerfile, `.dockerignore`, `.env.example`, a runbook and
+`compile-report.json`. The compiler makes no provider requests.
+
+The service reads `AGORA_APP_ID` and `AGORA_APP_CERTIFICATE` from its environment.
+The project must have Conversational AI enabled. `AGORA_AREA` defaults to `us`;
+`eu` and `ap` are accepted too. This is API routing, not a guarantee about model
+inference residency. The CN area is outside this managed-model example.
+
+Follow the emitted runbook to install dependencies and run `python server.py`.
+Open http://localhost:8080 and allow microphone access. The page joins and
+publishes audio before starting the agent. Its browser SDK comes from a pinned
+jsDelivr URL.
+
+## Supported behavior
+
+The first target supports one English cascade agent, with Deepgram `nova-3`,
+OpenAI `gpt-4o-mini` and MiniMax `speech_2_6_turbo`. These models use
+Agora-managed credentials; no separate vendor keys are needed. The voice must
+be explicit, and availability is verified during a real call.
+
+System instructions and a fixed agent-first greeting reach the hosted agent.
+`conversation.interruption.enabled` must be explicit. Enabled interruption uses
+start-of-speech handling. `conversation.max_duration` accepts whole seconds
+from `1s` to `600s`; omission selects `600s`.
+
+Tools, MCP, tasks, handoffs, variables, phone routes, video, speech-to-speech
+models, custom model parameters, tracing, capacity and deployment settings are
+refused before generation. These are limits of this adapter's first version.
+
+## Lifecycle and verification
+
+Five prepared or active sessions fit in the local service. A preparation
+expires after 60 seconds if it is unused. Each session has its own channel,
+scoped browser token and control key. The certificate stays on the server.
+
+Ending a call closes the microphone, leaves RTC and stops the cloud agent.
+Repeated stops are safe; the service retries failed cleanup. A local deadline
+ends each conversation, and the agent's departure idle timeout is 30 seconds.
+If a cloud start fails without returning an agent ID, the browser leaves and
+that idle limit is the fallback. A killed server cannot perform its cleanup.
+
+This is a single-process localhost demo, not a production authentication or
+durable session-management layer. Keep Docker's published port on loopback.
+The browser ends sessions rather than renewing tokens. Start a new call to
+continue.
+
+`unmute dev` and `unmute deploy` do not run this target. Use the generated
+project's runbook. Compilation and offline SDK checks do not establish model
+access or a successful conversation. Verify the greeting, response,
+interruption and cleanup in a real browser call and record it with sound.
+
+The interactive starter scaffold does not create Agora packages yet. Copy
+`examples/agora-voice` and edit its authored files before compiling.

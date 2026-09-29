@@ -1,0 +1,319 @@
+"""Local Agora browser demo. Run one process; cloud conversations use Agora."""
+
+import argparse
+import hmac
+import json
+import logging
+import os
+import secrets
+import signal
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
+
+LOG = logging.getLogger("agora-demo")
+ROOT = Path(__file__).resolve().parent
+MAX_SESSIONS = 5
+PREPARE_SECONDS = 60
+
+
+class SessionError(Exception):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+
+
+class AgoraBackend:
+    def __init__(self, settings, httpx_client=None):
+        from agora_agent import Agent, Agora, Area, DeepgramSTT, MiniMaxTTS, OpenAI
+        from agora_agent.agentkit import InterruptionConfig
+
+        self.app_id = os.environ["AGORA_APP_ID"]
+        self.certificate = os.environ["AGORA_APP_CERTIFICATE"]
+        area = os.environ.get("AGORA_AREA", "us").lower()
+        areas = {"us": Area.US, "eu": Area.EU, "ap": Area.AP}
+        if area not in areas:
+            raise ValueError("AGORA_AREA must be us, eu or ap for this managed-model demo")
+        self.client = Agora(
+            app_id=self.app_id, app_certificate=self.certificate, area=areas[area],
+            timeout=15, httpx_client=httpx_client,
+        )
+        self.agent = (
+            Agent(
+                client=self.client,
+                turn_detection={"language": "en-US"},
+                interruption=InterruptionConfig(
+                    enable=settings["interruptions"],
+                    **({"mode": "start_of_speech"} if settings["interruptions"] else {}),
+                ),
+            )
+            .with_stt(DeepgramSTT(
+                model=settings["stt"]["model"], language=settings["stt"]["language"],
+            ))
+            .with_llm(OpenAI(
+                model=settings["llm"]["model"],
+                system_messages=[{"role": "system", "content": settings["instructions"]}],
+                greeting_message=settings["greeting"],
+            ))
+            .with_tts(MiniMaxTTS(
+                model=settings["tts"]["model"], voice_id=settings["tts"]["voice"],
+            ))
+        )
+
+    def prepare(self, channel, seconds):
+        from agora_agent import generate_rtc_token
+
+        # Numeric identities are distinct, and the agent hears only this browser.
+        uid, agent_uid = 1001, 2001
+        session = self.agent.create_session(
+            channel=channel, agent_uid=str(agent_uid), remote_uids=[str(uid)],
+            name=channel, idle_timeout=30, expires_in=seconds + 120,
+        )
+        token = generate_rtc_token(
+            self.app_id, self.certificate, channel, uid, expiry_seconds=seconds + 120,
+        )
+        return session, {"app_id": self.app_id, "channel": channel, "uid": uid, "token": token}
+
+    def start(self, handle):
+        return handle.start()
+
+    def stop(self, handle, agent_id):
+        # The stateless API treats an already stopped/missing agent as success.
+        if agent_id:
+            self.client.stop_agent(agent_id)
+
+
+@dataclass
+class Session:
+    key: str
+    handle: object
+    bootstrap: dict
+    deadline: float
+    state: str = "prepared"
+    agent_id: str | None = None
+    stopped_at: float | None = None
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+class SessionManager:
+    def __init__(self, backend, seconds=600, clock=time.monotonic):
+        if not 1 <= seconds <= 600:
+            raise ValueError("max_session_seconds must be between 1 and 600")
+        self.backend, self.seconds, self.clock = backend, seconds, clock
+        self.sessions = {}
+        self.lock = threading.Lock()
+        self.closing = False
+        self.cleanup_workers = ThreadPoolExecutor(max_workers=MAX_SESSIONS)
+        self.cleanup_jobs = {}
+
+    def prepare(self):
+        with self.lock:
+            if self.closing:
+                raise SessionError(503, "Service is shutting down")
+            active = sum(s.state != "stopped" for s in self.sessions.values())
+            if active >= MAX_SESSIONS:
+                raise SessionError(429, "The local demo has no free session slots")
+            sid, key = secrets.token_urlsafe(18), secrets.token_urlsafe(32)
+            handle, bootstrap = self.backend.prepare("unmute_" + secrets.token_hex(12), self.seconds)
+            self.sessions[sid] = Session(key, handle, bootstrap, self.clock() + PREPARE_SECONDS)
+            return {"id": sid, "key": key, **bootstrap, "expires_in": self.seconds}
+
+    def get(self, sid, key):
+        with self.lock:
+            session = self.sessions.get(sid)
+        if session is None or not hmac.compare_digest(session.key, key):
+            raise SessionError(404, "Session not found")
+        return session
+
+    def start(self, sid, key):
+        session = self.get(sid, key)
+        with session.lock:
+            if self.closing or session.state in ("stopped", "cleanup_pending"):
+                raise SessionError(410, "Session has ended")
+            if self.clock() >= session.deadline:
+                self._stop(session)
+                raise SessionError(410, "Session expired; start a new conversation")
+            if session.state == "running":
+                return {"status": "started"}
+            session.deadline = self.clock() + self.seconds
+            try:
+                session.agent_id = self.backend.start(session.handle)
+                session.state = "running"
+            except Exception:
+                # An ambiguous cloud start can have no returned ID. The agent
+                # subscribes to one browser and has a 30s departure idle limit.
+                self._stop(session)
+                raise
+            if self.closing or self.clock() >= session.deadline:
+                self._stop(session)
+                raise SessionError(410, "Session expired while starting")
+            return {"status": "started"}
+
+    def _stop(self, session):
+        if session.state == "stopped":
+            return
+        session.state = "cleanup_pending"
+        # Keep a failed stop in the registry so the reaper can retry it.
+        self.backend.stop(session.handle, session.agent_id)
+        session.state = "stopped"
+        session.stopped_at = self.clock()
+
+    def stop(self, sid, key):
+        session = self.get(sid, key)
+        with session.lock:
+            self._stop(session)
+        return {"status": "stopped"}
+
+    def _reap_session(self, session):
+        with session.lock:
+            try:
+                self._stop(session)
+            except Exception:  # noqa: BLE001 - isolate provider failures; retry next sweep.
+                LOG.warning("Session cleanup failed; retrying on next sweep")
+
+    def reap(self):
+        # Never wait for a different session's start or cloud stop. At most one
+        # queued/running cleanup per active session and five workers in total.
+        with self.lock:
+            if self.closing:
+                return
+            for sid, session in list(self.sessions.items()):
+                job = self.cleanup_jobs.get(sid)
+                if job is not None:
+                    if not job.done():
+                        continue
+                    del self.cleanup_jobs[sid]
+                if session.state == "stopped":
+                    if self.clock() - session.stopped_at >= 60:
+                        self.sessions.pop(sid, None)
+                elif session.state == "cleanup_pending" or self.clock() >= session.deadline:
+                    self.cleanup_jobs[sid] = self.cleanup_workers.submit(self._reap_session, session)
+
+    def close(self):
+        with self.lock:
+            self.closing = True
+            sessions = list(self.sessions.values())
+        self.cleanup_workers.shutdown(wait=True)
+        for session in sessions:
+            with session.lock:
+                try:
+                    self._stop(session)
+                except Exception:  # noqa: BLE001 - attempt every shutdown cleanup.
+                    LOG.warning("Shutdown cleanup failed; cloud idle expiry remains active")
+
+
+class DemoServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, address, manager):
+        super().__init__(address, Handler)
+        self.manager = manager
+        self.allowed_hosts = {f"localhost:{self.server_port}", f"127.0.0.1:{self.server_port}"}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, _format, *_args):
+        # Never log headers, session capabilities, tokens or provider exceptions.
+        pass
+
+    def send_json(self, status, value):
+        self.send_content(status, json.dumps(value).encode(), "application/json")
+
+    def send_content(self, status, body, content_type):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "DENY")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def trusted_host(self):
+        return self.headers.get("Host", "") in self.server.allowed_hosts
+
+    def do_GET(self):
+        if not self.trusted_host():
+            self.send_json(403, {"error": "Use the localhost address printed by the server"})
+            return
+        paths = {"/": ("index.html", "text/html; charset=utf-8"),
+                 "/client.js": ("client.js", "text/javascript; charset=utf-8")}
+        resource = paths.get(self.path)
+        if resource is None:
+            self.send_json(404, {"error": "Not found"})
+            return
+        path, mime = resource
+        self.send_content(200, (ROOT / path).read_bytes(), mime)
+
+    def do_POST(self):
+        origin = urlsplit(self.headers.get("Origin", ""))
+        if (not self.trusted_host() or origin.scheme != "http"
+                or origin.netloc != self.headers.get("Host")):
+            self.send_json(403, {"error": "A same-origin localhost browser request is required"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 <= length <= 1024 or self.headers.get("Transfer-Encoding"):
+                raise ValueError
+            self.rfile.read(length)
+        except ValueError:
+            self.send_json(400, {"error": "Invalid request body"})
+            return
+        try:
+            manager = self.server.manager
+            if self.path == "/sessions":
+                result = manager.prepare()
+            else:
+                parts = self.path.strip("/").split("/")
+                if len(parts) != 3 or parts[0] != "sessions" or parts[2] not in ("start", "stop"):
+                    raise SessionError(404, "Not found")
+                auth = self.headers.get("Authorization", "")
+                key = auth[7:] if auth.startswith("Bearer ") else ""
+                operation = manager.start if parts[2] == "start" else manager.stop
+                result = operation(parts[1], key)
+            self.send_json(200, result)
+        except SessionError as error:
+            self.send_json(error.status, {"error": str(error)})
+        except Exception:  # noqa: BLE001 - do not expose SDK errors or credentials over HTTP.
+            LOG.warning("Agora operation failed; check credentials and project access")
+            self.send_json(502, {"error": "Agora request failed. Check project access and credentials."})
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", choices=["127.0.0.1", "0.0.0.0"], default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8080)
+    args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    settings = json.loads((ROOT / "settings.json").read_text())
+    manager = SessionManager(AgoraBackend(settings), settings["max_session_seconds"])
+    server = DemoServer((args.host, args.port), manager)
+    done = threading.Event()
+
+    def sweep():
+        while not done.wait(1):
+            manager.reap()
+
+    def shutdown(_signum, _frame):
+        # BaseServer.shutdown must run outside serve_forever's thread.
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGINT, shutdown)
+    signal.signal(signal.SIGTERM, shutdown)
+    threading.Thread(target=sweep, daemon=True).start()
+    LOG.info("Open http://localhost:%s (local demo; one process)", server.server_port)
+    try:
+        server.serve_forever()
+    finally:
+        done.set()
+        manager.close()
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

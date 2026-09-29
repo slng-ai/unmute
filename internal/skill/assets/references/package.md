@@ -405,7 +405,7 @@ provider with different settings, for example `pipecat_twilio` and
 
 | Field | What it is |
 |---|---|
-| `provider` | `livekit`, `pipecat`, or `slng` |
+| `provider` | `livekit`, `pipecat`, `slng`, or `agora` |
 | `version` | required exact `x.y.z` framework version for code targets; refused on `slng` |
 | `pins` | LiveKit-only known package pins, name to semantic version; refused on `slng` |
 | `sdk_language` | `python` when written; refused on `slng` |
@@ -490,11 +490,13 @@ every field that entry needs.
 | `pipecat` | yes | yes |
 | `livekit` | yes | yes |
 | `slng` | yes | no |
+| `agora` | yes | yes |
 
-Those are the only three. A provider earns a place here by having a driver that
+Those are the four supported targets. A provider earns a place here by having a driver that
 owns its whole output, so validate and compile agree about what exists.
 
 `pipecat` and `livekit` generate a runnable Python project you host and run.
+`agora` generates a local Python session service with a browser RTC example.
 `slng` generates a deployment body for a platform that runs the agent for you,
 so there is nothing to run locally and `unmute dev` does not apply to it. See
 "The slng target" below.
@@ -646,3 +648,8 @@ Do not write one into a prompt, a greeting or a tool field. For a value that
 varies per call, declare a package variable and write `{{name}}`. For a
 credential, name the Vault entry on the tool that reads it, as a bare name in
 its `auth:` block with no braces and no dollar.
+
+## The agora target
+
+`agora` emits a Python session service and browser client. See [Agora authoring](agora.md)
+for its deliberately small supported surface and launch commands.

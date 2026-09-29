@@ -1,0 +1,34 @@
+version: 1
+name: agora-voice
+architecture: cascade
+entry_agent: assistant
+models:
+  listen:
+    transcriber:
+      provider: deepgram
+      model: nova-3
+      language: en
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+  speak:
+    voice:
+      provider: minimax
+      model: speech_2_6_turbo
+      voice: English_captivating_female1
+agents:
+  assistant:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+conversation:
+  greeting:
+    speaks_first: agent
+    text: Hello, how can I help?
+  interruption:
+    enabled: true
+  max_duration: 600s
+channels:
+  web:
+    kind: realtime_audio

@@ -31,6 +31,10 @@ the way. It is never in the call path.
 > to a voice you can talk to in your browser. The full guide lives at
 > [unmute.ai](https://unmute.ai).
 
+The [Agora voice example](examples/agora-voice/) compiles to an Agora Agents
+Python service and an RTC browser client. Its first target supports a single
+managed cascade conversation; its README describes the supported boundary.
+
 ## Quickstart
 
 ```sh
@@ -558,7 +562,7 @@ published SLNG conformance fixtures and needs network.
 ## Contributing
 
 Contributions are welcome, from anyone. Unmute is MIT licensed and every part of
-it is open: the compiler, the three targets, the examples, the skill and the
+it is open: the compiler, the four targets, the examples, the skill and the
 docs site.
 
 A pull request needs five things:

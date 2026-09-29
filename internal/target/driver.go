@@ -59,7 +59,11 @@ type SupportWindow struct {
 //
 // Each runtime intentionally supports one tested SDK version rather than
 // claiming a compatibility range the release matrix does not exercise.
+const AgoraSDKVersion = "2.11.0"
+
 var supportWindows = map[Provider]SupportWindow{
+	// SDK source inspected 2026-09-29; offline checks only. Browser call OWED.
+	Agora: {Floor: AgoraSDKVersion, Ceiling: AgoraSDKVersion, Verified: "2026-09-29"},
 	// 1.8.1 is the first release carrying the GPT-Live model
 	// (livekit/plugins/openai/realtime/gpt_live_model.py), which is why this
 	// moved: architecture: live cannot compile on this target below it. Checked
@@ -138,6 +142,7 @@ var LiveKitDeploymentRegions = []string{"us-east", "eu-central", "ap-south"}
 var frameworkPackages = map[Provider]string{
 	LiveKit: "livekit-agents",
 	Pipecat: "pipecat-ai",
+	Agora:   "agora-agents",
 }
 
 // Window returns the supported framework version for a provider. A provider with

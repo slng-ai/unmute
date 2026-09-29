@@ -298,3 +298,16 @@ is a live call against a deployed agent, and no test level stands in for it.
 - Keep media and conversation state in the active process, never in Redis.
 - Measure locally. Nothing measured leaves the machine that produced it.
 - Scale from declared capacity and measured behavior, not authored agent count.
+
+## Agora browser target
+
+`internal/ir/validate_agora.go` closes the first Agora surface to one managed
+cascade agent and rejects fields it cannot lower. `internal/generate/agora_v1.go`
+emits settings plus a Python session service and RTC browser client. The
+service owns credentials, scoped tokens and session cleanup; Agora executes
+speech and reasoning. Unmute performs no runtime work or provider requests.
+
+Agora emits a runnable project without being a local Pipecat/LiveKit pipeline.
+It therefore participates in `EmitsProject`, not `IsCode`. The shared dev runner,
+deploy command and starter scaffold do not support it yet; authors copy the
+public Agora example and follow the generated runbook.

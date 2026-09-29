@@ -1,12 +1,12 @@
 ---
 title: "Unmute"
-description: "A declarative standard for voice agents. Describe the agent once, compile it to Pipecat, LiveKit, or SLNG."
+description: "A declarative standard for voice agents. Describe the agent once, compile it to Pipecat, LiveKit, SLNG, or Agora."
 sidebarTitle: "Overview"
 ---
 
 Unmute is a declarative standard for voice agents. You describe the agent
 once, in YAML and Markdown. The compiler turns that package into a native
-project for the target you pick: Pipecat, LiveKit, or SLNG.
+project for the target you pick: Pipecat, LiveKit, SLNG, or Agora.
 
 ## The problem
 
@@ -37,6 +37,8 @@ compiles the package into what that target expects:
 - **Pipecat** and **LiveKit** are code targets. You get a Python
   project with a Dockerfile, a `.env.example`, and a <Tooltip tip="A README written for your build alone. It lists the exact keys, commands and phone steps that build needs.">runbook</Tooltip>. The project does
   not import Unmute, and Unmute is not in the call path.
+- **Agora** emits a Python session service and an RTC browser example for
+  a single hosted conversation. See its [supported surface](/targets/agora).
 - **SLNG** is a hosted target. You get a deployment body, `unmute deploy`
   pushes it, and SLNG runs the agent.
 
@@ -45,9 +47,9 @@ compiles the package into what that target expects:
     `agent.yaml`, your prompts, your tool files. Read it and you know what the
     agent does.
   </Card>
-  <Card title="Three targets" icon="boxes" href="/targets/overview">
-    The same package compiles to Pipecat, to LiveKit, and to SLNG. Same
-    prompt, same tools, same behavior.
+  <Card title="Four targets" icon="boxes" href="/targets/overview">
+    Choose Pipecat, LiveKit, SLNG, or Agora. The compiler refuses behavior
+    that the chosen target cannot express.
   </Card>
 </Columns>
 

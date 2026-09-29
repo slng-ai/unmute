@@ -67,6 +67,13 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, row.Warnings...)
 	}
 	switch resolved.Provider {
+	case ir.ProviderAgora:
+		emitted, err := GenerateAgora(agent, resolved)
+		if err != nil {
+			return Artifact{}, err
+		}
+		emitted.Notes.Warnings = append(emitted.Notes.Warnings, artifact.Notes.Warnings...)
+		return withManifestReport(emitted, agent)
 	case ir.ProviderLiveKit:
 		emitted, err := GenerateLiveKit(agent, resolved, report.ForwardedBindings, report.Sizing)
 		if err != nil {
@@ -172,7 +179,7 @@ func targetDiagnostics(report ir.ValidateReport) string {
 
 func artifactKind(provider ir.Provider) ArtifactKind {
 	switch provider {
-	case ir.ProviderLiveKit, ir.ProviderPipecat:
+	case ir.ProviderLiveKit, ir.ProviderPipecat, ir.ProviderAgora:
 		return CodeTarget
 	case ir.ProviderSlng:
 		return BodyTarget

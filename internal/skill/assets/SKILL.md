@@ -81,6 +81,7 @@ path and commands and ask for their output. If audio cannot be heard, run the
 other checks and say that the agent still needs a listening test. Never claim a
 package works because files were written.
 
+For `provider: agora`, read [references/agora.md](references/agora.md).
 ## Hard rules
 
 - The CLI wins when a reference and validation disagree.
@@ -90,8 +91,7 @@ package works because files were written.
   values. Secrets never use `{{templates}}`.
 
 ## Finish clearly
-
-Tell the user:
+Tell the user the following:
 
 1. the target and smallest structure chosen;
 2. every model bound by role;

@@ -69,6 +69,8 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 	}
 	resolved := targets[0]
 	switch resolved.Provider {
+	case ir.ProviderAgora:
+		return fmt.Errorf("dev %s: agora uses its generated browser service; run `unmute compile %s --target %s`, then follow build/%s/README.md", root, root, resolved.Name, resolved.Name)
 	case ir.ProviderPipecat, ir.ProviderLiveKit:
 		// code targets: run the deployable container below.
 	default:

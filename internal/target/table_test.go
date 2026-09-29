@@ -643,8 +643,12 @@ func TestToolAnnounceCapabilityRows(t *testing.T) {
 	// stay core because the field row above already stops them, the same shape as
 	// FieldToolMCPTask.
 	for _, provider := range Providers {
-		if got := table.Capability(FieldToolAnnounceTask, provider); got.Tag != Core {
-			t.Errorf("%s task-scoped announce tag = %q, want %q", provider, got.Tag, Core)
+		want := Core
+		if provider == Agora {
+			want = Gated
+		}
+		if got := table.Capability(FieldToolAnnounceTask, provider); got.Tag != want {
+			t.Errorf("%s task-scoped announce tag = %q, want %q", provider, got.Tag, want)
 		}
 	}
 }

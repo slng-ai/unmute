@@ -954,6 +954,9 @@ func (d Data) DeclaredSecrets() []string {
 // paths in deterministic (lexical) order. Refuses if dir already exists and is
 // non-empty (no overwrite, no partial write).
 func Write(dir string, d Data) ([]string, error) {
+	if d.Target == string(targetcap.Agora) {
+		return nil, fmt.Errorf("agora starter scaffolding is not supported; copy examples/agora-voice and compile it instead")
+	}
 	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
 		return nil, fmt.Errorf("%s: %w", dir, ErrExists)
 	}

@@ -1261,17 +1261,18 @@ func TestNoUnmuteEnvOnTheBeginnerPath(t *testing.T) {
 	}
 }
 
-// TestOneModelIdEverywhere holds every author-facing surface to the single model
-// identifier internal/scaffold owns. It fails on three things, not one: a stale
+// TestOneModelIdEverywhere holds generic author-facing surfaces to the model
+// identifiers internal/scaffold owns. The Agora managed target has its own
+// verified model contract, checked only on its dedicated surfaces. It fails on three things, not one: a stale
 // identifier, a combined provider/model form, and a
 // temperature on a think model, which OpenAI's reference does not state this
 // model family accepts (research D10).
 func TestOneModelIdEverywhere(t *testing.T) {
 	// Two owned identifiers, both from internal/scaffold: the scaffold default
 	// and the one the router example names. The comparison stays exact, so a
-	// third identifier still fails. Widening the regexp, allowlisting a path, or
-	// skipping a file would each let a stale identifier back in, which is the
-	// ratchet rule (FR-032).
+	// third identifier still fails outside the exact Agora surfaces below. Those
+	// surfaces accept only target.AgoraReasonModel: no file skips,
+	// arbitrary model allowance, combined syntax or temperature exception.
 	want := []string{scaffold.DefaultReasonModel, scaffold.RouterExampleModel}
 	for _, owned := range want {
 		if owned == "" {
@@ -1284,9 +1285,13 @@ func TestOneModelIdEverywhere(t *testing.T) {
 	combined := regexp.MustCompile(`\b(?:openai|slng)/gpt-[A-Za-z0-9.-]+\b`)
 
 	for name, content := range authorFacingModelSurfaces(t) {
+		owned := want
+		if agoraManagedModelSurface(name, target.AgoraReasonModel) {
+			owned = []string{target.AgoraReasonModel}
+		}
 		for _, hit := range identifier.FindAllString(content, -1) {
-			if !slices.Contains(want, hit) {
-				t.Errorf("%s names the model %q; the owned identifiers are %v", name, hit, want)
+			if !slices.Contains(owned, hit) {
+				t.Errorf("%s names the model %q; the owned identifiers are %v", name, hit, owned)
 			}
 		}
 		if hit := combined.FindString(content); hit != "" {
@@ -1296,6 +1301,42 @@ func TestOneModelIdEverywhere(t *testing.T) {
 			if strings.Contains(block, "temperature:") {
 				t.Errorf("%s sets temperature on a think model; OpenAI does not state this family accepts it, so it stays off until it is verified", name)
 			}
+		}
+	}
+}
+
+// The hosted SDK model is intentionally confined to its own documentation and
+// example. Merely mentioning Agora in generic prose cannot waive this gate.
+func agoraManagedModelSurface(name, model string) bool {
+	if model != target.AgoraReasonModel || model == "" {
+		return false
+	}
+	switch name {
+	case "../../examples/agora-voice/agent.yaml", "../../examples/agora-voice/README.md",
+		"../../docs-site/targets/agora.mdx", "bundle/references/agora.md":
+		return true
+	default:
+		return false
+	}
+}
+
+func TestAgoraModelExceptionIsScopedAndExact(t *testing.T) {
+	for _, tc := range []struct {
+		path, model string
+		want        bool
+	}{
+		{"../../examples/agora-voice/agent.yaml", target.AgoraReasonModel, true},
+		{"../../examples/agora-voice/README.md", target.AgoraReasonModel, true},
+		{"../../docs-site/targets/agora.mdx", target.AgoraReasonModel, true},
+		{"bundle/references/agora.md", target.AgoraReasonModel, true},
+		{"../../examples/agora-voice/agent.yaml", "gpt-3.5-turbo", false},
+		{"../../examples/agora-voice/agent.yaml", "openai/" + target.AgoraReasonModel, false},
+		{"../../examples/customer-intake/agent.yaml", target.AgoraReasonModel, false},
+		{"bundle/references/models.md", target.AgoraReasonModel, false},
+		{"../../docs-site/targets/agora.mdx", "", false},
+	} {
+		if got := agoraManagedModelSurface(tc.path, tc.model); got != tc.want {
+			t.Errorf("%s model %q: exception = %v, want %v", tc.path, tc.model, got, tc.want)
 		}
 	}
 }
@@ -1339,7 +1380,7 @@ func authorFacingModelSurfaces(t *testing.T) map[string]string {
 	walk(repo("docs"), ".md")
 	read(repo("README.md"))
 	read(repo("internal", "scaffold", "scaffold.go"))
-	for _, name := range []string{"references/models.md", "references/package.md"} {
+	for _, name := range []string{"references/models.md", "references/package.md", "references/agora.md"} {
 		out["bundle/"+name] = bundleFile(t, name)
 	}
 	return out

@@ -4,8 +4,7 @@ description: "What a target is, what targets.yaml holds, and how one package com
 ---
 
 A target is where your agent runs. Unmute compiles one package into a native
-project for the target you pick: Pipecat, LiveKit, or SLNG. Two are code
-targets, and one is hosted.
+project or deployment body for Pipecat, LiveKit, SLNG, or Agora.
 
 **Pipecat** and **LiveKit** are code targets: `unmute compile` writes a
 Python project you own, host and run.
@@ -14,7 +13,9 @@ Python project you own, host and run.
 pushes it, and SLNG runs the agent. There is nothing to host and no
 `unmute dev`.
 
-Those three are the only values `provider` accepts.
+**Agora** emits a Python session service and an RTC browser example for a
+single hosted conversation. Its [initial supported surface](/targets/agora)
+is smaller than the other targets. These four names are the values `provider` accepts.
 
 On this page:
 
@@ -52,15 +53,15 @@ is yours: a package with two Twilio setups might call them `pipecat_twilio` and
 
 One is required everywhere. The rest depend on the provider you chose.
 
-<ParamField path="provider" type="livekit | pipecat | slng" required>
-  Which runtime this instance compiles for. Those three names are the whole
+<ParamField path="provider" type="livekit | pipecat | slng | agora" required>
+  Which runtime this instance compiles for. Those four names are the whole
   list. `vapi` and `deepgram` were target names once, and both are now refused
   by name.
 </ParamField>
 
 <ParamField path="version" type="exact framework version">
   The framework release an emitted project pins, written with all three
-  numbers. Required on `livekit` and `pipecat`. Refused on `slng`, which owns
+  numbers. Required on `livekit`, `pipecat` and `agora`. Refused on `slng`, which owns
   the version its agents run on.
 </ParamField>
 

@@ -1,5 +1,6 @@
 .agents/skills/unmute/.unmute-manifest.json
 .agents/skills/unmute/SKILL.md
+.agents/skills/unmute/references/agora.md
 .agents/skills/unmute/references/conversation.md
 .agents/skills/unmute/references/deploy.md
 .agents/skills/unmute/references/examples.md

@@ -1,0 +1,112 @@
+const startButton = document.querySelector('#start');
+const stopButton = document.querySelector('#stop');
+const status = document.querySelector('#status');
+let current = null;
+let busy = false;
+let generation = 0;
+
+async function post(path, session, keepalive = false) {
+  const response = await fetch(path, {
+    method: 'POST', keepalive,
+    headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.key}` } : {}) },
+    body: '{}',
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Request failed');
+  return result;
+}
+
+function resetUI(message = 'Conversation ended. Start a new conversation.') {
+  busy = false;
+  startButton.disabled = false;
+  stopButton.disabled = true;
+  status.textContent = message;
+}
+
+async function cleanup(session, keepalive = false) {
+  if (!session) return;
+  session.stopping = true;
+  clearTimeout(session.timer);
+  session.track?.stop();
+  session.track?.close();
+  session.track = null;
+  session.client?.removeAllListeners();
+  if (current === session) current = null;
+  // Start server cleanup immediately, independently of RTC leave. A late
+  // preparation response may supply the ID after an earlier cleanup attempt.
+  let stop = Promise.resolve();
+  if (session.id && !session.stopRequested) {
+    session.stopRequested = true;
+    stop = post(`/sessions/${session.id}/stop`, session, keepalive).catch(() => {});
+  }
+  // Repeat leave when a cancelled, pending join subsequently completes.
+  try { await session.client?.leave(); } catch { /* Server expiry also remains active. */ }
+  await stop;
+}
+
+startButton.addEventListener('click', async () => {
+  if (busy || current) return;
+  busy = true;
+  startButton.disabled = true;
+  status.textContent = 'Connecting…';
+  const attempt = ++generation;
+  const session = {};
+  current = session;
+  function checkActive() {
+    if (attempt !== generation || session.stopping) throw new Error('Conversation cancelled.');
+  }
+  try {
+    if (!window.AgoraRTC) throw new Error('The Agora browser SDK did not load. Check your network and reload.');
+    Object.assign(session, await post('/sessions'));
+    checkActive();
+    session.client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+    session.client.on('user-published', async (user, mediaType) => {
+      if (mediaType !== 'audio' || session.stopping) return;
+      try {
+        await session.client.subscribe(user, mediaType);
+        if (!session.stopping) {
+          user.audioTrack.play();
+          status.textContent = 'Connected. Speak to the agent.';
+        }
+      } catch {
+        if (!session.stopping) status.textContent = 'Could not play agent audio. End the call and try again.';
+      }
+    });
+    session.client.on('token-privilege-will-expire', () => void endCall('Session ended. Start a new conversation.'));
+    session.client.on('token-privilege-did-expire', () => void endCall('Session expired. Start a new conversation.'));
+    session.track = await AgoraRTC.createMicrophoneAudioTrack({ AEC: true, ANS: true, AGC: true });
+    checkActive();
+    await session.client.join(session.app_id, session.channel, session.token, session.uid);
+    checkActive();
+    await session.client.publish([session.track]);
+    checkActive();
+    status.textContent = 'Starting agent…';
+    await post(`/sessions/${session.id}/start`, session);
+    checkActive();
+    stopButton.disabled = false;
+    session.timer = setTimeout(() => void endCall('Session ended. Start a new conversation.'), session.expires_in * 1000);
+  } catch (error) {
+    await cleanup(session);
+    if (attempt === generation) resetUI(error.message || 'Could not start the conversation.');
+  } finally {
+    if (attempt === generation) busy = false;
+  }
+});
+
+async function endCall(message = 'Conversation ended.') {
+  const attempt = ++generation;
+  busy = true;
+  stopButton.disabled = true;
+  status.textContent = message;
+  try { await cleanup(current); }
+  finally { if (attempt === generation) resetUI(message); }
+}
+stopButton.addEventListener('click', () => void endCall());
+window.addEventListener('pagehide', () => {
+  ++generation;
+  void cleanup(current, true);
+  resetUI();
+});
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) resetUI();
+});

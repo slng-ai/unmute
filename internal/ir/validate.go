@@ -846,6 +846,10 @@ const (
 
 func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *TargetValidation) {
 	provider := targetcap.Provider(resolved.Provider)
+	if provider == targetcap.Agora {
+		validateAgoraTarget(agent, resolved, row)
+		return
+	}
 	if !slices.Contains(targetcap.Providers, provider) {
 		// A retired provider used to work, so "unknown" is true and useless.
 		// Say what happened and what the supported values are (Principle II).

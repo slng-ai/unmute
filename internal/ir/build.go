@@ -1445,6 +1445,14 @@ func stringSlice(value any) ([]string, error) {
 // Only used models and the listen/turn selections resolve; palette alternates
 // stay inert.
 func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, agent *Agent, used map[string]bool) (Target, error) {
+	if raw.Provider == string(ProviderAgora) {
+		for _, modelName := range sortedKeys(raw.Models) {
+			fields := agoraUnsupported(raw.Models[modelName], "provider", "model", "voice", "language", "placement", "description")
+			if len(fields) > 0 {
+				return Target{}, fmt.Errorf("agora target %q: models.%s.%s is not supported; remove it", name, modelName, fields[0])
+			}
+		}
+	}
 	for _, key := range sortedKeys(raw.Models) {
 		def, ok := agent.Models[key]
 		if !ok {

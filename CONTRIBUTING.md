@@ -1,7 +1,7 @@
 # Contributing to Unmute
 
 Contributions are welcome. Unmute is MIT licensed and open all the way
-through: the compiler, the three targets, the examples, the coding agent skill
+through: the compiler, the targets, the examples, the coding agent skill
 and the docs site. You do not need permission to open a pull request, and you
 do not need to work at SLNG.
 

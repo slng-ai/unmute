@@ -1415,6 +1415,7 @@ func TestPublicExamplePackages(t *testing.T) {
 	// knowledge on a speech-to-speech package built no index until 2026-09-13,
 	// and nothing shipped exercised it.
 	want := []string{
+		"agora-voice",
 		"customer-intake",
 		"hotel-concierge",
 		"pharmacy-refills",

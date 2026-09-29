@@ -53,7 +53,7 @@ func TestPublicExamplesEmitLintCleanPython(t *testing.T) {
 			}
 			for _, name := range sortedTargetNames(agent) {
 				resolved := agent.Targets[name]
-				if !target.IsCode(target.Provider(resolved.Provider)) {
+				if !target.EmitsProject(target.Provider(resolved.Provider)) {
 					continue
 				}
 				artifact, err := Generate(agent, resolved, target.Default())

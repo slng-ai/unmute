@@ -6,6 +6,7 @@ const (
 	LiveKit Provider = "livekit"
 	Pipecat Provider = "pipecat"
 	Slng    Provider = "slng"
+	Agora   Provider = "agora"
 )
 
 // Providers is every target a package may name. A provider earns a place here by
@@ -18,7 +19,7 @@ const (
 // runnable project; slng emits a deployment body for a platform that runs the
 // agent, which is a complete output of a different shape (constitution 6.0.0).
 // What is still forbidden is a provider that validates and produces nothing.
-var Providers = []Provider{LiveKit, Pipecat, Slng}
+var Providers = []Provider{LiveKit, Pipecat, Slng, Agora}
 
 // Retired names a provider this repository used to accept as a target. The
 // value is what to tell the author, because "unknown provider" is true and
@@ -43,7 +44,7 @@ func IsCode(provider Provider) bool {
 // separates a target that has a `dev`, a framework version and dependency pins
 // from one that has none of the three.
 func EmitsProject(provider Provider) bool {
-	return provider == LiveKit || provider == Pipecat
+	return provider == LiveKit || provider == Pipecat || provider == Agora
 }
 
 type Tag string
@@ -282,7 +283,7 @@ func (t Table) HistorySupport(history History, provider Provider) HistorySupport
 }
 
 func Default() Table {
-	return Table{
+	table := Table{
 		Fields: map[Field]map[Provider]Capability{
 			FieldListenLocal: field(deny(Slng, slngNoPlacement("listen"))),
 			FieldSpeakLocal:  field(deny(Slng, slngNoPlacement("speak"))),
@@ -821,6 +822,17 @@ func Default() Table {
 			LiveKit: FallbackComponent, Pipecat: FallbackGenerated, Slng: FallbackComponent,
 		},
 	}
+	// Agora owns hosted turn taking. New feature rows stay denied until their
+	// generated settings and runtime implementation explicitly support them.
+	for field, providers := range table.Fields {
+		providers[Agora] = Capability{Tag: Gated, Note: "agora target does not emit " + string(field) + "; remove it or choose another target"}
+	}
+	table.Fields[FieldMaxDuration][Agora] = Capability{Tag: Core}
+	for _, role := range []Role{Listen, Reason, Speak} {
+		table.Roles[role][Agora] = Open
+	}
+	table.FallbackSlots[Agora] = FallbackComponent
+	return table
 }
 
 // slngNoPlacement, slngNoTasks and slngNoHandoff each carry one reason shared by
@@ -900,7 +912,7 @@ func routedControls(name string) map[Provider]ControlCapability {
 }
 
 func controls(livekit, pipecat, slng ControlCapability) map[Provider]ControlCapability {
-	return map[Provider]ControlCapability{LiveKit: livekit, Pipecat: pipecat, Slng: slng}
+	return map[Provider]ControlCapability{LiveKit: livekit, Pipecat: pipecat, Slng: slng, Agora: controlDeny("agora target emits browser audio only; remove phone controls")}
 }
 
 type override struct {
@@ -922,7 +934,7 @@ func allow(provider Provider) override {
 	return override{provider, Capability{Tag: Core}}
 }
 
-// field seeds the providers whose drivers emit a project and nothing else.
+// field seeds only the established local pipeline drivers.
 //
 // It used to seed every provider in Providers with Core, which read as a
 // convenience and was a trapdoor: the day a third provider joined the list, all
@@ -930,13 +942,13 @@ func allow(provider Provider) override {
 // own comments already described the managed answer. Twenty-four of them carry no
 // override at all, so nothing would have looked wrong in this file.
 //
-// Leaving Slng out makes TestDefaultTableIsCompleteAndTyped, which already
+// Leaving hosted targets out makes TestDefaultTableIsCompleteAndTyped, which already
 // existed, fail once per undecided row until a person writes an answer. No new
 // test buys 48 forced decisions.
 func field(overrides ...override) map[Provider]Capability {
 	values := make(map[Provider]Capability, len(Providers))
 	for _, provider := range Providers {
-		if !EmitsProject(provider) {
+		if !IsCode(provider) {
 			continue
 		}
 		values[provider] = Capability{Tag: Core}
@@ -948,12 +960,13 @@ func field(overrides ...override) map[Provider]Capability {
 }
 
 func role(livekit, pipecat, slng RoleKind) map[Provider]RoleKind {
-	return map[Provider]RoleKind{LiveKit: livekit, Pipecat: pipecat, Slng: slng}
+	return map[Provider]RoleKind{LiveKit: livekit, Pipecat: pipecat, Slng: slng, Agora: Integrated}
 }
 
 func history(livekit, pipecat, slng HistoryKind) map[Provider]HistorySupport {
 	values := map[Provider]HistorySupport{
 		LiveKit: {Kind: livekit}, Pipecat: {Kind: pipecat}, Slng: {Kind: slng},
+		Agora: {Kind: HistoryFail, Note: "agora target serves one agent; remove task and handoff history"},
 	}
 	// One value fails on Pipecat now rather than four, so the note names what
 	// the target does support. A refusal that only says what is missing leaves
