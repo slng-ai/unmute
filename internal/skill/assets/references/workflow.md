@@ -176,14 +176,27 @@ required services. The SLNG target emits its deployment body instead.
 
 **Never edit `build/`.** It is rewritten on every compile. Change the package.
 
-For Twilio, host the app at a public HTTPS/WSS origin, then run:
+For Twilio, explain all three steps: compile on the user's computer, deploy
+`build/twilio/` to their chosen host, then connect the number. Running Docker
+or Python locally does not publish a service. Upload the generated project
+without `.env`, use a deployment repository connected to a container host,
+or push an image to the host's registry. The public
+[hosting walkthrough](https://unmute.ai/telephony/twilio-conversation-relay#4-host-the-application)
+includes Render as an example, a VM option, and a temporary laptop tunnel.
+
+Set `TWILIO_PUBLIC_URL` to the same exact HTTPS origin in the host's environment
+and the source package's local `.env`. Wait for public `/healthz` to return
+200. From the source package on the user's computer, run:
 
 ```sh
 unmute deploy --target twilio --dry-run
 unmute deploy --target twilio
 ```
 
-The command does not host the app or buy a number. See
+The command sets the number's incoming-call webhook to HTTPS `/voice` with
+POST. The generated FastAPI app returns TwiML containing WSS `/conversation`;
+the user does not create another WebSocket server or paste WSS into the
+number's webhook field. The command does not host the app or buy a number. See
 [the Twilio package reference](package.md#the-twilio-target).
 
 ## Talk to it

@@ -17,6 +17,13 @@ answers. SLNG hosts the router; you still host this app.
 {{end}}
 ## Run it
 
+Compile creates this project locally. To publish it, upload its contents
+(excluding `.env`) to a Python host, connect a deployment repository to a
+container host, or push a built image to your host's registry. The
+[hosting walkthrough](https://unmute.ai/telephony/twilio-conversation-relay#4-host-the-application)
+includes a Render example and a VM alternative. Running the commands below on
+your laptop starts only a local app; a tunnel is needed for Twilio to reach it.
+
 1. Copy `.env.example` to `.env` and fill in the values. Keep secrets out of Git.
    Set `{{.Env.PublicURL}}` to the exact public HTTPS origin, with no path.
 {{- if ne .Region "us1"}}
@@ -51,7 +58,10 @@ answers. SLNG hosts the router; you still host this app.
 
    Deploy reads the Twilio values from your shell or the source package's
    `.env`, not this build folder's `.env`. Supply the same account, token and
-   public origin, plus the number SID listed below.
+   public origin, plus the number SID listed below. The command sets the
+   number's webhook to `https://<host>/voice` with HTTP POST. The app generates
+   the `wss://<host>/conversation` URL from `{{.Env.PublicURL}}`; do not put
+   the WebSocket URL in the number's webhook field.
 5. Call the number. Check the greeting, a reply, interruption, and `end_call`.
    Read the app's log and Twilio's call inspector if a step fails.
 

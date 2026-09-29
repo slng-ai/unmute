@@ -675,8 +675,9 @@ environment:
   public_url: TWILIO_PUBLIC_URL
 ```
 
-The connection may also name `region: us1`, `ie1` or `au1` (default `us1`),
-the Twilio Region that handles the calls. Outside `us1`, `auth_token` must name
+The connection may also name `region: us1` (United States, the default),
+`ie1` (Ireland) or `au1` (Australia), the Twilio Region that handles the calls.
+This is independent of the app host's region and SLNG's `world_part`. Outside `us1`, `auth_token` must name
 that region's own Auth Token, and the number's routing region must match.
 
 `unmute init <name> --target twilio` writes this starter with no questions:

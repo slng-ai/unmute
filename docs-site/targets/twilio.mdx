@@ -243,7 +243,10 @@ changes nothing. A hosting file does not change the build's `artifact_id`.
 
 Use a container service, VM, or other Python host of your choice. The
 [walkthrough](/telephony/twilio-conversation-relay#4-host-the-application)
-provides Docker and Python commands. The host must supply:
+walks through uploading the compiled project, deploying a container on Render
+as one example, running on a VM, and testing through a local tunnel. Compile
+creates files on your computer; your host deploys those files; `unmute deploy`
+then points the number at the running app. The host must supply:
 
 - Public HTTPS and WSS, with WebSocket upgrades and connections kept open for a whole call.
 - The exact public origin in `TWILIO_PUBLIC_URL`, without a path. Signature checks use this URL.
@@ -365,7 +368,20 @@ on this target.
 
 </Accordion>
 
-<Accordion title="Regional configuration">
+### Regional configuration
+
+<Accordion title="Choose a region or set up Ireland">
+
+| Twilio call-processing region | Connection value |
+|---|---|
+| United States (default) | `us1` |
+| Ireland | `ie1` |
+| Australia | `au1` |
+
+[ConversationRelay supports all three](https://www.twilio.com/docs/voice/twiml/connect).
+The Twilio region is independent of the FastAPI host's location and SLNG's
+`world_part`; selecting `ie1` does not move either service or guarantee that
+all speech-provider and LLM processing stays in Ireland.
 
 <ParamField path="region" type="us1 | ie1 | au1" default="us1">
   The [Twilio Region](https://www.twilio.com/docs/global-infrastructure/understanding-twilio-regions)
@@ -378,6 +394,39 @@ on this target.
   ([inbound processing region](https://www.twilio.com/docs/global-infrastructure/inbound-processing-console)).
   Refused on every other route.
 </ParamField>
+
+For an Ireland deployment:
+
+1. In Twilio Console's **API keys & tokens**, select **Ireland (IE1)** and
+   obtain that region's Auth Token. Use it as `TWILIO_AUTH_TOKEN` in both the
+   host's environment and the source package's `.env`. An API key secret is
+   not a substitute for the Auth Token used to validate webhook signatures.
+2. Add `region: ie1` at the top level of `connections/twilio.yaml`:
+
+   ```yaml
+   transport: conversation-relay
+   carrier: twilio
+   region: ie1
+   environment:
+     account_sid: TWILIO_ACCOUNT_SID
+     auth_token: TWILIO_AUTH_TOKEN
+     phone_number_sid: TWILIO_PHONE_NUMBER_SID
+     public_url: TWILIO_PUBLIC_URL
+   ```
+
+   Validate, compile, and deploy the new build to your host with the IE1
+   token. Keep `TWILIO_PUBLIC_URL` pointing to the same host if it has not moved.
+3. In the number's **Ireland** configuration, set the incoming-call webhook
+   to `https://YOUR-HOST/voice`, method **POST**. Then change its incoming-call
+   processing region to **Ireland (IE1)**, following
+   [Twilio's routing instructions](https://www.twilio.com/docs/global-infrastructure/inbound-processing-console).
+   Allow up to five minutes for the routing change. Coordinate the token and
+   routing switch while the number is idle; mismatched regions fail signature
+   checks. `unmute deploy` checks the routing region but does not change it.
+4. From the local source package, run `unmute deploy --target twilio --dry-run`,
+   then `unmute deploy --target twilio`. Make a real call and inspect that
+   call in the **IE1** Console. The CLI uses `api.dublin.ie1.twilio.com`;
+   the app still receives calls on its own public HTTPS/WSS origin.
 
 </Accordion>
 
