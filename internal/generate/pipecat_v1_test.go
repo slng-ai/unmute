@@ -34,12 +34,21 @@ func TestPipecatV1LoggingIsConfiguredAtFirstBot(t *testing.T) {
 	if got := strings.Count(bot, "logger.remove()"); got != 1 {
 		t.Errorf("bot.py removes Loguru sinks %d times, want one guarded call", got)
 	}
-	if !strings.Contains(bot, "_LOGGING_CONFIGURED = False\n\n\ndef _configure_logging() -> None:\n    global _LOGGING_CONFIGURED\n    if _LOGGING_CONFIGURED:\n        return") {
+	if !strings.Contains(bot, "_LOGGING_CONFIGURED = False\n\n\ndef _configure_logging() -> None:\n    \"\"\"Send log output to stderr at UNMUTE_LOG_LEVEL, once per process.\"\"\"\n    global _LOGGING_CONFIGURED\n    if _LOGGING_CONFIGURED:\n        return") {
 		t.Error("bot.py does not guard process-wide logging configuration")
 	}
 	const entry = "async def bot(runner_args: RunnerArguments) -> None:"
 	entryAt := strings.Index(bot, entry)
-	if entryAt < 0 || !strings.HasPrefix(strings.TrimSpace(bot[entryAt+len(entry):]), "_configure_logging()") {
+	// The docstring opens the function; the first statement after it must be
+	// the logging call.
+	body := ""
+	if entryAt >= 0 {
+		body = bot[entryAt+len(entry):]
+		if _, after, ok := strings.Cut(body, "\n    \"\"\"\n"); ok {
+			body = after
+		}
+	}
+	if entryAt < 0 || !strings.HasPrefix(strings.TrimSpace(body), "_configure_logging()") {
 		t.Error("bot.py does not configure logging at the first bot entry")
 	}
 }
@@ -74,7 +83,7 @@ func TestPipecatV1BuiltinEndCallTool(t *testing.T) {
 	}
 	bot := artifactFile(t, artifact, "bot.py")
 	for _, want := range []string{
-		"async def end_call(self, params: FunctionCallParams):",
+		"async def end_call(self, params: FunctionCallParams) -> None:",
 		`"content": "Thank the caller and say goodbye."`,
 		"await params.result_callback({\"ended\": True})\n        await params.pipeline_worker.end()",
 	} {
@@ -86,7 +95,8 @@ func TestPipecatV1BuiltinEndCallTool(t *testing.T) {
 		t.Error("builtin tool must not emit a webhook POST")
 	}
 	body := bot[strings.Index(bot, "async def end_call("):]
-	if end := strings.Index(body, "\n\n"); end >= 0 {
+	// The method ends at two blank lines; a docstring holds single blank ones.
+	if end := strings.Index(body, "\n\n\n"); end >= 0 {
 		body = body[:end]
 	}
 	if !strings.Contains(body, "run_llm=False") || strings.Contains(body, "run_llm=True") {
@@ -216,7 +226,7 @@ func TestPipecatV1MCPTransportChooser(t *testing.T) {
 	bot := artifactFile(t, artifact, "bot.py")
 	for _, want := range []string{
 		"from mcp.client.session_group import SseServerParameters, StreamableHttpParameters",
-		"def _mcp_params(url: str, headers: dict[str, str] | None = None):",
+		"def _mcp_params(\n    url: str, headers: dict[str, str] | None = None\n) -> StreamableHttpParameters | SseServerParameters:",
 		`params_cls = StreamableHttpParameters if url.rstrip("/").endswith("/mcp") else SseServerParameters`,
 		`server_params=_mcp_params(os.environ["NOTES_MCP_URL"]),`,
 	} {
@@ -652,7 +662,6 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"from collections.abc import Mapping, Sequence",
 		"from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider",
 		"def on_start(self, span: Span, parent_context: Context | None = None) -> None:",
 		// Mapping, not dict: ty 0.0.40 reads the caller's literal as dict[str, str]
@@ -674,6 +683,11 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 	} {
 		if !strings.Contains(tracing, want) {
 			t.Errorf("tracing.py missing static-check-safe form %q", want)
+		}
+	}
+	for _, name := range []string{"Mapping", "Sequence"} {
+		if !pyImports(tracing, "collections.abc", name) {
+			t.Errorf("tracing.py missing static-check-safe import of %s from collections.abc", name)
 		}
 	}
 	for _, forbidden := range []string{
@@ -843,11 +857,11 @@ func TestPipecatV1MCPLifecycleAndCollisionsFailClosed(t *testing.T) {
 	}
 	bot := artifactFile(t, artifact, "bot.py")
 	for _, want := range []string{
-		"async def _close_mcp(awaitables, *, suppress: bool = False) -> None:",
+		"async def _close_mcp(awaitables: Iterable[Awaitable[None]], *, suppress: bool = False) -> None:",
 		"for awaitable in awaitables:",
 		"await awaitable",
 		"except BaseException as failure:",
-		"async def _register_mcp_tools(clients, llm, reserved_names",
+		"async def _register_mcp_tools(\n    clients: list[MCPClient],\n    llm: Any,\n    reserved_names: set[str],\n) -> list[Any]:",
 		"tools = await client.get_tools_schema()",
 		"if schema.name in names:",
 		"MCP tool name collision",
@@ -927,7 +941,7 @@ func TestPipecatV1MCPReservesFlowFunctionNames(t *testing.T) {
 	}
 	worker := pipecatMethodBody(t, bot, "class IntakeAgent(", "\nclass BillingAgent(")
 	initAt := strings.Index(worker, "self._mcp_clients = [")
-	activationAt := strings.Index(worker, "async def on_activated(self, args) -> None:")
+	activationAt := strings.Index(worker, "async def on_activated(self, args: dict[str, Any] | None) -> None:")
 	if initAt < 0 || activationAt < 0 || initAt > activationAt {
 		t.Error("a Flow-owning MCP worker must construct its clients before on_activated")
 	}
@@ -986,24 +1000,28 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 	}
 	bot := artifactFile(t, artifact, "bot.py")
 	for _, want := range []string{
-		"from pipecat.flows import FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE",
 		`name="to_billing"`,
 		"handler=_flow_visit(self, \"run_verify\"",
-		"async def _run_verify_transfer_verify_to_billing(self, args, flow_manager):",
+		"async def _run_verify_transfer_verify_to_billing(\n        self, args: Any, flow_manager: FlowManager\n    ) -> tuple[dict[str, Any], Any]:",
 		`self._run_verify_active_step = "verify"`,
 		`if self._run_verify_active_step != "verify":`,
 		`return {"status": "already handled"}, NO_RESPONSE`,
-		`async def on_activated(self, args) -> None:`,
+		`async def on_activated(self, args: dict[str, Any] | None) -> None:`,
 		`self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))`,
 		`return {"transferred": True}, NO_RESPONSE`,
 		// The chain is a plan now, decided as the flow starts, because a group
 		// may skip a step whose confirmation holds and stops when one ends
 		// unserved. The next step is looked up rather than named.
 		`return _task_status(self._run_verify_results["verify"]), await self._run_verify_node(_next)`,
-		`def _run_verify_next(self, name):`,
+		`def _run_verify_next(self, name: str) -> str | None:`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing task-transfer invariant %q", want)
+		}
+	}
+	for _, name := range []string{"FlowManager", "FlowsFunctionSchema", "NodeConfig", "NO_RESPONSE"} {
+		if !pyImports(bot, "pipecat.flows", name) {
+			t.Errorf("bot.py missing task-transfer invariant: import of %s from pipecat.flows", name)
 		}
 	}
 	transferAt := strings.Index(bot, "async def _run_verify_transfer_verify_to_billing")
@@ -1040,7 +1058,7 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 	finalBody := bot[nextFinishAt:]
 	for _, want := range []string{
 		`return await self._run_verify_complete_complete()`,
-		`async def _run_verify_complete_complete(self):`,
+		`async def _run_verify_complete_complete(self) -> tuple[dict[str, Any], Any]:`,
 		// The prompt continues with the compiler's finish contract, so match its
 		// opening rather than the whole literal.
 		`delta=LLMSettings(system_instruction="Complete verification.`,
@@ -1113,8 +1131,12 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	if bot == "" {
 		t.Fatal("bot.py not emitted")
 	}
+	for _, name := range []string{"EndFrame", "FunctionCallResultProperties", "LLMMessagesAppendFrame", "LLMRunFrame", "LLMUpdateSettingsFrame", "TTSSpeakFrame"} {
+		if !pyImports(bot, "pipecat.frames.frames", name) {
+			t.Errorf("bot.py missing task role boundary: import of %s from pipecat.frames.frames", name)
+		}
+	}
 	for _, want := range []string{
-		"from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMRunFrame, LLMUpdateSettingsFrame, TTSSpeakFrame",
 		"from pipecat.services.settings import LLMSettings",
 		// The compiler appends its finish contract, so this matches the
 		// authored opening only.
@@ -1135,7 +1157,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	if strings.Contains(bot, `task_messages=[{"role": "system"`) {
 		t.Error("bot.py still sends task instructions as a second system message")
 	}
-	activation := strings.Index(bot, "async def on_activated(self, args) -> None:")
+	activation := strings.Index(bot, "async def on_activated(self, args: dict[str, Any] | None) -> None:")
 	if activation < 0 {
 		t.Fatal("bot.py missing the flow owner's activation hook")
 	}
@@ -1378,7 +1400,7 @@ func TestPipecatV1DirectToolGuard(t *testing.T) {
 	bot := artifactFile(t, artifact, "bot.py")
 
 	for _, want := range []string{
-		"def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None):",
+		"def _direct_tool(\n    fn: Callable[..., Any] | None = None,\n    *,\n    cancel_on_interruption: bool = True,\n    timeout_secs: float | None = None,\n) -> Any:",
 		"@functools.wraps(handler)",
 		"unexpected = sorted(set(kwargs) - declared - {\"params\"})",
 		"original_result_callback = params.result_callback",
@@ -1399,7 +1421,7 @@ func TestPipecatV1DirectToolGuard(t *testing.T) {
 	if regexp.MustCompile(`(?m)^\s*@tool(?:\(|$)`).MatchString(bot) {
 		t.Error("a generated direct tool bypasses the shared guard")
 	}
-	if !strings.Contains(bot, `async def lookup_customer(self, params: FunctionCallParams, email: str = "", phone: str = ""):`) {
+	if !strings.Contains(bot, `async def lookup_customer(self, params: FunctionCallParams, email: str = "", phone: str = "") -> None:`) {
 		t.Error("guard changed the generated tool's declared signature")
 	}
 }
@@ -1445,10 +1467,11 @@ func TestV2PipecatV1AgentTransferAnnouncementWaitsForSourcePlayout(t *testing.T)
 		"class _HandoffWorker(",
 		"async def _announce_handoff(self, announcement: str) -> None:",
 		"await PipelineWorker.queue_frame(self, TTSSpeakFrame(announcement))",
-		"await asyncio.wait_for(self._handoff_finished.wait(), timeout=30.0)",
+		"HANDOFF_CUE_TIMEOUT_SECS = 30.0",
+		"await asyncio.wait_for(\n                self._handoff_finished.wait(), timeout=HANDOFF_CUE_TIMEOUT_SECS\n            )",
 		"isinstance(frame, BotStartedSpeakingFrame)",
 		"isinstance(frame, BotStoppedSpeakingFrame)",
-		"async def process_deferred_tool_frames(self, frames):",
+		"async def process_deferred_tool_frames(self, frames: list[Any]) -> list[Any]:",
 		"if not self.active:",
 		"return []",
 		"class IntakeAgent(_HandoffWorker):",
@@ -1457,8 +1480,10 @@ func TestV2PipecatV1AgentTransferAnnouncementWaitsForSourcePlayout(t *testing.T)
 			t.Errorf("announced handoff is missing source playout step %q", want)
 		}
 	}
-	if !regexp.MustCompile(`(?m)^from pipecat\.frames\.frames import .*BotStartedSpeakingFrame.*BotStoppedSpeakingFrame.*TTSSpeakFrame`).MatchString(bot) {
-		t.Error("an announced handoff must import playout and speech frames even without a text greeting")
+	for _, name := range []string{"BotStartedSpeakingFrame", "BotStoppedSpeakingFrame", "TTSSpeakFrame"} {
+		if !pyImports(bot, "pipecat.frames.frames", name) {
+			t.Errorf("an announced handoff must import playout and speech frames even without a text greeting: %s not imported", name)
+		}
 	}
 	if !strings.Contains(body, "run_llm=True") {
 		t.Error("receiver must answer normally after source playout completes")
@@ -1657,7 +1682,7 @@ func TestV1PipecatAgentToolCarriesSchema(t *testing.T) {
 
 	for _, want := range []string{
 		// Agent-level @tool: required first, typed, then optional with defaults.
-		"async def book_service(self, params: FunctionCallParams, service: str, notes: str = \"\", party_size: int = 0):",
+		"async def book_service(self, params: FunctionCallParams, service: str, notes: str = \"\", party_size: int = 0) -> None:",
 		// Google Args docstring carries descriptions + enum prose + real types.
 		"            service (str): Which service One of: haircut, hair-color, blowout.",
 		"            notes (str): Extra notes",
@@ -1840,7 +1865,7 @@ func TestPipecatV1LocalTool(t *testing.T) {
 	for _, want := range []string{
 		"import inspect",
 		"import tools.fetch_notes",
-		"async def fetch_notes(self, params: FunctionCallParams, topic: str):",
+		"async def fetch_notes(  # noqa: D417\n        self, params: FunctionCallParams, topic: str) -> None:",
 		"result = tools.fetch_notes.fetch_notes(topic=topic)",
 		"if inspect.isawaitable(result):",
 		"await params.result_callback(result)",
@@ -2162,7 +2187,7 @@ func TestPipecatMutableCallStateIsRunLocal(t *testing.T) {
 			name: "daily transfer",
 			bot:  artifactFile(t, dailyCarrierArtifact(t, "twilio", false), "bot.py"),
 			want: []string{
-				"call_context = {}",
+				"call_context: dict[str, Any] = {}",
 				`call_context["_transport"] = transport`,
 				`self.call_context.get("_transfer_result")`,
 				`self.call_context.get("_transport")`,
@@ -2174,7 +2199,7 @@ func TestPipecatMutableCallStateIsRunLocal(t *testing.T) {
 				inbound: true, transfer: true, connection: true,
 			}), "bot.py"),
 			want: []string{
-				"call_context = {}",
+				"call_context: dict[str, Any] = {}",
 				`call_context["_phone_call"] = phone_call`,
 				"_pipeline_audio_rates(phone_call)",
 				`self.call_context.get("_phone_call")`,
@@ -2185,7 +2210,7 @@ func TestPipecatMutableCallStateIsRunLocal(t *testing.T) {
 			name: "daily carrier forward",
 			bot:  artifactFile(t, dailyCarrierArtifact(t, "twilio", false), "bot.py"),
 			want: []string{
-				"call_context = {}",
+				"call_context: dict[str, Any] = {}",
 				"call_forwarded = False",
 				"nonlocal call_forwarded",
 			},
@@ -2194,7 +2219,7 @@ func TestPipecatMutableCallStateIsRunLocal(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if strings.Count(tc.bot, "    call_context = {}") != 1 {
+			if strings.Count(tc.bot, "    call_context: dict[str, Any] = {}") != 1 {
 				t.Error("run_bot must create exactly one fresh call context")
 			}
 			if !strings.Contains(tc.bot, "call_context=call_context") {
@@ -2548,7 +2573,7 @@ func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
 	for _, want := range []string{
 		"runner_ready = asyncio.Event()",
 		"pipeline_started = asyncio.Event()",
-		"worker_start_error = None",
+		"worker_start_error: Exception | None = None",
 		"entry_started = False",
 		"nonlocal entry_started",
 		"if entry_started or worker_start_error is not None:",
@@ -2568,7 +2593,7 @@ func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
 	// on_pipeline_started (post-start by definition). Assert the client-connected
 	// handler waits before invoking the helper — refactor-stable, unlike an
 	// absolute source order (agent-transfer handoffs also call activate_worker).
-	if !strings.Contains(bot, "async def activate_entry():") {
+	if !strings.Contains(bot, "async def activate_entry() -> None:") {
 		t.Errorf("bot.py missing activate_entry helper (entry activation must be centralised)")
 	}
 	started := strings.Index(bot, `@main.event_handler("on_pipeline_started")`)
@@ -2680,7 +2705,7 @@ func TestV1_DailyColdTransferHandlesPrimitiveFailures(t *testing.T) {
 		"this session is not a phone call, so it cannot be transferred",
 		`self.call_context.pop("_transfer_result", None)`,
 		"try:\n            error = await transport.sip_call_transfer(",
-		"except Exception as exc:\n            error = exc",
+		"except Exception as exc:  # noqa: BLE001 - the transport may raise or return a failure; both are handled below\n            error = exc",
 		"if error is not None:",
 		"Tell the caller and keep helping them.",
 	} {
@@ -2788,7 +2813,7 @@ func TestPipecatV1TaskToolAnnounceQueuesFrameFromFlowManager(t *testing.T) {
 	if !strings.Contains(bot, want) {
 		t.Errorf("a task tool must announce through FlowManager.worker: want %s", want)
 	}
-	if !regexp.MustCompile(`(?m)^from pipecat\.frames\.frames import .*TTSSpeakFrame`).MatchString(bot) {
+	if !pyImports(bot, "pipecat.frames.frames", "TTSSpeakFrame") {
 		t.Error("an announcing task tool must import TTSSpeakFrame")
 	}
 	// The line is queued, never awaited for playout: the whole point is that
@@ -2857,7 +2882,7 @@ func TestPipecatV1ToolAnnounceQueuesFrameWithoutWaiting(t *testing.T) {
 	}
 	bot := artifactFile(t, artifact, "bot.py")
 	for _, want := range []string{
-		"def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None, announce=None):",
+		"def _direct_tool(\n    fn: Callable[..., Any] | None = None,\n    *,\n    cancel_on_interruption: bool = True,\n    timeout_secs: float | None = None,\n    announce: str | None = None,\n) -> Any:",
 		"await params.llm.push_frame(TTSSpeakFrame(announce))",
 		`    @_direct_tool(announce="Let me pull that invoice up.")`,
 		`    @_direct_tool(cancel_on_interruption=False, announce="Give me one second to find you.")`,
@@ -2866,7 +2891,7 @@ func TestPipecatV1ToolAnnounceQueuesFrameWithoutWaiting(t *testing.T) {
 			t.Errorf("announcing package missing %q", want)
 		}
 	}
-	if !regexp.MustCompile(`(?m)^from pipecat\.frames\.frames import .*TTSSpeakFrame`).MatchString(bot) {
+	if !pyImports(bot, "pipecat.frames.frames", "TTSSpeakFrame") {
 		t.Error("an announcing tool must import TTSSpeakFrame")
 	}
 	// The announcement is queued, never waited on: no handle await, and none of
@@ -3024,7 +3049,7 @@ func TestPipecatLastNLeavesNoOrphanedToolResult(t *testing.T) {
 	helper := pipecatMethodBody(t, bot, "def _last_n(", "\n\n\n")
 	for _, want := range []string{
 		`messages[-limit:]`,
-		`if leading and message.get("role") == "tool":`,
+		`if i >= first or not (isinstance(message, dict) and message.get("role") == "tool")`,
 	} {
 		if !containsCollapsed(helper, want) {
 			t.Errorf("the _last_n helper is missing %q:\n%s", want, helper)
@@ -3058,10 +3083,10 @@ func TestPipecatMessagesLeavesNoOrphanedToolCall(t *testing.T) {
 	}
 	helper := pipecatMethodBody(t, bot, "def _speech_only(", "\n\n\n")
 	for _, want := range []string{
-		`message.get("role") not in ("user", "assistant")`,
-		`if not message.get("tool_calls"):`,
+		`isinstance(message, dict) and message.get("role") in ("user", "assistant")`,
+		`if message.get("tool_calls") else message`,
 		`if key != "tool_calls"`,
-		`if spoken.get("content"):`,
+		`if not message.get("tool_calls") or turn.get("content")`,
 	} {
 		if !containsCollapsed(helper, want) {
 			t.Errorf("the _speech_only helper is missing %q:\n%s", want, helper)
@@ -3075,7 +3100,7 @@ func TestPipecatMessagesLeavesNoOrphanedToolCall(t *testing.T) {
 		return
 	}
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "helper.py"), []byte(helper), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "helper.py"), []byte("from typing import Any\n\n"+helper), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// The live context, in order: the greeting, the caller, the delegate call,
@@ -3124,7 +3149,7 @@ assert mixed == [{"role": "assistant", "content": "Let me look."}], mixed
 // II forbids by name.
 func TestPipecatShapesAHandoffByTheSameValues(t *testing.T) {
 	bot := pipecatHistoryBot(t)
-	handoff := pipecatMethodBody(t, bot, "async def to_billing(self, params: FunctionCallParams):", "\n    @_direct_tool")
+	handoff := pipecatMethodBody(t, bot, "async def to_billing(self, params: FunctionCallParams) -> None:", "\n    @_direct_tool")
 	shapeAt := strings.Index(handoff, "self.context.set_messages([])")
 	activateAt := strings.Index(handoff, "await self.activate_worker(")
 	if shapeAt < 0 {
@@ -3156,7 +3181,7 @@ func TestPipecatRestoresTheOwnerContextAtEveryHistoryValue(t *testing.T) {
 	// restored from whatever the step was given rather than from what it had.
 	// read_back is the case that can get this wrong: it is the one whose entry
 	// both snapshots and shapes.
-	entry := pipecatMethodBody(t, bot, "async def read_back(self, params: FunctionCallParams):", "def _read_back_node_read_back")
+	entry := pipecatMethodBody(t, bot, "async def read_back(self, params: FunctionCallParams) -> None:", "def _read_back_node_read_back")
 	snapshotAt := strings.Index(entry, "self._read_back_snapshot = (")
 	shapeAt := strings.Index(entry, "self.context.set_messages(")
 	if snapshotAt < 0 || shapeAt < 0 || snapshotAt > shapeAt {
@@ -3268,7 +3293,7 @@ func TestPipecatFullOnlyPackageEmitsNoShaping(t *testing.T) {
 	if !strings.Contains(entry, `m.get("role") in ("user", "assistant", "tool")`) {
 		t.Errorf("history: full does not strip old instructions on task entry:\n%s", entry)
 	}
-	handoff := pipecatMethodBody(t, bot, "async def to_billing(self, params: FunctionCallParams):", "\n    @_direct_tool")
+	handoff := pipecatMethodBody(t, bot, "async def to_billing(self, params: FunctionCallParams) -> None:", "\n    @_direct_tool")
 	if !strings.Contains(handoff, `m.get("role") in ("user", "assistant", "tool")`) {
 		t.Errorf("history: full does not strip old instructions on handoff:\n%s", handoff)
 	}
