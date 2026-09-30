@@ -454,8 +454,10 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 			t.Errorf("configured tool-free agent.py contains unused import %q", forbidden)
 		}
 	}
+	if !pyImports(configuredTracing, "collections.abc", "Sequence") {
+		t.Error(`configured tracing.py does not import Sequence from collections.abc`)
+	}
 	for _, want := range []string{
-		"from collections.abc import Sequence",
 		") -> TracerProvider:",
 		"trace_provider: TracerProvider,",
 		"speech_metrics: Sequence[STTMetrics | TTSMetrics]",
@@ -833,7 +835,7 @@ func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
 
 	for _, want := range []string{
 		// transfer: hands off to the target, does not return; no typed-result return.
-		"async def do_reserve(self, ctx: RunContext):",
+		"async def do_reserve(self, ctx: RunContext) -> Agent:",
 		"return Greeter(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))",
 		"when it finishes the caller is handed to the greeter.",
 		// end: shuts the session down, does not return.
@@ -955,7 +957,7 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 		"class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):",
 		"self._terminal_claimed = False",
 		"def _claim_terminal(self) -> bool:",
-		"async def back_to_greeter(self, ctx: RunContext):",
+		"async def back_to_greeter(self, ctx: RunContext) -> None:",
 		"if not self._claim_terminal():\n            return",
 		`await dev_say(ctx.session, "I will take you back to Remy.", allow_interruptions=False)`,
 		"self.complete(_TaskTransfer(Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))))",
@@ -1098,7 +1100,7 @@ func TestLiveKitV1IsolatedGroupTaskAgentTransfer(t *testing.T) {
 	}
 	block := botpy[start:]
 	for _, want := range []string{
-		"try:\n            task_results = {}",
+		"try:\n            task_results: dict = {}",
 		// Walked as a plan so the sequence can stop when a step ends unserved,
 		// the same way a shared group does.
 		`_plan = ["find_slot", "confirm_booking"]`,
@@ -1529,7 +1531,7 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
-	start := strings.Index(botpy, "    async def to_reservations(self, ctx: RunContext):")
+	start := strings.Index(botpy, "    async def to_reservations(self, ctx: RunContext) -> Agent:")
 	if start < 0 {
 		t.Fatal("agent.py missing to_reservations")
 	}
@@ -1564,7 +1566,7 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 	if strings.Contains(botpy, "await session.start(agent=Greeter(), room=ctx.room)") {
 		t.Error("the startup agent must be marked initial; transfer-created agents keep the false default")
 	}
-	backStart := strings.Index(botpy, "    async def back_to_greeter(self, ctx: RunContext):")
+	backStart := strings.Index(botpy, "    async def back_to_greeter(self, ctx: RunContext) -> Agent:")
 	if backStart < 0 {
 		t.Fatal("agent.py missing back_to_greeter")
 	}
@@ -1627,7 +1629,7 @@ func TestV3LiveKitAgentTransfersHiddenOnlyOnEnter(t *testing.T) {
 	}
 	for _, want := range []string{
 		`if t.id not in {"to_reservations", "to_events"}`,
-		`if t.id not in {"back_to_greeter"}`,
+		`if t.id != "back_to_greeter"`, // a single handoff is a comparison, not a one-item set
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("an opening reply does not withhold its handoffs: want %s", want)
@@ -2536,7 +2538,7 @@ func TestLiveKitV1MCPPreflightIsRequired(t *testing.T) {
 		`if source == "book_table":`,
 		`tools=[_mcp_toolset("book_table")]`,
 		`async def _preflight_mcp() -> None:`,
-		`async def probe(source: str):`,
+		`async def probe(source: str) -> tuple[BaseException | None, BaseException | None]:`,
 		`sources = ("book_table",)`,
 		`*(probe(source) for source in sources)`,
 		`return_exceptions=True`,

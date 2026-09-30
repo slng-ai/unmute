@@ -19,7 +19,7 @@ func TestPlaceholderPathIsWalkedOnBothTargets(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		module := emitted(t, agent, provider)
 		for _, want := range []string{
-			"def _state_lookup(state, name):",
+			"def _state_lookup(state: object, name: str) -> tuple[str, object]:",
 			`root, _, path = name.partition("__")`,
 			"_state_text(*_prompt_value(",
 			"{{last_appointment__appointment_type}}",
@@ -41,7 +41,7 @@ func TestPlaceholderPathIsWalkedOnBothTargets(t *testing.T) {
 		}
 		// The walk reads None past an absent link rather than raising, which is
 		// what lets a prompt name a field of a record nobody has filled.
-		body := functionBody(t, module, "def _state_lookup(state, name):")
+		body := functionBody(t, module, "def _state_lookup(state: object, name: str) -> tuple[str, object]:")
 		if !strings.Contains(body, "if value is None:") || !strings.Contains(body, "isinstance(value, dict)") {
 			t.Errorf("%s: the walk does not stop at an absent link:\n%s", provider, body)
 		}
