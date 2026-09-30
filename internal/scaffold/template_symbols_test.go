@@ -44,8 +44,14 @@ var (
 	// Scanning only one style is how this gate first shipped, and it silently
 	// covered none of the six methods it was written to protect: they all live
 	// behind [[ ]] in agent.yaml.tmpl. Both styles, or this checks nothing.
-	templateAction = regexp.MustCompile(`(?s)(?:\{\{-?(.*?)-?\}\}|\[\[-?(.*?)-?\]\])`)
-	templateField  = regexp.MustCompile(`\.([A-Z][A-Za-z0-9_]*)`)
+	//
+	// Each style is read only where it is the delimiter. Python type hints
+	// (`Callable[[Span], None]`) look exactly like a [[ ]] action, so reading
+	// [[ ]] in an emitted-Python template reports Python as a missing Go symbol.
+	templateAction      = regexp.MustCompile(`(?s)\{\{-?(.*?)-?\}\}`)
+	scaffoldAction      = regexp.MustCompile(`(?s)\[\[-?(.*?)-?\]\]`)
+	scaffoldTemplateDir = filepath.Join("internal", "scaffold") + string(filepath.Separator)
+	templateField       = regexp.MustCompile(`\.([A-Z][A-Za-z0-9_]*)`)
 	// A template comment is an action, and these comments quote the Python they
 	// are about ("llm.FallbackAdapter around its fallback chain"). Prose, not
 	// calls, so it comes out before the fields are read.
@@ -85,8 +91,12 @@ func TestTemplatesOnlyCallSymbolsThatExist(t *testing.T) {
 				return err
 			}
 			rel, _ := filepath.Rel(root, path)
-			for _, action := range templateAction.FindAllStringSubmatch(string(raw), -1) {
-				body := templateComment.ReplaceAllString(action[1]+action[2], "")
+			action := templateAction
+			if strings.HasPrefix(rel, scaffoldTemplateDir) {
+				action = scaffoldAction // scaffold.go sets Delims("[[", "]]")
+			}
+			for _, found := range action.FindAllStringSubmatch(string(raw), -1) {
+				body := templateComment.ReplaceAllString(found[1], "")
 				for _, m := range templateField.FindAllStringSubmatch(body, -1) {
 					templates[m[1]] = append(templates[m[1]], rel)
 				}
