@@ -280,7 +280,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			}
 		}
 		for _, tool := range tools {
-			if tool.URLEnv != "" {
+			if tool.URLEnv != "" || tool.HostedRequest {
 				data.NeedsHTTPX = true // webhook tool POSTs with httpx (agents + tasks own them)
 			}
 			if tool.Auth != nil {

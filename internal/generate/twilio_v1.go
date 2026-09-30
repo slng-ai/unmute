@@ -210,8 +210,9 @@ func renderTwilio(name string, data twilioData) ([]byte, error) {
 		return nil, fmt.Errorf("read %s: %w", name, err)
 	}
 	tmpl, err := template.New(name).Funcs(template.FuncMap{
-		"pyq":  pyQuote,
-		"join": strings.Join,
+		"pyq":      pyQuote,
+		"join":     strings.Join,
+		"checkers": pythonCheckers,
 	}).Option("missingkey=error").Parse(string(raw))
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", name, err)

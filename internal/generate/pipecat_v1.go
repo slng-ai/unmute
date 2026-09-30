@@ -988,6 +988,7 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 		"resultAccess": resultAccess,
 		"pytriple":     pyTriple,
 		"join":         strings.Join,
+		"checkers":     pythonCheckers,
 
 		"mcpTimeout": func() int { return mcpTimeoutSeconds },
 		// SLNG's contract for a hosted code tool, named once in Go so neither

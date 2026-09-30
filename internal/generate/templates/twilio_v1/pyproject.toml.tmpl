@@ -11,8 +11,7 @@ dependencies = [
 {{- end}}
 ]
 
-[dependency-groups]
-dev = ["ruff==0.15.7", "ty"]
-
 [tool.uv]
 package = false
+
+{{checkers .Python}}

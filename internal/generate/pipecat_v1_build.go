@@ -700,7 +700,7 @@ func setImportNeeds(data *pipecatData) {
 			// never used, failed the emitted project's own ruff gate, and declared
 			// no httpx in pyproject.toml to back it up. livekit reads URLEnv here
 			// and always did.
-			if t.URLEnv != "" {
+			if t.URLEnv != "" || t.HostedRequest {
 				data.NeedsHTTPX = true // webhook tool POSTs with httpx
 			}
 			if t.Auth != nil {
@@ -741,7 +741,7 @@ func setImportNeeds(data *pipecatData) {
 					if t.Local {
 						data.NeedsInspect = true
 					}
-					if t.URLEnv != "" {
+					if t.URLEnv != "" || t.HostedRequest {
 						data.NeedsHTTPX = true // flows tool handlers POST with httpx
 					}
 					if t.Auth != nil {

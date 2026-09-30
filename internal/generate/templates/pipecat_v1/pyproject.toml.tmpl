@@ -17,12 +17,6 @@ dependencies = [
 # terminates a carrier's WebSocket, so it should say so rather than inherit it
 # from a neighbour that might stop carrying it.
 {{end}}
-# Same checkers, same pins, same bar as the LiveKit driver: ruff is declared
-# here so a generated project can run the lint gate its README promises, and
-# it is pinned because ruff 0.16 widened its default rule selection.
-[dependency-groups]
-dev = ["ruff==0.15.7", "ty"]
-
 [tool.uv]
 package = false
 {{- if .Knowledge.AnyKeyword}}
@@ -53,3 +47,5 @@ package = false
 # retriever relaxes its own pin.
 override-dependencies = ["pystemmer>=3.1.0,<4"]
 {{- end}}
+
+{{checkers "3.11"}}
