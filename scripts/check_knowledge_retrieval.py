@@ -3,7 +3,7 @@
 This is the knowledge-base equivalent of `replay_router_scopes.py`. The rule is
 to reproduce a defect in the layer it lives in, and retrieval is two layers
 below a phone call. If a live call gives a vague answer, run this first. It
-imports the emitted `knowledge.py` from a build directory, builds the indexes
+imports the emitted `utils/knowledge.py` from a build directory, builds the indexes
 exactly as the agent does at startup, and asks questions straight at `look_up`.
 
 What it can prove:
@@ -43,13 +43,13 @@ from pathlib import Path
 
 
 def load_knowledge(build_dir: Path):
-    """Import the emitted knowledge.py from a build directory.
+    """Import the emitted utils/knowledge.py from a build directory.
 
     Imported by path rather than by name so this runs against any build directory
     without installing it, and so two build directories can never shadow each
     other in sys.modules.
     """
-    module_path = build_dir / "knowledge.py"
+    module_path = build_dir / "utils" / "knowledge.py"
     if not module_path.is_file():
         raise SystemExit(
             f"{module_path} does not exist. Either the package declares no "

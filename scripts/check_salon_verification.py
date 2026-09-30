@@ -23,12 +23,15 @@ async def main():
     sys.path.insert(0, str(build))
     os.chdir(build)
 
-    import agent as generated  # noqa: PLC0415
+    import agent  # noqa: F401, PLC0415 - loads the package's .env
+    import agents  # noqa: PLC0415
+    import call  # noqa: PLC0415
+    import session as call_state  # noqa: PLC0415
     from livekit.agents import AgentSession, llm  # noqa: PLC0415
 
     for correction in (False, True):
-        state = generated.Userdata()
-        generated._save_result(
+        state = call_state.Userdata()
+        call_state._save_result(
             "verify_customer",
             state,
             {"customer_phone": "+15005550006"},
@@ -42,9 +45,9 @@ async def main():
                 else "Can we switch my appointment to another day around the same time?"
             ),
         )
-        model = compiled_llm(build / "agent.py", vars(generated))
+        model = compiled_llm(build / "call.py", vars(call))
         async with AgentSession(userdata=state, llm=model) as session:
-            task = generated.VerifyCustomer(chat_ctx=context)
+            task = agents.VerifyCustomer(chat_ctx=context)
             result = await session.start(task, capture_run=True)
             await result
             items = [getattr(event, "item", event) for event in events_of(result)]

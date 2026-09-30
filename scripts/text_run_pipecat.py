@@ -62,8 +62,12 @@ async def run(args: argparse.Namespace) -> None:
         os.environ.pop("UNMUTE_CALL_FACTS", None)
     seed_unused_env(package, build)
 
-    # After sys.path and cwd are set, so the emitted module and its tools load.
-    import bot  # noqa: PLC0415
+    # After sys.path and cwd are set, so the emitted modules and their tools
+    # load. bot first: importing it loads the package's .env and runs the
+    # startup check, the way the runner does.
+    import agents  # noqa: PLC0415
+    import bot  # noqa: F401, PLC0415
+    import session  # noqa: PLC0415
     from pipecat.bus import BusBridgeProcessor  # noqa: PLC0415
     from pipecat.frames.frames import (  # noqa: PLC0415
         EndFrame,
@@ -123,29 +127,30 @@ async def run(args: argparse.Namespace) -> None:
                 print(f"   [result] {frame.function_name}: {out[:300]}")
             await self.push_frame(frame, direction)
 
-    # Only the voices are replaced. Every build_<agent>_tts the module emits
-    # becomes a stand-in named after its agent.
-    for name in [n for n in vars(bot) if n.startswith("build_") and n.endswith("_tts")]:
+    # Only the voices are replaced. Every build_<agent>_tts the agents module
+    # emits becomes a stand-in named after its agent, patched where the workers
+    # look it up.
+    for name in [n for n in vars(agents) if n.startswith("build_") and n.endswith("_tts")]:
         agent = name.removeprefix("build_").removesuffix("_tts")
-        setattr(bot, name, lambda agent=agent: Voice(agent))
+        setattr(agents, name, lambda agent=agent: Voice(agent))
 
     context = LLMContext()
-    state = bot.build_state({})
-    await bot._prefetch(state, {})
+    state = session.build_state({})
+    await session._prefetch(state, {})
     print("prefetch:", state_of(state))
-    agents = [
+    workers = [
         cls(state=state, context=context, call_context={})
-        for cls in vars(bot).values()
+        for cls in vars(agents).values()
         if isinstance(cls, type)
-        and issubclass(cls, bot.TracedLLMWorker)
-        and cls is not bot.TracedLLMWorker
-        and cls.__module__ == bot.__name__
+        and issubclass(cls, agents.TracedLLMWorker)
+        and cls is not agents.TracedLLMWorker
+        and cls.__module__ == agents.__name__
     ]
     # The entry agent and its greeting are what _run_bot's activate_entry()
     # activates and speaks. Read from the source so this follows the emitter.
-    opening = (build / "bot.py").read_text().split("async def activate_entry", 1)[1]
+    opening = (build / "call.py").read_text().split("async def activate_entry", 1)[1]
     first = re.search(r'main\.activate_worker\(\s*"([^"]+)"', opening)
-    entry = next(a for a in agents if first and a.name == first.group(1))
+    entry = next(a for a in workers if first and a.name == first.group(1))
     spoken = re.search(r'TTSSpeakFrame\(\s*"((?:[^"\\]|\\.)*)"', opening.split("_end_after", 1)[0])
     greeting = spoken.group(1) if spoken else None
     if greeting:
@@ -174,7 +179,7 @@ async def run(args: argparse.Namespace) -> None:
     @main.event_handler("on_pipeline_started")
     async def on_started(worker, frame):
         await ready.wait()
-        await runner.add_workers(*agents)
+        await runner.add_workers(*workers)
         await main.activate_worker(entry.name, args=LLMWorkerActivationArgs(run_llm=False))
         started.set()
 
