@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from typing import Any
 
 from langfuse import Langfuse
 from livekit.agents import AgentSession, JobContext
@@ -16,7 +17,6 @@ from opentelemetry import trace
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider
 from opentelemetry.util.types import AttributeValue
-
 
 # The livekit span that covers the whole call, and the root of its trace. Read
 # by name, the way the Pipecat target reads its own. It used to be the only
@@ -56,9 +56,8 @@ class CallTrace(SpanProcessor):
     the trace shows what was said rather than an envelope of lifecycle spans.
     """
 
-    def __init__(
-        self, tracer: trace.Tracer, attributes: dict[str, AttributeValue]
-    ) -> None:
+    def __init__(self, tracer: trace.Tracer, attributes: dict[str, AttributeValue]) -> None:
+        """Bind the tracer that opens turns and the attributes every span carries."""
         self._tracer = tracer
         self._attributes = attributes
         self._call: Span | None = None
@@ -68,6 +67,7 @@ class CallTrace(SpanProcessor):
         self._transcript: list[dict[str, str]] = []
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
+        """Stamp the call's attributes on a span and remember the call's root."""
         span.set_attributes(self._attributes)
         # The call's root, matched by name rather than by having no parent, so
         # neither another parentless span nor livekit parenting the session
@@ -91,6 +91,7 @@ class CallTrace(SpanProcessor):
         self._turn, self._turn_context = None, None
 
     def context(self) -> Context | None:
+        """Return the open turn's context, if there is one."""
         return self._turn_context
 
     def ensure(self) -> Context | None:
@@ -128,16 +129,22 @@ class TurnTracer:
     """A tracer that puts livekit's turn spans inside the turn span above."""
 
     def __init__(self, inner: trace.Tracer, call: CallTrace) -> None:
+        """Wrap a tracer so turn spans are started inside the call's turn."""
         self._inner, self._call = inner, call
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
+        """Forward anything not wrapped here to the real tracer."""
         return getattr(self._inner, name)
 
-    def start_span(self, name, context=None, **kwargs):
+    def start_span(self, name: str, context: Context | None = None, **kwargs: Any) -> trace.Span:
+        """Start a span, moving livekit's turn spans inside the call's turn."""
         return self._inner.start_span(name, self._call.context_for(name, context), **kwargs)
 
     @contextmanager
-    def start_as_current_span(self, name, context=None, **kwargs):
+    def start_as_current_span(
+        self, name: str, context: Context | None = None, **kwargs: Any
+    ) -> Iterator[trace.Span]:
+        """Start a current span, moving livekit's turn spans inside the call's turn."""
         with self._inner.start_as_current_span(
             name, self._call.context_for(name, context), **kwargs
         ) as span:
@@ -160,10 +167,11 @@ def install_turn_spans(provider: TracerProvider, call: CallTrace) -> None:
     if getattr(provider, "__unmute_turn_spans__", False):
         return
     get_tracer = provider.get_tracer
-    setattr(
+    # setattr, not assignment: the SDK class declares neither attribute.
+    setattr(  # noqa: B010
         provider, "get_tracer", lambda *a, **kw: TurnTracer(get_tracer(*a, **kw), call)
     )
-    setattr(provider, "__unmute_turn_spans__", True)
+    setattr(provider, "__unmute_turn_spans__", True)  # noqa: B010
 
 
 def _export_call_spans(span: ReadableSpan) -> bool:
@@ -200,6 +208,7 @@ def setup_langfuse(
     session: AgentSession,
     metadata: dict[str, AttributeValue] | None = None,
 ) -> TracerProvider:
+    """Install Langfuse tracing on the session and return the tracer provider."""
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
     base_url = os.getenv("LANGFUSE_BASE_URL")
@@ -304,6 +313,7 @@ def trace_speech_metrics(
     ended_at: float,
     context: Context | None = None,
 ) -> None:
+    """File one span for a speech turn, summed over the metrics collected for it."""
     if not speech_metrics:
         return
 

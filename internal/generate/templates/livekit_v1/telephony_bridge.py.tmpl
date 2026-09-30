@@ -24,6 +24,7 @@ import os
 import re
 import secrets
 from array import array
+from typing import Any
 
 from aiohttp import web
 from livekit import api, rtc
@@ -40,12 +41,18 @@ BRIDGE_PORT = int(os.getenv("UNMUTE_TELEPHONY_BRIDGE_PORT", "7860"))
 
 SAMPLE_RATE = 8000
 NUM_CHANNELS = 1
+BYTES_PER_SAMPLE = 2  # 16-bit PCM
 E164 = re.compile(r"\+[1-9][0-9]{7,14}")
 
 # Pending calls keyed by the single-use, unguessable token embedded in the
 # media WebSocket URL. The signed webhook is the trust boundary; the token is
 # the capability that authorizes the matching WebSocket (popped on use).
-PENDING: dict[str, dict] = {}
+PENDING: dict[str, dict[str, Any]] = {}
+
+# Random bytes in a pending-call token, and the WebSocket close code sent when a
+# token is unknown or already used (4000-4999 is the application range).
+TOKEN_BYTES = 32
+CLOSE_UNKNOWN_TOKEN = 4403
 
 
 # Names something other than you supplies: `unmute dev` sets them for a local
@@ -56,6 +63,7 @@ SUPPLIED_FOR_YOU = {{"{"}}{{range $i, $name := .SuppliedForYou}}{{if $i}}, {{end
 
 
 def _missing_env(name: str) -> str:
+    """Say which environment variable is missing and, if it is supplied, by whom."""
     message = f"Missing required environment variable: {name}"
     if name in SUPPLIED_FOR_YOU:
         message += (
@@ -66,6 +74,7 @@ def _missing_env(name: str) -> str:
 
 
 def _env(name: str) -> str:
+    """Read a required environment variable, or fail naming it."""
     value = os.getenv(name)
     if not value:
         raise RuntimeError(_missing_env(name))
@@ -73,6 +82,7 @@ def _env(name: str) -> str:
 
 
 def _public_origin() -> str:
+    """The public HTTPS origin Twilio reaches this bridge on."""
     value = _env("UNMUTE_PUBLIC_URL").rstrip("/")
     if not value.startswith("https://"):
         raise RuntimeError("UNMUTE_PUBLIC_URL must be an HTTPS origin")
@@ -80,10 +90,12 @@ def _public_origin() -> str:
 
 
 def _https_url(path: str) -> str:
+    """An absolute HTTPS URL on the public origin, as Twilio signs it."""
     return _public_origin() + path
 
 
 def _wss_url(path: str) -> str:
+    """An absolute WSS URL on the public origin."""
     return "wss://" + _public_origin()[len("https://"):] + path
 
 
@@ -95,6 +107,7 @@ _CLIP = 32635
 
 
 def _ulaw_to_linear(u: int) -> int:
+    """Decode one mu-law byte to a 16-bit linear sample."""
     u = ~u & 0xFF
     sign = u & 0x80
     exponent = (u >> 4) & 0x07
@@ -104,6 +117,7 @@ def _ulaw_to_linear(u: int) -> int:
 
 
 def _linear_to_ulaw(sample: int) -> int:
+    """Encode one 16-bit linear sample as a mu-law byte."""
     sign = 0x80 if sample < 0 else 0
     if sign:
         sample = -sample
@@ -120,16 +134,19 @@ _ULAW_TO_PCM = [_ulaw_to_linear(b) for b in range(256)]
 
 
 def ulaw_to_pcm16(payload: bytes) -> bytes:
+    """Decode a mu-law payload to little-endian 16-bit PCM."""
     return array("h", (_ULAW_TO_PCM[b] for b in payload)).tobytes()
 
 
 def pcm16_to_ulaw(pcm: bytes) -> bytes:
+    """Encode little-endian 16-bit PCM as a mu-law payload."""
     samples = array("h")
     samples.frombytes(pcm)
     return bytes(_linear_to_ulaw(s) for s in samples)
 
 
 def _mulaw_selfcheck() -> None:
+    """Fail at boot if the mu-law tables do not round-trip."""
     # A decode -> encode -> decode round-trip must preserve the linear value on
     # every code point (SPEC V8): a broken table would silently corrupt audio,
     # so fail loud at boot. This holds for all 256 codes including the two zero
@@ -141,14 +158,17 @@ def _mulaw_selfcheck() -> None:
 
 # --- Twilio surface ----------------------------------------------------------
 def _validator() -> RequestValidator:
+    """The validator for Twilio's request signature."""
     return RequestValidator(_env({{pyq .Telephony.AuthTokenEnv}}))
 
 
 def _client() -> Client:
+    """A Twilio REST client for placing outbound calls."""
     return Client(_env({{pyq .Telephony.AccountSIDEnv}}), _env({{pyq .Telephony.AuthTokenEnv}}))
 
 
 def _stream_twiml(token: str) -> str:
+    """The TwiML that connects a call's audio to this bridge's media WebSocket."""
     url = _wss_url(f"/telephony/ws/{token}")
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -157,15 +177,17 @@ def _stream_twiml(token: str) -> str:
 
 
 async def health(_: web.Request) -> web.Response:
+    """Answer the liveness probe."""
     return web.Response(text="ok")
 
 {{if .Telephony.HasInbound}}
 async def inbound(request: web.Request) -> web.Response:
+    """Answer Twilio's signed voice webhook by streaming the call to this bridge."""
     form = dict(await request.post())
     signature = request.headers.get("X-Twilio-Signature", "")
     if not signature or not _validator().validate(_https_url("/telephony/inbound"), form, signature):
         raise web.HTTPForbidden(text="invalid carrier signature")
-    token = secrets.token_urlsafe(32)
+    token = secrets.token_urlsafe(TOKEN_BYTES)
     PENDING[token] = {
         "direction": "inbound",
         "from_number": form.get("From", ""),
@@ -175,6 +197,7 @@ async def inbound(request: web.Request) -> web.Response:
     return web.Response(text=_stream_twiml(token), content_type="application/xml")
 {{end}}{{if .Telephony.HasOutbound}}
 async def outbound(request: web.Request) -> web.Response:
+    """Place an outbound call for an authorized application request."""
     expected = "Bearer " + _env("UNMUTE_OUTBOUND_TOKEN")
     if not hmac.compare_digest(request.headers.get("Authorization", ""), expected):
         raise web.HTTPUnauthorized(text="invalid application authorization")
@@ -186,7 +209,7 @@ async def outbound(request: web.Request) -> web.Response:
     if not isinstance(destination, str) or not E164.fullmatch(destination) or not isinstance(call_start, dict):
         raise web.HTTPBadRequest(text="invalid outbound request")
     from_number = _env({{pyq .Telephony.FromNumberEnv}})
-    token = secrets.token_urlsafe(32)
+    token = secrets.token_urlsafe(TOKEN_BYTES)
     PENDING[token] = {
         "direction": "outbound",
         "from_number": from_number,
@@ -208,13 +231,15 @@ async def outbound(request: web.Request) -> web.Response:
     return web.json_response({"call_id": call.sid, "status": "accepted"})
 {{end}}
 async def status(request: web.Request) -> web.Response:
+    """Log Twilio's call status callbacks."""
     form = dict(await request.post())
     logger.info("call status %s -> %s", form.get("CallSid", ""), form.get("CallStatus", ""))
     return web.Response(text="ok")
 
 
 # --- media bridge ------------------------------------------------------------
-def _dispatch_token(room_name: str, pending: dict, call_sid: str, stream_sid: str) -> str:
+def _dispatch_token(room_name: str, pending: dict[str, Any], call_sid: str, stream_sid: str) -> str:
+    """A join token that also dispatches the agent worker with the call's metadata."""
     metadata = json.dumps({
         "direction": pending["direction"],
         "from_number": pending["from_number"],
@@ -234,7 +259,10 @@ def _dispatch_token(room_name: str, pending: dict, call_sid: str, stream_sid: st
     )
 
 
-async def forward_agent_audio(ws: web.WebSocketResponse, stream_sid_ref: dict, audio_track: rtc.Track) -> None:
+async def forward_agent_audio(
+    ws: web.WebSocketResponse, stream_sid_ref: dict[str, str | None], audio_track: rtc.Track
+) -> None:
+    """Send the agent's audio track to Twilio until the stream ends."""
     # The agent's speech: resample to 8 kHz mono, mu-law encode, send to Twilio.
     stream = rtc.AudioStream(audio_track, sample_rate=SAMPLE_RATE, num_channels=NUM_CHANNELS)
     try:
@@ -250,24 +278,25 @@ async def forward_agent_audio(ws: web.WebSocketResponse, stream_sid_ref: dict, a
 
 
 async def media_ws(request: web.Request) -> web.WebSocketResponse:
+    """Bridge one call's Twilio media WebSocket to a LiveKit room, both ways."""
     ws = web.WebSocketResponse()
     await ws.prepare(request)
     token_key = request.match_info["token"]
     pending = PENDING.pop(token_key, None)
     if pending is None:
         logger.warning("media WS with unknown or already-used token; closing")
-        await ws.close(code=4403, message=b"unknown or used token")
+        await ws.close(code=CLOSE_UNKNOWN_TOKEN, message=b"unknown or used token")
         return ws
     logger.info("media WS connected (%s call)", pending["direction"])
 
     source = rtc.AudioSource(SAMPLE_RATE, NUM_CHANNELS)
     track = rtc.LocalAudioTrack.create_audio_track("caller", source)
     room = rtc.Room()
-    stream_sid_ref: dict = {"value": None}
-    tasks: list = []
+    stream_sid_ref: dict[str, str | None] = {"value": None}
+    tasks: list[asyncio.Task[None]] = []
 
     @room.on("track_subscribed")
-    def _on_track(track_: rtc.Track, *_args) -> None:
+    def _on_track(track_: rtc.Track, *_args: Any) -> None:
         if track_.kind == rtc.TrackKind.KIND_AUDIO:
             logger.info("agent audio track subscribed; forwarding to the caller")
             tasks.append(asyncio.create_task(forward_agent_audio(ws, stream_sid_ref, track_)))
@@ -296,7 +325,7 @@ async def media_ws(request: web.Request) -> web.WebSocketResponse:
             elif event == "media" and connected:
                 pcm = ulaw_to_pcm16(base64.b64decode(data["media"]["payload"]))
                 await source.capture_frame(
-                    rtc.AudioFrame(data=pcm, sample_rate=SAMPLE_RATE, num_channels=NUM_CHANNELS, samples_per_channel=len(pcm) // 2)
+                    rtc.AudioFrame(data=pcm, sample_rate=SAMPLE_RATE, num_channels=NUM_CHANNELS, samples_per_channel=len(pcm) // BYTES_PER_SAMPLE)
                 )
             elif event == "stop":
                 logger.info("media stream stopped by carrier")
@@ -314,6 +343,7 @@ async def media_ws(request: web.Request) -> web.WebSocketResponse:
 
 
 def build_app() -> web.Application:
+    """Build the bridge's web application with its routes."""
     app = web.Application()
     app.router.add_get("/", health)
 {{- if .Telephony.HasInbound}}
