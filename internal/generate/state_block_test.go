@@ -32,7 +32,7 @@ func TestStateBlockRendersJSONAndNotARepr(t *testing.T) {
 		}
 		// The bound is measured after the JSON rendering, which is what
 		// _state_text does: the length check is inside it, below the dumps.
-		body := functionBody(t, module, "def _state_text(name, value):")
+		body := functionBody(t, module, "def _state_text(name: str, value: object) -> str:")
 		dumps := strings.Index(body, "json.dumps")
 		bound := strings.Index(body, "len(text) > _STATE_VALUE_MAX")
 		if dumps < 0 || bound < 0 || bound < dumps {
@@ -65,7 +65,7 @@ func TestStateTextRendersEmptyNotNoneForABarePrimitive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := functionBody(t, block.Source, "def _state_text(name, value):")
+	body := functionBody(t, block.Source, "def _state_text(name: str, value: object) -> str:")
 	if body == "" {
 		t.Fatal("no _state_text emitted, so this gate proves nothing")
 	}

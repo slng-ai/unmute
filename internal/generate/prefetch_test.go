@@ -260,7 +260,7 @@ func TestPrefetchBoundsARouterValueAndSaysSo(t *testing.T) {
 	if !strings.Contains(py, "_PREFETCH_VALUE_MAX = 512") {
 		t.Error("the bound is not emitted as a named constant")
 	}
-	if !strings.Contains(py, "def _prefetch_bounded(name, value):") {
+	if !strings.Contains(py, "def _prefetch_bounded(name: str, value: object) -> object:") {
 		t.Error("no bound is applied to a pre-fetched value")
 	}
 	if !strings.Contains(py, "stops the") || !strings.Contains(py, "prompt being cached") {
@@ -340,7 +340,7 @@ func TestPrefetchSeedFillsOnlyWhatTheCarrierDidNot(t *testing.T) {
 				t.Errorf("%s does not read the seed, so the browser loop cannot exercise the path", tc.file)
 			}
 			// The carrier wins: the seed is only written where the fact is empty.
-			if !strings.Contains(py, "if not facts.get(name):") {
+			if !strings.Contains(py, "facts |= {name: value for name, value in values.items() if not facts.get(name)}") {
 				t.Error("the seed can overwrite a carrier fact")
 			}
 			// And it flows through the pre-fetch rather than around it, which is
@@ -513,7 +513,7 @@ func TestPipecatHydratesASystemSourceVariable(t *testing.T) {
 	bot := artifactFile(t, artifact, "bot.py")
 	for _, want := range []string{
 		`_value = (call_context or {}).get("from_number")`,
-		`setattr(state, "caller_fact", _value)`,
+		`state.caller_fact = _value`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("build_state does not hydrate a system-source variable: %s", want)
