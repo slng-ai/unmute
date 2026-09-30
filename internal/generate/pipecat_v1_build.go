@@ -162,6 +162,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		pt, def := stateField(v, false)
 		data.Variables = append(data.Variables, pipecatVariable{
 			Name: name, PyType: pt, Default: def, Source: string(v.Source), Description: oneLine(v.Description),
+			LiteralDefault: defaultOutsideLiteral(pt, def),
 		})
 		// Dispatched input variables hydrate before the greeting on every
 		// channel, not just telephony: the web and console dev paths read the

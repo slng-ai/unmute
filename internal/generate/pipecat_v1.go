@@ -398,6 +398,9 @@ type pipecatVariable struct {
 	Default     string // Python literal
 	Source      string
 	Description string
+	// LiteralDefault marks an authored default outside the variable's allowed
+	// words, which ty refuses; see defaultOutsideLiteral.
+	LiteralDefault bool
 }
 
 // pipecatCallStartVar is one dispatched input variable, hydrated from the call
