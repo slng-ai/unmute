@@ -1,0 +1,79 @@
+"""Every value this app was compiled with, and the limits it runs under."""
+
+log = logging.getLogger("relay")
+
+MODEL = {{pyq .Model}}
+# Forwarded to every request verbatim, as the package wrote them.
+MODEL_PARAMS: dict[str, Any] = json.loads({{pyq .ParamsJSON}})
+{{- if .Vertex}}
+VERTEX_LOCATION = {{pyq .Location}}
+{{- end}}
+# ConversationRelay speaks this line itself (welcomeGreeting). The app records it
+# in history once and never sends it.
+GREETING: str | None = {{if .Greeting}}{{pyq .Greeting}}{{else}}None{{end}}
+TOOL_SPECS: list[dict[str, Any]] = json.loads({{pyq .ToolsJSON}})
+
+ENV_ACCOUNT_SID = {{pyq .Env.AccountSID}}
+ENV_AUTH_TOKEN = {{pyq .Env.AuthToken}}
+ENV_PUBLIC_URL = {{pyq .Env.PublicURL}}
+ENV_MODEL_KEY = {{pyq .ModelKeyEnv}}
+# The Twilio Region the connection names. Outside US1 the REST API has its own
+# host and takes only that region's Auth Token.
+TWILIO_REGION: str | None = {{if .RESTEdge}}{{pyq .Region}}{{else}}None{{end}}
+TWILIO_EDGE: str | None = {{if .RESTEdge}}{{pyq .RESTEdge}}{{else}}None{{end}}
+{{- with .Router}}
+# The SLNG Context Router answers the turns it judges repeatable from its cache
+# and calls the upstream model for the rest. These are the upstream's own credentials, which
+# the inline configuration names.
+UPSTREAM_ENV: tuple[str, ...] = ({{range .UpstreamEnv}}{{pyq .}}, {{end}})
+ROUTER_BASE_URL = {{pyq .BaseURL}}
+# This agent's cache scope, sent as {{.AgentHeader}} on every request.
+ROUTER_SCOPE = {{pyq .Scope}}
+{{- else}}
+UPSTREAM_ENV: tuple[str, ...] = ()
+{{- end}}
+
+# Limits. Each one bounds something a caller or a provider could otherwise grow.
+MAX_SESSIONS = {{.MaxSessions}}  # capacity.max_sessions: calls held at once
+MAX_TOOL_ROUNDS = {{.MaxRounds}}  # model and tool round trips per caller turn
+TOOL_DEADLINE = {{.ToolDeadline}}.0  # seconds a turn waits for one tool
+MODEL_TIMEOUT = 30.0  # seconds for one model response
+SETUP_TIMEOUT = 10.0  # seconds from WebSocket open to the setup message
+DRAIN_TIMEOUT = 20.0  # seconds shutdown waits for calls to finish
+END_GRACE = 5.0  # seconds Twilio has to close the socket after an end message
+MAX_PENDING_PROMPTS = 8  # caller turns waiting while a tool runs
+MAX_PROMPT_CHARS = 4000
+MAX_HISTORY = 80  # history entries kept per call
+MAX_WS_MESSAGE = 64 * 1024
+MAX_RELAY_ERRORS = 5  # ConversationRelay error messages before the call ends
+MAX_UNEXPECTED = 20  # unknown or disabled events before the call ends
+MAX_FAILURES = 3  # failed model responses in a row before the call ends
+PARK_SECONDS = 600.0  # seconds a call's history waits for a step to hand the caller back
+NEXT_STEP_TIMEOUT = 10.0  # seconds an async next_twiml() may take; Twilio waits 15
+MAX_RESUME_NOTE = 500
+MAX_PARKED_PER_SLOT = 4  # parked call histories kept for each call slot
+DEFAULT_PORT = 8080  # used when PORT is not set
+# WebSocket close codes, RFC 6455.
+CLOSE_NORMAL = 1000
+CLOSE_UNSUPPORTED_DATA = 1003
+CLOSE_INVALID_PAYLOAD = 1007
+CLOSE_POLICY_VIOLATION = 1008
+# How much of a wire value a log line keeps.
+LOG_SID_CHARS = 34  # a call SID
+LOG_KIND_CHARS = 32  # an event kind or a reason
+LOG_WORD_CHARS = 16  # a status or a direction
+LOG_CODE_CHARS = 8  # a Twilio error code
+FAILURE_LINE = "Sorry, something went wrong on my side. Could you say that again?"
+
+HERE = Path(__file__).resolve().parent
+ORIGIN_PLACEHOLDER = "__PUBLIC_ORIGIN__"
+WSS_PLACEHOLDER = "__PUBLIC_WSS_ORIGIN__"
+CALL_SID = re.compile(r"CA[0-9a-f]{32}")
+SESSION_ID = re.compile(r"VX[0-9a-f]{32}")
+HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>'
+# Which build this is, served on /healthz so `unmute deploy` can refuse to route
+# a number at a different one. An Unmute drift check, not a Twilio API and not
+# an attestation. Hashed from the rest of the app's modules, the prompt, the
+# TwiML, the pins, the image and the tools; never from a credential or the
+# public origin.
+ARTIFACT_ID = {{pyq .ArtifactID}}

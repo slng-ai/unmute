@@ -24,7 +24,7 @@ import (
 // ConversationRelay calls. ConversationRelay listens and speaks; the app thinks
 // with one model SDK and runs the package's local tools. The emitted project
 // holds no unmute dependency and no YAML: every decision is made here and
-// written into app.py and conversation-relay.xml.tmpl as literals.
+// written into the app's modules and conversation-relay.xml.tmpl as literals.
 
 //go:embed templates/twilio_v1/*.tmpl
 var twilioTemplates embed.FS
@@ -51,7 +51,7 @@ type twilioData struct {
 	Vertex       bool
 	Location     string
 	ModelKeyEnv  string
-	Instructions string
+	Prompts      []pyPrompt // the entry agent's instructions, as prompts/instructions.md
 	Greeting     string
 	MaxSessions  int
 	MaxRounds    int
@@ -139,10 +139,26 @@ func GenerateTwilio(agent *ir.Agent, resolved ir.Target, bindings []ir.Forwarded
 	return Artifact{Kind: CodeTarget, Files: files, ArtifactID: data.ArtifactID}, nil
 }
 
+// twilioModules are the app's own Python modules, each rendered from its
+// template and given its imports by linkPython. app.py stays the entry, because
+// the image runs `python app.py`.
+var twilioModules = []struct{ tmpl, path string }{
+	{"settings.py", "settings.py"},
+	{"prompts.py", "prompts/__init__.py"},
+	{"tool_runner.py", "tool_runner.py"},
+	{"brain.py", "brain.py"},
+	{"handoff.py", "handoff.py"},
+	{"call.py", "call.py"},
+	{"app.py", "app.py"},
+}
+
 func renderTwilioFiles(agent *ir.Agent, resolved ir.Target, data twilioData) ([]File, error) {
-	var files []File
+	files, err := renderPythonModules(twilioTemplates, "templates/twilio_v1/", twilioFuncs(), data, twilioModules)
+	if err != nil {
+		return nil, fmt.Errorf("twilio modules: %w", err)
+	}
+	files = append(files, writePromptFiles(data.Prompts)...)
 	for _, file := range []struct{ tmpl, path string }{
-		{"app.py.tmpl", "app.py"},
 		{"pyproject.toml.tmpl", "pyproject.toml"},
 		{"Dockerfile.tmpl", "Dockerfile"},
 		{"dockerignore.tmpl", ".dockerignore"},
@@ -175,19 +191,18 @@ func renderTwilioFiles(agent *ir.Agent, resolved ir.Target, data twilioData) ([]
 // route a number at a different build. It is an Unmute drift check, not a
 // Twilio API and not an attestation: a host can report any string it likes.
 //
-// It hashes the files that decide behaviour (the app, its TwiML, its pins,
-// its image, the tool handlers and any custom logic), sorted by path, and
-// nothing else. The
-// README, .env.example and the compile report are left out, so a docs change
-// needs no rehost. No hashed file holds a credential or the public origin:
-// both are environment names here, and values only on the host.
+// It hashes every file that decides behaviour (the app's modules, its prompt,
+// its TwiML, its pins, its image, the tool handlers and any custom logic),
+// sorted by path. The README, .env.example and the compile report are left
+// out, so a docs change needs no rehost. No hashed file holds a credential or
+// the public origin: both are environment names here, and values only on the
+// host.
 func twilioArtifactID(files []File) string {
 	var hashed []File
 	for _, file := range files {
-		switch {
-		case file.Path == "app.py", file.Path == "pyproject.toml", file.Path == "Dockerfile",
-			file.Path == ".dockerignore", file.Path == TwilioRelayTemplate, strings.HasPrefix(file.Path, "tools/"),
-			strings.HasPrefix(file.Path, "logic/"):
+		switch file.Path {
+		case "README.md", ".env.example", "compile-report.json":
+		default:
 			hashed = append(hashed, file)
 		}
 	}
@@ -204,25 +219,22 @@ func twilioArtifactID(files []File) string {
 	return "sha256:" + hex.EncodeToString(sum.Sum(nil))
 }
 
+func twilioFuncs() template.FuncMap {
+	return template.FuncMap{"pyq": pyQuote, "join": strings.Join, "checkers": pythonCheckers}
+}
+
 func renderTwilio(name string, data twilioData) ([]byte, error) {
 	raw, err := twilioTemplates.ReadFile("templates/twilio_v1/" + name)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", name, err)
 	}
-	tmpl, err := template.New(name).Funcs(template.FuncMap{
-		"pyq":      pyQuote,
-		"join":     strings.Join,
-		"checkers": pythonCheckers,
-	}).Option("missingkey=error").Parse(string(raw))
+	tmpl, err := template.New(name).Funcs(twilioFuncs()).Option("missingkey=error").Parse(string(raw))
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", name, err)
 	}
 	var out bytes.Buffer
 	if err := tmpl.Execute(&out, data); err != nil {
 		return nil, fmt.Errorf("render %s: %w", name, err)
-	}
-	if strings.HasSuffix(name, ".py.tmpl") {
-		return wrapLongImports(out.Bytes()), nil
 	}
 	return out.Bytes(), nil
 }
@@ -241,7 +253,7 @@ func buildTwilioData(agent *ir.Agent, resolved ir.Target) (twilioData, error) {
 	data := twilioData{
 		Target: resolved.Name, Project: cmp.Or(agent.Name, resolved.Name), Python: targetcap.TwilioPython,
 		OpenAI: thinkEntry.Vendor == "openai", Model: think.Model, ModelKeyEnv: thinkEntry.Call.APIKeyEnv,
-		Instructions: entry.Instructions,
+		Prompts:      []pyPrompt{{Const: "INSTRUCTIONS", File: "instructions", Text: entry.Instructions}},
 		MaxRounds:    targetcap.TwilioMaxToolRounds, ToolDeadline: targetcap.TwilioToolDeadlineSeconds,
 		Docs: targetcap.TwilioDocs,
 	}

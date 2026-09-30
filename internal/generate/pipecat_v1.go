@@ -962,7 +962,7 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pipecat modules: %w", err)
 	}
-	files = append(files, writePromptFiles(data.Prompts)...)
+	files = append(append(files, utilsPackage), writePromptFiles(data.Prompts)...)
 	// tmpl → output path (decoupled so .env.example can't be a dotfile template,
 	// which Go's embed would skip).
 	outputs := []struct{ tmpl, path string }{
@@ -1252,15 +1252,15 @@ var (
 		"asyncio": true, "base64": true, "collections": true, "contextlib": true, "copy": true,
 		"dataclasses": true, "datetime": true, "functools": true, "hashlib": true,
 		"hmac": true, "inspect": true, "json": true, "logging": true, "math": true,
-		"os": true, "pathlib": true, "random": true, "re": true, "sys": true, "time": true,
-		"typing": true, "urllib": true, "uuid": true, "zoneinfo": true,
+		"os": true, "pathlib": true, "random": true, "re": true, "sys": true, "threading": true,
+		"time": true, "typing": true, "urllib": true, "uuid": true, "xml": true, "zoneinfo": true,
 	}
 	// firstPartyModules are the sibling modules and packages a package emits
-	// beside bot.py, which ruff files apart from third-party imports.
+	// beside its entry file, which ruff files apart from third-party imports.
 	firstPartyModules = map[string]bool{
-		"agents": true, "call": true, "dev_metrics": true, "knowledge": true,
-		"logic": true, "prompts": true, "session": true, "settings": true,
-		"telephony_helper": true, "tools": true, "tracing": true, "utils": true,
+		"agents": true, "brain": true, "call": true, "dev_metrics": true, "handoff": true,
+		"knowledge": true, "logic": true, "prompts": true, "session": true, "settings": true,
+		"telephony_helper": true, "tool_runner": true, "tools": true, "tracing": true, "utils": true,
 	}
 )
 

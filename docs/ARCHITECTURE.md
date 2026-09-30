@@ -91,7 +91,9 @@ behavior is expressed in one framework.
 - **Pipecat** emits `bot.py` (the entry point, with the same modules beside
   it). The generated process owns both its network
   endpoint and conversation pipeline.
-- **Twilio** emits `app.py`, a web app on no agent framework. Twilio
+- **Twilio** emits `app.py` (the entry point, with `call.py`, `brain.py`,
+  `handoff.py`, `tool_runner.py`, `settings.py` and `prompts/` beside it), a
+  web app on no agent framework. Twilio
   ConversationRelay owns speech and turn taking; the app owns the history, the
   tools and call admission. Its facts and refusals live in
   `internal/target/twilio_target.go` and `internal/ir/validate_twilio.go`.
@@ -163,7 +165,7 @@ request is checked against Twilio's signature, built from the configured
 public origin rather than request headers. The app keeps one reader and one
 response owner per call; a generation number drops speech an interrupt made
 obsolete. A tool handler is never cancelled, and its call slot stays taken
-until it really ends. `app.py` embeds an `artifact_id`, a hash of the files
+until it really ends. The app embeds an `artifact_id`, a hash of the files
 that decide behaviour, and `/healthz` returns it.
 
 The number's webhook is set by `unmute deploy --target <name>`, or by the

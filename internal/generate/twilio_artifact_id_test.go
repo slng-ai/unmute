@@ -45,8 +45,8 @@ func TestTwilioArtifactIDIsStableAndAgrees(t *testing.T) {
 		if first.ArtifactID != again.ArtifactID {
 			t.Errorf("%s recompiled to a different id: %s then %s", instance, first.ArtifactID, again.ArtifactID)
 		}
-		if !strings.Contains(artifactFile(t, first, "app.py"), `ARTIFACT_ID = "`+first.ArtifactID+`"`) {
-			t.Errorf("%s app.py does not carry %s", instance, first.ArtifactID)
+		if !strings.Contains(artifactFile(t, first, "settings.py"), `ARTIFACT_ID = "`+first.ArtifactID+`"`) {
+			t.Errorf("%s settings.py does not carry %s", instance, first.ArtifactID)
 		}
 		var report struct {
 			ArtifactID string `json:"artifact_id"`
@@ -55,7 +55,7 @@ func TestTwilioArtifactIDIsStableAndAgrees(t *testing.T) {
 			t.Fatal(err)
 		}
 		if report.ArtifactID != first.ArtifactID {
-			t.Errorf("%s compile report id %q, app.py id %q", instance, report.ArtifactID, first.ArtifactID)
+			t.Errorf("%s compile report id %q, settings.py id %q", instance, report.ArtifactID, first.ArtifactID)
 		}
 	}
 	if twilioArtifact(t, relayDesk, "twilio-openai").ArtifactID == twilioArtifact(t, relayDesk, "twilio-gemini").ArtifactID {

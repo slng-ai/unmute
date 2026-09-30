@@ -107,7 +107,7 @@ func twilioFixtureArtifact(t *testing.T) generate.Artifact {
 	return artifact
 }
 
-// renderRelay is what app.py's render_twiml() answers /voice with.
+// renderRelay is what the app answers /voice with, from relay_document() in handoff.py.
 func (f *fakeTwilio) renderRelay() string {
 	host := strings.TrimPrefix(f.srv.URL, "https://")
 	body := strings.ReplaceAll(string(f.relay), "__PUBLIC_WSS_ORIGIN__", "wss://"+host)

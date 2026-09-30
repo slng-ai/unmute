@@ -936,7 +936,7 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("livekit modules: %w", err)
 	}
-	files = append(files, writePromptFiles(data.Prompts)...)
+	files = append(append(files, utilsPackage), writePromptFiles(data.Prompts)...)
 	outputs := []struct{ tmpl, path string }{
 		// Always emitted, inert unless the dev loop sets devmetrics.Env. Emitting
 		// it only for `dev` would make build/<target>/ depend on which command

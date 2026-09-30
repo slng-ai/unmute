@@ -102,13 +102,13 @@ func TestTwilioRegionReachesTheRunbook(t *testing.T) {
 				t.Errorf("region %q: runbook does not name the region and its token:\n%s", region, readme)
 			}
 			// The app's REST client calls the same region the number lives in.
-			app := artifactFile(t, artifact, "app.py")
+			app := artifactFile(t, artifact, agentSource)
 			want := `TWILIO_REGION: str | None = None`
 			if regional {
 				want = `TWILIO_EDGE: str | None = "` + target.TwilioRegionEdges[region] + `"`
 			}
 			if !strings.Contains(app, want) {
-				t.Errorf("region %q: app.py lacks %s", region, want)
+				t.Errorf("region %q: the app lacks %s", region, want)
 			}
 		})
 	}
@@ -122,7 +122,7 @@ func TestTwilioArtifactCarriesOnlyTheSelectedProvider(t *testing.T) {
 		{"twilio-gemini", "GOOGLE_API_KEY", "google-genai==", "openai", "OPENAI_API_KEY", "openai=="},
 	} {
 		artifact := twilioArtifact(t, relayDesk, tc.instance)
-		for _, path := range []string{"app.py", "pyproject.toml", ".env.example", "Dockerfile"} {
+		for _, path := range []string{agentSource, "pyproject.toml", ".env.example", "Dockerfile"} {
 			body := artifactFile(t, artifact, path)
 			if strings.Contains(body, tc.otherKey) || strings.Contains(body, tc.otherSDK) {
 				t.Errorf("%s %s names the unselected provider (%s or %s)", tc.instance, path, tc.otherKey, tc.otherSDK)
@@ -134,8 +134,8 @@ func TestTwilioArtifactCarriesOnlyTheSelectedProvider(t *testing.T) {
 		if !strings.Contains(artifactFile(t, artifact, ".env.example"), tc.key+"=") {
 			t.Errorf("%s .env.example does not ask for %s", tc.instance, tc.key)
 		}
-		if strings.Contains(artifactFile(t, artifact, "app.py"), "import "+tc.other) {
-			t.Errorf("%s app.py imports %s", tc.instance, tc.other)
+		if strings.Contains(artifactFile(t, artifact, agentSource), "import "+tc.other) {
+			t.Errorf("%s the app imports %s", tc.instance, tc.other)
 		}
 		var report struct {
 			RequiredEnv []string `json:"required_env"`
@@ -281,6 +281,16 @@ func TestTwilioContainer(t *testing.T) {
 			t.Errorf("Dockerfile lacks %q", want)
 		}
 	}
+	// A module left out builds an image that cannot import its own code. The
+	// logic build emits every kind of file: modules, prompt, tools and logic.
+	logic := twilioArtifact(t, relayDesk, "twilio-logic")
+	for _, file := range logic.Files {
+		if strings.HasSuffix(file.Path, ".py") || strings.HasPrefix(file.Path, "prompts/") || file.Path == TwilioRelayTemplate {
+			if !dockerCopies(artifactFile(t, logic, "Dockerfile"), file.Path) {
+				t.Errorf("Dockerfile does not copy %s", file.Path)
+			}
+		}
+	}
 	ignore := artifactFile(t, artifact, ".dockerignore")
 	for _, want := range []string{".env", ".venv/"} {
 		if !strings.Contains(ignore, want) {
@@ -298,7 +308,7 @@ func TestTwilioContainer(t *testing.T) {
 // headers, on every request. The upstream key joins the startup check.
 func TestTwilioRouterThink(t *testing.T) {
 	artifact := twilioArtifact(t, filepath.Join("..", "voice-agents-tests", "relay-desk"), "twilio-slng")
-	app := artifactFile(t, artifact, "app.py")
+	app := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		`ENV_MODEL_KEY = "SLNG_API_KEY"`,
 		`UPSTREAM_ENV: tuple[str, ...] = ("OPENAI_API_KEY", )`,
@@ -312,7 +322,7 @@ func TestTwilioRouterThink(t *testing.T) {
 		`MODEL_PARAMS: dict[str, Any] = json.loads("{}")`,
 	} {
 		if !strings.Contains(app, want) {
-			t.Errorf("app.py lacks %s", want)
+			t.Errorf("the app lacks %s", want)
 		}
 	}
 	// The provenance line, held to the contract the other router targets keep
@@ -320,7 +330,7 @@ func TestTwilioRouterThink(t *testing.T) {
 	if strings.Count(app, "def _slng_log_provenance(") != 1 || !strings.Contains(app, "async def _slng_log_provenance(") ||
 		!strings.Contains(app, `"slng router: "`) || !strings.Contains(app, "except Exception:") ||
 		!strings.Contains(app, `event_hooks={"response": [_slng_log_provenance]}`) {
-		t.Error("app.py lacks the router's provenance hook")
+		t.Error("the app lacks the router's provenance hook")
 	}
 	at := -1
 	for _, key := range slngProvenanceKeys {
@@ -340,7 +350,7 @@ func TestTwilioRouterThink(t *testing.T) {
 		t.Errorf("required_env = %v, want the router key and the upstream key", report.RequiredEnv)
 	}
 	// A direct binding carries none of it.
-	direct := artifactFile(t, twilioArtifact(t, filepath.Join("..", "voice-agents-tests", "relay-desk"), "twilio-openai"), "app.py")
+	direct := artifactFile(t, twilioArtifact(t, filepath.Join("..", "voice-agents-tests", "relay-desk"), "twilio-openai"), agentSource)
 	if strings.Contains(direct, "ROUTER_") || strings.Contains(direct, "extra_body") {
 		t.Error("a direct openai binding emits router code")
 	}
@@ -363,10 +373,10 @@ func TestTwilioLogicTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := artifactFile(t, artifact, "app.py")
+	app := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{"import logic", "self.brain = brain if resumed else LogicBrain(client)", "async for piece in logic.respond(self.session):"} {
 		if !strings.Contains(app, want) {
-			t.Errorf("app.py lacks %s", want)
+			t.Errorf("the app lacks %s", want)
 		}
 	}
 	var copied bool
@@ -393,7 +403,7 @@ func TestTwilioLogicTarget(t *testing.T) {
 	if changed.ArtifactID == artifact.ArtifactID {
 		t.Error("a change to the logic did not change artifact_id")
 	}
-	if strings.Contains(artifactFile(t, twilioArtifact(t, relayDesk, "twilio-openai"), "app.py"), "LogicBrain") {
+	if strings.Contains(artifactFile(t, twilioArtifact(t, relayDesk, "twilio-openai"), agentSource), "LogicBrain") {
 		t.Error("a target without logic emits the logic brain")
 	}
 }

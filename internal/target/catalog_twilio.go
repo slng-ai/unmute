@@ -3,7 +3,7 @@ package target
 // The twilio target's catalogue. Two kinds of row live here, and the field names
 // mean different things for each.
 //
-// The think rows are real SDK calls made by the emitted app.py: OpenAI Chat
+// The think rows are real SDK calls made by the emitted brain.py: OpenAI Chat
 // Completions or native Gemini generateContent. The Class is the SDK client.
 //
 // The listen and speak rows are not code the app runs. ConversationRelay does
