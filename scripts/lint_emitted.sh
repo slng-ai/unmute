@@ -13,6 +13,14 @@
 # own build/ folder, and with it the dev.log `unmute dev` writes there.
 set -eu
 
+# compile formats with the ruff on PATH and writes raw output without one, and
+# raw output is not laid out the way `ruff format --check` wants. The raw
+# output's lint is `make smoke`'s job; this checks what a user with ruff gets.
+if ! command -v ruff >/dev/null; then
+  echo "lint-emitted: ruff is not on PATH, so compile would not format; install the version internal/generate/pyproject.go pins" >&2
+  exit 1
+fi
+
 unmute=${UNMUTE:-bin/unmute}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

@@ -184,7 +184,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install uv==0.11.16
+      # compile formats emitted Python with whatever ruff is on PATH, so the
+      # job installs the one every generated pyproject.toml pins. A test in
+      # internal/generate/pyproject_test.go keeps the two versions equal.
+      - run: pip install uv==0.11.16 ruff==0.15.7
       - run: make lint-emitted
 
   # Known vulnerabilities, both in what we import and in the standard library we
