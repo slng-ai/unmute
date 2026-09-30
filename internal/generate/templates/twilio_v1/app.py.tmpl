@@ -11,6 +11,7 @@ the voice webhook with TwiML, holds the ConversationRelay WebSocket, thinks with
 """
 
 import asyncio
+import contextlib
 import copy
 import inspect
 import json
@@ -20,7 +21,7 @@ import re
 import threading
 import time
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
@@ -40,11 +41,13 @@ from google.genai import types
 {{- end}}
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, create_model
 from twilio.request_validator import RequestValidator
-{{range .LocalTools}}
-import tools.{{.Name}}
-{{- end}}
+{{- if or .Logic .LocalTools}}
+{{end}}
 {{- if .Logic}}
 import logic
+{{- end}}
+{{- range .LocalTools}}
+import tools.{{.Name}}
 {{- end}}
 
 log = logging.getLogger("relay")
@@ -101,6 +104,18 @@ MAX_FAILURES = 3  # failed model responses in a row before the call ends
 PARK_SECONDS = 600.0  # seconds a call's history waits for a step to hand the caller back
 NEXT_STEP_TIMEOUT = 10.0  # seconds an async next_twiml() may take; Twilio waits 15
 MAX_RESUME_NOTE = 500
+MAX_PARKED_PER_SLOT = 4  # parked call histories kept for each call slot
+DEFAULT_PORT = 8080  # used when PORT is not set
+# WebSocket close codes, RFC 6455.
+CLOSE_NORMAL = 1000
+CLOSE_UNSUPPORTED_DATA = 1003
+CLOSE_INVALID_PAYLOAD = 1007
+CLOSE_POLICY_VIOLATION = 1008
+# How much of a wire value a log line keeps.
+LOG_SID_CHARS = 34  # a call SID
+LOG_KIND_CHARS = 32  # an event kind or a reason
+LOG_WORD_CHARS = 16  # a status or a direction
+LOG_CODE_CHARS = 8  # a Twilio error code
 FAILURE_LINE = "Sorry, something went wrong on my side. Could you say that again?"
 
 HERE = Path(__file__).resolve().parent
@@ -124,7 +139,17 @@ _JSON_TYPES: dict[str, type] = {"string": str, "integer": int, "number": float, 
 
 
 def one_of(values: list[Any]) -> Any:
+    """Build a validator that accepts only the listed values.
+
+    Args:
+        values: The values a schema property allows.
+
+    Returns:
+        A Pydantic validator to put in an Annotated type.
+    """
+
     def check(value: Any) -> Any:
+        """Refuse a value that is not listed."""
         if value not in values:
             raise ValueError(f"must be one of {values}")
         return value
@@ -140,6 +165,14 @@ def schema_model(
     unmute refuses any other schema at compile time, so nothing else reaches
     here. Fields are aliased, so a property named like a BaseModel attribute
     still works.
+
+    Args:
+        name: The model class name.
+        schema: The JSON Schema object, or None for no model.
+        extra: Whether keys the schema does not declare are allowed or refused.
+
+    Returns:
+        The model, or None when there is no schema.
     """
     if schema is None:
         return None
@@ -158,6 +191,8 @@ def schema_model(
 
 @dataclass
 class Tool:
+    """One tool the model may call."""
+
     name: str
     declaration: dict[str, Any]
     args: type[BaseModel] | None
@@ -174,6 +209,11 @@ HANDLERS: dict[str, Any] = {
 
 
 def load_tools() -> dict[str, Tool]:
+    """Build every declared tool, keyed by name.
+
+    Returns:
+        The tools the model can call.
+    """
     loaded = {}
     for spec in TOOL_SPECS:
         parameters = spec["input"] or {"type": "object", "properties": {}}
@@ -195,6 +235,13 @@ TOOLS = load_tools()
 
 
 def settle(future: asyncio.Future, value: Any, error: BaseException | None) -> None:
+    """Finish a handler's future once, with its value or its error.
+
+    Args:
+        future: The future the turn waits on.
+        value: The handler's result.
+        error: What the handler raised, or None.
+    """
     if future.done():
         return
     if error is not None:
@@ -210,6 +257,13 @@ def start_handler(run: Any, kwargs: dict[str, Any]) -> asyncio.Future:
     so a hung one cannot block process exit or queue behind another call's.
     Neither is ever cancelled: a thread cannot be stopped, and cancelling a
     task mid-action could leave an action half done. Bound your own I/O.
+
+    Args:
+        run: The tool handler.
+        kwargs: The validated arguments.
+
+    Returns:
+        A future that settles with the handler's result or error.
     """
     if inspect.iscoroutinefunction(run):
         return asyncio.ensure_future(run(**kwargs))
@@ -217,14 +271,13 @@ def start_handler(run: Any, kwargs: dict[str, Any]) -> asyncio.Future:
     future = loop.create_future()
 
     def work() -> None:
+        """Run the handler and hand its outcome to the loop."""
         try:
             value, error = run(**kwargs), None
         except BaseException as caught:  # noqa: BLE001 - handed to the loop as the outcome
             value, error = None, caught
-        try:
+        with contextlib.suppress(RuntimeError):  # the loop closed while the handler ran: the process is exiting
             loop.call_soon_threadsafe(settle, future, value, error)
-        except RuntimeError:
-            pass  # the loop closed while the handler ran: the process is exiting
 
     threading.Thread(target=work, name="tool", daemon=True).start()
     return future
@@ -235,6 +288,8 @@ def start_handler(run: Any, kwargs: dict[str, Any]) -> asyncio.Future:
 
 @dataclass
 class ToolCall:
+    """One tool call the model asked for."""
+
     id: str
     name: str
     arguments: Any  # {{if .OpenAI}}a JSON string{{else}}a dict{{end}}
@@ -242,6 +297,8 @@ class ToolCall:
 
 @dataclass
 class Reply:
+    """What one model response held: tool calls and the text it produced."""
+
     calls: list[ToolCall]
     generated: str  # every text fragment the model produced, spoken or not
     raw: Any = None  # the provider's own parts, kept for the history
@@ -259,6 +316,7 @@ class Cycle:
 
     @property
     def text(self) -> str:
+        """The text handed to the socket so far."""
         return "".join(self.sent)
 
 {{if .OpenAI}}
@@ -268,6 +326,9 @@ def _slng_config() -> dict[str, Any]:
 
     Read on every request, so a missing credential fails at startup through
     build_app's check rather than here. No value is written into this file.
+
+    Returns:
+        The configuration sent in the request body.
     """
     return {{.Config}}
 
@@ -278,6 +339,9 @@ async def _slng_log_provenance(response: Any) -> None:
     The router states it only in response headers. httpx runs this hook before
     the body is read, so it reads headers only, and it never raises: a raising
     response hook would fail the request it only describes.
+
+    Args:
+        response: The httpx response, before its body is read.
     """
     try:
         scope = response.request.headers.get({{pyq .AgentHeader}})
@@ -298,8 +362,14 @@ async def _slng_log_provenance(response: Any) -> None:
 
 {{end}}
 def make_client() -> AsyncOpenAI:
-    # No SDK retries: a retry would spend the caller's silence. A failed
-    # response takes the failure path instead.
+    """Build the OpenAI client.
+
+    No SDK retries: a retry would spend the caller's silence. A failed
+    response takes the failure path instead.
+
+    Returns:
+        The async client every call shares.
+    """
     return AsyncOpenAI(
         api_key=os.environ[ENV_MODEL_KEY],
         {{- if .Router}}
@@ -318,19 +388,46 @@ class Brain:
     """
 
     def __init__(self, client: Any) -> None:
+        """Start an empty history.
+
+        Args:
+            client: The model client.
+        """
         self.client = client
         self.history: list[dict[str, Any]] = []
         self.tools = [{"type": "function", "function": tool.declaration} for tool in TOOLS.values()]
 
     def user(self, text: str) -> None:
+        """Add something the caller said.
+
+        Args:
+            text: The caller's words.
+        """
         self.history.append({"role": "user", "content": text})
 
     def assistant_text(self, text: str) -> dict[str, Any]:
+        """Add something the agent said.
+
+        Args:
+            text: The agent's words.
+
+        Returns:
+            The history entry, so a later interrupt can edit it.
+        """
         entry = {"role": "assistant", "content": text}
         self.history.append(entry)
         return entry
 
     async def stream(self, call: "Call", cycle: Cycle) -> Reply:
+        """Stream one model response, speaking its text as it arrives.
+
+        Args:
+            call: The call to speak on.
+            cycle: The speech cycle this response fills.
+
+        Returns:
+            The tool calls and the text the model produced.
+        """
         request: dict[str, Any] = {
             "model": MODEL,
             "messages": [{"role": "system", "content": INSTRUCTIONS}, *self.history],
@@ -368,6 +465,16 @@ class Brain:
         return Reply(calls=calls, generated="".join(generated))
 
     def commit(self, cycle: Cycle, reply: Reply, results: list[tuple[ToolCall, Any]]) -> Any:
+        """Record the assistant turn and its tool results.
+
+        Args:
+            cycle: The cycle that was spoken.
+            reply: What the model produced.
+            results: Each tool call with its result.
+
+        Returns:
+            The assistant entry, or None when there was nothing to keep.
+        """
         entry: dict[str, Any] = {"role": "assistant", "content": cycle.text or None}
         if reply.calls:
             entry["tool_calls"] = [
@@ -382,6 +489,12 @@ class Brain:
         return entry
 
     def set_text(self, entry: Any, text: str) -> None:
+        """Cut an entry's text down to what the caller heard.
+
+        Args:
+            entry: A history entry from assistant_text or commit.
+            text: The text to keep; empty drops it.
+        """
         if text:
             entry["content"] = text
         elif entry.get("tool_calls"):
@@ -390,12 +503,22 @@ class Brain:
             remove_entry(self.history, entry)
 
     def trim(self) -> None:
+        """Drop the oldest turns once the history is too long."""
         trim_history(self.history, lambda e: e["role"] == "user")
 
 
 def valid_json(arguments: Any) -> str:
-    # Replayed to the model as sent, unless it is not JSON at all: the tool
-    # result already says the arguments were refused.
+    """Return tool arguments as JSON the model will accept back.
+
+    Replayed to the model as sent, unless it is not JSON at all: the tool
+    result already says the arguments were refused.
+
+    Args:
+        arguments: The arguments string the model sent.
+
+    Returns:
+        The arguments unchanged, or "{}" when they are not JSON.
+    """
     try:
         json.loads(arguments)
     except (TypeError, ValueError):
@@ -403,6 +526,11 @@ def valid_json(arguments: Any) -> str:
     return arguments
 {{else}}
 def make_client() -> Any:
+    """Build the Gemini client.
+
+    Returns:
+        The client every call shares.
+    """
     key = os.environ[ENV_MODEL_KEY]
 {{- if .Vertex}}
     return _google_vertex_client(key, VERTEX_LOCATION)
@@ -422,6 +550,11 @@ class Brain:
     """
 
     def __init__(self, client: Any) -> None:
+        """Start an empty history.
+
+        Args:
+            client: The model client.
+        """
         self.client = client
         self.history: list[Any] = []
         declarations = [
@@ -440,14 +573,36 @@ class Brain:
         )
 
     def user(self, text: str) -> None:
+        """Add something the caller said.
+
+        Args:
+            text: The caller's words.
+        """
         self.history.append(types.Content(role="user", parts=[types.Part(text=text)]))
 
     def assistant_text(self, text: str) -> Any:
+        """Add something the agent said.
+
+        Args:
+            text: The agent's words.
+
+        Returns:
+            The history entry, so a later interrupt can edit it.
+        """
         entry = types.Content(role="model", parts=[types.Part(text=text)])
         self.history.append(entry)
         return entry
 
     async def stream(self, call: "Call", cycle: Cycle) -> Reply:
+        """Stream one model response, speaking its text as it arrives.
+
+        Args:
+            call: The call to speak on.
+            cycle: The speech cycle this response fills.
+
+        Returns:
+            The tool calls, the text and the raw parts the model produced.
+        """
         parts: list[Any] = []
         generated: list[str] = []
         stream = await self.client.aio.models.generate_content_stream(
@@ -468,6 +623,16 @@ class Brain:
         return Reply(calls=calls, generated="".join(generated), raw=merge_text_parts(parts))
 
     def commit(self, cycle: Cycle, reply: Reply, results: list[tuple[ToolCall, Any]]) -> Any:
+        """Record the model turn and its tool results.
+
+        Args:
+            cycle: The cycle that was spoken.
+            reply: What the model produced.
+            results: Each tool call with its result.
+
+        Returns:
+            The model entry, or None when there was nothing to keep.
+        """
         if not reply.raw and not cycle.text:
             return None
         seen: set[str] = set()
@@ -503,8 +668,15 @@ class Brain:
         return entry
 
     def set_text(self, entry: Any, text: str) -> None:
-        # ponytail: edits unsigned text parts only; text inside a signed part
-        # stays as generated, because editing it could invalidate the signature.
+        """Cut an entry's text down to what the caller heard.
+
+            Edits unsigned text parts only; text inside a signed part stays as
+            generated, because editing it could invalidate the signature.
+
+        Args:
+            entry: A history entry from assistant_text or commit.
+            text: The text to keep; empty drops it.
+        """
         plain = [p for p in entry.parts if p.text is not None and not p.thought and not p.thought_signature]
         if not plain:
             return
@@ -517,6 +689,7 @@ class Brain:
             remove_entry(self.history, entry)
 
     def trim(self) -> None:
+        """Drop the oldest turns once the history is too long."""
         trim_history(
             self.history,
             lambda e: e.role == "user" and any(p.text for p in e.parts or []),
@@ -524,7 +697,14 @@ class Brain:
 
 
 def merge_text_parts(parts: list[Any]) -> list[Any]:
-    """Join neighbouring unsigned text parts; keep every other part as it came."""
+    """Join neighbouring unsigned text parts; keep every other part as it came.
+
+    Args:
+        parts: The parts the model returned, in order.
+
+    Returns:
+        The parts with neighbouring plain text merged.
+    """
     merged: list[Any] = []
     for part in parts:
         plain = part.text is not None and not part.thought and not part.thought_signature
@@ -538,21 +718,31 @@ def merge_text_parts(parts: list[Any]) -> list[Any]:
 {{end}}
 
 def remove_entry(history: list[Any], entry: Any) -> None:
-    for index, item in enumerate(history):
-        if item is entry:
-            del history[index]
-            return
+    """Remove one entry by identity, since equal entries can repeat.
+
+    Args:
+        history: The history to edit in place.
+        entry: The entry to remove; nothing happens if it is not there.
+    """
+    index = next((i for i, item in enumerate(history) if item is entry), None)
+    if index is not None:
+        del history[index]
 
 
-def trim_history(history: list[Any], is_user_turn: Any) -> None:
-    """Drop the oldest turns, cutting only where a caller turn starts, so a
-    tool call is never separated from its result."""
+def trim_history(history: list[Any], is_user_turn: Callable[[Any], bool]) -> None:
+    """Drop the oldest turns, cutting only where a caller turn starts.
+
+    A tool call is never separated from its result.
+
+    Args:
+        history: The history to edit in place.
+        is_user_turn: Says whether an entry starts a caller turn.
+    """
     if len(history) <= MAX_HISTORY:
         return
-    for index in range(len(history) - MAX_HISTORY, len(history)):
-        if is_user_turn(history[index]):
-            del history[:index]
-            return
+    start = next((i for i in range(len(history) - MAX_HISTORY, len(history)) if is_user_turn(history[i])), None)
+    if start is not None:
+        del history[:start]
 
 
 {{- if .Logic}}
@@ -579,6 +769,12 @@ class Session:
     """
 
     def __init__(self, call: "Call", history: list[dict[str, Any]]) -> None:
+        """Bind the session to a call and its history.
+
+        Args:
+            call: The call this session belongs to.
+            history: The brain's history list, shared.
+        """
         self._history = history
         self.instructions = INSTRUCTIONS
         self.model = ModelSettings(
@@ -599,8 +795,13 @@ class Session:
 
     def bind(self, call: "Call") -> None:
         """Point this session at the call's current ConversationRelay session.
+
         A resumed call keeps this object, its history and its state, so a tool
-        that holds the session still ends the right one."""
+        that holds the session still ends the right one.
+
+        Args:
+            call: The call whose session is current.
+        """
         self._call = call
         setup = call.setup
         self.call: dict[str, Any] = {
@@ -617,23 +818,34 @@ class Session:
 
     @property
     def history(self) -> list[dict[str, str]]:
-        """What the caller said and heard, oldest first; the last entry is the
-        turn to answer. A reply the caller interrupted holds only what they
-        heard. A copy, so changing it changes nothing here."""
+        """What the caller said and heard, oldest first.
+
+        The last entry is the turn to answer. A reply the caller interrupted
+        holds only what they heard. A copy, so changing it changes nothing here.
+        """
         return [{"role": e["role"], "content": e["content"]} for e in self._history if e["content"]]
 
     def end(self, reason: str = "end_call", **data: Any) -> None:
-        """End the session once this reply has been sent. Twilio then asks
-        /connect-action what comes next, with reason as handoffData's
-        reasonCode and data beside it: that is what next_twiml() reads."""
+        """End the session once this reply has been sent.
+
+        Twilio then asks /connect-action what comes next, with reason as
+        handoffData's reasonCode and data beside it: that is what next_twiml()
+        reads.
+
+        Args:
+            reason: The handoffData reasonCode.
+            **data: Extra handoffData for next_twiml().
+        """
         self._call.ending = True
         self._call.end_reason, self._call.end_data = str(reason), data
-        self._call.event("logic_end", reason=str(reason)[:32])
+        self._call.event("logic_end", reason=str(reason)[:LOG_KIND_CHARS])
 
     @property
     def twilio(self) -> Any:
-        """A Twilio REST client on this app's account, for any Twilio API
-        during the call. It is synchronous: call it through asyncio.to_thread."""
+        """A Twilio REST client on this app's account, for any Twilio API during the call.
+
+        It is synchronous: call it through asyncio.to_thread.
+        """
         return twilio_client()
 
 
@@ -646,18 +858,48 @@ class LogicBrain:
     """
 
     def __init__(self, client: Any) -> None:
+        """Start an empty history.
+
+        Args:
+            client: Unused; respond() brings its own client.
+        """
         self.history: list[dict[str, Any]] = []
         self.session: Session | None = None
 
     def user(self, text: str) -> None:
+        """Add something the caller said.
+
+        Args:
+            text: The caller's words.
+        """
         self.history.append({"role": "user", "content": text})
 
     def assistant_text(self, text: str) -> dict[str, Any]:
+        """Add something the agent said.
+
+        Args:
+            text: The agent's words.
+
+        Returns:
+            The history entry, so a later interrupt can edit it.
+        """
         entry = {"role": "assistant", "content": text}
         self.history.append(entry)
         return entry
 
     async def stream(self, call: "Call", cycle: Cycle) -> Reply:
+        """Run logic.respond() and speak what it yields.
+
+        Args:
+            call: The call to speak on.
+            cycle: The speech cycle this reply fills.
+
+        Returns:
+            The text the logic produced; never a tool call.
+
+        Raises:
+            TypeError: If respond() yields something other than a str.
+        """
         if self.session is None:
             self.session = Session(call, self.history)
         elif self.session._call is not call:
@@ -672,12 +914,29 @@ class LogicBrain:
         return Reply(calls=[], generated="".join(generated))
 
     def commit(self, cycle: Cycle, reply: Reply, results: list[tuple[ToolCall, Any]]) -> Any:
+        """Record what was said this cycle.
+
+        Args:
+            cycle: The cycle that was spoken.
+            reply: Unused; a reply here has no tool calls.
+            results: Unused, always empty.
+
+        Returns:
+            The assistant entry.
+        """
         return self.assistant_text(cycle.text)
 
     def set_text(self, entry: dict[str, Any], text: str) -> None:
+        """Cut an entry's text down to what the caller heard.
+
+        Args:
+            entry: A history entry from assistant_text.
+            text: The text to keep.
+        """
         entry["content"] = text
 
     def trim(self) -> None:
+        """Drop the oldest turns once the history is too long."""
         trim_history(self.history, lambda e: e["role"] == "user")
 
 
@@ -699,6 +958,16 @@ class Call:
     def __init__(
         self, ws: WebSocket, setup: dict[str, Any], client: Any, slots: "Slots", parked: "Parked", brain: Any = None
     ) -> None:
+        """Start a call from its setup message.
+
+        Args:
+            ws: The ConversationRelay WebSocket.
+            setup: The setup message.
+            client: The model client.
+            slots: The call admission counter.
+            parked: Histories of calls whose session ended.
+            brain: A parked history to carry on, or None for a new call.
+        """
         self.ws = ws
         self.call_sid = setup["callSid"]
         self.session_id = setup["sessionId"]
@@ -734,12 +1003,26 @@ class Call:
             self.spoken = greeting
 
     def event(self, name: str, **fields: Any) -> None:
+        """Log one call event with its call and session IDs.
+
+        Args:
+            name: The event name.
+            **fields: Extra key=value pairs for the line.
+        """
         details = " ".join(f"{key}={value}" for key, value in fields.items())
         log.info("event=%s call=%s session=%s %s", name, self.call_sid, self.session_id, details)
 
     # --- sending ---------------------------------------------------------------
 
     async def send_token(self, cycle: Cycle, token: str, last: bool, force: bool = False) -> None:
+        """Send one text token, unless its generation is stale.
+
+        Args:
+            cycle: The cycle the token belongs to.
+            token: The text to speak.
+            last: Whether this token closes the utterance.
+            force: Send even when a newer generation has started.
+        """
         async with self.send_lock:
             if self.closed or (cycle.generation != self.generation and not force):
                 return
@@ -755,6 +1038,12 @@ class Call:
                 self.closed = True
 
     async def speak(self, cycle: Cycle, fragment: str) -> None:
+        """Queue a fragment, sending the one held before it.
+
+        Args:
+            cycle: The cycle being spoken.
+            fragment: The new text; empty is ignored.
+        """
         if not fragment:
             return
         previous, cycle.held = cycle.held, fragment
@@ -762,13 +1051,22 @@ class Call:
             await self.send_token(cycle, previous, last=False)
 
     async def finish(self, cycle: Cycle) -> None:
-        """Send the held fragment with last=true, closing the cycle."""
+        """Send the held fragment with last=true, closing the cycle.
+
+        Args:
+            cycle: The cycle to close.
+        """
         fragment, cycle.held = cycle.held, None
         if fragment is not None:
             await self.send_token(cycle, fragment, last=True)
         cycle.done = True
 
     async def say_fixed(self, text: str) -> None:
+        """Speak a fixed line as its own cycle.
+
+        Args:
+            text: The line to say.
+        """
         cycle = Cycle(generation=self.generation)
         self.cycle = cycle
         await self.speak(cycle, text)
@@ -777,8 +1075,14 @@ class Call:
             cycle.entry = self.brain.assistant_text(cycle.text)
 
     def resume(self, greeting: str) -> None:
-        """Carry on a parked conversation. ConversationRelay speaks the
-        greeting itself, so it enters the history as said, like the first one."""
+        """Carry on a parked conversation.
+
+        ConversationRelay speaks the greeting itself, so it enters the history
+        as said, like the first one.
+
+        Args:
+            greeting: The line spoken as the caller comes back; may be empty.
+        """
         self.event("resumed")
         if greeting:
             cycle = Cycle(generation=0, sent=[greeting], done=True)
@@ -789,7 +1093,12 @@ class Call:
         """Hand the call back to Twilio, which then requests /connect-action.
 
         The history is parked first, so it is there before Twilio can ask
-        what comes next, in case that step hands the caller back."""
+        what comes next, in case that step hands the caller back.
+
+        Args:
+            reason: The handoffData reasonCode.
+            **data: Extra handoffData for next_twiml().
+        """
         if self.closed:
             return
         self.event("end", reason=reason)
@@ -797,10 +1106,8 @@ class Call:
         handoff = json.dumps({**data, "reasonCode": reason}, default=str)
         async with self.send_lock:
             self.closed = True
-            try:
+            with contextlib.suppress(WebSocketDisconnect, ConnectionError, RuntimeError):
                 await self.ws.send_json({"type": "end", "handoffData": handoff})
-            except (WebSocketDisconnect, ConnectionError, RuntimeError):
-                pass
         # Twilio closes the socket once it has taken the end message. Closing
         # it here first can reach Twilio before the end does, and the session
         # then fails as 64105 "WebSocket ended" instead of ending. The reader
@@ -809,12 +1116,18 @@ class Call:
         self.closer = asyncio.ensure_future(self.close_after(END_GRACE))
 
     async def close_after(self, seconds: float) -> None:
+        """Close the socket after a wait, for a peer that never closes it.
+
+        Args:
+            seconds: How long to wait.
+        """
         await asyncio.sleep(seconds)
         await close_quietly(self.ws)
 
     # --- the reader --------------------------------------------------------------
 
     async def read(self) -> None:
+        """Take messages off the socket until it closes, never waiting on the model."""
         while True:
             message = await receive(self.ws)
             if message is None:
@@ -825,7 +1138,7 @@ class Call:
             text = message.get("text")
             if text is None:
                 self.event("protocol_error", detail="non_text_frame")
-                await close_quietly(self.ws, 1003)
+                await close_quietly(self.ws, CLOSE_UNSUPPORTED_DATA)
                 return
             try:
                 event = json.loads(text)
@@ -833,7 +1146,7 @@ class Call:
                 event = None
             if not isinstance(event, dict):
                 self.event("protocol_error", detail="malformed_json")
-                await close_quietly(self.ws, 1007)
+                await close_quietly(self.ws, CLOSE_INVALID_PAYLOAD)
                 return
             kind = event.get("type")
             if kind == "prompt":
@@ -857,13 +1170,19 @@ class Call:
                 # dtmf is disabled in the TwiML, a second setup is a protocol
                 # error, and anything else is not ours to act on.
                 self.unexpected += 1
-                self.event("unexpected_event", kind=str(kind)[:32])
+                self.event("unexpected_event", kind=str(kind)[:LOG_KIND_CHARS])
                 if kind == "setup" or self.unexpected >= MAX_UNEXPECTED:
                     await self.end("protocol_error")
 
     async def on_prompt(self, text: str) -> None:
-        # Each final prompt is its own turn, kept as said: two identical
-        # sentences are two things the caller said.
+        """Queue a final caller prompt and stop what is being said.
+
+        Each final prompt is its own turn, kept as said: two identical
+        sentences are two things the caller said.
+
+        Args:
+            text: What the caller said.
+        """
         self.pending.append(text)
         cycle = self.cycle
         self.generation += 1
@@ -876,6 +1195,11 @@ class Call:
         self.wake.set()
 
     def on_interrupt(self, heard: str) -> None:
+        """Stop what is being said and note how much the caller heard.
+
+        Args:
+            heard: The utterance up to the interruption; may be empty.
+        """
         self.generation += 1
         self.cancel_stream()
         if self.cycle is not None:
@@ -884,13 +1208,14 @@ class Call:
         self.wake.set()
 
     def cancel_stream(self) -> None:
-        # Only the model stream is cancellable. A running tool is not touched.
+        """Cancel the model stream. A running tool is not touched."""
         if self.stream_task is not None and not self.stream_task.done():
             self.stream_task.cancel()
 
     # --- the owner ---------------------------------------------------------------
 
     async def run(self) -> None:
+        """Own the call: wait for work, then answer it, until the call closes."""
         try:
             while not self.closed:
                 await self.wake.wait()
@@ -903,6 +1228,7 @@ class Call:
             await self.end("internal_error")
 
     def take_pending(self) -> None:
+        """Move the queued caller turns into the history."""
         for text in self.pending:
             self.brain.user(text)
         self.pending.clear()
@@ -932,6 +1258,7 @@ class Call:
             self.event("interrupted", kept_chars=len(kept), sent_chars=len(cycle.text))
 
     async def respond(self) -> None:
+        """Answer the queued caller turns, running tool rounds until the model is done."""
         self.take_pending()
         rounds = 0
         while not self.closed:
@@ -985,10 +1312,24 @@ class Call:
             # during the tool does not silence the answer that uses its result.
 
     async def stream(self, cycle: Cycle) -> Reply:
+        """Run one model response under the model timeout.
+
+        Args:
+            cycle: The speech cycle to fill.
+
+        Returns:
+            What the model produced.
+        """
         async with asyncio.timeout(MODEL_TIMEOUT):
             return await self.brain.stream(self, cycle)
 
     async def fail(self, cycle: Cycle, reason: str) -> None:
+        """Handle a failed model response: apologise, or end after too many.
+
+        Args:
+            cycle: The cycle that failed.
+            reason: A short name for the failure, for the log.
+        """
         self.failures += 1
         self.event("model_failed", reason=reason, count=self.failures)
         # Whatever was already said stays said.
@@ -1003,6 +1344,14 @@ class Call:
     # --- tools -------------------------------------------------------------------
 
     async def run_tools(self, calls: list[ToolCall]) -> list[tuple[ToolCall, Any]]:
+        """Run each tool call once, in order.
+
+        Args:
+            calls: The calls the model asked for.
+
+        Returns:
+            Each call that ran with its result; a duplicated call ID is dropped.
+        """
         results = []
         seen = set()
         for tool_call in calls:
@@ -1014,6 +1363,14 @@ class Call:
         return results
 
     async def run_tool(self, tool_call: ToolCall) -> Any:
+        """Validate and run one tool call.
+
+        Args:
+            tool_call: The call to run.
+
+        Returns:
+            The tool's result, or an error object the model can read.
+        """
         tool = TOOLS.get(tool_call.name)
         if tool is None:
             self.event("tool_unknown")
@@ -1060,6 +1417,12 @@ class Call:
         return result
 
     def tool_settled(self, name: str, future: asyncio.Future) -> None:
+        """Note that a handler finished, and free a slot it was holding.
+
+        Args:
+            name: The tool's name.
+            future: The handler's finished future.
+        """
         if not future.cancelled() and future.exception() is not None:
             future.exception()  # retrieved, so asyncio does not log it as lost
         if self.holding:
@@ -1071,7 +1434,7 @@ class Call:
     # --- ending ------------------------------------------------------------------
 
     def close(self) -> None:
-        """The socket is gone. Give the slot back once no handler is running."""
+        """Note the socket is gone; give the slot back once no handler is running."""
         self.closed = True
         self.cancel_stream()
         if self.closer is not None:
@@ -1084,13 +1447,21 @@ class Call:
         self.release()
 
     def release(self) -> None:
+        """Give the call's slot back, once."""
         if not self.released:
             self.released = True
             self.slots.give_back()
 
 
 async def receive(ws: WebSocket) -> Mapping[str, Any] | None:
-    """The next frame, or None once the peer has closed the socket."""
+    """Read the next frame.
+
+    Args:
+        ws: The WebSocket to read.
+
+    Returns:
+        The frame, or None once the peer has closed the socket.
+    """
     try:
         message = await ws.receive()
     except (WebSocketDisconnect, RuntimeError):
@@ -1098,33 +1469,46 @@ async def receive(ws: WebSocket) -> Mapping[str, Any] | None:
     return None if message["type"] == "websocket.disconnect" else message
 
 
-async def close_quietly(ws: WebSocket, code: int = 1000) -> None:
-    """Close the socket, unless it is already closed on either side."""
-    try:
+async def close_quietly(ws: WebSocket, code: int = CLOSE_NORMAL) -> None:
+    """Close the socket, unless it is already closed on either side.
+
+    Args:
+        ws: The WebSocket to close.
+        code: The close code to send.
+    """
+    with contextlib.suppress(WebSocketDisconnect, ConnectionError, RuntimeError):
         await ws.close(code=code)
-    except (WebSocketDisconnect, ConnectionError, RuntimeError):
-        pass
 
 
 async def drain(ws: WebSocket) -> None:
-    """Read and drop messages until the peer closes the socket."""
+    """Read and drop messages until the peer closes the socket.
+
+    Args:
+        ws: The WebSocket to drain.
+    """
     while await receive(ws) is not None:
         pass
 
 
 def heard_prefix(sent: str, heard: str) -> str:
-    """The part of `sent` the caller heard, or "" when that is not clear."""
+    """Find the part of a sent reply the caller heard.
+
+    Args:
+        sent: Everything that was sent to the socket.
+        heard: What ConversationRelay says was played before the interrupt.
+
+    Returns:
+        The part of `sent` the caller heard, or "" when that is not clear.
+    """
 
     def norm(text: str) -> str:
+        """Fold case and whitespace so two spellings of a line compare equal."""
         return " ".join(text.split()).lower()
 
     target = norm(heard)
     if not target or not norm(sent).startswith(target):
         return ""
-    for end in range(len(sent) + 1):
-        if len(norm(sent[:end])) >= len(target):
-            return sent[:end]
-    return sent
+    return next((sent[:end] for end in range(len(sent) + 1) if len(norm(sent[:end])) >= len(target)), sent)
 
 
 # --- the web app ---------------------------------------------------------------
@@ -1134,6 +1518,11 @@ class Slots:
     """Bounded call admission. One process, so a counter is the whole story."""
 
     def __init__(self, limit: int) -> None:
+        """Start with every slot free.
+
+        Args:
+            limit: How many calls may be held at once.
+        """
         self.limit = limit
         self.taken = 0
         self.orphaned = 0  # held by calls that ended while a handler still runs
@@ -1142,9 +1531,15 @@ class Slots:
         self.idle.set()
 
     def has_room(self) -> bool:
+        """Say whether a call could be admitted now."""
         return not self.draining and self.taken < self.limit
 
     def take(self) -> bool:
+        """Take a slot.
+
+        Returns:
+            True if one was free.
+        """
         if not self.has_room():
             return False
         self.taken += 1
@@ -1152,6 +1547,7 @@ class Slots:
         return True
 
     def give_back(self) -> None:
+        """Return a slot, and note when none are held."""
         self.taken -= 1
         if self.taken == 0:
             self.idle.set()
@@ -1165,40 +1561,64 @@ class Slots:
 
 
 class Parked:
-    """The history of each call whose session ended, kept for a step that may
-    hand the caller back.
+    """The history of each call whose session ended.
+
+    Kept for a step that may hand the caller back.
 
     ponytail: in this process only, so the resumed session must reach the
     same process. Several instances need sticky routing or a shared store.
     """
 
     def __init__(self) -> None:
+        """Start with nothing parked."""
         self.brains: dict[str, tuple[float, Any]] = {}
 
     def put(self, call_sid: str, brain: Any) -> None:
+        """Park a call's history, dropping the oldest when too many wait.
+
+        Args:
+            call_sid: The call's SID.
+            brain: The history to keep.
+        """
         self.expire()
         self.brains.pop(call_sid, None)
         self.brains[call_sid] = (time.monotonic() + PARK_SECONDS, brain)
-        while len(self.brains) > MAX_SESSIONS * 4:
+        while len(self.brains) > MAX_SESSIONS * MAX_PARKED_PER_SLOT:
             del self.brains[next(iter(self.brains))]  # the oldest goes first
 
     def take(self, call_sid: str) -> Any:
+        """Take a call's parked history out.
+
+        Args:
+            call_sid: The call's SID.
+
+        Returns:
+            The history, or None if it expired or was never parked.
+        """
         self.expire()
         entry = self.brains.pop(call_sid, None)
         return entry[1] if entry else None
 
     def drop(self, call_sid: str) -> None:
+        """Forget a call's parked history.
+
+        Args:
+            call_sid: The call's SID.
+        """
         self.brains.pop(call_sid, None)
 
     def expire(self) -> None:
+        """Forget every history parked longer than PARK_SECONDS."""
         now = time.monotonic()
         for call_sid in [sid for sid, (until, _) in self.brains.items() if until < now]:
             del self.brains[call_sid]
 
 
 class Resume(str):
-    """TwiML that connects the caller to the agent again. The app keeps the
-    call's history for it; any other answer lets the history go."""
+    """TwiML that connects the caller to the agent again.
+
+    The app keeps the call's history for it; any other answer lets the history go.
+    """
 
 
 @dataclass
@@ -1213,13 +1633,20 @@ class Handoff:
 
     @property
     def twilio(self) -> Any:
-        """A Twilio REST client on this app's account. It is synchronous:
-        call it through asyncio.to_thread."""
+        """A Twilio REST client on this app's account.
+
+        It is synchronous: call it through asyncio.to_thread.
+        """
         return twilio_client()
 
 
 @cache
 def twilio_client() -> Any:
+    """Build the Twilio REST client once.
+
+    Returns:
+        A client on this app's account and region.
+    """
     from twilio.rest import Client
 
     return Client(
@@ -1228,7 +1655,14 @@ def twilio_client() -> Any:
 
 
 def parse_handoff(raw: Any) -> tuple[str, dict[str, Any]]:
-    """handoffData is a string the app itself wrote. Anything else is none."""
+    """Read handoffData, a string the app itself wrote. Anything else is none.
+
+    Args:
+        raw: The HandoffData form field.
+
+    Returns:
+        The reasonCode and the rest of the data.
+    """
     try:
         data = json.loads(raw) if isinstance(raw, str) else None
     except ValueError:
@@ -1245,8 +1679,16 @@ NEXT_STEPS: dict[str, Callable[[Handoff], str]] = {}
 
 
 async def next_step(handoff: Handoff) -> str:
-    """The TwiML for what the call does after the session: the package's own
-    logic first, then a built-in step, then hang up."""
+    """Pick the TwiML for what the call does after the session.
+
+    The package's own logic first, then a built-in step, then hang up.
+
+    Args:
+        handoff: What the ended session handed over.
+
+    Returns:
+        The TwiML to answer /connect-action with.
+    """
 {{- if .Logic}}
     hook = getattr(logic, "next_twiml", None)
     if hook is not None:
@@ -1267,8 +1709,20 @@ async def next_step(handoff: Handoff) -> str:
 
 
 def public_origin(value: str) -> tuple[str, str]:
-    """Read the public URL as an https origin. Everything signed is built from
-    it, never from request headers, because a proxy can rewrite those."""
+    """Read the public URL as an https origin.
+
+    Everything signed is built from it, never from request headers, because
+    a proxy can rewrite those.
+
+    Args:
+        value: The public URL from the environment.
+
+    Returns:
+        The origin and its host.
+
+    Raises:
+        SystemExit: If the URL is not a bare https origin.
+    """
     parts = urlsplit(value.strip())
     if (
         parts.scheme != "https"
@@ -1287,6 +1741,18 @@ def public_origin(value: str) -> tuple[str, str]:
 
 
 def relay_document(origin: str, host: str) -> ET.Element:
+    """Load the TwiML template and point it at this app.
+
+    Args:
+        origin: The public https origin.
+        host: The public host, for the wss URL.
+
+    Returns:
+        The TwiML document.
+
+    Raises:
+        SystemExit: If the template is malformed or a placeholder survives.
+    """
     root = ET.parse(HERE / "conversation-relay.xml.tmpl").getroot()
     connect = root.find("Connect")
     relay = connect.find("ConversationRelay") if connect is not None else None
@@ -1301,21 +1767,39 @@ def relay_document(origin: str, host: str) -> ET.Element:
 
 
 def to_twiml(root: ET.Element) -> str:
+    """Serialize a TwiML document.
+
+    Args:
+        root: The document's root element.
+
+    Returns:
+        The TwiML text with its XML declaration.
+    """
     return '<?xml version="1.0" encoding="UTF-8"?>' + ET.tostring(root, encoding="unicode")
 
 
 def resume_twiml(root: ET.Element, note: str, before: str = "", greeting: str = "") -> Resume:
-    """The same Connect, telling the new session to carry on the parked
-    conversation. before is TwiML verbs Twilio runs first, for example
-    <Say>One moment.</Say>. greeting is the line ConversationRelay speaks as
-    the caller comes back; without one, the agent waits for the caller.
+    """Build the same Connect, telling the new session to carry on the parked conversation.
 
     The model is not asked to speak here, and no turn is made up for it: a
     turn the caller never said was where it stopped following its
-    instructions. The note reaches the new session as customParameters.resume."""
+    instructions. The note reaches the new session as customParameters.resume.
+
+    Args:
+        root: The TwiML document from relay_document.
+        note: Why the caller is coming back, for the new session.
+        before: TwiML verbs Twilio runs first, for example <Say>One moment.</Say>.
+        greeting: The line ConversationRelay speaks as the caller comes back;
+            without one, the agent waits for the caller.
+
+    Returns:
+        The TwiML that reconnects the caller.
+
+    Raises:
+        RuntimeError: If the document has no ConversationRelay element.
+    """
     root = copy.deepcopy(root)
-    for index, verb in enumerate(ET.fromstring(f"<Response>{before}</Response>")):
-        root.insert(index, verb)
+    root[:0] = ET.fromstring(f"<Response>{before}</Response>")
     relay = root.find("Connect/ConversationRelay")
     if relay is None:  # relay_document checked it; this satisfies the type checker
         raise RuntimeError("the TwiML lost its ConversationRelay")
@@ -1328,17 +1812,45 @@ def resume_twiml(root: ET.Element, note: str, before: str = "", greeting: str = 
 
 
 def xml_response(body: str) -> Response:
+    """Wrap TwiML in an XML response.
+
+    Args:
+        body: The TwiML text.
+
+    Returns:
+        The HTTP response.
+    """
     return Response(content=body, media_type="text/xml")
 
 
 def raw_target(scope: Mapping[str, Any]) -> tuple[str, str]:
-    """The path and query exactly as the client sent them, which is what
-    Twilio signed. The decoded path Starlette builds URLs from is not."""
+    """Read the path and query exactly as the client sent them.
+
+    That is what Twilio signed. The decoded path Starlette builds URLs from
+    is not.
+
+    Args:
+        scope: The ASGI scope.
+
+    Returns:
+        The raw path and the raw query string.
+    """
     path = scope.get("raw_path") or scope["path"].encode()
     return path.decode("latin-1"), scope.get("query_string", b"").decode("latin-1")
 
 
 def build_app(client: Any = None) -> FastAPI:
+    """Build the web app: the voice webhook, the WebSocket and the health check.
+
+    Args:
+        client: A model client to use instead of make_client(), for tests.
+
+    Returns:
+        The FastAPI app, with its drain function on app.state.drain_calls.
+
+    Raises:
+        SystemExit: If the environment or the TwiML is not usable.
+    """
     required = (ENV_ACCOUNT_SID, ENV_AUTH_TOKEN, ENV_PUBLIC_URL, ENV_MODEL_KEY, *UPSTREAM_ENV)
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
@@ -1355,27 +1867,33 @@ def build_app(client: Any = None) -> FastAPI:
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
 
     def signed(headers: Any, urls: list[str], params: Any) -> bool:
+        """Check Twilio's signature against every URL it may have signed."""
         signature = headers.get("X-Twilio-Signature", "")
         return bool(signature) and any(validator.validate(url, params, signature) for url in urls)
 
     def signed_url(request: Request) -> str:
-        # https://www.twilio.com/docs/usage/security: the exact URL Twilio
-        # requested, query included, built on the public origin, never on
-        # request headers a proxy can rewrite.
+        """Build the exact URL Twilio requested, query included.
+
+        https://www.twilio.com/docs/usage/security. Built on the public origin,
+        never on request headers a proxy can rewrite.
+        """
         path, query = raw_target(request.scope)
         return origin + path + ("?" + query if query else "")
 
     @app.get("/healthz")
     async def healthz() -> JSONResponse:
-        # 503 while draining, or when every slot is held by a handler that
-        # outlived its call: the process can take no call either way. A 200
-        # does not promise a free slot: /voice may still answer <Hangup/>.
+        """Answer 503 while draining, or when handlers hold every slot.
+
+        The process can take no call either way. A 200 does not promise a free
+        slot: /voice may still answer <Hangup/>.
+        """
         if slots.draining or slots.orphaned >= slots.limit:
             return JSONResponse({"ok": False, "artifact_id": ARTIFACT_ID}, status_code=503)
         return JSONResponse({"ok": True, "artifact_id": ARTIFACT_ID})
 
     @app.post("/voice")
     async def voice(request: Request) -> Response:
+        """Answer the voice webhook with the ConversationRelay TwiML."""
         form = await request.form()
         if not signed(request.headers, [signed_url(request)], form):
             log.warning("event=signature_rejected route=/voice")
@@ -1390,8 +1908,11 @@ def build_app(client: Any = None) -> FastAPI:
 
     @app.post("/connect-action")
     async def connect_action(request: Request) -> Response:
-        # https://www.twilio.com/docs/voice/twiml/connect: Twilio asks here what
-        # to do once the session ends, with the session's HandoffData.
+        """Say what the call does once the session ends.
+
+        https://www.twilio.com/docs/voice/twiml/connect. Twilio asks here, with
+        the session's HandoffData.
+        """
         form = await request.form()
         if not signed(request.headers, [signed_url(request)], form):
             log.warning("event=signature_rejected route=/connect-action")
@@ -1400,9 +1921,9 @@ def build_app(client: Any = None) -> FastAPI:
             return Response(status_code=403)
         log.info(
             "event=session_ended call=%s status=%s error=%s",
-            str(form.get("CallSid", ""))[:34],
-            str(form.get("SessionStatus", ""))[:16],
-            str(form.get("ErrorCode", ""))[:8],
+            str(form.get("CallSid", ""))[:LOG_SID_CHARS],
+            str(form.get("SessionStatus", ""))[:LOG_WORD_CHARS],
+            str(form.get("ErrorCode", ""))[:LOG_CODE_CHARS],
         )
         reason, data = parse_handoff(form.get("HandoffData"))
         call_sid = str(form.get("CallSid", ""))
@@ -1425,15 +1946,18 @@ def build_app(client: Any = None) -> FastAPI:
 
     @app.websocket("/conversation")
     async def conversation(ws: WebSocket) -> None:
-        # The handshake is signed over the wss URL with no form fields. Twilio
-        # documents one variant: a trailing slash on the path.
+        """Hold one ConversationRelay session.
+
+        The handshake is signed over the wss URL with no form fields. Twilio
+        documents one variant: a trailing slash on the path.
+        """
         path, query = raw_target(ws.scope)
         suffix = "?" + query if query else ""
         urls = [f"wss://{host}{path}{suffix}", f"wss://{host}{path}/{suffix}"]
         if not signed(ws.headers, urls, {}):
             log.warning("event=signature_rejected route=/conversation")
             # Closing before accept answers the handshake with HTTP 403.
-            await ws.close(code=1008)
+            await ws.close(code=CLOSE_POLICY_VIOLATION)
             return
         await ws.accept()
         try:
@@ -1450,7 +1974,7 @@ def build_app(client: Any = None) -> FastAPI:
             or not SESSION_ID.fullmatch(str(setup.get("sessionId", "")))
         ):
             log.warning("event=setup_rejected")
-            await close_quietly(ws, 1008)
+            await close_quietly(ws, CLOSE_POLICY_VIOLATION)
             return
         # Call state starts here, after the setup message proved the account.
         if not slots.take():
@@ -1460,10 +1984,8 @@ def build_app(client: Any = None) -> FastAPI:
             except (WebSocketDisconnect, ConnectionError, RuntimeError):
                 return
             # As in Call.end: wait for Twilio to close, or the refusal fails as 64105.
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(drain(ws), END_GRACE)
-            except TimeoutError:
-                pass
             await close_quietly(ws)
             return
         custom = setup.get("customParameters")
@@ -1471,7 +1993,7 @@ def build_app(client: Any = None) -> FastAPI:
         brain = parked.take(setup["callSid"]) if note is not None else None
         call = Call(ws, setup, model_client, slots, parked, brain=brain)
         calls.add(call)
-        call.event("call_started", direction=str(setup.get("direction", ""))[:16])
+        call.event("call_started", direction=str(setup.get("direction", ""))[:LOG_WORD_CHARS])
         if note is not None and brain is None:
             # Nothing parked: it expired, or another process held the call.
             call.event("resume_missed")
@@ -1491,19 +2013,17 @@ def build_app(client: Any = None) -> FastAPI:
         await asyncio.gather(owner, return_exceptions=True)
 
     async def drain_calls() -> None:
-        # Stop taking calls, give the current ones a bounded time, then end
-        # whatever is left and let Twilio close those sockets.
+        """Stop taking calls, give the current ones a bounded time, then end the rest.
+
+        Twilio closes the sockets of the calls that are ended.
+        """
         slots.draining = True
-        try:
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(slots.idle.wait(), DRAIN_TIMEOUT)
-        except TimeoutError:
-            pass
         for call in list(calls):
             await call.end("shutdown")
-        try:
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(slots.idle.wait(), END_GRACE)
-        except TimeoutError:
-            pass
 
     app.state.drain_calls = drain_calls
     return app
@@ -1518,16 +2038,37 @@ class RelayServer(uvicorn.Server):
     /healthz answering 503 and /voice answering <Hangup/> while calls end.
     """
 
-    def __init__(self, config: uvicorn.Config, drain: Any) -> None:
+    def __init__(self, config: uvicorn.Config, drain: Callable[[], Awaitable[None]]) -> None:
+        """Wrap a uvicorn config with the drain to run first.
+
+        Args:
+            config: The uvicorn configuration.
+            drain: Ends the open calls; runs before uvicorn closes anything.
+        """
         super().__init__(config)
         self.drain = drain
 
     async def shutdown(self, sockets: Any = None) -> None:
+        """Drain the calls, then shut uvicorn down.
+
+        Args:
+            sockets: The listening sockets, as uvicorn passes them.
+        """
         await self.drain()
         await super().shutdown(sockets=sockets)
 
 
 def server_config(app: FastAPI, host: str, port: int) -> uvicorn.Config:
+    """Build the uvicorn configuration.
+
+    Args:
+        app: The FastAPI app.
+        host: The address to bind.
+        port: The port to bind.
+
+    Returns:
+        The configuration.
+    """
     return uvicorn.Config(
         app,
         host=host,
@@ -1542,9 +2083,10 @@ def server_config(app: FastAPI, host: str, port: int) -> uvicorn.Config:
 
 
 def main() -> None:
+    """Run the app until it is stopped."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     app = build_app()
-    port = int(os.environ.get("PORT", "8080"))
+    port = int(os.environ.get("PORT", DEFAULT_PORT))
     RelayServer(server_config(app, "0.0.0.0", port), app.state.drain_calls).run()
 
 
