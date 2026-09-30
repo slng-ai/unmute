@@ -22,8 +22,9 @@ func TestTwilioSmoke(t *testing.T) {
 	for _, build := range []struct{ name, dir, instance string }{
 		{"relay-desk/twilio-openai", relayDesk, "twilio-openai"},
 		{"relay-desk/twilio-gemini", relayDesk, "twilio-gemini"},
-		{"example/openai", twilioExample, "twilio"},
-		{"example/gemini", twilioGeminiVariant(t), "twilio"},
+		{"example/slng", twilioExample, "twilio"},
+		{"example/openai", twilioThinkVariant(t, "openai"), "twilio"},
+		{"example/gemini", twilioThinkVariant(t, "google"), "twilio"},
 	} {
 		t.Run(build.name, func(t *testing.T) {
 			artifact := twilioArtifact(t, build.dir, build.instance)

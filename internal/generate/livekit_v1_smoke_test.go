@@ -1477,9 +1477,9 @@ func TestSmokeV26LiveKitExamplesStaticCheck(t *testing.T) {
 		toolFree bool
 		tracing  bool
 	}{
+		// The examples and remy run in TestSmokeEmittedProjectsPassTheirOwnGate.
+		// These are the shapes no shipped package has.
 		{name: "simple-prompt"},
-		{name: "salon-concierge"},
-		{name: "remy"},
 		{name: "simple-prompt-tool-free-unconfigured", toolFree: true},
 		{name: "simple-prompt-tool-free-tracing", toolFree: true, tracing: true},
 	}
