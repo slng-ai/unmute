@@ -43,7 +43,7 @@ agents and tasks share the shape (T15). */ -}}
 {{define "webhook_tool"}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict{{if .Terminal}} | None{{end}}:
-        {{doc .Description}}
+        {{doc 8 .Description}}
 {{- if .Needed}}
         refusal = _refusal({{pyq .Method}}, ctx.userdata, {{.NeededLiteral}})
         if refusal:
@@ -97,7 +97,7 @@ the file defines a callable named like the tool; sync or async). */ -}}
 {{define "local_tool"}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict{{if .Terminal}} | None{{end}}:
-        {{doc .Description}}
+        {{doc 8 .Description}}
 {{- if .Needed}}
         refusal = _refusal({{pyq .Method}}, ctx.userdata, {{.NeededLiteral}})
         if refusal:
@@ -136,7 +136,7 @@ never reads a file and never re-indexes (FR-017). */ -}}
 {{define "knowledge_tool"}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict{{if .Terminal}} | None{{end}}:
-        {{doc .Description}}
+        {{doc 8 .Description}}
 {{- if .Announce}}
         # Not awaited, on purpose: see the same line in webhook_tool.
         dev_say(self.session, {{.Announce}})
@@ -150,7 +150,7 @@ The result is a pydantic model, so it is dumped to a dict for the model. */ -}}
 {{define "hosted_tool"}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict{{if .Terminal}} | None{{end}}:
-        {{doc .Description}}
+        {{doc 8 .Description}}
 {{- if .Needed}}
         refusal = _refusal({{pyq .Method}}, ctx.userdata, {{.NeededLiteral}})
         if refusal:
@@ -298,6 +298,7 @@ from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskCompletedEv
 {{- end}}
 from livekit.agents.llm import ChatChunk, Tool{{if .HasWarmTransfer}}, ToolError{{end}}
 from livekit.agents.voice import MetricsCollectedEvent
+
 # Not re-exported from livekit.agents or livekit.agents.voice, so it comes from
 # the module that defines it. Checked against 1.6.10 and 1.8.x.
 from livekit.agents.voice.agent_session import SessionConnectOptions
@@ -1583,8 +1584,8 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- if .IsEntry}}
             initial: True for the call's first agent, which greets the caller.
 {{- end}}
-{{- end}}
         """
+{{- else}}"""{{end}}
 {{- if and .IsEntry (not $.SingleAgentMinimal)}}
         self._initial = initial
 {{- end}}
@@ -1666,7 +1667,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{range .Transfers}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext) -> Agent:
-        {{doc .When}}
+        {{doc 8 .When}}
 
 {{- if .Announce}}
         await dev_say(ctx.session, {{pyq .Announce}}, allow_interruptions=False)
@@ -1686,7 +1687,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- range .HumanTransfers}}
     @function_tool(on_duplicate="reject")
     async def {{.Method}}(self, ctx: RunContext) -> str | None:
-        {{doc .When}}
+        {{doc 8 .When}}
         # One line per firing, so a live test can see which control the model
         # picked and when — the transfer that ran is otherwise invisible in the
         # logs until the carrier request goes out.
@@ -1874,7 +1875,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- range .Delegates}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext){{if or .Task (eq .Then "return")}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{else if eq .Then "transfer"}} -> Agent{{else}} -> None{{end}}:
-        {{doc .When}}
+        {{doc 8 .When}}
         # Already ran, and nobody has spoken since. Then this is not a second
         # request, it is the model reading its own completed result as though it
         # were one, and running the whole thing again is the worst possible
@@ -2443,7 +2444,7 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{$terminals := .TerminalTools}}{{range .Transfers}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext) -> {{if $terminals}}str | None{{else}}None{{end}}:
-        {{doc .When}}
+        {{doc 8 .When}}
 {{- if $terminals}}
         if self._terminal_pending or _sibling_call(ctx, {{$terminals}}):
             # A tool that ends this step is running, or was called in the same

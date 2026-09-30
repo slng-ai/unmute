@@ -1092,6 +1092,9 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("livekit template %s: %w", name, err)
 	}
+	if strings.HasSuffix(name, ".py") {
+		return wrapLongImports(buf.Bytes()), nil
+	}
 	return buf.Bytes(), nil
 }
 
@@ -1163,37 +1166,57 @@ func livekitReport(agent *ir.Agent, data livekitData, files []File, bindings []i
 }
 
 // pyDoc renders a tool description as the docstring the framework reads it
-// from, and marks the docstring rules the text would trip. The words are the
-// model's tool description, so they cannot be reshaped to satisfy a linter (a
-// summary line, a blank second line, a full stop). A noqa is added only for a
-// rule the text really breaks, because an unused one is itself a finding.
-func pyDoc(s string) string {
-	doc := pyTriple(s)
+// from, at the indent of the body it opens, and marks the docstring rules the
+// text would trip. The words are the model's tool description, so they cannot
+// be reshaped to satisfy a linter (a summary line, a blank second line, a full
+// stop). The layout can: every continuation line is indented to the body and a
+// multi-line docstring closes on its own line, which is what ruff format would
+// write anyway, and Python strips that indent (inspect.cleandoc) before the
+// framework reads it, so the model sees the same text either way. A noqa is
+// added only for a rule the text really breaks, because an unused one is
+// itself a finding.
+func pyDoc(indent int, s string) string {
 	body := strings.TrimSpace(s)
 	if body == "" {
-		return doc
+		return pyTriple(s)
 	}
 	lines := strings.Split(body, "\n")
 	var codes []string
 	if len(lines) > 1 && strings.TrimSpace(lines[1]) != "" {
 		codes = append(codes, "D205")
 	}
-	if len(lines) > 1 && !strings.HasSuffix(s, "\n") {
-		codes = append(codes, "D209")
-	}
 	first := strings.TrimSpace(lines[0])
-	if first != "" && !strings.ContainsAny(first[len(first)-1:], ".?!") {
+	if !strings.ContainsAny(first[len(first)-1:], ".?!") {
 		codes = append(codes, "D415")
 	}
-	if first != "" && first[0] >= 'a' && first[0] <= 'z' {
+	if first[0] >= 'a' && first[0] <= 'z' {
 		codes = append(codes, "D403")
 	}
 	if strings.Contains(s, `\`) {
 		codes = append(codes, "D301")
 	}
+	doc := pyTriple(indentDocLines(lines, strings.Repeat(" ", indent)))
 	if len(codes) == 0 {
 		return doc
 	}
 	slices.Sort(codes)
 	return doc + "  # noqa: " + strings.Join(codes, ", ")
+}
+
+// indentDocLines joins a docstring's lines with every continuation line at
+// pad, blank lines left empty, and a closing line of its own when there is
+// more than one line.
+func indentDocLines(lines []string, pad string) string {
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(lines[0]))
+	for _, line := range lines[1:] {
+		b.WriteString("\n")
+		if line = strings.TrimRight(line, " \t\r"); strings.TrimSpace(line) != "" {
+			b.WriteString(pad + line)
+		}
+	}
+	if len(lines) > 1 {
+		b.WriteString("\n" + pad)
+	}
+	return b.String()
 }

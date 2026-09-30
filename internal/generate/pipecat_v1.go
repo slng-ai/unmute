@@ -1015,6 +1015,9 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 	if name == "bot.py" {
 		return sortBotImports(buf.Bytes()), nil
 	}
+	if strings.HasSuffix(name, ".py") {
+		return wrapLongImports(buf.Bytes()), nil
+	}
 	return buf.Bytes(), nil
 }
 
@@ -1026,49 +1029,40 @@ type docParam struct{ name, typ, description string }
 // emitted project's ruff rules.
 //
 // Two kinds of docstring come through here. A tool method's docstring IS the
-// tool's description: the framework parses it, so everything before the Args
-// section is what the model reads. Its layout is therefore left exactly as it
-// always was. A description of one line gets a full Args section, where the
-// `params` entry is ignored by the parser. A description of several lines keeps
-// its own continuation lines and gets no `params` entry, because a section the
-// parser does not recognise would read that entry out to the model as prose.
-// The lint findings that layout raises (D205, D214, D417, D415) are silenced on
-// the closing line instead of being fixed in the text. A flow tool's docstring is
-// read by nobody but a person, so its layout is free (modelFacing false).
-func pyDocstring(indent int, description string, params []docParam, modelFacing bool) string {
+// tool's description: the framework parses it (docstring_parser, Google
+// style), so everything before the Args section is what the model reads, and
+// each Args entry becomes that parameter's description. The words are the
+// author's and are never reshaped, so the findings the text itself raises
+// (D205, D415) are silenced on the closing line. The layout is not the
+// author's: every line is indented to the body, the way ruff format would
+// write it. That indent is what lets the parser find the Args section at all.
+// Python strips a docstring's common indent before the parser reads it, so a
+// multi-line description written flush left kept its Args section four spaces
+// deeper than the text, where the parser took it for more description: the
+// parameters lost their descriptions and the model read them as prose.
+// A flow tool's docstring goes through here too, and is read only by a person.
+func pyDocstring(indent int, description string, params []docParam) string {
 	pad := strings.Repeat(" ", indent)
 	lines := strings.Split(strings.TrimRight(description, " \t\r\n"), "\n")
-	multi := len(lines) > 1
 	first := strings.TrimSpace(lines[0])
 	var noqa []string
 	if !strings.HasSuffix(first, ".") && !strings.HasSuffix(first, "?") && !strings.HasSuffix(first, "!") {
 		noqa = append(noqa, "D415")
 	}
-	if multi && strings.TrimSpace(lines[1]) != "" {
+	if len(lines) > 1 && strings.TrimSpace(lines[1]) != "" {
 		noqa = append(noqa, "D205")
 	}
 	var b strings.Builder
 	b.WriteString(`"""` + first)
 	for _, line := range lines[1:] {
 		b.WriteString("\n")
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		if !modelFacing {
-			b.WriteString(pad)
-		}
-		b.WriteString(strings.TrimRight(line, " \t\r"))
-	}
-	documented := params
-	if modelFacing && multi {
-		documented = slices.DeleteFunc(slices.Clone(params), func(p docParam) bool { return p.name == "params" })
-		if len(documented) > 0 {
-			noqa = append(noqa, "D214")
+		if line = strings.TrimRight(line, " \t\r"); strings.TrimSpace(line) != "" {
+			b.WriteString(pad + line)
 		}
 	}
-	if len(documented) > 0 {
+	if len(params) > 0 {
 		b.WriteString("\n\n" + pad + "Args:")
-		for _, p := range documented {
+		for _, p := range params {
 			text := strings.Split(p.description, "\n")
 			b.WriteString("\n" + pad + "    " + p.name + " (" + p.typ + "):")
 			if strings.TrimSpace(text[0]) != "" {
@@ -1104,14 +1098,13 @@ func toolParams(args []pipecatArg) []docParam {
 }
 
 // toolDefNoqa is what a tool's `def` line opens its parameter list with when the
-// docstring raises D417: a multi-line description that hides the Args section
-// from the parser, or an argument the author left without a description. Ruff reports that finding on the function's name, and
-// a noqa comment only reaches the line it is on, so it cannot ride on the
-// docstring's closing line like the others. Written after the opening
-// parenthesis, it stays on the name's line however the signature is wrapped.
-func toolDefNoqa(description string, args []pipecatArg) string {
-	undescribed := slices.ContainsFunc(toolParams(args), func(p docParam) bool { return p.description == "" })
-	if (strings.Contains(strings.TrimRight(description, " \t\r\n"), "\n") && len(args) > 0) || undescribed {
+// docstring raises D417: an argument the author left without a description.
+// Ruff reports that finding on the function's name, and a noqa comment only
+// reaches the line it is on, so it cannot ride on the docstring's closing line
+// like the others. Written after the opening parenthesis, it stays on the
+// name's line however the signature is wrapped.
+func toolDefNoqa(args []pipecatArg) string {
+	if slices.ContainsFunc(toolParams(args), func(p docParam) bool { return p.description == "" }) {
 		return "  # noqa: D417\n        "
 	}
 	return ""
@@ -1119,13 +1112,13 @@ func toolDefNoqa(description string, args []pipecatArg) string {
 
 // toolDoc is the docstring of a direct tool, agent or inline.
 func toolDoc(indent int, description string, args []pipecatArg) string {
-	return pyDocstring(indent, description, toolParams(args), true)
+	return pyDocstring(indent, description, toolParams(args))
 }
 
 // handoffDoc is the docstring of a handoff or delegate method, whose only
 // parameter is the framework's call handle.
 func handoffDoc(indent int, description string) string {
-	return pyDocstring(indent, description, toolParams(nil), true)
+	return pyDocstring(indent, description, toolParams(nil))
 }
 
 // flowToolDoc is the docstring of a module-level flows handler.
@@ -1137,7 +1130,7 @@ func flowToolDoc(indent int, description string, needsState bool) string {
 	if needsState {
 		params = append(params, docParam{"state", "Any", "The call's typed variables."})
 	}
-	return pyDocstring(indent, description, params, false)
+	return pyDocstring(indent, description, params)
 }
 
 // ABCImports is the collections.abc names bot.py's annotations use, so no

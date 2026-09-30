@@ -1,6 +1,9 @@
 package generate
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // pythonCheckers renders the tail of every emitted pyproject.toml: the pinned
 // checkers and the rules they hold the emitted code to. It lives in one place
@@ -42,3 +45,33 @@ convention = "google"
 [tool.ty.environment]
 python-version = "%s"
 `
+
+// pyLineLimit is ruff's default line length, which the emitted pyproject keeps.
+const pyLineLimit = 88
+
+// wrapLongImports wraps every top-level `from x import a, b` line longer than
+// pyLineLimit into one name per line, the layout ruff's import sorter writes.
+// The generator does not format (compile does, when ruff is installed), but
+// an import's wrapping is part of rule I001, so the raw output has to carry it
+// or a project compiled on a machine without ruff fails its own lint.
+func wrapLongImports(src []byte) []byte {
+	lines := strings.Split(string(src), "\n")
+	for i, line := range lines {
+		head, names, found := strings.Cut(line, " import ")
+		if !found || len(line) <= pyLineLimit || !strings.HasPrefix(line, "from ") || strings.Contains(names, "(") {
+			continue
+		}
+		names, comment, _ := strings.Cut(names, "  #")
+		var b strings.Builder
+		b.WriteString(head + " import (")
+		if comment != "" {
+			b.WriteString("  #" + comment)
+		}
+		for _, name := range strings.Split(names, ",") {
+			b.WriteString("\n    " + strings.TrimSpace(name) + ",")
+		}
+		b.WriteString("\n)")
+		lines[i] = b.String()
+	}
+	return []byte(strings.Join(lines, "\n"))
+}

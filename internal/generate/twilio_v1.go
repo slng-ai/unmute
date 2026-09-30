@@ -221,6 +221,9 @@ func renderTwilio(name string, data twilioData) ([]byte, error) {
 	if err := tmpl.Execute(&out, data); err != nil {
 		return nil, fmt.Errorf("render %s: %w", name, err)
 	}
+	if strings.HasSuffix(name, ".py.tmpl") {
+		return wrapLongImports(out.Bytes()), nil
+	}
 	return out.Bytes(), nil
 }
 

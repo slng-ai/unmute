@@ -134,6 +134,13 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // call-facts seed now logs a warning instead of raising, fire-and-forget
 // tasks are held in a set so they cannot be collected mid-flight, a hosted
 // api_request tool imports the httpx it calls) are named in the commits.
+// One changes what a model reads, and only on Pipecat: a tool whose
+// description runs to several lines (every knowledge tool) wrote those lines
+// flush left, so docstring_parser never found the Args section below them. The
+// model read the Args block as the end of the description, and the parameter
+// went out with no description at all. The lines are indented now, the section
+// parses, and the parameter carries its description. LiveKit reads the same
+// text as before, measured on salon-concierge and pharmacy-refills.
 //
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.

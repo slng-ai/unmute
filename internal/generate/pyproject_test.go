@@ -67,3 +67,30 @@ func providerArtifact(t *testing.T, dir string, provider ir.Provider) Artifact {
 	}
 	return artifact
 }
+
+// A from-import past the line limit comes out the way ruff's import sorter
+// writes it, and everything else is left alone: a short line, an already
+// wrapped one, a plain import and an indented one.
+func TestWrapLongImportsWrapsOnlyWhatRuffWould(t *testing.T) {
+	long := "from livekit.agents.voice import Agent, AgentSession, ModelSettings, RunContext, SpeechHandle"
+	commented := long + "  # the voice API"
+	src := strings.Join([]string{
+		"from os import path",
+		long,
+		commented,
+		"from x import (\n    a,\n)",
+		"import " + strings.Repeat("a.", 45) + "b",
+		"    " + long,
+	}, "\n")
+	want := strings.Join([]string{
+		"from os import path",
+		"from livekit.agents.voice import (\n    Agent,\n    AgentSession,\n    ModelSettings,\n    RunContext,\n    SpeechHandle,\n)",
+		"from livekit.agents.voice import (  # the voice API\n    Agent,\n    AgentSession,\n    ModelSettings,\n    RunContext,\n    SpeechHandle,\n)",
+		"from x import (\n    a,\n)",
+		"import " + strings.Repeat("a.", 45) + "b",
+		"    " + long,
+	}, "\n")
+	if got := string(wrapLongImports([]byte(src))); got != want {
+		t.Errorf("wrapLongImports:\n%s\nwant:\n%s", got, want)
+	}
+}

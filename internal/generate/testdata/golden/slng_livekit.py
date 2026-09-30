@@ -38,6 +38,7 @@ from livekit.agents import (
 )
 from livekit.agents.llm import ChatChunk, Tool
 from livekit.agents.voice import MetricsCollectedEvent
+
 # Not re-exported from livekit.agents or livekit.agents.voice, so it comes from
 # the module that defines it. Checked against 1.6.10 and 1.8.x.
 from livekit.agents.voice.agent_session import SessionConnectOptions

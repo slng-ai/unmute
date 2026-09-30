@@ -1318,7 +1318,7 @@ def build_{{.Name}}_tts() -> TTSService:
 {{end}}{{if $.Inline}}{{range .Tools}}
 
 @_direct_tool{{.Decorator}}
-async def {{.MethodName}}({{toolDefNoqa .Description .Args}}params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}) -> None:
+async def {{.MethodName}}({{toolDefNoqa .Args}}params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}) -> None:
     {{toolDoc 4 .Description .Args}}
 {{if .Builtin}}{{if .Instructions}}    await params.llm.push_frame(
         LLMMessagesAppendFrame(
@@ -1501,7 +1501,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         )
 {{end}}{{range .Tools}}
     @_direct_tool{{.Decorator}}
-    async def {{.MethodName}}({{toolDefNoqa .Description .Args}}self, params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}) -> None:
+    async def {{.MethodName}}({{toolDefNoqa .Args}}self, params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}) -> None:
         {{toolDoc 8 .Description .Args}}
 {{if .ColdDestination}}        logger.info("human transfer fired: {{.MethodName}} (cold)")
         transfer_result = self.call_context.get("_transfer_result")

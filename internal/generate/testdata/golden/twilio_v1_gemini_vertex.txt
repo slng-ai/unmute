@@ -33,7 +33,14 @@ import uvicorn
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from google.genai import types
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, create_model
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    create_model,
+)
 from twilio.request_validator import RequestValidator
 
 import tools.opening_hours
@@ -104,7 +111,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:04818ddd024c2e0d320f123df1d78e9beddcba720b5d6ad1841f266d746755c6"
+ARTIFACT_ID = "sha256:d59fdbc4c4919458d1bc7effae586ed61f59bd5f20550c11040abde1cf08c0a8"
 
 def _google_vertex_client(api_key: str, location: str):  # noqa: ANN202 - genai.Client is only imported inside
     """Build a GenAI client that reaches Vertex with an API key.
@@ -1935,7 +1942,7 @@ def opening_hours(day):
     return {"day": day, "open": bool(opens), "opens": opens, "closes": closes}
 === compile-report.json ===
 {
-  "artifact_id": "sha256:04818ddd024c2e0d320f123df1d78e9beddcba720b5d6ad1841f266d746755c6",
+  "artifact_id": "sha256:d59fdbc4c4919458d1bc7effae586ed61f59bd5f20550c11040abde1cf08c0a8",
   "bindings": [
     {
       "binding": {

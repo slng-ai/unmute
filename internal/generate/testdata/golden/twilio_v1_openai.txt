@@ -33,7 +33,14 @@ import uvicorn
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, create_model
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    create_model,
+)
 from twilio.request_validator import RequestValidator
 
 log = logging.getLogger("relay")
@@ -101,7 +108,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:5739b330b1308f69806892dcce01fe83b801c3e47f8d1d3381c3d5687741807e"
+ARTIFACT_ID = "sha256:ae1074a43c8a8ceb990fbfaa6f7810bd8eaff204a39ef759215944411767e6ec"
 
 # --- tools ---------------------------------------------------------------------
 
@@ -1846,7 +1853,7 @@ change before restoring. Otherwise set its webhook back to the snapshot's
 </Response>
 === compile-report.json ===
 {
-  "artifact_id": "sha256:5739b330b1308f69806892dcce01fe83b801c3e47f8d1d3381c3d5687741807e",
+  "artifact_id": "sha256:ae1074a43c8a8ceb990fbfaa6f7810bd8eaff204a39ef759215944411767e6ec",
   "bindings": [
     {
       "binding": {

@@ -1979,7 +1979,11 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.metrics.metrics import ProcessingMetricsData, TextAggregationMetricsData, TTFBMetricsData
+from pipecat.metrics.metrics import (
+    ProcessingMetricsData,
+    TextAggregationMetricsData,
+    TTFBMetricsData,
+)
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.runner.types import RunnerArguments
