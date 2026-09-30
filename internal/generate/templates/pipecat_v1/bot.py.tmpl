@@ -20,7 +20,7 @@ credentials, so the call ends by closing the socket. Emitted for a package whose
 cloud-websocket route declares none, and for the local route every other package
 carries so a simulated caller can reach it. */ -}}
 {{define "carrier_transport"}}async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
-    """The carrier's stream, with the call ended by closing the socket.
+    """Build the carrier's stream, with the call ended by closing the socket.
 
     Used by a package that holds no carrier credentials at all, which needs a
     transport that never asks a carrier to hang a call up.
@@ -37,24 +37,33 @@ carries so a simulated caller can reach it. */ -}}
     number points at has nothing after `<Connect>`. Declare a connection and this
     function is not emitted at all: the framework's path is used, and the agent
     ends calls through the carrier's own call control.
+
+    Args:
+        runner_args: The runner's arguments for a websocket session.
+
+    Returns:
+        The Twilio Media Streams transport for this call.
     """
+    from pipecat.runner.types import WebSocketRunnerArguments
     from pipecat.runner.utils import parse_telephony_websocket
     from pipecat.serializers.twilio import TwilioFrameSerializer
     from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
 
-    transport_type, call_data = await parse_telephony_websocket(runner_args.websocket)
+    # Only a websocket session reaches this function; the base type has no socket.
+    websocket_args = cast(WebSocketRunnerArguments, runner_args)
+    transport_type, call_data = await parse_telephony_websocket(websocket_args.websocket)
     # Set the same two attributes the framework's path sets, so _phone_session
     # above reads the handshake the same way whichever path built the transport.
-    runner_args.transport_type = transport_type
+    setattr(runner_args, "transport_type", transport_type)  # noqa: B010 - not declared on RunnerArguments
     runner_args.call_data = call_data
-    params = transport_params[transport_type]()
+    params = cast(FastAPIWebsocketParams, transport_params[transport_type]())
     params.add_wav_header = False
     params.serializer = TwilioFrameSerializer(
         stream_sid=call_data["stream_id"],
         call_sid=call_data["call_id"],
         params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
     )
-    return FastAPIWebsocketTransport(websocket=runner_args.websocket, params=params)
+    return FastAPIWebsocketTransport(websocket=websocket_args.websocket, params=params)
 {{end -}}
 """Generated Pipecat agent for {{.Project}}.
 
@@ -71,6 +80,7 @@ a completed or unserved status.{{end}}
 
 from __future__ import annotations
 
+from collections.abc import {{.ABCImports}}
 {{if or (not .Inline) .NeedsEndAfter .Inactivity .NeedsPrefetchAsync}}import asyncio
 {{end}}{{if .Slng.Vertex}}import base64
 {{end}}{{if or .HasFlows .NeedsHistoryCopy}}import copy
@@ -84,17 +94,18 @@ from __future__ import annotations
 {{if .Slng.Any}}import uuid
 {{end}}{{if .Variables}}from dataclasses import {{if .NeedsDataclassField}}dataclass, field{{else}}dataclass{{end}}
 {{end}}{{if .NeedsPrefetchClock}}from datetime import datetime
-{{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
-{{end}}{{if .NeedsRender}}from urllib.parse import quote
+{{end}}from typing import {{.TypingNames}}
+{{if .NeedsRender}}from urllib.parse import quote
 {{end}}{{if .NeedsPrefetchClock}}from zoneinfo import ZoneInfo
 {{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
 import aiohttp
 {{end}}{{end}}{{if .CloudWebsocket}}{{if .HasColdTransfer}}
 import aiohttp
-{{end}}{{end}}{{if .NeedsHTTPX}}
+{{end}}{{end}}{{if .UsesHTTPX}}
 import httpx
 {{end}}{{if and .TypedState .TypedState.NeedsEmailValidator}}from email_validator import EmailNotValidError, validate_email
 {{end}}{{if .Slng.RouterClass}}from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+from pipecat.utils.http import connection_limits
 {{end}}{{if .Knowledge.Knowledge}}import knowledge
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
@@ -120,8 +131,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 {{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
+{{end}}{{if .NeedsLLMServiceType}}from pipecat.services.llm_service import LLMService
 {{end}}{{if .NeedsMCP}}from pipecat.services.mcp_service import MCPClient
 {{end}}{{if not .Inline}}from pipecat.services.settings import LLMSettings
+{{end}}{{if .NeedsSTTServiceType}}from pipecat.services.stt_service import STTService
+{{end}}{{if .NeedsTTSServiceType}}from pipecat.services.tts_service import TTSService
 {{end}}{{if .NeedsLanguage}}from pipecat.transcriptions.language import Language
 {{end}}from pipecat.transports.base_transport import BaseTransport, TransportParams
 {{if .DailyParams}}{{.DailyParams.Import}}
@@ -135,7 +149,7 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 {{else if .NeedsFunctionCalls}}from pipecat.workers.llm import tool
 {{end}}from pipecat.workers.runner import WorkerRunner
 
-from dev_metrics import install_dev_metrics
+from dev_metrics import DevReporter, install_dev_metrics
 {{if .Tracing}}from tracing import (
     TRACE_NAME,
 {{if or .NeedsFunctionCalls .NeedsMCP}}    TracedLLMWorker,
@@ -155,6 +169,7 @@ _LOGGING_CONFIGURED = False
 
 
 def _configure_logging() -> None:
+    """Send log output to stderr at UNMUTE_LOG_LEVEL, once per process."""
     global _LOGGING_CONFIGURED
     if _LOGGING_CONFIGURED:
         return
@@ -164,7 +179,21 @@ def _configure_logging() -> None:
 
 
 MAIN_NAME = {{pyq .MainName}}
-{{if .Knowledge.Knowledge}}
+{{if .HasTransferAnnouncements}}# The longest a handoff waits for its spoken cue to finish before it moves on.
+HANDOFF_CUE_TIMEOUT_SECS = 30.0
+{{end}}{{if .NeedsTerminal}}# The longest a handoff or a finish waits for a running terminal tool to settle.
+TERMINAL_SETTLE_TIMEOUT_SECS = 30.0
+{{end}}{{if .UsesHTTPX}}# The longest a webhook tool waits for its endpoint before the call fails.
+WEBHOOK_TIMEOUT_SECS = 30.0
+{{end}}{{if .CloudWebsocket}}# Twilio Media Streams is 8 kHz mono in both directions.
+PHONE_SAMPLE_RATE_HZ = 8000
+{{end}}{{if .Slng.RouterClass}}# The router client's connection limits, restated from the base service's own.
+ROUTER_KEEPALIVE_CONNECTIONS = 100
+ROUTER_MAX_CONNECTIONS = 1000
+{{end}}{{if .NeedsEndAfter}}# Tasks that end the call later. A task nobody references can be collected
+# while it sleeps, so each is held here until it finishes.
+_END_TASKS: set[asyncio.Task[None]] = set()
+{{end}}{{if .Knowledge.Knowledge}}
 # Read, split and embed every knowledge base at module import, which is once per
 # container rather than once per session.
 #
@@ -191,6 +220,11 @@ knowledge.build_indexes()
 {{end}}{{end}}
 
 def require_env() -> None:
+    """Fail at startup, naming every required environment variable that is unset.
+
+    Raises:
+        RuntimeError: When at least one name in REQUIRED_ENV has no value.
+    """
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
@@ -211,24 +245,36 @@ def require_env() -> None:
 # every way out swaps the owner's back.
 {{range .Slng.Configs}}
 
-def {{.Func}}() -> dict:
-    """The model configuration, sent inline in the body of every think request.
+def {{.Func}}() -> dict[str, Any]:
+    """Build the model configuration sent inline in every think request.
 
     Credentials are read here rather than at import, so a missing one is reported
     by require_env() alongside every other name instead of raising a KeyError
     before anything has checked. No value is written into this file: each is the
     name of an environment variable.
+
+    Returns:
+        The configuration body for the router's think request.
     """
     return {{.Body}}
 {{end}}{{if .Slng.Vertex}}
 
-def _slng_vertex_credentials(name: str) -> dict:
-    """A GCP service-account key, in whichever of three shapes the variable holds.
+def _slng_vertex_credentials(name: str) -> dict[str, Any]:
+    """Read a GCP service-account key, in whichever of three shapes the variable holds.
 
     The key JSON, that JSON base64 encoded, or a path to the key file, decided in
     that order because a base64 value can begin with "/" and look like a path.
     This runs once at startup, so a malformed value fails before the agent answers
     anything rather than mid-call.
+
+    Args:
+        name: The environment variable holding the key.
+
+    Returns:
+        The parsed service-account key.
+
+    Raises:
+        RuntimeError: When the variable holds none of the three shapes.
     """
     raw = os.environ[name].strip()
     if raw.startswith("{"):
@@ -247,7 +293,7 @@ def _slng_vertex_credentials(name: str) -> dict:
         f"the key JSON, that JSON base64 encoded, or a path to the key file"
     )
 {{end}}
-async def _slng_log_provenance(response) -> None:
+async def _slng_log_provenance(response: Any) -> None:
     """Say where this answer came from, once per think request.
 
     The router states this only in response headers, and neither framework hands
@@ -265,19 +311,26 @@ async def _slng_log_provenance(response) -> None:
     It also logs only a router think request. The scope header is what lets the
     line name a scope at all, so a request without one is a request this hook
     could not describe.
+
+    Args:
+        response: The httpx response, whose body has not been read yet.
     """
     try:
         scope = response.request.headers.get({{pyq .Slng.AgentIDHeader}})
         if not scope:
             return
+        headers = response.headers
         # Field order is the contract, and the gate reads it off this line.
-        fields = ["scope=" + scope]
-        fields.append("source=" + response.headers.get("x-slng-response-source", "unknown"))
-        if response.headers.get("x-slng-cache-layer"):
-            fields.append("layer=" + response.headers["x-slng-cache-layer"])
-        if response.headers.get("x-slng-model"):
-            fields.append("model=" + response.headers["x-slng-model"])
-        fields.append("request_id=" + response.headers.get("x-slng-request-id", "unknown"))
+        fields = [
+            "scope=" + scope,
+            "source=" + headers.get("x-slng-response-source", "unknown"),
+            *(
+                f"{label}={headers[header]}"
+                for label, header in (("layer", "x-slng-cache-layer"), ("model", "x-slng-model"))
+                if headers.get(header)
+            ),
+            "request_id=" + headers.get("x-slng-request-id", "unknown"),
+        ]
         logger.info("slng router: " + " ".join(fields))
     except Exception:  # noqa: BLE001 - a log line must never end a call
         logger.debug("could not read the router's provenance headers", exc_info=True)
@@ -307,11 +360,26 @@ class {{.Slng.RouterClass}}(OpenAILLMService):
     what makes the two targets refresh at the same point.
     """
 
-    def __init__(self, *args, slng_state=None, **kwargs):
+    def __init__(self, *args: Any, slng_state: Any = None, **kwargs: Any) -> None:
+        """Build the service and keep the call state its request body reads.
+
+        Args:
+            *args: Passed to the base service.
+            slng_state: The live call state, read on every request.
+            **kwargs: Passed to the base service.
+        """
         super().__init__(*args, **kwargs)
         self._slng_state = slng_state
 
-    def build_chat_completion_params(self, params_from_context) -> dict:
+    def build_chat_completion_params(self, params_from_context: Any) -> dict[str, Any]:
+        """Add the live template variables to the request body.
+
+        Args:
+            params_from_context: The invocation parameters the base service built.
+
+        Returns:
+            The request parameters with `template_variables` filled from state.
+        """
         params = super().build_chat_completion_params(params_from_context)
         scope = (params.get("extra_headers") or {}).get("{{.Slng.AgentIDHeader}}", "")
         body = dict(params.get("extra_body") or {})
@@ -321,14 +389,35 @@ class {{.Slng.RouterClass}}(OpenAILLMService):
         params["extra_body"] = body
         return params
 
-    def create_client(self, api_key=None, base_url=None, **kwargs):
+    def create_client(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        organization: str | None = None,
+        project: str | None = None,
+        default_headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> AsyncOpenAI:
+        """Build the client with a hook that logs where each answer came from.
+
+        Args:
+            api_key: The router's API key.
+            base_url: The router's base URL.
+            organization: Accepted for the base signature and not forwarded.
+            project: Accepted for the base signature and not forwarded.
+            default_headers: Accepted for the base signature and not forwarded.
+            **kwargs: Accepted for the base signature and not forwarded.
+
+        Returns:
+            An AsyncOpenAI client with the provenance response hook installed.
+        """
         return AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
             http_client=DefaultAsyncHttpxClient(
-                limits=httpx.Limits(
-                    max_keepalive_connections=100,
-                    max_connections=1000,
+                limits=connection_limits(
+                    max_keepalive_connections=ROUTER_KEEPALIVE_CONNECTIONS,
+                    max_connections=ROUTER_MAX_CONNECTIONS,
                     keepalive_expiry=None,
                 ),
                 event_hooks={"response": [_slng_log_provenance]},
@@ -342,12 +431,22 @@ _SLNG_TEMPLATE_PATHS = {{.Slng.TemplatePaths}}
 _SLNG_SCOPE_SITES = {{.Slng.TemplateSites}}
 
 
-def _slng_template_variables(state, names, *, scope="") -> dict:
-    """The values the router substitutes into the prompt's placeholders.
+def _slng_template_variables(
+    state: Any, names: Sequence[str], *, scope: str = ""
+) -> dict[str, str]:
+    """Build the values the router substitutes into the prompt's placeholders.
 
     A name with no value yet sends the empty string, never None and never the text
     "None". A value over the router's limit is truncated with a warning rather
     than dropped: an over-long value must not end a live call.
+
+    Args:
+        state: The call state, or None before one exists.
+        names: The placeholder names the prompt at this scope reads.
+        scope: The cache scope, which picks the prompt site for a path lookup.
+
+    Returns:
+        Each name mapped to its text, bounded by the router's limit.
     """
     values = {}
     for name in names:
@@ -374,12 +473,25 @@ def _slng_template_variables(state, names, *, scope="") -> dict:
     return values
 {{end}}{{end}}{{if .NeedsMCP}}
 
-async def _close_mcp(awaitables, *, suppress: bool = False) -> None:
-    failures = []
+async def _close_mcp(awaitables: Iterable[Awaitable[None]], *, suppress: bool = False) -> None:
+    """Close every MCP client, then report the failures once.
+
+    Every close runs even when an earlier one fails, so one broken client cannot
+    leave the others open.
+
+    Args:
+        awaitables: The close calls, one per MCP client.
+        suppress: When true, only log the failures, because another error is
+            already on its way out and must not be replaced.
+
+    Raises:
+        BaseException: The first close failure, when `suppress` is false.
+    """
+    failures: list[BaseException] = []
     for awaitable in awaitables:
         try:
             await awaitable
-        except BaseException as failure:
+        except BaseException as failure:  # noqa: BLE001 - every close runs; the first failure is re-raised below
             failures.append(failure)
     if suppress:
         for failure in failures:
@@ -397,7 +509,26 @@ async def _close_mcp(awaitables, *, suppress: bool = False) -> None:
         raise failures[0]
 
 
-async def _register_mcp_tools(clients, llm, reserved_names{{if .Tracing}}, trace_handler{{end}}):
+async def _register_mcp_tools(
+    clients: list[MCPClient],
+    llm: Any,
+    reserved_names: set[str],
+{{if .Tracing}}    trace_handler: Any,
+{{end}}) -> list[Any]:
+    """Connect each MCP client and register its tools on one agent's LLM.
+
+    Args:
+        clients: The MCP clients of one agent.
+        llm: The LLM service the tools are registered on.
+        reserved_names: Tool names already taken by generated tools.
+{{if .Tracing}}        trace_handler: Wraps a tool handler so its call is traced.
+{{end}}
+    Returns:
+        The standard tool schemas every client exposed.
+
+    Raises:
+        RuntimeError: When two tools, across sources and generated tools, share a name.
+    """
     discovered = []
     names = set(reserved_names)
     for client in clients:
@@ -430,15 +561,33 @@ async def _register_mcp_tools(clients, llm, reserved_names{{if .Tracing}}, trace
     return registered
 {{end}}{{if .NeedsFunctionCalls}}
 
-def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None{{if $.HasToolAnnouncements}}, announce=None{{end}}):
-    """Keep every direct function call terminal, even on malformed input."""
+def _direct_tool(
+    fn: Callable[..., Any] | None = None,
+    *,
+    cancel_on_interruption: bool = True,
+    timeout_secs: float | None = None,
+{{if $.HasToolAnnouncements}}    announce: str | None = None,
+{{end}}) -> Any:
+    """Keep every direct function call terminal, even on malformed input.
 
-    def decorate(handler):
+    Args:
+        fn: The handler, when used as a bare `@_direct_tool`.
+        cancel_on_interruption: Whether the caller speaking cancels the call.
+        timeout_secs: How long the framework waits for the handler.
+{{if $.HasToolAnnouncements}}        announce: A line spoken as the tool starts, or None for silence.
+{{end}}
+    Returns:
+        The decorated handler, or a decorator when called with options.
+    """
+
+    def decorate(handler: Callable[..., Any]) -> Any:
+        """Wrap one handler so a bad or failing call still resolves."""
         signature = inspect.signature(handler)
         declared = set(signature.parameters) - {"self", "params"}
 
         @functools.wraps(handler)
-        async def guarded(*args, **kwargs):
+        async def guarded(*args: Any, **kwargs: Any) -> Any:
+            """Run the handler, resolving the call itself on bad input or failure."""
             params = kwargs.get("params")
             if params is None:
                 params_index = 1 if "self" in signature.parameters else 0
@@ -467,7 +616,8 @@ def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None{{if 
 {{end}}            resolved = False
             original_result_callback = params.result_callback
 
-            async def resolve(result, **callback_kwargs):
+            async def resolve(result: Any, **callback_kwargs: Any) -> Any:
+                """Record that the call was resolved, then hand the result on."""
                 nonlocal resolved
                 resolved = True
                 return await original_result_callback(result, **callback_kwargs)
@@ -532,12 +682,21 @@ CALL_REQUIRED_ENV = [
 {{range .CloudWebsocket.CallEnv}}    {{pyq .}},
 {{end}}]
 
-def _phone_session(runner_args: RunnerArguments) -> dict | None:
-    """The parsed carrier handshake, or None when this is not a phone call.
+def _phone_session(runner_args: RunnerArguments) -> dict[str, Any] | None:
+    """Read the parsed carrier handshake, or None when this is not a phone call.
 
     The runner sets transport_type and call_data while building the transport, so
     this reads facts rather than deriving them. A browser or console session has
     neither and must behave exactly as it does on a package with no telephony.
+
+    Args:
+        runner_args: The arguments the runner started this session with.
+
+    Returns:
+        The call's handshake data, or None for a browser or console session.
+
+    Raises:
+        RuntimeError: When a phone call is missing an environment variable it needs.
     """
     if getattr(runner_args, "transport_type", None) != {{pyq .CloudWebsocket.Carrier}}:
         return None
@@ -550,8 +709,8 @@ def _phone_session(runner_args: RunnerArguments) -> dict | None:
     return call
 
 
-def _pipeline_audio_rates(phone_call: dict | None) -> dict:
-    """Run the pipeline at the carrier's own sample rate, on a phone call only.
+def _pipeline_audio_rates(phone_call: dict[str, Any] | None) -> dict[str, Any]:
+    """Choose the pipeline's sample rates: the carrier's own on a phone call only.
 
     Twilio Media Streams is 8 kHz mono in both directions. Pipecat's defaults are
     16 kHz in and 24 kHz out, so without this every inbound frame is upsampled and
@@ -561,20 +720,36 @@ def _pipeline_audio_rates(phone_call: dict | None) -> dict:
 
     A browser or console session on the same package keeps the defaults, where
     8 kHz would throw away quality those channels really have.
+
+    Args:
+        phone_call: The parsed carrier handshake, or None off a phone call.
+
+    Returns:
+        The two pipeline parameters to set, or an empty dict to keep the defaults.
     """
     if not phone_call:
         return {}
-    return {"audio_in_sample_rate": 8000, "audio_out_sample_rate": 8000}
+    return {
+        "audio_in_sample_rate": PHONE_SAMPLE_RATE_HZ,
+        "audio_out_sample_rate": PHONE_SAMPLE_RATE_HZ,
+    }
 
 
 {{if not .CloudWebsocket.AccountSIDEnv}}{{template "carrier_transport" .}}{{end}}{{if .HasColdTransfer}}
 def _transfer_twiml(destination: str, ring_timeout: int) -> str:
-    """The whole transfer, as one document your carrier will run in order.
+    """Build the whole transfer as one document your carrier will run in order.
 
     Announce, dial, then end the original call when the destination leg ends.
     Twilio moves to the next verb after a completed, declined, or unanswered
     dial, so the same final hangup covers every outcome without starting a new
     agent that has none of this call's context.
+
+    Args:
+        destination: The markup for whom to dial.
+        ring_timeout: How many seconds the destination may ring.
+
+    Returns:
+        The TwiML document.
     """
     return (
         "<Response>"
@@ -591,17 +766,26 @@ async def _update_carrier_call(call_id: str, twiml: str) -> None:
     This is the one request in the whole project made in the carrier's own words,
     and it is call control rather than provisioning: the call already exists. One
     HTTPS request, so no carrier SDK.
+
+    Args:
+        call_id: The carrier's id for the live call.
+        twiml: The document the call should run from now on.
+
+    Raises:
+        RuntimeError: When the carrier answers with a non-2xx status.
     """
     account_sid = os.environ[{{pyq .CloudWebsocket.AccountSIDEnv}}]
     base = "https://api.twilio.com"
     url = f"{base}/2010-04-01/Accounts/{account_sid}/Calls/{call_id}.json"
     auth = aiohttp.BasicAuth(account_sid, os.environ[{{pyq .CloudWebsocket.AuthTokenEnv}}])
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, auth=auth, data={"Twiml": twiml}) as response:
-            if response.status < 200 or response.status >= 300:
-                raise RuntimeError(
-                    f"carrier call update failed with {response.status}: {await response.text()}"
-                )
+    async with (
+        aiohttp.ClientSession() as session,
+        session.post(url, auth=auth, data={"Twiml": twiml}) as response,
+    ):
+        if not 200 <= response.status < 300:
+            raise RuntimeError(
+                f"carrier call update failed with {response.status}: {await response.text()}"
+            )
 {{end}}{{else if .LocalTwilio}}
 # --- a caller on a Twilio-shaped websocket ----------------------------------
 # `python bot.py -t twilio -x <public host>` serves a TwiML webhook and a Media
@@ -616,13 +800,19 @@ async def _update_carrier_call(call_id: str, twiml: str) -> None:
 
 
 def _carrier_sip(destination: str) -> str:
-    """A destination dialled through your own trunk.
+    """Turn a destination into one dialled through your own trunk.
 
     Every outbound leg on this route leaves through your carrier, so an E.164
     number becomes a SIP URI at your trunk's termination address. Composed here,
     at call time, because a destination deferred to an environment variable has
     no value until now. A destination that is already a SIP URI is dialled as
     written.
+
+    Args:
+        destination: An E.164 number or a SIP URI.
+
+    Returns:
+        The SIP URI to dial.
     """
     if destination.startswith(("sip:", "sips:")):
         return destination
@@ -639,13 +829,22 @@ CALL_REQUIRED_ENV = [
 {{end}}]
 
 
-def _carrier_session(runner_args: RunnerArguments) -> dict | None:
-    """The call details the helper started this session with, validated.
+def _carrier_session(runner_args: RunnerArguments) -> dict[str, Any] | None:
+    """Read and validate the call details the helper started this session with.
 
     Returns None when this session is not a phone call at all: a browser or
     console session carries no call details and must behave like an ordinary
     browser session. A body that claims to be a call but is missing
     a field fails here, by field name, rather than half-way through the call.
+
+    Args:
+        runner_args: The arguments the runner started this session with.
+
+    Returns:
+        The validated call body, or None for a browser or console session.
+
+    Raises:
+        RuntimeError: When a call body is malformed or an environment variable is unset.
     """
     body = getattr(runner_args, "body", None)
     if not isinstance(body, dict) or not body.get("direction"):
@@ -675,17 +874,26 @@ async def _forward_carrier_call(call_sid: str, sip_uri: str) -> None:
     This is the one request in the whole project made in the carrier's own words,
     and it is call control rather than provisioning: the call already exists and
     the carrier just handed it to us. One HTTPS request, so no carrier SDK.
+
+    Args:
+        call_sid: The carrier's id for the live call.
+        sip_uri: The room's SIP address.
+
+    Raises:
+        RuntimeError: When the carrier answers with an error status.
     """
     account_sid = os.environ[{{pyq .DailyCarrier.AccountSIDEnv}}]
     url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
     twiml = f"<Response><Dial><Sip>{sip_uri}</Sip></Dial></Response>"
     auth = aiohttp.BasicAuth(account_sid, os.environ[{{pyq .DailyCarrier.AuthTokenEnv}}])
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, auth=auth, data={"Twiml": twiml}) as response:
-            if response.status >= 400:
-                raise RuntimeError(
-                    f"carrier call update failed with {response.status}: {await response.text()}"
-                )
+    async with (
+        aiohttp.ClientSession() as session,
+        session.post(url, auth=auth, data={"Twiml": twiml}) as response,
+    ):
+        if response.status >= 400:
+            raise RuntimeError(
+                f"carrier call update failed with {response.status}: {await response.text()}"
+            )
 {{end}}{{end}}{{end}}
 {{if .TypedState}}
 {{.TypedState.Source}}
@@ -698,9 +906,21 @@ class State:
 {{range .Variables}}    {{.Name}}: {{.PyType}} = {{.Default}}{{if .Description}}  # {{.Description}}{{end}}
 {{end}}
 {{if .CallStartVars}}
-def _dispatched_call_start(call_context: dict | None) -> dict:
-    """Input variables arrive with the dispatch: the call context on a telephony
-    route, or UNMUTE_CALL_START for a local `unmute dev --var` session."""
+def _dispatched_call_start(call_context: dict[str, Any] | None) -> dict[str, Any]:
+    """Read the input variables that arrived with the dispatch.
+
+    They come in the call context on a telephony route, or in UNMUTE_CALL_START
+    for a local `unmute dev --var` session.
+
+    Args:
+        call_context: The call's context, or None when there is none.
+
+    Returns:
+        The dispatched values, the dispatch winning over the environment.
+
+    Raises:
+        RuntimeError: When UNMUTE_CALL_START is not a JSON object.
+    """
     values = dict((call_context or {}).get("call_start", {}))
     raw = os.getenv("UNMUTE_CALL_START")
     if raw:
@@ -711,20 +931,30 @@ def _dispatched_call_start(call_context: dict | None) -> dict:
         if not isinstance(supplied, dict):
             raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
         # The dispatch wins: env is the local stand-in for it.
-        for name, value in supplied.items():
-            values.setdefault(name, value)
+        values |= {name: value for name, value in supplied.items() if name not in values}
     return values
 
 {{end}}
-def build_state(call_context: dict | None = None) -> State:
+def build_state(call_context: dict[str, Any] | None = None) -> State:
+    """Build the call's typed variables from the dispatch and the call's own facts.
+
+    Args:
+        call_context: The call's context, or None when there is none.
+
+    Returns:
+        The state every agent on the call shares.
+{{if .RequiredCallStart}}
+    Raises:
+        RuntimeError: When a required input variable was not dispatched.
+{{end}}    """
     state = State()
-    missing = []
 {{if .CallStartVars}}    call_start = _dispatched_call_start(call_context)
 {{range .CallStartVars}}    if {{pyq .Name}} in call_start:
-        setattr(state, {{pyq .Name}}, call_start[{{pyq .Name}}])
-{{if .Required}}    else:
-        missing.append({{pyq .Name}})
-{{end}}{{end}}{{end}}{{if .SystemSourceVars}}    # A variable declaring `source: <call fact>` reads the fact the route lifted
+        state.{{.Name}} = call_start[{{pyq .Name}}]
+{{end}}{{if .RequiredCallStart}}    missing = [
+        name for name in ({{range .RequiredCallStart}}{{pyq .}}, {{end}}) if name not in call_start
+    ]
+{{end}}{{end}}{{if .SystemSourceVars}}    # A variable declaring `source: <call fact>` reads the fact the route lifted
     # into call_context above. Shaped like the call_start loop, and separate from
     # it for the reason the two doors are separate: the dispatch payload and the
     # carrier's own facts are different things arriving from different places.
@@ -735,21 +965,33 @@ def build_state(call_context: dict | None = None) -> State:
     # and hold an empty string on every live call.
 {{range .SystemSourceVars}}    _value = (call_context or {}).get({{pyq .Source}})
     if _value:
-        setattr(state, {{pyq .Name}}, _value)
-{{end}}{{end}}    if missing:
+        state.{{.Name}} = _value
+{{end}}{{end}}{{if .RequiredCallStart}}    if missing:
         raise RuntimeError(f"Missing call context fields: {', '.join(missing)}")
-    return state
+{{end}}    return state
 {{end}}{{if .NeedsRender}}
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
-def _render(text: str, state, *, quote_values: bool = False, site: str = "") -> str:
+def _render(text: str, state: Any, *, quote_values: bool = False, site: str = "") -> str:
     """Substitute each variable token from the call state (SCHEMA 4.4 templates).
-    Only substituted values are URL-encoded, never the surrounding literal."""
+
+    Only substituted values are URL-encoded, never the surrounding literal.
+
+    Args:
+        text: The template, with variable tokens in double braces.
+        state: The call state, or None to leave the text as written.
+        quote_values: Whether to URL-encode each substituted value.
+        site: The prompt site, which picks the variables a path may read.
+
+    Returns:
+        The text with every token replaced.
+    """
     if state is None:
         return text
 
     def _one(match: re.Match[str]) -> str:
+        """Render one token."""
 {{- if .TypedState}}
         # Through _state_lookup, which walks a path emitted as one flat name, and
         # _state_text, so a declared value renders as compact JSON and an empty
@@ -765,9 +1007,20 @@ def _render(text: str, state, *, quote_values: bool = False, site: str = "") -> 
     return _TEMPLATE.sub(_one, text)
 {{end}}{{if .NeedsRefusal}}
 
-def _refusal(tool: str, state, needed: list[tuple[str, str]]) -> str:
-    """Refuse a call whose injected variables are still unset (V4): the model is
-    told what to do about each one, and no half-formed request is ever sent."""
+def _refusal(tool: str, state: Any, needed: list[tuple[str, str]]) -> str:
+    """Refuse a call whose injected variables are still unset (V4).
+
+    The model is told what to do about each one, and no half-formed request is
+    ever sent.
+
+    Args:
+        tool: The tool being called.
+        state: The call state the variables are read from.
+        needed: Each required variable name with the hint that says how to set it.
+
+    Returns:
+        The refusal text, or an empty string when every variable is set.
+    """
     unset = [
         (name, hint)
         for name, hint in needed
@@ -789,28 +1042,70 @@ def _refusal(tool: str, state, needed: list[tuple[str, str]]) -> str:
 {{.Prefetch}}
 {{end}}{{if .NeedsEndAfter}}
 async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
+    """End the call once `timeout_secs` have passed.
+
+    Args:
+        worker: The pipeline worker to send the end frame to.
+        timeout_secs: How long to wait first.
+    """
     await asyncio.sleep(timeout_secs)
     await worker.queue_frame(EndFrame())
+
+
+def _schedule_end_after(worker: PipelineWorker, timeout_secs: float) -> None:
+    """Schedule `_end_after` and hold its task until it finishes.
+
+    Args:
+        worker: The pipeline worker to send the end frame to.
+        timeout_secs: How long to wait first.
+    """
+    task = asyncio.create_task(_end_after(worker, timeout_secs))
+    _END_TASKS.add(task)
+    task.add_done_callback(_END_TASKS.discard)
 {{end}}{{if .AuthKinds.Any}}
 # One helper per auth scheme a tool actually declares; the token is read from the
 # environment at call time and never appears in the package.
 {{if .AuthKinds.Bearer}}
 def _bearer(env: str) -> dict[str, str]:
-    """auth: bearer — the Authorization header read from the tool's token_env."""
+    """Build the `auth: bearer` Authorization header from the tool's token_env.
+
+    Args:
+        env: The environment variable holding the token, read at call time.
+
+    Returns:
+        The header to send with the request.
+    """
     return {"Authorization": "Bearer " + os.environ[env]}
 {{end}}{{if .AuthKinds.APIKey}}
 def _api_key(header: str, env: str) -> dict[str, str]:
-    """auth: api_key — the token verbatim in its own header."""
+    """Build the `auth: api_key` header, the token verbatim in its own header.
+
+    Args:
+        header: The header name.
+        env: The environment variable holding the token, read at call time.
+
+    Returns:
+        The header to send with the request.
+    """
     return {header: os.environ[env]}
 {{end}}{{end}}{{if .NeedsMCPChooser}}
 
-def _mcp_params(url: str, headers: dict[str, str] | None = None):
+def _mcp_params(
+    url: str, headers: dict[str, str] | None = None
+) -> StreamableHttpParameters | SseServerParameters:
     """Pick the transport for a source that did not state one.
 
     ponytail: this mirrors livekit-agents' own auto-detect instead of adding a
     knob, so one server URL behaves the same on both targets: a path ending in
     /mcp is streamable HTTP, anything else is SSE. Write `transport:` in the
     tool file to decide it yourself.
+
+    Args:
+        url: The server URL.
+        headers: Headers to send, such as an Authorization header.
+
+    Returns:
+        The connection parameters for the chosen transport.
     """
     params_cls = StreamableHttpParameters if url.rstrip("/").endswith("/mcp") else SseServerParameters
     return params_cls(url=url, headers=headers, timeout={{mcpTimeout}})
@@ -819,7 +1114,7 @@ def _mcp_params(url: str, headers: dict[str, str] | None = None):
 # --- context shaping ---------------------------------------------------------
 {{end}}
 {{- if .NeedsSpeechOnly}}
-def _speech_only(messages: list) -> list[dict]:
+def _speech_only(messages: list[Any]) -> list[Any]:
     """history: messages, what was said out loud and no tool record.
 
     A tool record cannot be half-dropped. In LLMContext's standard message
@@ -834,24 +1129,33 @@ def _speech_only(messages: list) -> list[dict]:
     called a tool keeps what it said, because that half is what this value is
     for. LiveKit needs none of this: .messages() holds no function-call items,
     so its filter drops both halves already.
+
+    Args:
+        messages: The context's messages, provider metadata included.
+
+    Returns:
+        The user and assistant turns with every tool record removed.
     """
-    kept: list[dict] = []
-    for message in messages:
+    said = [
+        message
+        for message in messages
         # Provider metadata (including Gemini thought signatures) is not speech.
-        if not isinstance(message, dict):
-            continue
-        if message.get("role") not in ("user", "assistant"):
-            continue
-        if not message.get("tool_calls"):
-            kept.append(message)
-            continue
-        spoken = {key: value for key, value in message.items() if key != "tool_calls"}
-        if spoken.get("content"):
-            kept.append(spoken)
-    return kept
+        if isinstance(message, dict) and message.get("role") in ("user", "assistant")
+    ]
+    spoken = [
+        {key: value for key, value in message.items() if key != "tool_calls"}
+        if message.get("tool_calls")
+        else message
+        for message in said
+    ]
+    return [
+        turn
+        for message, turn in zip(said, spoken, strict=True)
+        if not message.get("tool_calls") or turn.get("content")
+    ]
 {{end}}
 {{- if .NeedsLastN}}
-def _last_n(messages: list, limit: int) -> list:
+def _last_n(messages: list[Any], limit: int) -> list[Any]:
     """history: last_n, the newest `limit` entries with no orphaned tool result.
 
     LLMContext mixes standard dicts with provider metadata and has no truncate(),
@@ -860,17 +1164,25 @@ def _last_n(messages: list, limit: int) -> list:
     assistant call fell outside it. A tool message with no matching call is a
     request the provider rejects, so it goes. An assistant message carrying
     tool calls is safe at the front: its results follow it.
+
+    Args:
+        messages: The context's messages, provider metadata included.
+        limit: How many of the newest entries to keep.
+
+    Returns:
+        The window, without tool results that lost their call.
     """
     window = messages[-limit:] if limit > 0 else []
-    kept = []
-    leading = True
-    for message in window:
-        if isinstance(message, dict):
-            if leading and message.get("role") == "tool":
-                continue
-            leading = False
-        kept.append(message)
-    return kept
+    # The leading run ends at the first dict that is not a tool result.
+    first = next(
+        (i for i, m in enumerate(window) if isinstance(m, dict) and m.get("role") != "tool"),
+        len(window),
+    )
+    return [
+        message
+        for i, message in enumerate(window)
+        if i >= first or not (isinstance(message, dict) and message.get("role") == "tool")
+    ]
 {{end}}{{if .NeedsAnnounceChoice}}
 
 # --- announcements ---------------------------------------------------------
@@ -885,7 +1197,15 @@ _ANNOUNCE_LAST: dict[str, str] = {}
 
 
 def _announce(key: str, lines: list[str]) -> str:
-    """One of these lines, never the one this key used last."""
+    """Pick one of these lines, never the one this key used last.
+
+    Args:
+        key: The announcement site, which remembers its own last line.
+        lines: The alternatives the author wrote.
+
+    Returns:
+        The line to speak.
+    """
     # ponytail: process wide, not per call. Two concurrent callers can only
     # affect each other's variety, which is the whole thing this is for.
     choices = [line for line in lines if line != _ANNOUNCE_LAST.get(key)] or lines
@@ -905,15 +1225,32 @@ class _HandoffWorker({{if and .Tracing .NeedsFunctionCalls}}TracedLLMWorker{{els
     """Finish one exact source-side cue before activating the next worker."""
 
     async def _announce_handoff(self, announcement: str) -> None:
+        """Speak the cue and wait until it has finished playing.
+
+        Args:
+            announcement: The exact line to say before the handoff.
+
+        Raises:
+            TimeoutError: When the cue does not finish within HANDOFF_CUE_TIMEOUT_SECS.
+        """
         self._handoff_started = False
         self._handoff_finished = asyncio.Event()
         await PipelineWorker.queue_frame(self, TTSSpeakFrame(announcement))
         try:
-            await asyncio.wait_for(self._handoff_finished.wait(), timeout=30.0)
+            await asyncio.wait_for(
+                self._handoff_finished.wait(), timeout=HANDOFF_CUE_TIMEOUT_SECS
+            )
         finally:
             self._handoff_finished = None
 
-    async def queue_frame(self, frame, *args, **kwargs) -> None:
+    async def queue_frame(self, frame: Any, *args: Any, **kwargs: Any) -> None:
+        """Note when the cue starts and stops playing, then queue the frame as usual.
+
+        Args:
+            frame: The frame to queue.
+            *args: Passed to the base worker.
+            **kwargs: Passed to the base worker.
+        """
         finished = getattr(self, "_handoff_finished", None)
         if finished:
             if isinstance(frame, BotStartedSpeakingFrame):
@@ -922,20 +1259,30 @@ class _HandoffWorker({{if and .Tracing .NeedsFunctionCalls}}TracedLLMWorker{{els
                 finished.set()
         await super().queue_frame(frame, *args, **kwargs)
 
-    async def process_deferred_tool_frames(self, frames):
+    async def process_deferred_tool_frames(self, frames: list[Any]) -> list[Any]:
+        """Drop deferred tool frames while this worker is not the active one.
+
+        Args:
+            frames: The frames held back while a tool ran.
+
+        Returns:
+            The frames to release, empty while inactive.
+        """
         if not self.active:
             return []
         return await super().process_deferred_tool_frames(frames)
 {{end}}
 {{range .Agents}}
 {{if .Live}}
-def build_{{.Name}}_live():
+def build_{{.Name}}_live() -> Any:
+    """Build the live service for this agent."""
     # One service where the transcriber, the model and the synthesizer sat. Its
     # instructions, model and voice are fixed once the session starts, and its
     # tools and reasoning run on the backend named in the delegation.
     return {{template "svc" .LLM.Call}}
 {{else if .Realtime}}
-def build_{{.Name}}_realtime():
+def build_{{.Name}}_realtime() -> Any:
+    """Build the realtime service for this agent."""
     # One service over one websocket session, where the transcriber, the model
     # and{{if $.HalfCascade}}, until a synthesizer was bound in front of it,{{end}} the synthesizer sat. The model id rides the socket URL as a
     # query parameter rather than a session field, which is why it is a setting
@@ -943,25 +1290,40 @@ def build_{{.Name}}_realtime():
     return {{template "svc" .LLM.Call}}
 {{if $.HalfCascade}}
 
-def build_{{.Name}}_tts():
+def build_{{.Name}}_tts() -> TTSService:
+    """Build the voice that speaks what the realtime model writes."""
     # The half cascade: the model above writes text and this speaks it.
     return {{template "svc" .TTS.Call}}
 {{end}}{{else}}
-def build_{{.Name}}_llm(state=None{{if $.Slng.Any}}, *, slng_session_id{{end}}):
+def build_{{.Name}}_llm(
+    state: {{if $.Variables}}State | None{{else}}None{{end}} = None{{if $.Slng.Any}},
+    *,
+    slng_session_id: str,{{end}}
+) -> LLMService[Any]:
+    """Build the language model for this agent.
+
+    Args:
+        state: The call state, read by the router for its template variables.
+{{if $.Slng.Any}}        slng_session_id: This call's SLNG router session id.
+{{end}}
+    Returns:
+        The configured LLM service.
+    """
     return {{template "svc" .LLM.Call}}
 
 
-def build_{{.Name}}_tts():
+def build_{{.Name}}_tts() -> TTSService:
+    """Build the voice for this agent.
+
+    Returns:
+        The configured TTS service.
+    """
     return {{template "svc" .TTS.Call}}
 {{end}}{{if $.Inline}}{{range .Tools}}
 
 @_direct_tool{{.Decorator}}
-async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}):
-    """{{.Description}}{{if .Args}}
-
-    Args:
-{{range .Args}}        {{.Name}} ({{.PyType}}):{{if .Description}} {{.Description}}{{end}}{{if .Enum}} One of: {{join .Enum ", "}}.{{end}}
-{{end}}    """{{else}}"""{{end}}
+async def {{.MethodName}}({{toolDefNoqa .Description .Args}}params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}) -> None:
+    {{toolDoc 4 .Description .Args}}
 {{if .Builtin}}{{if .Instructions}}    await params.llm.push_frame(
         LLMMessagesAppendFrame(
             [{"role": "developer", "content": {{pyq .Instructions}}}],
@@ -985,7 +1347,7 @@ async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: 
             {{.URLExpr}},
 {{if .Auth}}            headers={{.Auth.Expr}},
 {{end}}            json={{.JSONBody}},
-            timeout=30.0,
+            timeout=WEBHOOK_TIMEOUT_SECS,
         )
         response.raise_for_status()
         await params.result_callback(response.json())
@@ -995,8 +1357,26 @@ async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: 
 class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.Tracing (or $.NeedsFunctionCalls $.NeedsMCP)}}TracedLLMWorker{{else}}LLMWorker{{end}}):
     """Agent: {{.Name}}."""
 
-    def __init__(self, state=None, context=None, call_context=None, dev_metrics=None{{if $.Slng.Any}}, *, slng_session_id{{end}}) -> None:
-{{if $.Variables}}        self.state = state
+    def __init__(
+        self,
+        state: {{if $.Variables}}State | None{{else}}None{{end}} = None,
+        context: LLMContext | None = None,
+        call_context: dict[str, Any] | None = None,
+        dev_metrics: DevReporter | None = None,
+{{if $.Slng.Any}}        *,
+        slng_session_id: str,
+{{end}}    ) -> None:
+        """Build this agent's model and voice and join the call's shared context.
+
+        Args:
+            state: The call's typed variables, shared by every agent.
+            context: The LLM context every agent on the call shares.
+            call_context: The call's own facts and transport handles.
+            dev_metrics: The dev-page reporter, or None outside `unmute dev`.
+{{if $.Slng.Any}}            slng_session_id: This call's SLNG router session id.
+{{end}}        """
+{{if $.Variables}}        # Always supplied when the package declares variables; None only in a test.
+        self.state: State = cast(State, state)
 {{end}}        if context is not None:
             self.context = context
 {{if $.HasColdTransfer}}        self.call_context = call_context if call_context is not None else {}
@@ -1020,7 +1400,8 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         self._response_calls: tuple[str, ...] = ()
 
         @llm.event_handler("on_function_calls_started")
-        async def _record_calls(service, function_calls):  # noqa: ARG001
+        async def _record_calls(service: Any, function_calls: list[Any]) -> None:
+            """Remember the tools the model called in this response."""
             self._response_calls = tuple(call.function_name for call in function_calls)
 {{end}}
 {{if .MCPSources}}        # MCP tool sources. The clients are built here and connected in
@@ -1029,14 +1410,26 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         self._mcp_clients = [
 {{range .MCPSources}}            {{template "mcp_client" .}},
 {{end}}        ]
-        self._mcp_tools: list = []
+        self._mcp_tools: list[Any] = []
 {{end}}
-    async def queue_frame(self, frame, *args, **kwargs) -> None:
+    async def queue_frame(self, frame: Any, *args: Any, **kwargs: Any) -> None:
+        """Stamp the frame for the dev page, then queue it as usual.
+
+        Args:
+            frame: The frame to queue.
+            *args: Passed to the base worker.
+            **kwargs: Passed to the base worker.
+        """
         if self._dev:
             self._dev.stamp(frame)
         await super().queue_frame(frame, *args, **kwargs)
 
-    async def on_activated(self, args) -> None:
+    async def on_activated(self, args: dict[str, Any] | None) -> None:
+        """Set this agent's prompt and scope, then ask for its first reply when told to.
+
+        Args:
+            args: The activation arguments the previous agent or the entry passed.
+        """
         token = self._dev.enter_activation(args) if self._dev else None
         try:
             await self.queue_frame(LLMUpdateSettingsFrame(
@@ -1065,24 +1458,37 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}        )
 
     async def close_mcp(self) -> None:
-        await _close_mcp((client.close() for client in self._mcp_clients))
+        """Close every MCP client this agent opened."""
+        await _close_mcp(client.close() for client in self._mcp_clients)
 
-    def build_tools(self):
+    def build_tools(self) -> list[Any]:
+        """List the framework's tools plus the ones the MCP servers exposed."""
         return super().build_tools() + self._mcp_tools
 {{end}}{{if $.NeedsStateBind}}
-    def _bind_state(self, handler):
-        """Give a module-level flows handler this worker's call state, so a task
-        tool can read injected variables the same way an agent tool does."""
+    def _bind_state(
+        self, handler: Callable[..., Awaitable[Any]]
+    ) -> Callable[[Any, FlowManager], Awaitable[Any]]:
+        """Give a module-level flows handler this worker's call state.
 
-        async def _bound(args, flow_manager):
+        A task tool can then read injected variables the same way an agent tool does.
+
+        Args:
+            handler: The module-level flows handler.
+
+        Returns:
+            A handler with the call state already bound.
+        """
+
+        async def _bound(args: Any, flow_manager: FlowManager) -> Any:
+            """Call the handler with this worker's state."""
             return await handler(args, flow_manager, state=self.state)
 
         return _bound
 {{end}}
 {{range .Transfers}}
     @_direct_tool(cancel_on_interruption=False)
-    async def {{.MethodName}}(self, params: FunctionCallParams):
-        """{{.When}}"""
+    async def {{.MethodName}}(self, params: FunctionCallParams) -> None:
+        {{handoffDoc 8 .When}}
 {{if .Announce}}        await self._announce_handoff({{pyq .Announce}})
 {{end}}{{if .CtxExpr}}        # context.history on this handoff. One LLMContext is shared for the whole
         # call, so the receiver is given the shaped list rather than a copy.
@@ -1099,12 +1505,8 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         )
 {{end}}{{range .Tools}}
     @_direct_tool{{.Decorator}}
-    async def {{.MethodName}}(self, params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}):
-        """{{.Description}}{{if .Args}}
-
-        Args:
-{{range .Args}}            {{.Name}} ({{.PyType}}):{{if .Description}} {{.Description}}{{end}}{{if .Enum}} One of: {{join .Enum ", "}}.{{end}}
-{{end}}        """{{else}}"""{{end}}
+    async def {{.MethodName}}({{toolDefNoqa .Description .Args}}self, params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}) -> None:
+        {{toolDoc 8 .Description .Args}}
 {{if .ColdDestination}}        logger.info("human transfer fired: {{.MethodName}} (cold)")
         transfer_result = self.call_context.get("_transfer_result")
         if transfer_result is not None:
@@ -1140,7 +1542,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                 phone_call["call_id"],
                 _transfer_twiml({{.ColdDestination}}, {{.RingTimeoutSecs}}),
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - any failure leaves the call untouched
             # The request failed, so the call is untouched and the caller is still
             # here listening. Tell them, and never report a transfer that did not
             # happen.
@@ -1155,7 +1557,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                     )
                 )
                 await params.result_callback(self.call_context["_transfer_result"])
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001 - held, then re-raised once the call has ended
                 failure_error = exc
             try:
                 await params.pipeline_worker.end()
@@ -1164,7 +1566,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                     raise
                 logger.exception("failed to end call after transfer failure")
             if failure_error is not None:
-                raise failure_error
+                raise failure_error  # noqa: B904 - the transfer error is logged above
 {{else}}            self.call_context["_transfer_result"] = {"failed": f"The transfer could not be completed ({exc}). Tell the caller and keep helping them."}
             await params.llm.push_frame(
                 LLMMessagesAppendFrame(
@@ -1200,7 +1602,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # until the call ends; the README states that cost.
         try:
             error = await transport.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - the transport may raise or return a failure; both are handled below
             error = exc
         if error is not None:
             # The transport can return or raise a failure (T5). Either way the
@@ -1217,7 +1619,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                     )
                 )
                 await params.result_callback(self.call_context["_transfer_result"])
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001 - held, then re-raised once the call has ended
                 failure_error = exc
             try:
                 await params.pipeline_worker.end()
@@ -1270,15 +1672,15 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                 {{.URLExpr}},
 {{if .Auth}}                headers={{.Auth.Expr}},
 {{end}}                json={{.JSONBody}},
-                timeout=30.0,
+                timeout=WEBHOOK_TIMEOUT_SECS,
             )
             response.raise_for_status()
             await params.result_callback(response.json())
 {{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.pipeline_worker.end()
 {{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{$agentSlngHeaders := .SlngHeaders}}{{range $d := .Delegates}}
     @_direct_tool
-    async def {{$d.MethodName}}(self, params: FunctionCallParams):
-        """{{$d.When}}"""
+    async def {{$d.MethodName}}(self, params: FunctionCallParams) -> None:
+        {{handoffDoc 8 $d.When}}
         # Already ran, and nobody has spoken since. Then this is not a second
         # request, it is the model reading its own completed result as though it
         # were one. On a live call on 2026-09-16 (trace 917975e9, LiveKit, same
@@ -1359,24 +1761,43 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}{{if $d.RuntimeChain}}        await flow.initialize(await self._{{$d.MethodName}}_node(self._{{$d.MethodName}}_active_step))
 {{else}}        await flow.initialize(await self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
 {{end}}{{if $d.RuntimeChain}}
-    async def _{{$d.MethodName}}_node(self, name) -> NodeConfig:
-        """One step's node by name, because the chain is decided at run time."""
+    async def _{{$d.MethodName}}_node(self, name: str) -> NodeConfig:
+        """Build one step's node by name, because the chain is decided at run time.
+
+        Args:
+            name: The step to enter.
+
+        Returns:
+            The step's flow node.
+        """
         return await {
 {{range $d.StepTasks}}            {{pyq .Name}}: self._{{$d.MethodName}}_node_{{.Name}},
 {{end}}        }[name]()
 
-    def _{{$d.MethodName}}_next(self, name):
-        """The step after this one in this invocation's plan, or None."""
+    def _{{$d.MethodName}}_next(self, name: str) -> str | None:
+        """Find the step after this one in this invocation's plan.
+
+        Args:
+            name: The step that just finished.
+
+        Returns:
+            The next step's name, or None when this was the last.
+        """
         plan = self._{{$d.MethodName}}_plan
         position = plan.index(name) + 1
         return plan[position] if position < len(plan) else None
 {{end}}{{if $d.CarriesTurn}}
-    def _{{$d.MethodName}}_settle(self):
-        """The running mutation is over, one way or another."""
+    def _{{$d.MethodName}}_settle(self) -> None:
+        """Mark the running mutation over, one way or another."""
         self._{{$d.MethodName}}_pending = False
         self._{{$d.MethodName}}_settled.set()
 {{end}}{{range $t := $d.StepTasks}}
     async def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
+        """Build the flow node for the {{$t.Name}} step.
+
+        Returns:
+            The node that runs this step's prompt and tools.
+        """
 {{if $d.CarriesTurn}}        # This step's own ending, whatever the step before it did. Held on the
         # flow rather than the step, so the tool that ended the previous step
         # closed this one's mutations too: a verified caller was told their
@@ -1459,17 +1880,30 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{if or $d.Isolated $t.Reset}}            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
 {{end}}        )
 
-{{range $x := $t.Transfers}}    async def _{{$d.MethodName}}_transfer_{{$t.Name}}_{{$x.MethodName}}(self, args, flow_manager):
+{{range $x := $t.Transfers}}    async def _{{$d.MethodName}}_transfer_{{$t.Name}}_{{$x.MethodName}}(
+        self, args: Any, flow_manager: FlowManager
+    ) -> tuple[dict[str, Any], Any]:
+        """Hand the caller to {{$x.To}} from inside the {{$t.Name}} step.
+
+        Args:
+            args: The arguments the model supplied, none for a handoff.
+            flow_manager: The flow this step runs in.
+
+        Returns:
+            The result the model sees, and whether a reply is generated.
+        """
         if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
-{{if $t.TerminalTools}}        if self._{{$d.MethodName}}_pending or any(name in {{$t.TerminalTools}} for name in self._response_calls):
+{{if $t.TerminalTools}}        if self._{{$d.MethodName}}_pending or not {{$t.TerminalTools}}.isdisjoint(self._response_calls):
             # A tool that ends this step is running, or was called in the same
             # response and has not started yet. The caller asked for two things
             # at once, and the step's own work has to be committed before the
             # caller is moved.
             try:
-                await asyncio.wait_for(self._{{$d.MethodName}}_settled.wait(), timeout=30.0)
-            except asyncio.TimeoutError:
+                await asyncio.wait_for(
+                    self._{{$d.MethodName}}_settled.wait(), timeout=TERMINAL_SETTLE_TIMEOUT_SECS
+                )
+            except TimeoutError:
                 self._{{$d.MethodName}}_settle()
             if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
                 # The flow moved on while this handoff waited.
@@ -1484,7 +1918,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             flow_messages = copy.deepcopy(self.context.get_messages())
             flow_tools = self.context.tools
 {{if $x.Announce}}            await self._announce_handoff({{pyq $x.Announce}})
-{{end}}            messages, tools = self._{{$d.MethodName}}_snapshot
+{{end}}            _, tools = self._{{$d.MethodName}}_snapshot
             self.context.set_messages({{$x.CtxExpr}})
             self.context.set_tools(tools)
 {{if $agentSlngHeaders}}            # This worker is about to be deactivated with the step's cache scope
@@ -1522,12 +1956,21 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}            raise
         return {"transferred": True}, NO_RESPONSE
 
-{{end}}{{range $t.Terminals}}    async def _{{$d.MethodName}}_terminal_{{$t.Name}}_{{.Tool}}(self, args, flow_manager):
+{{end}}{{range $t.Terminals}}    async def _{{$d.MethodName}}_terminal_{{$t.Name}}_{{.Tool}}(
+        self, args: Any, flow_manager: FlowManager
+    ) -> tuple[dict[str, Any], Any]:
         """Run {{.Tool}} and end this step when it says it did the work.
 
         The result never reaches the model on a success: the tool has already
         made the decision the model would have been asked to confirm. Anything
         else goes back as an ordinary result and the step stays open.
+
+        Args:
+            args: The arguments the model supplied.
+            flow_manager: The flow this step runs in.
+
+        Returns:
+            The result the model sees, and whether a reply is generated.
         """
         if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
@@ -1578,7 +2021,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             }, None
         self._{{$d.MethodName}}_settle()
         logger.info({{pyq (printf "step %s ended on %s" $t.Name .Tool)}})
-{{if .Transfers}}        if any(name in {{.Transfers}} for name in self._response_calls):
+{{if .Transfers}}        if not {{.Transfers}}.isdisjoint(self._response_calls):
             # A handoff was called in the same response. It owns the ending: the
             # save is committed, and advancing here would race its transition.
             # Recorded first, because the handoff reads this to know the step's
@@ -1590,7 +2033,18 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # wrote a second entry onto every list an assign appends to.
         return await self._{{$d.MethodName}}_advance_{{$t.Name}}(_values)
 
-{{end}}    async def _{{$d.MethodName}}_finish_{{$t.Name}}(self, args, flow_manager):
+{{end}}    async def _{{$d.MethodName}}_finish_{{$t.Name}}(
+        self, args: Any, flow_manager: FlowManager
+    ) -> tuple[dict[str, Any], Any]:
+        """Record this step's result and move the flow on.
+
+        Args:
+            args: The result fields the model supplied.
+            flow_manager: The flow this step runs in.
+
+        Returns:
+            The result the model sees, and the next node or None.
+        """
         if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
             return {"status": "already handled"}, NO_RESPONSE
 {{if $t.Terminals}}        if self._{{$d.MethodName}}_pending:
@@ -1598,8 +2052,10 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             # decides the step. Wait for it rather than ending the step under it
             # and leaving what it did unrecorded.
             try:
-                await asyncio.wait_for(self._{{$d.MethodName}}_settled.wait(), timeout=30.0)
-            except asyncio.TimeoutError:
+                await asyncio.wait_for(
+                    self._{{$d.MethodName}}_settled.wait(), timeout=TERMINAL_SETTLE_TIMEOUT_SECS
+                )
+            except TimeoutError:
                 self._{{$d.MethodName}}_settle()
             if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
                 return {"status": "already handled"}, NO_RESPONSE
@@ -1622,8 +2078,17 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
 {{if $t.Terminals}}        return await self._{{$d.MethodName}}_advance_{{$t.Name}}(_values)
 
-    async def _{{$d.MethodName}}_advance_{{$t.Name}}(self, _values):
-        """Move the flow on with this step's saved values: the next step, the owner, or the end."""
+    async def _{{$d.MethodName}}_advance_{{$t.Name}}(
+        self, _values: dict[str, Any]
+    ) -> tuple[dict[str, Any], Any]:
+        """Move the flow on with this step's saved values: the next step, the owner, or the end.
+
+        Args:
+            _values: The values this step saved.
+
+        Returns:
+            The result the model sees, and the next node or None.
+        """
 {{end}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = _values
 {{else}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
 {{end}}{{if $d.RuntimeChain}}        _next = self._{{$d.MethodName}}_next({{pyq $t.Name}})
@@ -1679,7 +2144,12 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                 raise error from rollback_error
             raise
 
-    async def _{{$d.MethodName}}_complete_{{$t.Name}}(self):
+    async def _{{$d.MethodName}}_complete_{{$t.Name}}(self) -> tuple[dict[str, Any], Any]:
+        """Hand control back to the owner, or end the call, once the last step is done.
+
+        Returns:
+            The result the model sees, and the end node or None.
+        """
 {{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{end}}{{if eq $d.Then "end"}}{{if $agentSlngHeaders}}        # The terminal node's goodbye is spoken by this agent, not by the step,
         # so the owner's cache scope goes back first.
         await self.queue_frame(LLMUpdateSettingsFrame(
@@ -1710,10 +2180,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             ),
             deactivate_self=True,
         )
-{{else}}        self.context.set_messages(messages{{if $d.CarriesTurn}} + _carried_messages(self._{{$d.MethodName}}_carried_turn){{end}} + [{
-            "role": "developer",
-            "content": json.dumps(_group_status(self._{{$d.MethodName}}_results)),
-        }])
+{{else}}        self.context.set_messages([
+            *messages,
+{{if $d.CarriesTurn}}            *_carried_messages(self._{{$d.MethodName}}_carried_turn),
+{{end}}            {
+                "role": "developer",
+                "content": json.dumps(_group_status(self._{{$d.MethodName}}_results)),
+            },
+        ])
         self.context.set_tools(tools)
         # Counted after the restore, so a turn a step consumed and carried back
         # is included: that turn is the one the owner is about to read, and it
@@ -1722,6 +2196,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{end}}        return {"status": "ok"}, None
 {{end}}{{end}}{{end}}{{if eq $d.Then "end"}}
     def _{{$d.MethodName}}_end_node(self) -> NodeConfig:
+        """Build the closing node that says goodbye and ends the call."""
         # Terminal node: speak a brief closing line, then end_conversation ends
         # the call once its TTS drains (Flows built-in action; V4/B2).
         return NodeConfig(
@@ -1732,35 +2207,57 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         )
 {{end}}{{end}}
 {{end}}{{end}}{{if and (not .Inline) .HasFlows}}
-def _caller_turns(messages):
-    """How many turns the caller has taken in this message list.
+def _caller_turns(messages: list[Any]) -> int:
+    """Count the turns the caller has taken in this message list.
 
     Read by every delegate, not just the ones that carry a turn: it is the one
     signal that separates "they asked again" from "the model re-read its own
     finished work", which is what the re-entry guard compares.
+
+    Args:
+        messages: The context's messages.
+
+    Returns:
+        The number of user messages.
     """
     return sum(1 for message in messages if isinstance(message, dict) and message.get("role") == "user")
 
 
-{{if .NeedsTerminal}}def _newest_caller_message(messages):
-    """The caller turn a terminal tool call answered.
+{{if .NeedsTerminal}}def _newest_caller_message(messages: list[Any]) -> dict[str, Any] | None:
+    """Find the caller turn a terminal tool call answered.
 
     Carried back to the owner when the step ends on its own tool, because the
     owner never saw it: the step consumed the turn and the owner's snapshot was
     taken before it arrived.
+
+    Args:
+        messages: The context's messages.
+
+    Returns:
+        A copy of the newest user message, or None when there is none.
     """
-    for message in reversed(messages):
-        if isinstance(message, dict) and message.get("role") == "user":
-            return dict(message)
-    return None
+    return next(
+        (
+            dict(message)
+            for message in reversed(messages)
+            if isinstance(message, dict) and message.get("role") == "user"
+        ),
+        None,
+    )
 
 
-def _carried_messages(carried):
-    """That turn as a list to splice in, empty when there is nothing to carry.
+def _carried_messages(carried: dict[str, Any] | None) -> list[Any]:
+    """Wrap that turn as a list to splice in, empty when there is nothing to carry.
 
     Whether there is one was decided where it was captured, by counting the
     caller's turns against the owner's snapshot rather than matching text, so a
     caller who repeated a word is not read as having said it once.
+
+    Args:
+        carried: The turn captured for the owner, or None.
+
+    Returns:
+        A one-item list, or an empty one.
     """
     if not carried:
         return []
@@ -1768,22 +2265,52 @@ def _carried_messages(carried):
     return [carried]
 
 
-{{end}}def _settle_task_call(messages, name, status):
-    """Replace this invocation's running reply before restoring the owner."""
-    for message in reversed(messages):
-        if not isinstance(message, dict):
-            continue
-        for call in message.get("tool_calls", []):
-            if call.get("function", {}).get("name") == name:
-                for reply in messages:
-                    if isinstance(reply, dict) and reply.get("role") == "tool" and reply.get("tool_call_id") == call["id"]:
-                        reply["content"] = json.dumps(status)
-                return
+{{end}}def _settle_task_call(messages: list[Any], name: str, status: Any) -> None:
+    """Replace this invocation's running reply before restoring the owner.
+
+    Args:
+        messages: The owner's messages, edited in place.
+        name: The delegate tool whose call is being settled.
+        status: The result to record in place of the running reply.
+    """
+    running = next(
+        (
+            call
+            for message in reversed(messages)
+            if isinstance(message, dict)
+            for call in message.get("tool_calls", [])
+            if call.get("function", {}).get("name") == name
+        ),
+        None,
+    )
+    if running is None:
+        return
+    for reply in messages:
+        if (
+            isinstance(reply, dict)
+            and reply.get("role") == "tool"
+            and reply.get("tool_call_id") == running["id"]
+        ):
+            reply["content"] = json.dumps(status)
 
 
-def _flow_visit(worker, delegate, handler):
+def _flow_visit(
+    worker: Any, delegate: str, handler: Callable[..., Awaitable[Any]]
+) -> Callable[[Any, FlowManager], Awaitable[Any]]:
+    """Wrap a step handler so it does nothing once its flow has been left.
+
+    Args:
+        worker: The worker that owns the flow.
+        delegate: The delegate tool that started this flow.
+        handler: The step's handler.
+
+    Returns:
+        The guarded handler.
+    """
     visit = getattr(worker, "_" + delegate + "_visit", None)
-    async def invoke(args, flow_manager):
+
+    async def invoke(args: Any, flow_manager: FlowManager) -> Any:
+        """Run the handler only while this visit is still the current one."""
         if getattr(worker, "_" + delegate + "_visit", None) is not visit:
             return {"status": "already handled"}, NO_RESPONSE
         return await handler(args, flow_manager)
@@ -1795,8 +2322,8 @@ def _flow_visit(worker, delegate, handler):
 # re-registered function name always resolves to the same callable.
 {{range .FlowTools}}
 
-async def _flow_tool_{{.Name}}(args, flow_manager{{if .NeedsState}}, state=None{{end}}):
-    """{{.Description}}"""
+async def _flow_tool_{{.Name}}(args: Any, flow_manager: FlowManager{{if .NeedsState}}, state: Any = None{{end}}) -> Any:
+    {{flowToolDoc 4 .Description .NeedsState}}
 {{if .Needed}}    refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
     if refusal:
         return {"refused": refusal}
@@ -1817,13 +2344,13 @@ async def _flow_tool_{{.Name}}(args, flow_manager{{if .NeedsState}}, state=None{
         result = await result
     return result.model_dump() if hasattr(result, "model_dump") else result
 {{else}}    async with httpx.AsyncClient() as client:
-        response = await client.post({{.URLExpr}}, {{if .Auth}}headers={{.Auth.Expr}}, {{end}}json={**dict(args){{range .Inject}}, {{pyq .Key}}: {{.Expr}}{{end}}}, timeout=30.0)
+        response = await client.post({{.URLExpr}}, {{if .Auth}}headers={{.Auth.Expr}}, {{end}}json={**dict(args){{range .Inject}}, {{pyq .Key}}: {{.Expr}}{{end}}}, timeout=WEBHOOK_TIMEOUT_SECS)
         response.raise_for_status()
         return response.json()
 {{end}}{{end}}
 {{end}}
 # --- transport & run --------------------------------------------------------
-transport_params: dict = {
+transport_params: dict[str, Callable[[], TransportParams]] = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     # The runner assigns an inbound call's dial-in settings and Daily credentials
     # onto whatever this returns, so on the Daily route it has to be the params
@@ -1841,11 +2368,23 @@ transport_params: dict = {
 
 
 
-{{if not .SpeechToSpeech}}def build_stt():
+{{if not .SpeechToSpeech}}def build_stt() -> STTService:
+    """Build the transcriber.
+
+    Returns:
+        The configured STT service.
+    """
     return {{template "svc" .STT.Call}}
 {{end}}
 
-{{if .Inline}}{{$agent := index .Agents 0}}async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) -> None:
+{{if .Inline}}{{$agent := index .Agents 0}}async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev: DevReporter) -> None:
+    """Build the pipeline for one session and run it until the call ends.
+
+    Args:
+        transport: The transport the caller is connected on.
+        runner_args: The arguments the runner started this session with.
+        dev: The dev-page reporter that observes the session.
+    """
     require_env()
 {{if .Slng.Any}}    # One SLNG Context Router session id per call, passed as an argument from here
     # on. It groups this call's think requests for support and scopes nothing:
@@ -1995,7 +2534,8 @@ transport_params: dict = {
     )
 {{if .Inactivity}}
     @user_aggregator.event_handler("on_user_turn_idle")
-    async def on_user_turn_idle(aggregator):
+    async def on_user_turn_idle(aggregator: Any) -> None:
+        """Nudge the caller when they have gone quiet."""
 {{if .Live}}        # A later context frame never reaches a live session, so the nudge goes
         # in as spoken commentary: the model checks on the caller in its own words.
         await live.send_client_event(live_events.SessionCommentaryAppendEvent(
@@ -2027,10 +2567,11 @@ transport_params: dict = {
     # second. Without it an idle call is nudged forever and never hung up, which
     # on a phone line is a billed open call. The clock starts at the first idle
     # turn and is cancelled by the caller speaking again.
-    _idle_end: asyncio.Task | None = None
+    _idle_end: asyncio.Task[None] | None = None
 
     @user_aggregator.event_handler("on_user_turn_idle")
-    async def on_user_turn_idle_end(aggregator):
+    async def on_user_turn_idle_end(aggregator: Any) -> None:
+        """Start the clock that ends an idle call."""
         nonlocal _idle_end
         if _idle_end is None or _idle_end.done():
             _idle_end = asyncio.create_task(
@@ -2038,13 +2579,15 @@ transport_params: dict = {
             )
 
     @user_aggregator.event_handler("on_user_turn_started")
-    async def on_user_turn_started(aggregator, strategy):
+    async def on_user_turn_started(aggregator: Any, strategy: Any) -> None:
+        """Stop the hangup clock when the caller speaks again."""
         nonlocal _idle_end
         if _idle_end is not None and not _idle_end.done():
             _idle_end.cancel()
             _idle_end = None
 {{end}}{{end}}
-    async def start_session():
+    async def start_session() -> None:
+        """Open the call: the greeting, and the cap on how long it may run."""
 {{if .Live}}        # The live session starts on the first context frame, so the run is
         # queued whatever the greeting says. An opening line rides ahead of it as
         # a developer message: the service lifts a trailing one out of the
@@ -2060,23 +2603,32 @@ transport_params: dict = {
         # and the opening line is already in the context above.
         await worker.queue_frame(LLMRunFrame())
 {{else}}{{if .GreetingText}}        await worker.queue_frame(TTSSpeakFrame({{pyq .GreetingText}}))
-{{end}}{{end}}{{if gt .MaxDurationSecs 0}}        asyncio.create_task(_end_after(worker, {{.MaxDurationSecs}}))
+{{end}}{{end}}{{if gt .MaxDurationSecs 0}}        _schedule_end_after(worker, {{.MaxDurationSecs}})
 {{end}}{{if .EmptyStartSession}}        pass
 {{end}}
     @worker.rtvi.event_handler("on_client_ready")
-    async def on_client_ready(rtvi):
+    async def on_client_ready(rtvi: Any) -> None:
+        """Start the session once the browser client is ready."""
         await start_session()
 
     @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport, client):
+    async def on_client_disconnected(transport: BaseTransport, client: Any) -> None:
+        """Stop the runner when the caller leaves."""
         await runner.cancel()
 
     await runner.add_workers(worker)
     await runner.run()
 
-{{else}}async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) -> None:
+{{else}}async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev: DevReporter) -> None:
+    """Build the pipeline for one session and run it until the call ends.
+
+    Args:
+        transport: The transport the caller is connected on.
+        runner_args: The arguments the runner started this session with.
+        dev: The dev-page reporter that observes the session.
+    """
     require_env()
-    call_context = {}
+    call_context: dict[str, Any] = {}
 {{if .Slng.Any}}    # One SLNG Context Router session id per call, passed as an argument from here
     # on. It groups this call's think requests for support and scopes nothing:
     # the agent id is what scopes the router's cache, so this may differ freely
@@ -2140,7 +2692,8 @@ transport_params: dict = {
     # so every prompt they render already sees them.
     await _prefetch(state, call_context)
 {{end}}    agents = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(state=state, context=context, call_context=call_context, dev_metrics=dev{{if $.Slng.Any}}, slng_session_id=slng_session_id{{end}}){{end}}]
-{{if .NeedsMCP}}    mcp_agents = [
+{{if .NeedsMCP}}    # Only some agents hold MCP sources, so the list is not one class.
+    mcp_agents: list[Any] = [
 {{range $i, $a := .Agents}}{{if $a.MCPSources}}        agents[{{$i}}],
 {{end}}{{end}}    ]
 {{end}}    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
@@ -2244,7 +2797,8 @@ transport_params: dict = {
 {{end}}
 {{if .Inactivity}}
     @user_aggregator.event_handler("on_user_turn_idle")
-    async def on_user_turn_idle(aggregator):
+    async def on_user_turn_idle(aggregator: Any) -> None:
+        """Nudge the caller when they have gone quiet."""
         await aggregator.push_frame(
             LLMMessagesAppendFrame(
                 [{"role": "developer", "content": "The caller has gone quiet. Politely check if they are still there."}],
@@ -2256,10 +2810,11 @@ transport_params: dict = {
     # second. Without it an idle call is nudged forever and never hung up, which
     # on a phone line is a billed open call. The clock starts at the first idle
     # turn and is cancelled by the caller speaking again.
-    _idle_end: asyncio.Task | None = None
+    _idle_end: asyncio.Task[None] | None = None
 
     @user_aggregator.event_handler("on_user_turn_idle")
-    async def on_user_turn_idle_end(aggregator):
+    async def on_user_turn_idle_end(aggregator: Any) -> None:
+        """Start the clock that ends an idle call."""
         nonlocal _idle_end
         if _idle_end is None or _idle_end.done():
             _idle_end = asyncio.create_task(
@@ -2267,14 +2822,16 @@ transport_params: dict = {
             )
 
     @user_aggregator.event_handler("on_user_turn_started")
-    async def on_user_turn_started(aggregator, strategy):
+    async def on_user_turn_started(aggregator: Any, strategy: Any) -> None:
+        """Stop the hangup clock when the caller speaks again."""
         nonlocal _idle_end
         if _idle_end is not None and not _idle_end.done():
             _idle_end.cancel()
             _idle_end = None
 {{end}}{{end}}{{if and .HasColdTransfer (not .CloudWebsocket)}}
     @transport.event_handler("on_dialout_answered")
-    async def on_dialout_answered(transport, data):
+    async def on_dialout_answered(transport: Any, data: Any) -> None:
+        """Leave the call once the transfer target answers."""
         # Cold transfer: the human answered, so the bot leaves the call.
 {{if .DailyCarrier}}        if call_context.get("_transfer_result") is None:
             # No transfer is under way, so this is the outbound call this session
@@ -2287,7 +2844,8 @@ transport_params: dict = {
     if carrier_call and carrier_call["direction"] == "inbound":
 
         @transport.event_handler("on_dialin_ready")
-        async def on_dialin_ready(transport, sip_endpoint):
+        async def on_dialin_ready(transport: Any, sip_endpoint: str) -> None:
+            """Forward the carrier call into the room once Daily says it is live."""
             # Daily says which address the room is reachable on and that it is
             # live, both in this one event. Waiting for it is the point: the
             # address exists from the moment the room does, but a call sent there
@@ -2302,7 +2860,7 @@ transport_params: dict = {
             call_forwarded = True
             try:
                 await _forward_carrier_call(carrier_call["call_sid"], sip_endpoint)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - logged by name; the caller stays on hold audio
                 # Named, not swallowed. The caller is still on the helper's hold
                 # audio, and this line is what says why they never got further.
                 logger.error("forwarding carrier call {} failed: {}", carrier_call["call_sid"], exc)
@@ -2312,7 +2870,8 @@ transport_params: dict = {
     if carrier_call and carrier_call["direction"] == "outbound":
 
         @transport.event_handler("on_joined")
-        async def on_joined(transport, data):
+        async def on_joined(transport: Any, data: Any) -> None:
+            """Dial out through the trunk once the bot has joined the room."""
             # Dialled through your own trunk: a SIP URI, and the provider Daily
             # documents for a carrier interconnect leg.
             await transport.start_dialout(
@@ -2324,26 +2883,30 @@ transport_params: dict = {
             )
 
         @transport.event_handler("on_dialout_connected")
-        async def on_dialout_connected(transport, data):
+        async def on_dialout_connected(transport: Any, data: Any) -> None:
+            """Log that the dial-out leg connected."""
             logger.info("dial-out connected: {}", data)
 
         @transport.event_handler("on_dialout_stopped")
-        async def on_dialout_stopped(transport, data):
+        async def on_dialout_stopped(transport: Any, data: Any) -> None:
+            """Cancel the session when the dial-out leg ends."""
             # A leg the carrier rejected ends here with its cause named, rather
             # than as a call that simply never rang.
             logger.warning("dial-out stopped: {}", data)
             await runner.cancel()
 
         @transport.event_handler("on_dialout_warning")
-        async def on_dialout_warning(transport, data):
+        async def on_dialout_warning(transport: Any, data: Any) -> None:
+            """Log a warning from the dial-out leg."""
             logger.warning("dial-out warning: {}", data)
 {{end}}{{end}}
     runner_ready = asyncio.Event()
     pipeline_started = asyncio.Event()
-    worker_start_error = None
+    worker_start_error: Exception | None = None
     entry_started = False
 
-    async def activate_entry():
+    async def activate_entry() -> None:
+        """Activate the entry agent once, when the client and the pipeline are ready."""
         nonlocal entry_started
         if entry_started or worker_start_error is not None:
             return
@@ -2360,19 +2923,21 @@ transport_params: dict = {
             TTSSpeakFrame({{.GreetingExpr}})
         )
 {{end}}
-{{if gt .MaxDurationSecs 0}}        asyncio.create_task(_end_after(main, {{.MaxDurationSecs}}))
+{{if gt .MaxDurationSecs 0}}        _schedule_end_after(main, {{.MaxDurationSecs}})
 {{end}}
     @runner.event_handler("on_ready")
-    async def on_runner_ready(runner):
+    async def on_runner_ready(runner: WorkerRunner) -> None:
+        """Note that the runner can take workers."""
         runner_ready.set()
 
     @main.event_handler("on_pipeline_started")
-    async def on_pipeline_started(worker, frame):
+    async def on_pipeline_started(worker: PipelineWorker, frame: Any) -> None:
+        """Add the agent workers once the main pipeline has started."""
         nonlocal worker_start_error
         await runner_ready.wait()
         try:
             await runner.add_workers(*agents)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - logged with its traceback, then the runner is cancelled
             worker_start_error = error
             # Logged here, where it is still known. Cancelling the runner makes
             # run() raise CancelledError, and that reaches the caller before the
@@ -2386,7 +2951,8 @@ transport_params: dict = {
         pipeline_started.set()
 {{if or (eq .Transport "daily-sip") (eq .Transport "cloud-websocket")}}
     @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
+    async def on_client_connected(transport: BaseTransport, client: Any) -> None:
+        """Activate the entry agent once the carrier's stream is open."""
         # Telephony transports (Daily SIP, the platform's carrier stream) have
         # no RTVI client-ready handshake: the carrier opens the media stream and
         # the bot initiates once that connection is open and main's StartFrame
@@ -2399,14 +2965,16 @@ transport_params: dict = {
         await activate_entry()
 {{else}}
     @main.rtvi.event_handler("on_client_ready")
-    async def on_client_ready(rtvi):
+    async def on_client_ready(rtvi: Any) -> None:
+        """Activate the entry agent once the client and the pipeline are ready."""
         # Wait for both client media readiness and main's StartFrame before
         # activating tools or emitting the greeting (SPEC V2).
         await pipeline_started.wait()
         await activate_entry()
 {{end}}
     @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport, client):
+    async def on_client_disconnected(transport: BaseTransport, client: Any) -> None:
+        """Stop the runner when the caller leaves."""
         await runner.cancel()
 
 {{if and (not .NeedsMCP) (not .Tracing)}}    await runner.add_workers(main)
@@ -2423,7 +2991,7 @@ transport_params: dict = {
         if primary_error is not None:
             try:
                 await asyncio.to_thread(flush_tracing, trace_provider{{if eq .TracingProvider "coval"}}, runner_args.session_id or ""{{end}})
-            except BaseException as cleanup_error:
+            except BaseException as cleanup_error:  # noqa: BLE001 - the primary error is what propagates
                 logger.error(
                     "Tracing flush failed while preserving the primary error ({})",
                     type(cleanup_error).__name__,
@@ -2454,6 +3022,12 @@ transport_params: dict = {
 {{end}}
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
+    """Run one session, reporting to the dev page and naming any error that stops it.
+
+    Args:
+        transport: The transport the caller is connected on.
+        runner_args: The arguments the runner started this session with.
+    """
     dev = install_dev_metrics(runner_args)
     try:
         await _run_bot(transport, runner_args, dev)
@@ -2469,6 +3043,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
 
 async def bot(runner_args: RunnerArguments) -> None:
+    """Handle one session: build its transport, then run the agent on it.
+
+    This is the entry point the Pipecat runner and Pipecat Cloud call.
+
+    Args:
+        runner_args: The arguments the runner started this session with.
+    """
     _configure_logging()
 
 {{if or .LocalTwilio (and .CloudWebsocket (not .CloudWebsocket.AccountSIDEnv))}}    # A websocket session is a phone call on this route, and this package holds no
