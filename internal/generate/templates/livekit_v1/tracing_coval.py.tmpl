@@ -932,10 +932,9 @@ class _Conversation:
             if vad_end is not None:
                 ends.append(vad_end)
         reply = turn.rounds[-1] if turn.rounds else None
-        # Each call writes that round's span and returns where it ends.
-        ends.extend(
-            self._write_round(turn, round_, span, reply=round_ is reply) for round_ in turn.rounds
-        )
+        for round_ in turn.rounds:
+            # A loop, not a comprehension: each call writes that round's span.
+            ends.append(self._write_round(turn, round_, span, reply=round_ is reply))  # noqa: PERF401
         for position, speech in enumerate(turn.speeches):
             self._write_tts(turn, speech, span, position == 0)
             ends.append(speech.ended)
