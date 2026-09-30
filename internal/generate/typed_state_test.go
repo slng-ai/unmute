@@ -131,7 +131,7 @@ func TestTypedStateEmitsTheBlockWhenAuthored(t *testing.T) {
 			"# --- declared state",
 			"class Appointment(BaseModel):",
 			"class _StateRefused(Exception):",
-			"def _typed_result(step, values):",
+			"def _typed_result(step: str, values: dict) -> dict:",
 			"_STATE_STRUCTURED = {",
 			"Phone = Annotated[\n    str,\n    AfterValidator(_shape_phone),\n",
 			"field(default_factory=list)",
@@ -630,7 +630,7 @@ func TestAnAbsentEntryAppendsNothing(t *testing.T) {
 		}
 		// The guard is in the helper rather than at each site, so it cannot be
 		// present at one append and missing at the next.
-		if !strings.Contains(module, "def _append_entry(entries, value):") {
+		if !strings.Contains(module, "def _append_entry(entries: list, value: object) -> None:") {
 			t.Errorf("%s emits %d appends and no _append_entry, so an absent entry appends None and the "+
 				"state holds a booking nobody made", provider, appends)
 		}
@@ -770,7 +770,7 @@ func TestAnOmittedResultFieldValidatesRatherThanVanishing(t *testing.T) {
 	agent := loadTypedState(t)
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		source := emitted(t, agent, provider)
-		if !strings.Contains(source, "out[name] = _plain(_typed(name, adapter, out.get(name)))") {
+		if !strings.Contains(source, "_plain(_typed(name, adapter, values.get(name)))") {
 			t.Errorf("%s does not put an absent declared field through its adapter; the key stays missing "+
 				"and the assignment that reads it raises a KeyError inside the finish handler", provider)
 		}

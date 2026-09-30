@@ -403,7 +403,7 @@ func TestCarrierInboundJoinsThePlatformsRoom(t *testing.T) {
 	}
 	// The forward uses the address the ready event carries, not one copied through
 	// the body: the address is only usable once that event says so.
-	if !strings.Contains(bot, "async def on_dialin_ready(transport, sip_endpoint)") {
+	if !strings.Contains(bot, "async def on_dialin_ready(transport: Any, sip_endpoint: str) -> None:") {
 		t.Error("the dial-in-ready handler ignores the address the event gives it")
 	}
 	if !strings.Contains(bot, `_forward_carrier_call(carrier_call["call_sid"], sip_endpoint)`) {

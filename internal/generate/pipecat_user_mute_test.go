@@ -110,22 +110,12 @@ func TestPipecatProtectsTheGreetingOnAPhoneRoute(t *testing.T) {
 			// A class used but not imported is a container that raises before it
 			// ever answers a call, which is exactly how dev_metrics shipped.
 			for _, class := range tc.want {
-				if !strings.Contains(bot, "from pipecat.turns.user_mute import ") || !importsClass(bot, class) {
+				if !pyImports(bot, "pipecat.turns.user_mute", class) {
 					t.Errorf("bot.py names %s but does not import it", class)
 				}
 			}
 		})
 	}
-}
-
-// importsClass reports whether the emitted user_mute import line names class.
-func importsClass(bot, class string) bool {
-	for _, line := range strings.Split(bot, "\n") {
-		if strings.HasPrefix(line, "from pipecat.turns.user_mute import ") && strings.Contains(line, class) {
-			return true
-		}
-	}
-	return false
 }
 
 // setInterruption replaces the interruption block, creating the conversation if
