@@ -596,7 +596,7 @@ func TestPipecatFinishSchemaResolvesEveryRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"def _schema(adapter):",
+		"def _schema(adapter: TypeAdapter) -> object:",
 		`defs = schema.pop("$defs", {})`,
 		`target = node.get("$ref")`,
 		"siblings = {key: value for key, value in node.items()",
@@ -608,7 +608,7 @@ func TestPipecatFinishSchemaResolvesEveryRef(t *testing.T) {
 	// The sibling keys survive the resolution. A `$ref` beside a description is
 	// how a nullable nested field arrives, and dropping the description would
 	// take away the one thing telling the model what the field is.
-	if !strings.Contains(block.Source, "{**resolve(found), **siblings}") {
+	if !strings.Contains(block.Source, "return {**found, **siblings} if isinstance(found, dict) else found") {
 		t.Error("the resolver drops the keys beside a $ref, so a nested field loses its description")
 	}
 }
