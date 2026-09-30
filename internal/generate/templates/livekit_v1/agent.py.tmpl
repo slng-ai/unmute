@@ -27,7 +27,7 @@ there is nothing left to hold this back. */ -}}
         # Not awaited, for the same reason the tool announcement is not: awaiting
         # the handle holds the step until playout finishes, which is the delay
         # this line exists to hide.
-        dev_say(self.session, {{.Announce}}){{end}}{{end}}{{define "opening_tools"}}tools=[t.id for t in self.tools if t.id not in { {{- range $i, $t := .Transfers}}{{if $i}}, {{end}}{{pyq $t.Method}}{{end -}} }]{{end}}
+        dev_say(self.session, {{.Announce}}){{end}}{{end}}{{define "opening_tools"}}tools=[t.id for t in self.tools if {{if eq (len .Transfers) 1}}t.id != {{pyq (index .Transfers 0).Method}}{{else}}t.id not in { {{- range $i, $t := .Transfers}}{{if $i}}, {{end}}{{pyq $t.Method}}{{end -}} }{{end}}]{{end}}
 {{- /* svc renders any resolved ServiceCall inline (session/agent kwargs).
 Classes, kwargs, and model-route forms come from the provider catalogue
 (internal/target/catalog_livekit.go). */ -}}
@@ -42,8 +42,8 @@ stt.FallbackAdapter around its fallback chain (T16). */ -}}
 agents and tasks share the shape (T15). */ -}}
 {{define "webhook_tool"}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict:
-        {{triple .Description}}
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict{{if .Terminal}} | None{{end}}:
+        {{doc .Description}}
 {{- if .Needed}}
         refusal = _refusal({{pyq .Method}}, ctx.userdata, {{.NeededLiteral}})
         if refusal:
@@ -96,8 +96,8 @@ agents and tasks share the shape (T15). */ -}}
 the file defines a callable named like the tool; sync or async). */ -}}
 {{define "local_tool"}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict:
-        {{triple .Description}}
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict{{if .Terminal}} | None{{end}}:
+        {{doc .Description}}
 {{- if .Needed}}
         refusal = _refusal({{pyq .Method}}, ctx.userdata, {{.NeededLiteral}})
         if refusal:
@@ -135,8 +135,8 @@ The index is built in prewarm and read from the job's userdata, so a lookup
 never reads a file and never re-indexes (FR-017). */ -}}
 {{define "knowledge_tool"}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict:
-        {{triple .Description}}
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict{{if .Terminal}} | None{{end}}:
+        {{doc .Description}}
 {{- if .Announce}}
         # Not awaited, on purpose: see the same line in webhook_tool.
         dev_say(self.session, {{.Announce}})
@@ -149,8 +149,8 @@ call is handler(Input(**args)) rather than a bare function named like the tool.
 The result is a pydantic model, so it is dumped to a dict for the model. */ -}}
 {{define "hosted_tool"}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict:
-        {{triple .Description}}
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict{{if .Terminal}} | None{{end}}:
+        {{doc .Description}}
 {{- if .Needed}}
         refusal = _refusal({{pyq .Method}}, ctx.userdata, {{.NeededLiteral}})
         if refusal:
@@ -209,51 +209,52 @@ slower than that needs `timeout:` on the mcp block, which does not exist yet. */
 {{- /* tools_list is the whole tools= surface: prebuilt tools first, then the
 MCP sources, in the order the package lists them. */ -}}
 {{define "tools_list"}}{{template "prebuilt_list" .Prebuilt}}{{if and .Prebuilt .MCPServers}}, {{end}}{{template "mcp_mounts" .MCPServers}}{{end -}}
-{{if .Slng.Vertex}}import base64
-{{end}}{{if or .NeedsAsyncio .NeedsMCP .NeedsPrefetchAsync}}import asyncio
+"""LiveKit voice agent, compiled by Unmute from this package's agent.yaml."""
+
+{{if or .NeedsAsyncio .NeedsMCP .NeedsPrefetchAsync}}import asyncio
+{{end}}{{if .Slng.Vertex}}import base64
 {{end}}{{if or .NeedsInspect .NeedsPrefetchLocal}}import inspect
 {{end}}{{if or .Outbound .Telephony .CallStartVars .NeedsTaskGroups .Slng.Vertex .NeedsPrefetchSeed .TypedState}}import json
 {{end}}import logging
 import os
 {{if .NeedsAnnounceChoice}}import random
-{{end}}{{if .Slng.Any}}import uuid
 {{end}}{{if or .NeedsRender (and .TypedState .TypedState.NeedsRe)}}import re
 {{end}}{{if or .HasWarmTransfer .HasColdTransfer}}import time
-{{end}}{{if .HasUserdata}}from dataclasses import {{if .NeedsDataclassField}}dataclass, field{{else}}dataclass{{end}}
+{{end}}{{if .Slng.Any}}import uuid
+{{end}}from collections.abc import AsyncIterable
+{{if .HasUserdata}}from dataclasses import {{if .NeedsDataclassField}}dataclass, field{{else}}dataclass{{end}}
 {{end}}{{if .NeedsPrefetchClock}}from datetime import datetime
 {{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
 {{end}}{{if .NeedsPrefetchClock}}from zoneinfo import ZoneInfo
-{{end}}{{if .NeedsHTTPX}}import httpx
-{{end}}{{if and .TypedState .TypedState.NeedsEmailValidator}}from email_validator import EmailNotValidError, validate_email
-{{end}}{{if .Slng.ClientBaseURL}}from openai import AsyncOpenAI
-{{end}}{{range .LocalTools}}import tools.{{.Name}}
-{{end}}from dotenv import load_dotenv
-{{if .NeedsOpenAIReasoning}}from openai import types as openai_types
 {{end}}
-{{if .PydanticImports}}from pydantic import {{.PydanticImports}}
-{{end}}{{if or .Outbound .HasColdTransfer .HasWarmTransfer}}from livekit import api
-{{end}}{{if or .HasColdTransfer (and .Telephony (eq .Telephony.Transport "sip") .HasVars)}}from livekit import rtc
-{{end}}from livekit.agents import (
+{{if .NeedsHTTPX}}import httpx
+{{end}}from dotenv import load_dotenv
+{{if and .TypedState .TypedState.NeedsEmailValidator}}from email_validator import EmailNotValidError, validate_email
+{{end}}from livekit import {{if or .Outbound .HasColdTransfer .HasWarmTransfer}}api, {{end}}rtc
+from livekit.agents import (
 {{- if .Outbound}}
     AMD,
 {{- end}}
-    APIConnectOptions,
 {{- if not .SingleAgentMinimal}}
     NOT_GIVEN,
 {{- end}}
     Agent,
+    AgentServer,
+    AgentSession,
 {{- if .NeedsTasks}}
     AgentTask,
 {{- end}}
-    AgentServer,
-    AgentSession,
+    APIConnectOptions,
 {{- if .ThinkingAudio}}
     BackgroundAudioPlayer,
     BuiltinAudioClip,
 {{- end}}
+    ChatContext,
+    FlushSentinel,
     JobContext,
     JobProcess,
+    ModelSettings,
 {{- if not .SingleAgentMinimal}}
     NotGivenOr,
 {{- end}}
@@ -262,6 +263,9 @@ import os
 {{- end}}
 {{- if .LocalTurnTaking}}
     TurnHandlingOptions,
+{{- end}}
+{{- if or .InactivityNudgeSecs .InactivityEndSecs}}
+    UserStateChangedEvent,
 {{- end}}
 {{- if .NeedsFunctionTools}}
     function_tool,
@@ -286,33 +290,33 @@ import os
     stt,
 {{- end}}
 )
-{{- if or .NeedsTaskGroups .HasWarmTransfer}}
-from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskCompletedEvent, TaskGroup{{end}}{{if and .NeedsTaskGroups .HasWarmTransfer}}, {{end}}{{if .HasWarmTransfer}}WarmTransferTask, WorkflowInstructions{{end}}
-{{- end}}
-{{- if .HasWarmTransfer}}
-from livekit.agents.llm import ToolError
-{{- end}}
 {{- if .NeedsEndCallTool}}
 from livekit.agents.beta.tools import EndCallTool  # prebuilt end_call (beta)
 {{- end}}
+{{- if or .NeedsTaskGroups .HasWarmTransfer}}
+from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskCompletedEvent, TaskGroup{{end}}{{if and .NeedsTaskGroups .HasWarmTransfer}}, {{end}}{{if .HasWarmTransfer}}WarmTransferTask, WorkflowInstructions{{end}}
+{{- end}}
+from livekit.agents.llm import ChatChunk, Tool{{if .HasWarmTransfer}}, ToolError{{end}}
 from livekit.agents.voice import MetricsCollectedEvent
 # Not re-exported from livekit.agents or livekit.agents.voice, so it comes from
 # the module that defines it. Checked against 1.6.10 and 1.8.x.
 from livekit.agents.voice.agent_session import SessionConnectOptions
-{{if .Live}}{{.Live.Entry.Import}}
-{{else if .Realtime}}{{.Realtime.Service.Entry.Import}}
-{{range .Realtime.Imports}}{{.}}
-{{end}}{{if .PluginModules}}from livekit.plugins import {{join .PluginModules ", "}}
+{{if .Live}}{{if .Live.Entry.Import}}{{.Live.Entry.Import}}
+{{end}}{{else if .Realtime}}{{if .PluginModules}}from livekit.plugins import {{join .PluginModules ", "}}
+{{end}}{{if .Realtime.Service.Entry.Import}}{{.Realtime.Service.Entry.Import}}
+{{end}}{{else}}from livekit.plugins import {{join .PluginModules ", "}}
+{{end}}{{if .Slng.ClientBaseURL}}from openai import AsyncOpenAI
+{{end}}{{if .NeedsOpenAIReasoning}}from openai import types as openai_types
+{{end}}{{if .Realtime}}{{range .Realtime.Imports}}{{.}}
+{{end}}{{end}}{{if .PydanticImports}}from pydantic import {{.PydanticImports}}
 {{end}}
-{{- else}}from livekit.plugins import {{join .PluginModules ", "}}{{end}}
-
 import dev_metrics
-from dev_metrics import dev_llm_node{{if .NeedsDevSay}}, dev_say{{end}}, install_dev_metrics
 {{if .Knowledge.Knowledge}}import knowledge
-{{end}}{{if .Tracing}}{{if eq .TracingProvider "coval"}}from tracing import setup_coval
+{{end}}{{range .LocalTools}}import tools.{{.Name}}
+{{end}}from dev_metrics import dev_llm_node{{if .NeedsDevSay}}, dev_say{{end}}, install_dev_metrics
+{{if .Tracing}}{{if eq .TracingProvider "coval"}}from tracing import setup_coval
 {{else}}from tracing import setup_langfuse
 {{end}}{{end}}
-
 logger = logging.getLogger({{pyq .Project}})
 logger.setLevel(logging.INFO)
 
@@ -332,7 +336,15 @@ _ANNOUNCE_LAST: dict[str, str] = {}
 
 
 def _announce(key: str, lines: list[str]) -> str:
-    """One of these lines, never the one this key used last."""
+    """Pick one of these lines, never the one this key used last.
+
+    Args:
+        key: The announcement site, so each site remembers its own last line.
+        lines: The alternatives the author wrote for that site.
+
+    Returns:
+        The line to speak.
+    """
     # ponytail: process wide, not per call. Two concurrent callers can only
     # affect each other's variety, which is the whole thing this is for.
     choices = [line for line in lines if line != _ANNOUNCE_LAST.get(key)] or lines
@@ -348,14 +360,33 @@ def _announce(key: str, lines: list[str]) -> str:
 # --- context shaping ---------------------------------------------------------
 {{- if .NeedsLastN}}
 def _last_n(source: llm.ChatContext, n: int, *, exclude_function_call: bool = False) -> llm.ChatContext:
-    """history: last_n — the newest n items; truncate() keeps call/output pairs."""
+    """Keep the newest items of a conversation for `history: last_n`.
+
+    truncate() keeps each tool call together with its output.
+
+    Args:
+        source: The conversation to shorten.
+        n: How many items to keep.
+        exclude_function_call: Drop tool calls and their outputs first.
+
+    Returns:
+        A shortened copy without instructions, config updates or handoff markers.
+    """
     ctx = source.copy(exclude_instructions=True, exclude_config_update=True, exclude_function_call=exclude_function_call, exclude_handoff=True)
     ctx.truncate(max_items=n)
     return ctx
 {{end}}
 {{- if .NeedsSummarize}}
 async def _summarize(source: llm.ChatContext, summarizer: llm.LLM) -> llm.ChatContext:
-    """history: summary — one summarizer turn replaces the running transcript."""
+    """Replace the running transcript with one summary, for `history: summary`.
+
+    Args:
+        source: The conversation to summarize.
+        summarizer: The model that writes the summary.
+
+    Returns:
+        A context holding a single assistant message with the summary.
+    """
     transcript = "\n".join(
         f"{m.role}: {m.text_content}" for m in source.messages() if m.text_content
     )
@@ -365,11 +396,12 @@ async def _summarize(source: llm.ChatContext, summarizer: llm.LLM) -> llm.ChatCo
         content="Summarize this conversation for the agent taking over. Keep names, facts, and open commitments. Reply with the summary only.{{if .SummaryPromptSuffix}}\n\n{{.SummaryPromptSuffix}}{{end}}",
     )
     prompt.add_message(role="user", content=transcript)
-    parts: list[str] = []
     async with summarizer.chat(chat_ctx=prompt) as stream:
-        async for chunk in stream:
-            if chunk.delta and chunk.delta.content:
-                parts.append(chunk.delta.content)
+        parts = [
+            chunk.delta.content
+            async for chunk in stream
+            if chunk.delta and chunk.delta.content
+        ]
     out = llm.ChatContext()
     out.add_message(role="assistant", content="Summary of the conversation so far: " + "".join(parts))
     return out
@@ -381,13 +413,28 @@ async def _summarize(source: llm.ChatContext, summarizer: llm.LLM) -> llm.ChatCo
 # environment at call time and never appears in the package.
 {{- if .AuthKinds.Bearer}}
 def _bearer(env: str) -> dict[str, str]:
-    """auth: bearer — the Authorization header read from the tool's token_env."""
+    """Build the Authorization header for `auth: bearer`.
+
+    Args:
+        env: The name of the environment variable holding the token.
+
+    Returns:
+        The header, read from the environment at call time.
+    """
     return {"Authorization": "Bearer " + os.environ[env]}
 
 {{end}}
 {{- if .AuthKinds.APIKey}}
 def _api_key(header: str, env: str) -> dict[str, str]:
-    """auth: api_key — the token verbatim in its own header."""
+    """Build the header for `auth: api_key`.
+
+    Args:
+        header: The header the token travels in.
+        env: The name of the environment variable holding the token.
+
+    Returns:
+        The header carrying the token verbatim.
+    """
     return {header: os.environ[env]}
 
 {{end}}
@@ -398,6 +445,17 @@ def _api_key(header: str, env: str) -> dict[str, str]:
 # These sources are required by the package, so probe fresh instances before
 # AgentSession.start; runtime agents/tasks get their own fresh instances below.
 def _mcp_toolset(source: str) -> mcp.MCPToolset:
+    """Build a fresh toolset for one required MCP source.
+
+    Args:
+        source: The source's name in the package.
+
+    Returns:
+        A toolset that has not been set up yet.
+
+    Raises:
+        ValueError: The package declares no source by that name.
+    """
 {{- range .MCPServers}}
     if source == {{pyq .Name}}:
         return {{template "mcp_constructor" .}}
@@ -406,22 +464,31 @@ def _mcp_toolset(source: str) -> mcp.MCPToolset:
 
 
 async def _preflight_mcp() -> None:
-    async def probe(source: str):
+    """Set up and close every required MCP source, and fail if any could not.
+
+    Raises:
+        BaseException: The first setup failure, or the first cleanup failure when
+            every setup worked. Later failures are logged.
+    """
+
+    async def probe(source: str) -> tuple[BaseException | None, BaseException | None]:
+        # A probe reports every failure, a cancelled setup included, so the caller
+        # can name the source and raise the first one.
         try:
             toolset = _mcp_toolset(source)
-        except BaseException as error:
+        except BaseException as error:  # noqa: BLE001 - reported to the caller, not swallowed
             return error, None
 
         setup_error = None
         try:
             await toolset.setup()
-        except BaseException as error:
+        except BaseException as error:  # noqa: BLE001 - reported to the caller, not swallowed
             setup_error = error
 
         close_error = None
         try:
             await toolset.aclose()
-        except BaseException as error:
+        except BaseException as error:  # noqa: BLE001 - reported to the caller, not swallowed
             close_error = error
         return setup_error, close_error
 
@@ -430,17 +497,13 @@ async def _preflight_mcp() -> None:
         *(probe(source) for source in sources),
         return_exceptions=True,
     )
-    setup_failures = []
-    close_failures = []
-    for source, result in zip(sources, results):
-        if isinstance(result, BaseException):
-            setup_failures.append((source, result))
-            continue
-        setup_error, close_error = result
-        if setup_error is not None:
-            setup_failures.append((source, setup_error))
-        if close_error is not None:
-            close_failures.append((source, close_error))
+    # A probe that itself raised counts as a setup failure for its source.
+    outcomes = [
+        (source, (result, None) if isinstance(result, BaseException) else result)
+        for source, result in zip(sources, results, strict=True)
+    ]
+    setup_failures = [(source, setup) for source, (setup, _) in outcomes if setup is not None]
+    close_failures = [(source, close) for source, (_, close) in outcomes if close is not None]
 
     failures = [
         *(("setup", source, error) for source, error in setup_failures),
@@ -466,7 +529,14 @@ async def _preflight_mcp() -> None:
 # a provider that needs its trunk host in the Refer-To (Plivo) takes the
 # `sip:+E164@<trunk>` form, which a destination may already carry (SCHEMA N26).
 def _refer_uri(destination: str) -> str:
-    """The destination as a REFER URI, adding `tel:` only to a bare number."""
+    """Turn a destination into a REFER URI, adding `tel:` only to a bare number.
+
+    Args:
+        destination: A phone number or a `tel:`, `sip:` or `sips:` URI.
+
+    Returns:
+        The destination as a URI.
+    """
     if destination.startswith(("tel:", "sip:", "sips:")):
         return destination
     return "tel:" + destination
@@ -485,13 +555,18 @@ def _refer_uri(destination: str) -> str:
 # and the host is the trunk's job: _sip_trunk() already carries it. The cold
 # path takes the whole URI, because there the host belongs in the Refer-To.
 def _sip_user(destination: str) -> str:
-    """The destination as a number or SIP user, never a full URI."""
+    """Turn a destination into a number or SIP user, never a full URI.
+
+    Args:
+        destination: A phone number, or a `sip:`, `sips:` or `tel:` URI.
+
+    Returns:
+        The user part, with the scheme and the host removed.
+    """
     if "@" in destination:
         destination = destination.rsplit("@", 1)[0]
-    for scheme in ("sip:", "sips:", "tel:"):
-        if destination.startswith(scheme):
-            return destination[len(scheme):]
-    return destination
+    scheme = next((s for s in ("sip:", "sips:", "tel:") if destination.startswith(s)), "")
+    return destination.removeprefix(scheme)
 
 {{end}}
 {{- if and .Telephony (eq .Telephony.Transport "sip") (or .Telephony.HasOutbound .Telephony.HasWarm)}}
@@ -503,7 +578,11 @@ def _sip_user(destination: str) -> str:
 # One function, every dial site, so a rotated credential cannot fix one path and
 # break another. Verified against livekit-agents 1.6.9 on 2026-08-12.
 def _sip_trunk() -> api.SIPOutboundConfig:
-    """The carrier trunk configuration, read from the Connection's env names."""
+    """Build the carrier trunk configuration from the Connection's env names.
+
+    Returns:
+        The inline trunk settings for a dial.
+    """
     return api.SIPOutboundConfig(
         hostname=os.environ[{{pyq .Telephony.SIPAddressEnv}}],
         auth_username=os.environ[{{pyq .Telephony.SIPUsernameEnv}}],
@@ -512,8 +591,14 @@ def _sip_trunk() -> api.SIPOutboundConfig:
 
 
 def _sip_number() -> str:
-    """The number to call from. Required with an inline trunk, which carries no
-    number list for the platform to default from."""
+    """Read the number to call from.
+
+    Required with an inline trunk, which carries no number list for the platform
+    to default from.
+
+    Returns:
+        The caller ID number.
+    """
     return os.environ[{{pyq .Telephony.FromNumberEnv}}]
 
 {{end}}
@@ -585,6 +670,11 @@ REQUIRED_ENV = [
 
 
 def require_env() -> None:
+    """Refuse to start a session when a required variable is unset.
+
+    Raises:
+        RuntimeError: Naming every unset variable in REQUIRED_ENV.
+    """
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
@@ -611,6 +701,9 @@ def {{.Func}}() -> dict:
     by require_env() alongside every other name instead of raising a KeyError
     before anything has checked. No value is written into this file: each is the
     name of an environment variable.
+
+    Returns:
+        The configuration object for the think request body.
     """
     return {{.Body}}
 {{end}}{{if .Slng.Vertex}}
@@ -622,6 +715,15 @@ def _slng_vertex_credentials(name: str) -> dict:
     that order because a base64 value can begin with "/" and look like a path.
     This runs once at startup, so a malformed value fails before the agent answers
     anything rather than mid-call.
+
+    Args:
+        name: The environment variable that holds the key.
+
+    Returns:
+        The parsed key.
+
+    Raises:
+        RuntimeError: The value is none of the three shapes.
     """
     raw = os.environ[name].strip()
     if raw.startswith("{"):
@@ -640,7 +742,7 @@ def _slng_vertex_credentials(name: str) -> dict:
         f"the key JSON, that JSON base64 encoded, or a path to the key file"
     )
 {{end}}
-async def _slng_log_provenance(response) -> None:
+async def _slng_log_provenance(response: httpx.Response) -> None:
     """Say where this answer came from, once per think request.
 
     The router states this only in response headers, and neither framework hands
@@ -658,6 +760,9 @@ async def _slng_log_provenance(response) -> None:
     It also logs only a router think request. The scope header is what lets the
     line name a scope at all, so a request without one is a request this hook
     could not describe.
+
+    Args:
+        response: The router's response, before its body is read.
     """
     try:
         scope = response.request.headers.get({{pyq .Slng.AgentIDHeader}})
@@ -692,6 +797,9 @@ def _slng_router_client() -> AsyncOpenAI:
 
     Passing a client also means owning it: the plugin closes only a client it
     built itself (`_owns_client`), so the entrypoint closes this one on shutdown.
+
+    Returns:
+        The client every router think request goes through.
     """
     return AsyncOpenAI(
         api_key=os.environ[{{pyq .Slng.ClientKeyEnv}}],
@@ -716,14 +824,24 @@ _SLNG_TEMPLATE_PATHS = {{.Slng.TemplatePaths}}
 _SLNG_SCOPE_SITES = {{.Slng.TemplateSites}}
 
 
-def _slng_template_variables(state, names, *, scope="") -> dict:
-    """The values the router substitutes into the prompt's placeholders.
+def _slng_template_variables(
+    state: "Userdata | None", names: list[str] | tuple[str, ...], *, scope: str = ""
+) -> dict[str, str]:
+    """Collect the values the router substitutes into the prompt's placeholders.
 
     A name with no value yet sends the empty string, never None and never the text
     "None". A value over the router's limit is truncated with a warning rather
     than dropped: an over-long value must not end a live call.
+
+    Args:
+        state: The call's shared state, if it has begun.
+        names: The placeholder names the prompt uses.
+        scope: The site whose placeholders these are.
+
+    Returns:
+        Each name mapped to its text.
     """
-    values = {}
+    values: dict[str, str] = {}
     for name in names:
 {{- if .TypedState}}
         # The bound is measured on the JSON rendering, not on the repr of the
@@ -759,6 +877,11 @@ CALL_REQUIRED_ENV = [
 
 
 def require_call_env() -> None:
+    """Refuse to greet a phone call when a variable it needs is unset.
+
+    Raises:
+        RuntimeError: Naming every unset variable in CALL_REQUIRED_ENV.
+    """
     missing = [name for name in CALL_REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError("Missing environment for a phone call: " + ", ".join(missing))
@@ -769,9 +892,20 @@ def require_call_env() -> None:
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
-def _render(text: str, userdata, *, quote_values: bool = False, site: str = "") -> str:
+def _render(text: str, userdata: object, *, quote_values: bool = False, site: str = "") -> str:
     """Substitute each variable token from the session userdata (SCHEMA 4.4).
-    Only substituted values are URL-encoded, never the surrounding literal."""
+
+    Only substituted values are URL-encoded, never the surrounding literal.
+
+    Args:
+        text: The text holding `{{"{{name}}"}}` tokens.
+        userdata: The session state to read them from, or None to leave the text alone.
+        quote_values: URL-encode each substituted value.
+        site: Where the text is used, for saved-value path lookups.
+
+    Returns:
+        The text with each token replaced.
+    """
     if userdata is None:
         return text
 
@@ -792,9 +926,20 @@ def _render(text: str, userdata, *, quote_values: bool = False, site: str = "") 
 
 {{end}}
 {{- if .NeedsRefusal}}
-def _refusal(tool: str, userdata, needed: list[tuple[str, str]]) -> str:
-    """Refuse a call whose injected variables are still unset (V4): the model is
-    told what to do about each one, and no half-formed request is ever sent."""
+def _refusal(tool: str, userdata: object, needed: list[tuple[str, str]]) -> str:
+    """Refuse a call whose injected variables are still unset (V4).
+
+    The model is told what to do about each one, and no half-formed request is
+    ever sent.
+
+    Args:
+        tool: The tool the model tried to call.
+        userdata: The session state holding the variables.
+        needed: Each required variable with the hint for getting it.
+
+    Returns:
+        The refusal text, or an empty string when nothing is missing.
+    """
     unset = [
         (name, hint)
         for name, hint in needed
@@ -824,11 +969,13 @@ def _refusal(tool: str, userdata, needed: list[tuple[str, str]]) -> str:
 # Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
 @dataclass
 class Userdata:
+    """The session state every agent and task of one call shares."""
+
 {{- if .NeedsPrefetchUnconfirmed}}
     _unconfirmed: set[str] = field(default_factory=lambda: set(_STATE_CONFIRM))
 {{- end}}
 {{- range .Vars}}
-    {{.Name}}: {{.Anno}} = {{.Default}}{{if .Description}}  # {{.Description}}{{end}}
+    {{.Name}}: {{.Anno}} = {{.Default}}{{if .LiteralDefault}}  # ty: ignore[invalid-assignment]{{end}}{{if .Description}}  # {{.Description}}{{end}}
 {{- end}}
 {{- if .Slng.Any}}
     # One value per call, set where the call begins. It groups this call's think
@@ -849,6 +996,17 @@ class Userdata:
 {{- if or .CallStartVars .Telephony}}
 # --- job metadata ------------------------------------------------------------
 def _livekit_job_metadata(raw: str) -> dict:
+    """Parse the job metadata LiveKit hands to this worker.
+
+    Args:
+        raw: The metadata string, possibly empty.
+
+    Returns:
+        The metadata object, empty when none was sent.
+
+    Raises:
+        RuntimeError: The metadata is not a JSON object.
+    """
     if not raw:
         return {}
     try:
@@ -863,8 +1021,21 @@ def _livekit_job_metadata(raw: str) -> dict:
 {{- if .CallStartVars}}
 # --- dispatched input variables ----------------------------------------------
 def _dispatched_call_start(metadata: dict | None = None) -> dict:
-    """Input variables arrive with the dispatch: the job metadata in production,
-    or UNMUTE_CALL_START for a local `unmute dev --var` session."""
+    """Read the input variables that arrive with the dispatch.
+
+    They come in the job metadata in production, or in UNMUTE_CALL_START for a
+    local `unmute dev --var` session.
+
+    Args:
+        metadata: The parsed job metadata, if any.
+
+    Returns:
+        The variables, checked against their declared types.
+
+    Raises:
+        RuntimeError: A value has the wrong type, a required one is missing, or
+            UNMUTE_CALL_START is not a JSON object.
+    """
     values = dict((metadata or {}).get("call_start", {}))
     raw = os.getenv("UNMUTE_CALL_START")
     if raw:
@@ -875,9 +1046,8 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
         if not isinstance(supplied, dict):
             raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
         # The dispatch wins: env is the local stand-in for it.
-        for name, value in supplied.items():
-            values.setdefault(name, value)
-    missing = []
+        values = supplied | values
+    missing: list[str] = []
 {{- range .CallStartVars}}
     if {{pyq .Name}} in values:
         value = values[{{pyq .Name}}]
@@ -893,7 +1063,13 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
     return values
 
 
-def _hydrate_call_start(userdata, values: dict) -> None:
+def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
+    """Copy the dispatched input variables onto the session state.
+
+    Args:
+        userdata: The state to fill.
+        values: The variables from _dispatched_call_start.
+    """
 {{- range .CallStartVars}}
     if {{pyq .Name}} in values:
         userdata.{{.Name}} = values[{{pyq .Name}}]
@@ -908,6 +1084,15 @@ def _hydrate_call_start(userdata, values: dict) -> None:
 # available during generation.
 {{- if eq .Telephony.Transport "connector"}}
 def _livekit_call_context(room_name: str, metadata: dict) -> dict:
+    """Collect the call facts the bridge wrote into the job metadata.
+
+    Args:
+        room_name: The LiveKit room, used as the session id.
+        metadata: The parsed job metadata.
+
+    Returns:
+        The call's carrier, connection and numbers.
+    """
     # The Twilio bridge writes every call fact into the job metadata, so the
     # agent reads them directly (there is no SIP participant to inspect).
     return {
@@ -921,7 +1106,20 @@ def _livekit_call_context(room_name: str, metadata: dict) -> dict:
         "to_number": metadata.get("to_number"),
     }
 {{- else}}
-def _livekit_call_context(room_name: str, participant, metadata: dict) -> dict:
+def _livekit_call_context(room_name: str, participant: rtc.RemoteParticipant | None, metadata: dict) -> dict:
+    """Collect the call facts from the SIP participant and the job metadata.
+
+    Args:
+        room_name: The LiveKit room, used as the session id.
+        participant: The SIP participant, or None before it has joined.
+        metadata: The parsed job metadata.
+
+    Returns:
+        The call's carrier, connection, direction and numbers.
+
+    Raises:
+        RuntimeError: The direction the SIP leg reports is not the job's.
+    """
     expected_direction = (
         "outbound" if "phone_number" in metadata else "inbound"
     )
@@ -949,7 +1147,17 @@ def _livekit_call_context(room_name: str, participant, metadata: dict) -> dict:
 
 {{- if .HasVars}}
 def _hydrate_livekit_context(userdata: Userdata, context: dict, *, require_all: bool = True) -> None:
-    missing = []
+    """Copy the call facts a prompt names onto the session state.
+
+    Args:
+        userdata: The state to fill.
+        context: The facts from _livekit_call_context.
+        require_all: Fail when a fact the package reads is absent.
+
+    Raises:
+        RuntimeError: A required fact is absent.
+    """
+    missing: list[str] = []
 {{- range .Telephony.SystemSources}}
     value = context.get({{pyq .Source}})
     if value in (None, ""):
@@ -963,6 +1171,11 @@ def _hydrate_livekit_context(userdata: Userdata, context: dict, *, require_all: 
 
 {{- end}}
 async def _livekit_entry_greeting(session: AgentSession) -> None:
+    """Open the call the way the package's greeting says to.
+
+    Args:
+        session: The running session.
+    """
 {{- if .Telephony.Greeting.Say}}
     await dev_say(session, {{if .Telephony.Greeting.Templated}}_render({{pyq .Telephony.Greeting.Say}}, session.userdata){{else}}{{pyq .Telephony.Greeting.Say}}{{end}})
 {{- else if .Telephony.Greeting.RunLLM}}
@@ -979,12 +1192,30 @@ IGNORE_PHRASES = [{{range $i, $p := .IgnorePhrases}}{{if $i}}, {{end}}{{pyq $p}}
 
 
 class IgnorePhrasesMixin:
-    """interruption.ignore_phrases (generated): matching final transcripts are
-    dropped before turn handling, so they neither interrupt nor reach the LLM."""
+    """Drop final transcripts that match interruption.ignore_phrases.
 
-    def stt_node(self, audio, model_settings):
-        async def _filtered():
-            async for event in Agent.default.stt_node(self, audio, model_settings):
+    A matching transcript is dropped before turn handling, so it neither
+    interrupts nor reaches the LLM.
+    """
+
+    def stt_node(
+        self, audio: AsyncIterable[rtc.AudioFrame], model_settings: ModelSettings
+    ) -> AsyncIterable[stt.SpeechEvent | str]:
+        """Filter the speech events of the default transcription node.
+
+        Args:
+            audio: The caller's audio frames.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The speech events, without the ignored phrases.
+        """
+        # Always an Agent: this mixin is only ever listed beside Agent.
+        assert isinstance(self, Agent)
+        agent: Agent = self
+
+        async def _filtered() -> AsyncIterable[stt.SpeechEvent | str]:
+            async for event in Agent.default.stt_node(agent, audio, model_settings):
                 if (
                     event.type == stt.SpeechEventType.FINAL_TRANSCRIPT
                     and event.alternatives
@@ -1005,73 +1236,105 @@ class IgnorePhrasesMixin:
     """
 
     def __init__(self, results: dict) -> None:
+        """Carry the results the group reached.
+
+        Args:
+            results: Each finished step's result, by step id.
+        """
         super().__init__()
         self.results = results
 
 
-{{end}}{{if .NeedsTasks}}def _caller_turns(chat_ctx) -> int:
-    """How many turns the caller has taken in this context.
+{{end}}{{if .NeedsTasks}}def _caller_turns(chat_ctx: llm.ChatContext) -> int:
+    """Count the turns the caller has taken in this context.
 
     The one signal that separates "they asked again" from "the model re-read its
     own finished work". A step that has already run and returned cannot have a
     new request in front of it unless somebody spoke, so this is what each
     delegate's re-entry guard compares.
+
+    Args:
+        chat_ctx: The conversation to count in.
+
+    Returns:
+        The number of caller messages.
     """
     return sum(1 for message in chat_ctx.messages() if message.role == "user")
 
 
-{{end}}{{if .NeedsTerminal}}def _newest_caller_turn(chat_ctx):
-    """The caller turn a terminal tool call answered.
+{{end}}{{if .NeedsTerminal}}def _newest_caller_turn(chat_ctx: llm.ChatContext) -> llm.ChatMessage | None:
+    """Find the caller turn a terminal tool call answered.
 
     Carried into the owner's restored context when the step ends on its tool,
     because the owner never saw it: the step consumed the turn and the owner's
     snapshot was taken before it arrived. Without it the owner reads a completed
     status with no request in front of it, and a compound request loses the half
     the step did not own.
+
+    Args:
+        chat_ctx: The step's conversation.
+
+    Returns:
+        The newest caller message, or None when the caller has not spoken.
     """
-    for item in reversed(chat_ctx.items):
-        if getattr(item, "type", None) == "message" and item.role == "user":
-            return item
-    return None
+    return next(
+        (
+            item
+            for item in reversed(chat_ctx.items)
+            if isinstance(item, llm.ChatMessage) and item.role == "user"
+        ),
+        None,
+    )
 
 
-def _insert_carried_turn(owner_ctx, carried):
+def _insert_carried_turn(owner_ctx: llm.ChatContext, carried: list[llm.ChatMessage | None]) -> None:
     """Put the caller turn a step consumed back in front of the owner, once.
 
     Only the newest one: a group whose steps each carried a turn has already
     answered the earlier ones. Skipped when the owner already holds the item,
     which is what a shared group leaves behind.
+
+    Args:
+        owner_ctx: The owner's restored conversation.
+        carried: The turn each step carried, oldest first, None where a step had none.
     """
-    for item in reversed(carried):
-        if item is None:
-            continue
-        if owner_ctx.get_by_id(item.id) is None:
-            owner_ctx.insert(item)
-            logger.info("carried the caller's turn back to the owner")
-        return
+    item = next((item for item in reversed(carried) if item is not None), None)
+    if item is not None and owner_ctx.get_by_id(item.id) is None:
+        owner_ctx.insert(item)
+        logger.info("carried the caller's turn back to the owner")
 
 
-def _sibling_call(ctx, names):
-    """Whether this response also called one of the named tools.
+def _sibling_call(ctx: RunContext, names: set[str]) -> bool:
+    """Say whether this response also called one of the named tools.
 
     The framework adds every function call of a response to the speech handle
     before it starts any of their bodies, so a tool can see what it was called
     beside. Its own call is skipped by id.
+
+    Args:
+        ctx: The calling tool's run context.
+        names: The tool names to look for.
+
+    Returns:
+        True when a different call in this response names one of them.
     """
-    for item in ctx.speech_handle.chat_items:
-        if getattr(item, "type", None) != "function_call":
-            continue
-        if item.call_id == ctx.function_call.call_id:
-            continue
-        if item.name in names:
-            return True
-    return False
+    return any(
+        isinstance(item, llm.FunctionCall)
+        and item.call_id != ctx.function_call.call_id
+        and item.name in names
+        for item in ctx.speech_handle.chat_items
+    )
 
 
 {{end}}{{if .HasTaskTransfers}}class _TaskTransfer(Exception):
     """Internal signal that a task handed the caller to another agent."""
 
     def __init__(self, agent: Agent) -> None:
+        """Carry the agent the caller moves to.
+
+        Args:
+            agent: The target of the handoff.
+        """
         super().__init__()
         self.agent = agent
 
@@ -1084,6 +1347,14 @@ def _sibling_call(ctx, names):
     and any caller turn a step consumed. The group's own results are not
     readable from here, and a group that stops early has to hand back what it
     did do.
+
+    Args:
+        group: The running group.
+        event: The step that just completed.
+        flow: The delegate's record of the run.
+
+    Raises:
+        RuntimeError: The completed step left no usable finish output.
     """
     flow["results"][event.task_id] = event.result
     flow["carried"].append(getattr(event.agent_task, "_carried_turn", None))
@@ -1159,9 +1430,10 @@ def _sibling_call(ctx, names):
 
 {{end -}}
 {{if .Slng.Any}}# --- router cache scope ------------------------------------------------------
-async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
-    """Agent.default.llm_node, plus everything this request's own scope and
-    values.
+async def _slng_llm_node(
+    agent: Any, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+    """Run Agent.default.llm_node with this request's own scope and values.
 
     One model object serves every agent and task in this session, so neither the
     scope nor the variable values can be a constructor value. The scope would be
@@ -1192,6 +1464,16 @@ async def _slng_llm_node(agent, chat_ctx, tools, model_settings):
     agent.session is read rather than stored: llm_node is only ever called by the
     running activity, so the session exists by the time this runs. That holds for
     an AgentTask too, which is an Agent.
+
+    Args:
+        agent: The agent or task asking, typed Any because it carries its own
+            _slng_scope and they share no base class that declares it.
+        chat_ctx: The conversation to send.
+        tools: The tools the model may call.
+        model_settings: The framework's per-turn model settings.
+
+    Yields:
+        The model's chunks.
     """
     session = agent.session
     # The activity resolves a per-class override against the session default the
@@ -1228,7 +1510,19 @@ class _SlngScoped:
 
     _slng_scope: str
 
-    def llm_node(self, chat_ctx, tools, model_settings):
+    def llm_node(
+        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+        """Send the request under this agent's cache scope.
+
+        Args:
+            chat_ctx: The conversation to send.
+            tools: The tools the model may call.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The model's chunks.
+        """
         return dev_llm_node(self, _slng_llm_node, chat_ctx, tools, model_settings)
 
 
@@ -1236,6 +1530,8 @@ class _SlngScoped:
 # --- agents ----------------------------------------------------------------
 {{range .Agents}}
 class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
+    """The {{.Name}} agent, compiled from its entry in agent.yaml."""
+
 {{if $.Live}}    # Neither hook below can fire on this package. A live session's model is a
     # DuplexModel, which the framework wraps as a RealtimeModel, and it dispatches
     # a reply on that instead of the pipeline these two sit in
@@ -1245,10 +1541,33 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
     # reply has no audio modality, which a duplex model never reports. They are
     # left in place because each raises rather than misbehaves if that ever
     # changes, and because removing them would be the dev feed's decision to make.
-{{end}}    def tts_node(self, text, model_settings):
+{{end}}    def tts_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[rtc.AudioFrame]:
+        """Synthesize speech through the dev feed's wrapper.
+
+        Args:
+            text: The text to speak.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The synthesized audio frames.
+        """
         return dev_metrics.dev_tts_node(self, text, model_settings)
 
-{{if not .SlngScope}}    def llm_node(self, chat_ctx, tools, model_settings):
+{{if not .SlngScope}}    def llm_node(
+        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+        """Ask the model, through the dev feed's wrapper.
+
+        Args:
+            chat_ctx: The conversation to send.
+            tools: The tools the model may call.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The model's chunks.
+        """
         return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
 
 {{end -}}
@@ -1256,6 +1575,16 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
     _slng_scope = {{pyq .SlngScope}}
 
 {{end}}    def __init__(self{{if not $.SingleAgentMinimal}}, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN{{end}}{{if and .IsEntry (not $.SingleAgentMinimal)}}, initial: bool = False{{end}}) -> None:
+        """Build the agent.
+{{- if not $.SingleAgentMinimal}}
+
+        Args:
+            chat_ctx: The conversation a handoff carries in.
+{{- if .IsEntry}}
+            initial: True for the call's first agent, which greets the caller.
+{{- end}}
+{{- end}}
+        """
 {{- if and .IsEntry (not $.SingleAgentMinimal)}}
         self._initial = initial
 {{- end}}
@@ -1284,6 +1613,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         await self.update_instructions({{.PromptExpr}})
 
 {{end}}    async def on_enter(self) -> None:
+        """Open this agent's turn as it takes over the call."""
 {{- if .PromptExpr}}
         # Rendered on the way in, and again by _refresh_prompt whenever a step
         # writes declared state: a call variable never changes, a declared value
@@ -1335,8 +1665,8 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- range .Tools}}{{template "method_tool" .}}{{end}}
 {{range .Transfers}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext):
-        {{triple .When}}
+    async def {{.Method}}(self, ctx: RunContext) -> Agent:
+        {{doc .When}}
 
 {{- if .Announce}}
         await dev_say(ctx.session, {{pyq .Announce}}, allow_interruptions=False)
@@ -1356,7 +1686,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{- range .HumanTransfers}}
     @function_tool(on_duplicate="reject")
     async def {{.Method}}(self, ctx: RunContext) -> str | None:
-        {{triple .When}}
+        {{doc .When}}
         # One line per firing, so a live test can see which control the model
         # picked and when — the transfer that ran is otherwise invisible in the
         # logs until the carrier request goes out.
@@ -1508,7 +1838,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         started = time.monotonic()
         try:
             await job_ctx.api.sip.transfer_sip_participant(request)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - any carrier failure is reported, never fatal
 {{- if .Hangup}}
             # on_unavailable: hangup. Attempt the goodbye here, and always shut
             # down even if generating it fails or is cancelled.
@@ -1543,8 +1873,8 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{end}}
 {{- range .Delegates}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext){{if or .Task (eq .Then "return")}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
-        {{triple .When}}
+    async def {{.Method}}(self, ctx: RunContext){{if or .Task (eq .Then "return")}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{else if eq .Then "transfer"}} -> Agent{{else}} -> None{{end}}:
+        {{doc .When}}
         # Already ran, and nobody has spoken since. Then this is not a second
         # request, it is the model reading its own completed result as though it
         # were one, and running the whole thing again is the worst possible
@@ -1568,7 +1898,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
         # Filled by a step that ended on its own tool, and read in the finally
         # below. A list because a group runs several steps and the last one to
         # carry a turn is the one the owner has not seen.
-        _carried: list = []
+        _carried: list[llm.ChatMessage | None] = []
 {{- end}}
 {{- if and .Steps (not .Isolated)}}
         # What the group reached, recorded as it goes: a group that stops early
@@ -1585,7 +1915,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
             result = await {{.Task.Class}}(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
 {{- end}}
 {{- else if .Isolated}}
-            task_results = {}
+            task_results: dict = {}
             # The steps this invocation will run, decided once as it starts.
 {{- if .HasSkips}}
             # A step whose confirmation already holds is not entered at all.
@@ -1683,32 +2013,88 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{end}}
 {{- if .NeedsTasks}}
 # --- tasks -----------------------------------------------------------------
+# The first request plus two retries, when a task's model answers with nothing.
+_TASK_MAX_ATTEMPTS = 3
+{{- if .NeedsTerminal}}
+# How long a handoff or a finish waits for the tool that ends the step to settle.
+_TERMINAL_WAIT_SECS = 30.0
+{{- end}}
+
+
 def _task_result(values: dict, {{.Unserved.Name}}: str) -> dict:
-    """A step that could not serve a request names it on the way out, so the
-    agent that owns the step reads it off the result and takes it from there."""
+    """Add the unserved request to a step's result, if it named one.
+
+    A step that could not serve a request names it on the way out, so the agent
+    that owns the step reads it off the result and takes it from there.
+
+    Args:
+        values: The values the step recorded.
+        {{.Unserved.Name}}: What the step could not serve, or an empty string.
+
+    Returns:
+        The values, with the unserved request added when there is one.
+    """
     if not {{.Unserved.Name}}:
         return values
     return {**values, {{pyq .Unserved.Name}}: {{.Unserved.Name}}}
 
 
 class _RetryEmptyTaskResponseMixin:
+    """Retry a task's model request when it comes back empty."""
+
     _response_tool_call_ids: set[str]
 
-    def tts_node(self, text, model_settings):
+    def tts_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[rtc.AudioFrame]:
+        """Synthesize speech through the dev feed's wrapper.
+
+        Args:
+            text: The text to speak.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The synthesized audio frames.
+        """
         return dev_metrics.dev_tts_node(self, text, model_settings)
 
-    async def update_chat_ctx(self, chat_ctx, *, exclude_invalid_function_calls=False):
+    async def update_chat_ctx(
+        self, chat_ctx: ChatContext, *, exclude_invalid_function_calls: bool = False
+    ) -> None:
+        """Replace the task's context, keeping tool records the task cannot run.
+
+        Args:
+            chat_ctx: The context to install.
+            exclude_invalid_function_calls: Drop calls whose tool is gone.
+        """
         # History policy owns old tool records, including tools this task cannot run.
         assert isinstance(self, Agent)
         await Agent.update_chat_ctx(self, chat_ctx, exclude_invalid_function_calls=exclude_invalid_function_calls)
 
-    async def update_tools(self, tools):
+    async def update_tools(self, tools: list[Tool | llm.Toolset]) -> None:
+        """Replace the task's tools without losing its context.
+
+        Args:
+            tools: The tools the task may call from now on.
+        """
         assert isinstance(self, Agent)
         history = self.chat_ctx.copy()
         await Agent.update_tools(self, tools)
         await self.update_chat_ctx(history, exclude_invalid_function_calls=False)
 
-    async def llm_node(self, chat_ctx, tools, model_settings):
+    async def llm_node(
+        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+        """Ask the model, retrying up to twice when it answers with nothing.
+
+        Args:
+            chat_ctx: The conversation to send.
+            tools: The tools the model may call.
+            model_settings: The framework's per-turn model settings.
+
+        Yields:
+            The model's chunks, or a short apology when every attempt was empty.
+        """
         # Every generated user of this mixin is an AgentTask; narrow that
         # invariant here so the emitted project type-checks without a new base.
         assert isinstance(self, Agent)
@@ -1751,7 +2137,7 @@ class _RetryEmptyTaskResponseMixin:
         finish_only = False
         request_tools: list[llm.Tool] = tools
         request_chat_ctx = chat_ctx
-        for attempt in range(3):
+        for attempt in range(_TASK_MAX_ATTEMPTS):
             has_response = False
 {{if $.Slng.Any}}            # A router-bound task asks under its own cache scope, not its owner's.
             # Dispatched here because this mixin owns llm_node for every task, and
@@ -1802,8 +2188,10 @@ class _RetryEmptyTaskResponseMixin:
                     completed_tool_call_ids
                 )
                 return
-            if attempt < 2:
-                logger.warning("task response was empty; retrying %d/2", attempt + 1)
+            if attempt < _TASK_MAX_ATTEMPTS - 1:
+                logger.warning(
+                    "task response was empty; retrying %d/%d", attempt + 1, _TASK_MAX_ATTEMPTS - 1
+                )
 
                 if attempt == 0 and post_tool:
                     finish_only = True
@@ -1876,11 +2264,21 @@ class _RetryEmptyTaskResponseMixin:
 
 {{range .Tasks}}
 class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict]):
+    """The {{.Name}} step, compiled from its entry in agent.yaml."""
+
 {{if .SlngScope}}    # This task's own cache scope. Read by _RetryEmptyTaskResponseMixin rather
     # than by a mixin of its own, because that mixin already owns llm_node here.
     _slng_scope = {{pyq .SlngScope}}
 
 {{end}}    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN{{if and .Announce .SpeakOpening}}, speak_opening: bool = False{{end}}) -> None:
+        """Build the step.
+
+        Args:
+            chat_ctx: The conversation the step starts from.
+{{- if and .Announce .SpeakOpening}}
+            speak_opening: Say the step's announcement as it is entered.
+{{- end}}
+        """
         super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if or .Prebuilt .MCPServers}}, tools=[{{template "tools_list" .}}]{{end}})
         if isinstance(chat_ctx, llm.ChatContext):
             self._chat_ctx = chat_ctx.copy()
@@ -1906,7 +2304,7 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
         self._terminal: tuple[str, dict] | None = None
         self._terminal_pending = False
         self._terminal_settled = asyncio.Event()
-        self._carried_turn = None
+        self._carried_turn: llm.ChatMessage | None = None
 {{- end}}
 {{- if .Transfers}}
         self._terminal_claimed = False
@@ -1918,6 +2316,11 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{- end}}
 
     def _claim_terminal(self) -> bool:
+        """Claim the step's ending for a handoff.
+
+        Returns:
+            False when a handoff has already claimed it.
+        """
         if self._terminal_claimed:
             return False
         self._terminal_claimed = True
@@ -1925,6 +2328,7 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{- end}}
 
     async def on_enter(self) -> None:
+        """Open this step's turn as it is entered."""
 {{- if .Withdraws}}
         # Entered, so whatever it confirms is being decided again. Withdrawn
         # before the prompt renders, so this step never reads a confirmation it
@@ -1965,21 +2369,30 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{- if .Terminal}}
 
     def _begin_terminal(self) -> None:
+        """Mark a tool that ends this step as in flight."""
         self._terminal_pending = True
         self._terminal_settled.clear()
 
     def _settle_terminal(self) -> None:
+        """Mark the step's ending tool as settled and wake anything waiting."""
         self._terminal_pending = False
         self._terminal_settled.set()
 {{- end}}
 {{range .Tools}}{{if .Terminal}}
-    async def _end_on_{{.Method}}(self, ctx: RunContext, result: dict):
+    async def _end_on_{{.Method}}(self, ctx: RunContext, result: dict) -> dict | None:
         """End this step on a validated result from {{.Method}}.
 
         The result never reaches the model: a tool that said what it did has
         already made the decision the model would have been asked to confirm.
         Anything that is not a success goes back as an ordinary result, which is
         what keeps a failed action a conversation rather than a saved one.
+
+        Args:
+            ctx: The tool call's run context.
+            result: What the tool returned.
+
+        Returns:
+            None when the step ended, otherwise the result to hand the model.
         """
         if self.done():
             # Delivered again after this step completed. There is nothing left
@@ -2029,8 +2442,8 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{end}}{{end}}{{range .Tools}}{{template "method_tool" .}}{{end}}
 {{$terminals := .TerminalTools}}{{range .Transfers}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext):
-        {{triple .When}}
+    async def {{.Method}}(self, ctx: RunContext) -> {{if $terminals}}str | None{{else}}None{{end}}:
+        {{doc .When}}
 {{- if $terminals}}
         if self._terminal_pending or _sibling_call(ctx, {{$terminals}}):
             # A tool that ends this step is running, or was called in the same
@@ -2040,8 +2453,8 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
             # unrecorded.
             self._transfer_waiting = True
             try:
-                await asyncio.wait_for(self._terminal_settled.wait(), timeout=30.0)
-            except asyncio.TimeoutError:
+                await asyncio.wait_for(self._terminal_settled.wait(), timeout=_TERMINAL_WAIT_SECS)
+            except TimeoutError:
                 self._settle_terminal()
             finally:
                 self._transfer_waiting = False
@@ -2089,8 +2502,8 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
             # decides the step. Wait for it rather than ending the step under it
             # and leaving what it did unrecorded.
             try:
-                await asyncio.wait_for(self._terminal_settled.wait(), timeout=30.0)
-            except asyncio.TimeoutError:
+                await asyncio.wait_for(self._terminal_settled.wait(), timeout=_TERMINAL_WAIT_SECS)
+            except TimeoutError:
                 self._settle_terminal()
             if self.done():
                 return
@@ -2123,7 +2536,24 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{- end}}
 
 # --- session ---------------------------------------------------------------
+{{- if or (and .InactivityNudgeSecs .InactivityEndSecs) .MaxDurationSecs}}
+# The loop keeps only a weak reference to a task, so a timer nobody holds can be
+# collected before it fires. Each one is held here until it finishes.
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+{{- end}}
+{{- if .Outbound}}
+# The dialled number's length bounds, with its leading +, from E.164.
+PHONE_NUMBER_MIN_LEN = 8
+PHONE_NUMBER_MAX_LEN = 16
+{{- end}}
+
+
 def prewarm(proc: JobProcess) -> None:
+    """Load what every call needs once, before the worker accepts a job.
+
+    Args:
+        proc: The worker process being warmed.
+    """
 {{- if not .LocalTurnTaking}}
     # No voice activity detector. The model reports the caller's speech itself,
     # and the framework only listens to it when no detector of ours is present:
@@ -2161,14 +2591,24 @@ def prewarm(proc: JobProcess) -> None:
 
 {{- if .Telephony}}
 MAX_SESSIONS = {{.MaxSessions}}
+# The port the health check listens on, unless UNMUTE_AGENT_HEALTH_PORT names another.
+DEFAULT_HEALTH_PORT = "8081"
 
 
 def telephony_load(agent_server: AgentServer) -> float:
+    """Report how full this worker is, so the platform stops routing to a full one.
+
+    Args:
+        agent_server: The server whose active jobs are counted.
+
+    Returns:
+        The load, from 0.0 (idle) to 1.0 (at MAX_SESSIONS).
+    """
     return min(len(agent_server.active_jobs) / MAX_SESSIONS, 1.0)
 
 
 server = AgentServer(
-    port=int(os.getenv("UNMUTE_AGENT_HEALTH_PORT", "8081")),
+    port=int(os.getenv("UNMUTE_AGENT_HEALTH_PORT", DEFAULT_HEALTH_PORT)),
     drain_timeout={{.DrainTimeoutSecs}},
     load_threshold=1.0,
 )
@@ -2176,14 +2616,21 @@ server.load_fnc = telephony_load
 {{- else}}
 server = AgentServer()
 {{- end}}
+# How long a warm process may take to start, knowledge indexing included.
+LOCAL_INIT_TIMEOUT_SECS = 60.0
 server.setup_fnc = prewarm
 if os.getenv({{pyq localRunEnv}}) == "1":
     # One browser call needs one warm spare, not one index build per CPU.
-    server.update_options(num_idle_processes=1, initialize_process_timeout=60.0)
+    server.update_options(num_idle_processes=1, initialize_process_timeout=LOCAL_INIT_TIMEOUT_SECS)
 
 
 @server.rtc_session(agent_name={{pyq .AgentName}})
 async def entrypoint(ctx: JobContext) -> None:
+    """Run one call: build the session, start the entry agent and wire the call.
+
+    Args:
+        ctx: The job LiveKit dispatched for this call.
+    """
 {{- if .RequiredSecrets}}
     require_env()
 {{- end}}
@@ -2359,7 +2806,7 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- end}}
 
     @session.on("user_state_changed")
-    def _on_user_state_changed(ev) -> None:
+    def _on_user_state_changed(ev: UserStateChangedEvent) -> None:
         if ev.new_state != "away":
             return
 {{- if .InactivityNudgeSecs}}
@@ -2367,7 +2814,9 @@ async def entrypoint(ctx: JobContext) -> None:
             instructions="The caller went quiet. Briefly check whether they are still there."
         )
 {{- if .InactivityEndSecs}}
-        asyncio.create_task(_end_if_still_away())
+        _timer = asyncio.create_task(_end_if_still_away())
+        _BACKGROUND_TASKS.add(_timer)
+        _timer.add_done_callback(_BACKGROUND_TASKS.discard)
 {{- end}}
 {{- else}}
         session.shutdown()  # inactivity.end_after with no nudge
@@ -2427,7 +2876,7 @@ async def entrypoint(ctx: JobContext) -> None:
             not isinstance(phone_number, str)
             or not phone_number.startswith("+")
             or not phone_number[1:].isdigit()
-            or not 8 <= len(phone_number) <= 16
+            or not PHONE_NUMBER_MIN_LEN <= len(phone_number) <= PHONE_NUMBER_MAX_LEN
         ):
             raise RuntimeError("phone_number must be an E.164 number")
 {{- if .HasVars}}
@@ -2588,7 +3037,9 @@ async def entrypoint(ctx: JobContext) -> None:
         await asyncio.sleep({{.MaxDurationSecs}})
         session.shutdown()  # conversation.max_duration
 
-    asyncio.create_task(_max_duration())
+    _timer = asyncio.create_task(_max_duration())
+    _BACKGROUND_TASKS.add(_timer)
+    _timer.add_done_callback(_BACKGROUND_TASKS.discard)
 {{- end}}
 {{- if .ThinkingAudio}}
 
