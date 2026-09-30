@@ -86,7 +86,8 @@ var supportWindows = map[Provider]SupportWindow{
 	//     and a run with that variable set would pass every gate we have.
 	//
 	// `metrics_collected` is deprecated and the emitted module subscribes to it
-	// in four places (agent.py, tracing.py, tracing_coval.py, dev_metrics.py),
+	// in four places (call.py, the two tracing templates behind utils/tracing.py,
+	// and utils/dev_metrics.py),
 	// which prints a warning per registration: two on a deployed traced run,
 	// three under `unmute dev`. It is NOT owed by this bump and this row is not
 	// where it gets fixed: the deprecation block is byte-identical in 1.6.10

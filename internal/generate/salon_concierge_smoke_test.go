@@ -28,7 +28,7 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402
+bot = _project("bot")
 from pipecat.frames.frames import (  # noqa: E402
     LLMMessagesAppendFrame,
     LLMRunFrame,
@@ -98,7 +98,7 @@ from types import SimpleNamespace
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import ` + module + ` as generated  # noqa: E402
+generated = _project("` + module + `")
 from tools import check_availability, create_booking, find_or_create_customer, list_bookings  # noqa: E402
 
 ` + livekitRunContextStandIn + `
@@ -331,7 +331,7 @@ assert version("livekit-agents") == _report["version"], (version("livekit-agents
 for name in _report["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import agent  # noqa: E402
+agent = _project("agent")
 from livekit.agents import AgentServer, llm  # noqa: E402
 import ast  # noqa: E402
 
@@ -575,7 +575,7 @@ assert version("pipecat-ai") == _report["version"], (version("pipecat-ai"), _rep
 for name in _report["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402
+bot = _project("bot")
 from pipecat.flows import NO_RESPONSE  # noqa: E402
 from pipecat.frames.frames import Frame  # noqa: E402
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage  # noqa: E402

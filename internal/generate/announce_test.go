@@ -33,8 +33,8 @@ func TestAGroupStepSpeaksItsOwnAnnounceOnce(t *testing.T) {
 		file     string
 		want     string
 	}{
-		{ir.ProviderLiveKit, "agent.py", "if self._speak_opening:"},
-		{ir.ProviderPipecat, "bot.py", `await self.queue_frame(TTSSpeakFrame(_open, append_to_context=False))`},
+		{ir.ProviderLiveKit, agentSource, "if self._speak_opening:"},
+		{ir.ProviderPipecat, agentSource, `await self.queue_frame(TTSSpeakFrame(_open, append_to_context=False))`},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			agent := loadExample(t, "remy")
@@ -67,7 +67,7 @@ func TestATaskNoGroupRunsGrowsNoStepOpening(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	if py := artifactFile(t, artifact, "agent.py"); strings.Contains(py, "speak_opening") {
+	if py := artifactFile(t, artifact, agentSource); strings.Contains(py, "speak_opening") {
 		t.Error("a task no group runs took the step-opening keyword")
 	}
 }
@@ -81,8 +81,8 @@ func TestAnnounceAlternativesLowerToTheHelperAndOneLineDoesNot(t *testing.T) {
 		provider ir.Provider
 		file     string
 	}{
-		{ir.ProviderLiveKit, "agent.py"},
-		{ir.ProviderPipecat, "bot.py"},
+		{ir.ProviderLiveKit, agentSource},
+		{ir.ProviderPipecat, agentSource},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			agent := salonAgent(t)
@@ -132,8 +132,8 @@ func TestAPackageWithNoAlternativesEmitsNoChooser(t *testing.T) {
 		provider ir.Provider
 		file     string
 	}{
-		{ir.ProviderLiveKit, "agent.py"},
-		{ir.ProviderPipecat, "bot.py"},
+		{ir.ProviderLiveKit, agentSource},
+		{ir.ProviderPipecat, agentSource},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			artifact, err := Generate(agent, targetByProvider(t, agent, tc.provider), target.Default())

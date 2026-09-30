@@ -272,7 +272,7 @@ func TestCarrierRunbookContract(t *testing.T) {
 // claimed before the request is issued, because a second signal arriving while the
 // first forward is in flight would otherwise slip past it.
 func TestCarrierCallIsForwardedOnce(t *testing.T) {
-	bot := artifactFile(t, dailyCarrierArtifact(t, "twilio", false), "bot.py")
+	bot := artifactFile(t, dailyCarrierArtifact(t, "twilio", false), agentSource)
 	handler := strings.Index(bot, "async def on_dialin_ready(")
 	if handler < 0 {
 		t.Fatal("the carrier bot registers no ready handler, so the call is never forwarded")
@@ -332,7 +332,7 @@ func TestCarrierOutboundIsStartedAgainstThePlatformNotTheHelper(t *testing.T) {
 	}
 
 	// And the bot's side of the leg, which is where the dial actually happens.
-	bot := artifactFile(t, artifact, "bot.py")
+	bot := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		"await transport.start_dialout(", `"provider": "daily"`,
 		`carrier_call["dialout"]["sip_uri"]`,
@@ -347,7 +347,7 @@ func TestCarrierOutboundIsStartedAgainstThePlatformNotTheHelper(t *testing.T) {
 	if strings.Contains(artifactFile(t, quiet, "README.md"), "### Place an outbound call") {
 		t.Error("a package declaring no outbound gets an outbound command anyway")
 	}
-	if strings.Contains(artifactFile(t, quiet, "bot.py"), "start_dialout") {
+	if strings.Contains(artifactFile(t, quiet, agentSource), "start_dialout") {
 		t.Error("a package declaring no outbound emits dial-out code anyway")
 	}
 }
@@ -387,7 +387,7 @@ func TestCarrierInboundJoinsThePlatformsRoom(t *testing.T) {
 		}
 	}
 
-	bot := artifactFile(t, carrier, "bot.py")
+	bot := artifactFile(t, carrier, agentSource)
 	entry := bot[strings.Index(bot, "async def bot("):]
 	if !strings.Contains(entry, "create_transport(runner_args, transport_params)") {
 		t.Errorf("the entry point does not take its transport from the runner:\n%s", entry)
@@ -411,7 +411,7 @@ func TestCarrierInboundJoinsThePlatformsRoom(t *testing.T) {
 	}
 	// Nothing here needs the transport class, so a carrier build without a transfer
 	// must not import it.
-	quiet := artifactFile(t, dailyCarrierArtifactWithoutTransfer(t), "bot.py")
+	quiet := artifactFile(t, dailyCarrierArtifactWithoutTransfer(t), agentSource)
 	if strings.Contains(quiet, "import DailyParams, DailyTransport") {
 		t.Error("a carrier build with no transfer imports DailyTransport without using it")
 	}
@@ -489,7 +489,7 @@ func dailyCarrierArtifactWithoutTransfer(t *testing.T) Artifact {
 // T039 / US3: on a carrier target the transfer leaves through the operator's own
 // trunk.
 func TestCarrierColdTransferDialsThroughTheOperatorTrunk(t *testing.T) {
-	carrier := artifactFile(t, dailyCarrierArtifact(t, "twilio", true), "bot.py")
+	carrier := artifactFile(t, dailyCarrierArtifact(t, "twilio", true), agentSource)
 
 	if !strings.Contains(carrier, `{"toEndPoint": _carrier_sip(os.environ["BILLING_PHONE_NUMBER"])}`) {
 		t.Error("the carrier transfer does not compose its destination at the trunk's termination address")
@@ -520,7 +520,7 @@ func TestCarrierColdTransferDialsThroughTheOperatorTrunk(t *testing.T) {
 // value fails by name rather than as a failed transfer on a
 // call somebody is paying for.
 func TestCarrierTransferValuesAreInTheStartupCheck(t *testing.T) {
-	bot := artifactFile(t, dailyCarrierArtifact(t, "twilio", true), "bot.py")
+	bot := artifactFile(t, dailyCarrierArtifact(t, "twilio", true), agentSource)
 	// Two checks, and every name is in exactly one of them. REQUIRED_ENV runs on
 	// every session; CALL_REQUIRED_ENV runs only once the body says this is a phone
 	// call, because a browser or console session on this package reads the carrier

@@ -26,11 +26,11 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402
+bot = _project("bot")
 from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper  # noqa: E402
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 
-src = open("bot.py").read()
+src = _project_source()
 assert "BusBridgeProcessor" not in src, "inline bot must not build the bus"
 assert "activate_worker(" not in src, "inline bot must not activate workers"
 
@@ -111,7 +111,7 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402
+bot = _project("bot")
 
 
 async def fake_create_transport(*_args, **_kwargs):
@@ -155,7 +155,7 @@ from types import SimpleNamespace
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402
+bot = _project("bot")
 from loguru import logger  # noqa: E402
 from pipecat.processors.frame_processor import FrameProcessor  # noqa: E402
 
@@ -257,7 +257,7 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402
+bot = _project("bot")
 from pipecat.frames.frames import (  # noqa: E402
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -385,10 +385,10 @@ from pathlib import Path
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402
+bot = _project("bot")
 
-if Path("tracing.py").exists():
-    import tracing
+if Path("utils/tracing.py").exists():
+    from utils import tracing
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
 
@@ -447,7 +447,7 @@ import subprocess
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402
+bot = _project("bot")
 from pipecat.bus import AsyncQueueBus, BusActivateWorkerMessage  # noqa: E402
 from pipecat.flows import FlowManager, NO_RESPONSE  # noqa: E402
 from pipecat.frames.frames import LLMSetToolsFrame  # noqa: E402
@@ -752,7 +752,7 @@ async def main() -> None:
     assert next_node is NO_RESPONSE
     owner.queue_frame = original_queue_frame
     owner.flush_pipeline = original_flush_pipeline
-    subprocess.run(["ruff", "check", "bot.py"], check=True)
+    subprocess.run(["ruff", "check", "--extend-exclude", "smoke_check.py", "."], check=True)
     print("task transfer smoke ok")
 
 
@@ -768,7 +768,7 @@ import subprocess
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402
+bot = _project("bot")
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 
 
@@ -835,7 +835,7 @@ async def main() -> None:
     assert second_context["_phone_call"]["call_id"] == "call-b"
     assert first.call_context is first_context
     assert second.call_context is second_context
-    subprocess.run(["ruff", "check", "bot.py"], check=True)
+    subprocess.run(["ruff", "check", "--extend-exclude", "smoke_check.py", "."], check=True)
     print("pipecat session isolation smoke ok")
 
 
@@ -853,7 +853,7 @@ for name in json.load(open("compile-report.json"))["required_env"]:
 os.environ["UNMUTE_PUBLIC_URL"] = "https://voice.example"
 os.environ["TWILIO_AUTH_TOKEN"] = "smoke-auth-token"
 
-import bot  # noqa: E402
+bot = _project("bot")
 import telephony_helper as helper  # noqa: E402
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 from pipecat.transports.daily.transport import DailyTransportClient  # noqa: E402
@@ -1102,8 +1102,8 @@ os.environ["LANGFUSE_PUBLIC_KEY"] = "pk-smoke"
 os.environ["LANGFUSE_SECRET_KEY"] = "sk-smoke"
 os.environ["LANGFUSE_BASE_URL"] = f"http://127.0.0.1:{receiver.server_port}"
 
-import bot  # noqa: E402
-import tracing as tracing_config  # noqa: E402
+bot = _project("bot")
+from utils import tracing as tracing_config  # noqa: E402
 from loguru import logger  # noqa: E402
 from opentelemetry import trace  # noqa: E402
 from opentelemetry.sdk.trace import TracerProvider  # noqa: E402
@@ -1429,7 +1429,7 @@ async def main() -> None:
         for value in vars(bot).values()
         if isinstance(value, type)
         and issubclass(value, LLMWorker)
-        and value.__module__ == "bot"
+        and value.__module__ == "agents"
     ]
     assert len(agent_types) == 1, agent_types
     request_agent = agent_types[0]()
@@ -1708,7 +1708,7 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402
+bot = _project("bot")
 from pipecat.runner.types import DailyDialinRequest  # noqa: E402
 from pipecat.runner.utils import _maybe_apply_daily_dialin  # noqa: E402
 from pipecat.transports.base_transport import TransportParams  # noqa: E402
@@ -1877,7 +1877,7 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "https://mcp.example/mcp")
 
-import bot  # noqa: E402
+bot = _project("bot")
 
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 from pipecat.services.mcp_service import MCPClient  # noqa: E402
@@ -1885,7 +1885,7 @@ from pipecat.workers.llm import LLMWorker  # noqa: E402
 
 workers = sorted(
     name for name, obj in vars(bot).items()
-    if inspect.isclass(obj) and issubclass(obj, LLMWorker) and obj.__module__ == "bot"
+    if inspect.isclass(obj) and issubclass(obj, LLMWorker) and obj.__module__ == "agents"
 )
 assert workers, "no agent workers found in bot.py"
 
@@ -1909,7 +1909,7 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "https://mcp.example/mcp")
 
-import bot  # noqa: E402
+bot = _project("bot")
 from mcp.types import ListToolsResult, Tool  # noqa: E402
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 from pipecat.workers.llm import LLMWorker  # noqa: E402
@@ -1983,7 +1983,7 @@ worker_types = [
     for value in vars(bot).values()
     if inspect.isclass(value)
     and issubclass(value, LLMWorker)
-    and value.__module__ == "bot"
+    and value.__module__ == "agents"
     and value.__name__.endswith("Agent")
 ]
 mcp_worker_type = next(worker_type for worker_type in worker_types if "start_mcp" in vars(worker_type))
@@ -2273,15 +2273,24 @@ func runPipecatSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 // is a 401.
 //
 // So the stub replaces each `_embed_<base>` with MockEmbedding *before* anything
-// imports bot. `knowledge` lands in sys.modules already patched, and bot's own
-// `import knowledge` picks up the patched module. Reading, text-layer detection,
-// splitting, indexing and both halves of the search still run for real; only the
-// hosted call is stubbed.
+// imports bot. `utils.knowledge` lands in sys.modules already patched, and the
+// project's own `from utils import knowledge` picks up the patched module.
+// Reading, text-layer detection, splitting, indexing and both halves of the
+// search still run for real; only the hosted call is stubbed.
 //
 // Silent when the package declares no knowledge base, which is most of them.
+//
+// The stub also defines _project, which a script calls where it used to write
+// `import bot` or `import agent`. The emitted code is several modules now, and a
+// script reads and patches it as the one namespace the entry file used to be:
+// a read finds the name in whichever module defines or imports it, and a write
+// rebinds it in every module that holds it. That second half is the point. Each
+// module holds its own binding of a name it imported from another, so patching
+// only the module that defines a function leaves the module that calls it
+// running the original.
 const knowledgeSmokeStub = `
 try:
-    import knowledge as _knowledge
+    from utils import knowledge as _knowledge
 
     from llama_index.core.embeddings import MockEmbedding
 
@@ -2289,6 +2298,41 @@ try:
         setattr(_knowledge, _name, lambda: MockEmbedding(embed_dim=8))
 except ImportError:
     pass  # no knowledge base in this package
+
+import importlib as _importlib
+import pathlib as _pathlib
+import types as _types
+
+
+class _Project(_types.ModuleType):
+    """The emitted modules, read and patched as one namespace."""
+
+    def __setattr__(self, name, value):
+        for module in self.__dict__.get("_modules", ()):
+            if name in vars(module):
+                setattr(module, name, value)
+        super().__setattr__(name, value)
+
+
+def _project(entry):
+    """Import the entry module, then every other emitted module, as one namespace."""
+    modules = [_importlib.import_module(entry)]
+    paths = [*sorted(_pathlib.Path().glob("*.py")), *sorted(_pathlib.Path("utils").glob("*.py"))]
+    for path in [*paths, _pathlib.Path("prompts/__init__.py")]:
+        name = ".".join(path.with_suffix("").parts).removesuffix(".__init__")
+        if path.exists() and name not in (entry, "utils") and not name.startswith(("smoke_", "telephony_", "text_run_")):
+            modules.append(_importlib.import_module(name))
+    project = _Project(entry)
+    for module in reversed(modules):
+        project.__dict__.update(vars(module))
+    project.__dict__["_modules"] = modules
+    return project
+
+
+def _project_source():
+    """Every emitted module's source, joined, for a script that reads the code."""
+    paths = [*sorted(_pathlib.Path().glob("*.py")), *sorted(_pathlib.Path("utils").glob("*.py"))]
+    return "\n".join(p.read_text() for p in paths if not p.name.startswith(("smoke_", "telephony_", "text_run_")))
 `
 
 // withKnowledgeStub splices the stub in below the script's own module docstring,

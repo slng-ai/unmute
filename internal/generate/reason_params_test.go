@@ -44,7 +44,7 @@ func reasonParamsArtifact(t *testing.T, provider ir.Provider) Artifact {
 // (temperature and friends) stay plain Settings fields; everything else rides
 // the entry's overflow field, which OpenAILLMService merges into the body.
 func TestReasonParamsOverflowIntoPipecatSettingsExtra(t *testing.T) {
-	bot := artifactFile(t, reasonParamsArtifact(t, ir.ProviderPipecat), "bot.py")
+	bot := artifactFile(t, reasonParamsArtifact(t, ir.ProviderPipecat), agentSource)
 
 	start := strings.Index(bot, "def build_intake_llm(")
 	if start < 0 {
@@ -77,7 +77,7 @@ func TestReasonParamsOverflowIntoPipecatSettingsExtra(t *testing.T) {
 // row forwards params as plain constructor kwargs, so reasoning_effort must
 // land flat on openai.LLM(...) and no extra={...} may appear.
 func TestReasonParamsStayFlatKwargsOnLiveKit(t *testing.T) {
-	agentpy := artifactFile(t, reasonParamsArtifact(t, ir.ProviderLiveKit), "agent.py")
+	agentpy := artifactFile(t, reasonParamsArtifact(t, ir.ProviderLiveKit), agentSource)
 
 	var call string
 	for _, line := range strings.Split(agentpy, "\n") {

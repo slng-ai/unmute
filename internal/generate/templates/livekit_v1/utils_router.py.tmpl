@@ -1,0 +1,288 @@
+"""The SLNG Context Router: its model configuration, client, variables and scope."""
+
+{{if .RequiredSecrets}}{{if .Slng.Any}}
+
+# --- SLNG Context Router ----------------------------------------------------
+# The router answers a repeated turn from its cache instead of calling the model.
+# That is why a router-bound system prompt below keeps its placeholders instead of
+# being rendered here: the router substitutes them from template_variables, so the
+# prompt it sees is identical on every call, which is what lets a turn repeat. A
+# first turn never caches, and the router decides which later turns are
+# repeatable, so a repeat served by the model is expected rather than a fault.
+#
+# The agent id header scopes that cache, and it is one value per prompt rather
+# than one for the package: each agent and each task sends the authored agent_id,
+# a colon, then its own name: `<agent_id>:<agent>` for an agent and
+# `<agent_id>:task.<task>` for a task. The cache key is the last exchange and carries no
+# system prompt, so two prompts under one scope get served each other's answers.
+{{range .Slng.Configs}}
+
+def {{.Func}}() -> dict:
+    """The model configuration, sent inline in the body of every think request.
+
+    Credentials are read here rather than at import, so a missing one is reported
+    by require_env() alongside every other name instead of raising a KeyError
+    before anything has checked. No value is written into this file: each is the
+    name of an environment variable.
+
+    Returns:
+        The configuration object for the think request body.
+    """
+    return {{.Body}}
+{{end}}{{if .Slng.Vertex}}
+
+def _slng_vertex_credentials(name: str) -> dict:
+    """A GCP service-account key, in whichever of three shapes the variable holds.
+
+    The key JSON, that JSON base64 encoded, or a path to the key file, decided in
+    that order because a base64 value can begin with "/" and look like a path.
+    This runs once at startup, so a malformed value fails before the agent answers
+    anything rather than mid-call.
+
+    Args:
+        name: The environment variable that holds the key.
+
+    Returns:
+        The parsed key.
+
+    Raises:
+        RuntimeError: The value is none of the three shapes.
+    """
+    raw = os.environ[name].strip()
+    if raw.startswith("{"):
+        return json.loads(raw)
+    try:
+        decoded = base64.b64decode(raw, validate=True).decode("utf-8").strip()
+    except (ValueError, UnicodeDecodeError):
+        decoded = ""
+    if decoded.startswith("{"):
+        return json.loads(decoded)
+    if os.path.isfile(raw):
+        with open(raw, encoding="utf-8") as handle:
+            return json.load(handle)
+    raise RuntimeError(
+        f"{name} must hold a GCP service-account key in one of three shapes: "
+        f"the key JSON, that JSON base64 encoded, or a path to the key file"
+    )
+{{end}}
+async def _slng_log_provenance(response: httpx.Response) -> None:
+    """Say where this answer came from, once per think request.
+
+    The router states this only in response headers, and neither framework hands
+    them to us, so a hook on the client is the one place that sees them. Without
+    it the question an operator actually asks about a cache, whether it is
+    working, has no answer in this run's own log.
+
+    Three rules, from httpx's own event-hooks documentation, each of which would
+    be a live-call defect if broken. It has to be async, because a sync callable
+    on an AsyncClient is never awaited. It reads headers only: the hook runs
+    before the body is read, so touching the body would consume the stream the
+    framework is about to iterate. And it cannot raise, because a raising
+    response hook fails the request it was only meant to describe.
+
+    It also logs only a router think request. The scope header is what lets the
+    line name a scope at all, so a request without one is a request this hook
+    could not describe.
+
+    Args:
+        response: The router's response, before its body is read.
+    """
+    try:
+        scope = response.request.headers.get({{pyq .Slng.AgentIDHeader}})
+        if not scope:
+            return
+        headers = response.headers
+        # Field order is the contract, and the gate reads it off this line.
+        fields = ["scope=" + scope, "source=" + headers.get("x-slng-response-source", "unknown")]
+        if layer := headers.get("x-slng-cache-layer"):
+            fields.append("layer=" + layer)
+        if model := headers.get("x-slng-model"):
+            fields.append("model=" + model)
+        fields.append("request_id=" + headers.get("x-slng-request-id", "unknown"))
+        logger.info("slng router: " + " ".join(fields))
+    except Exception:  # noqa: BLE001 - a log line must never end a call
+        logger.debug("could not read the router's provenance headers", exc_info=True)
+
+{{if .Slng.ClientBaseURL}}
+
+def _slng_router_client() -> AsyncOpenAI:
+    """The router client, built here so a response hook can read its headers.
+
+    The plugin builds its own client when it is given none, and it exposes no
+    hook, no raw response and no header callback. Passing one in is the only
+    supported seam (livekit-plugins-openai llm.py, the `client` argument), so the
+    provenance line above costs this function.
+
+    Every value restates the plugin's own default at the pinned version
+    (llm.py:161-176): retries off, and that exact httpx timeout and limit set.
+    Restating them is the point. Anything different here would be a change to
+    retry or connection behaviour that nobody asked for and nothing would report.
+
+    Passing a client also means owning it: the plugin closes only a client it
+    built itself (`_owns_client`), so the entrypoint closes this one on shutdown.
+
+    Returns:
+        The client every router think request goes through.
+    """
+    return AsyncOpenAI(
+        api_key=os.environ[{{pyq .Slng.ClientKeyEnv}}],
+        base_url={{pyq .Slng.ClientBaseURL}},
+        max_retries=0,
+        http_client=httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=15.0, read=5.0, write=5.0, pool=5.0),
+            follow_redirects=True,
+            limits=httpx.Limits(
+                max_connections=50,
+                max_keepalive_connections=50,
+                keepalive_expiry=120,
+            ),
+            event_hooks={"response": [_slng_log_provenance]},
+        ),
+    )
+{{end}}
+{{if .Slng.Variables}}
+
+_SLNG_VARIABLE_LIMIT = {{.Slng.Limit}}
+_SLNG_TEMPLATE_PATHS = {{.Slng.TemplatePaths}}
+_SLNG_SCOPE_SITES = {{.Slng.TemplateSites}}
+
+
+def _slng_template_variables(
+    state: Userdata | None, names: list[str] | tuple[str, ...], *, scope: str = ""
+) -> dict[str, str]:
+    """Collect the values the router substitutes into the prompt's placeholders.
+
+    A name with no value yet sends the empty string, never None and never the text
+    "None". A value over the router's limit is truncated with a warning rather
+    than dropped: an over-long value must not end a live call.
+
+    Args:
+        state: The call's shared state, if it has begun.
+        names: The placeholder names the prompt uses.
+        scope: The site whose placeholders these are.
+
+    Returns:
+        Each name mapped to its text.
+    """
+    values: dict[str, str] = {}
+    for name in names:
+{{- if .TypedState}}
+        # The bound is measured on the JSON rendering, not on the repr of the
+        # object: they are different lengths, and the one the router receives is
+        # the one that has to fit. _state_text carries its own bound and its own
+        # warning, so a declared value is already shortened by here. A path
+        # arrives as one flat name, and _state_lookup walks it.
+        text = _state_text(*_prompt_value(state, name, _SLNG_SCOPE_SITES.get(scope, "")))
+{{- else}}
+        value = getattr(state, name, None) if state is not None else None
+        text = "" if value is None else str(value)
+{{- end}}
+        if len(text) > _SLNG_VARIABLE_LIMIT:
+            logger.warning(
+                "template variable %s is %d characters; truncating to %d for the router",
+                name,
+                len(text),
+                _SLNG_VARIABLE_LIMIT,
+            )
+            text = text[:_SLNG_VARIABLE_LIMIT]
+        values[name] = text
+    return values
+{{end}}{{end}}
+{{end}}{{if .Slng.Any}}# --- router cache scope ------------------------------------------------------
+async def _slng_llm_node(
+    agent: Any, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+    """Run Agent.default.llm_node with this request's own scope and values.
+
+    One model object serves every agent and task in this session, so neither the
+    scope nor the variable values can be a constructor value. The scope would be
+    the same for all of them, which is the collision this prevents; the values
+    would be the ones the call started with, which is never the ones that matter.
+
+    Both dicts are written whole rather than by key, and both are written here
+    rather than at construction, for one reason read out of the plugin: it copies
+    the per-request extra_kwargs first and then overwrites extra_body and
+    extra_headers from its own constructor options (livekit-plugins-openai
+    llm.py:961-968, read at the pinned version). So a constructor value does not
+    merely win, it wins in silence. That is why no router model here is built
+    with either field.
+
+    The body restates the framework's own default (livekit-agents 1.8.1,
+    agents/voice/agent.py:559-580), because that default passes no per-request
+    extras and ModelSettings carries only tool_choice, so there is no supported
+    seam short of the node. The version pin is exact, floor equal to ceiling, so
+    a framework bump is already a deliberate step; checking this against the new
+    default is part of it.
+
+    A module function rather than only a mixin method, because two things need
+    it: the agent classes, through _SlngScoped below, and the task retry mixin,
+    which overrides llm_node for its own reasons and calls the default itself. A
+    second copy of this body is how one of those two would come to send the
+    wrong scope.
+
+    agent.session is read rather than stored: llm_node is only ever called by the
+    running activity, so the session exists by the time this runs. That holds for
+    an AgentTask too, which is an Agent.
+
+    Args:
+        agent: The agent or task asking, typed Any because it carries its own
+            _slng_scope and they share no base class that declares it.
+        chat_ctx: The conversation to send.
+        tools: The tools the model may call.
+        model_settings: The framework's per-turn model settings.
+
+    Yields:
+        The model's chunks.
+    """
+    session = agent.session
+    # The activity resolves a per-class override against the session default the
+    # same way (agent_activity.py:4938). isinstance covers both the not-given and
+    # the None case without reaching for a private helper.
+    activity_llm = agent.llm if isinstance(agent.llm, llm.LLM) else session.llm
+    tool_choice = model_settings.tool_choice if model_settings else NOT_GIVEN
+    async with activity_llm.chat(
+        chat_ctx=chat_ctx,
+        tools=tools,
+        tool_choice=tool_choice,
+        conn_options=session.conn_options.llm_conn_options,
+        extra_kwargs={
+            "extra_headers": {
+                {{pyq .Slng.AgentIDHeader}}: agent._slng_scope,
+                {{pyq .Slng.SessionIDHeader}}: session.userdata.{{.Slng.SessionIDField}},
+            },
+            # Rebuilt for every request, which is the point: a value this call
+            # learns partway through reaches the model from the next turn on.
+            "extra_body": {{.Slng.RequestBody}},
+        },
+    ) as stream:
+        async for chunk in stream:
+            yield chunk
+
+
+class _SlngScoped:
+    """Route an agent class's think requests through its own cache scope.
+
+    Agents only. A task carries _slng_scope as a plain class attribute and gets
+    here through _RetryEmptyTaskResponseMixin instead, because that mixin
+    overrides llm_node too and this one would shadow it.
+    """
+
+    _slng_scope: str
+
+    def llm_node(
+        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+        """Send the request under this agent's cache scope.
+
+        Args:
+            chat_ctx: The conversation to send.
+            tools: The tools the model may call.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The model's chunks.
+        """
+        return dev_llm_node(self, _slng_llm_node, chat_ctx, tools, model_settings)
+
+
+{{end -}}

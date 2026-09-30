@@ -1,0 +1,191 @@
+"""Read a phone call's facts, and dial and transfer through your trunk."""
+
+{{- if .HasColdTransfer}}
+# --- cold transfer destination -----------------------------------------------
+# TransferSIPParticipant's transfer_to is a URI, not a bare number: it becomes
+# the Refer-To of the outgoing SIP REFER. `tel:+E164` covers Twilio and Telnyx;
+# a provider that needs its trunk host in the Refer-To (Plivo) takes the
+# `sip:+E164@<trunk>` form, which a destination may already carry (SCHEMA N26).
+def _refer_uri(destination: str) -> str:
+    """Turn a destination into a REFER URI, adding `tel:` only to a bare number.
+
+    Args:
+        destination: A phone number or a `tel:`, `sip:` or `sips:` URI.
+
+    Returns:
+        The destination as a URI.
+    """
+    if destination.startswith(("tel:", "sip:", "sips:")):
+        return destination
+    return "tel:" + destination
+
+{{end}}
+{{- if .HasWarmTransfer}}
+# --- warm transfer destination -----------------------------------------------
+# CreateSIPParticipant's sip_call_to takes a phone number or a SIP user and
+# refuses a full URI, in those words: "SipCallTo should be a phone number or
+# SIP user, not a full SIP URI". Measured on a live call 2026-08-20 against
+# livekit-server v1.13.4, where a warm transfer failed with a 400 before it
+# dialled anything.
+#
+# A destination is allowed to be the `sip:+E164@<host>` form, which Plivo
+# documents as mandatory for its Refer-To, so the user part is what gets dialled
+# and the host is the trunk's job: _sip_trunk() already carries it. The cold
+# path takes the whole URI, because there the host belongs in the Refer-To.
+def _sip_user(destination: str) -> str:
+    """Turn a destination into a number or SIP user, never a full URI.
+
+    Args:
+        destination: A phone number, or a `sip:`, `sips:` or `tel:` URI.
+
+    Returns:
+        The user part, with the scheme and the host removed.
+    """
+    if "@" in destination:
+        destination = destination.rsplit("@", 1)[0]
+    scheme = next((s for s in ("sip:", "sips:", "tel:") if destination.startswith(s)), "")
+    return destination.removeprefix(scheme)
+
+{{end}}
+{{- if and .Telephony (eq .Telephony.Transport "sip") (or .Telephony.HasOutbound .Telephony.HasWarm)}}
+# --- dial-out trunk ----------------------------------------------------------
+# The carrier's own trunk settings, sent inline with every dial. No stored
+# LiveKit outbound trunk is used or needed: CreateSIPParticipant takes the
+# configuration in its `trunk` field and WarmTransferTask takes the same object
+# as `sip_connection`, so nothing has to be registered on the platform first.
+# One function, every dial site, so a rotated credential cannot fix one path and
+# break another. Verified against livekit-agents 1.6.9 on 2026-08-12.
+def _sip_trunk() -> api.SIPOutboundConfig:
+    """Build the carrier trunk configuration from the Connection's env names.
+
+    Returns:
+        The inline trunk settings for a dial.
+    """
+    return api.SIPOutboundConfig(
+        hostname=os.environ[{{pyq .Telephony.SIPAddressEnv}}],
+        auth_username=os.environ[{{pyq .Telephony.SIPUsernameEnv}}],
+        auth_password=os.environ[{{pyq .Telephony.SIPPasswordEnv}}],
+    )
+
+
+def _sip_number() -> str:
+    """Read the number to call from.
+
+    Required with an inline trunk, which carries no number list for the platform
+    to default from.
+
+    Returns:
+        The caller ID number.
+    """
+    return os.environ[{{pyq .Telephony.FromNumberEnv}}]
+
+{{end}}
+{{- if .Telephony}}
+# --- LiveKit SIP call context -----------------------------------------------
+# UNVERIFIED: Recheck these LiveKit-specific APIs with the LiveKit docs MCP.
+# They were verified against docs.livekit.io on 2026-07-20 because MCP was not
+# available during generation.
+{{- if eq .Telephony.Transport "connector"}}
+def _livekit_call_context(room_name: str, metadata: dict) -> dict:
+    """Collect the call facts the bridge wrote into the job metadata.
+
+    Args:
+        room_name: The LiveKit room, used as the session id.
+        metadata: The parsed job metadata.
+
+    Returns:
+        The call's carrier, connection and numbers.
+    """
+    # The Twilio bridge writes every call fact into the job metadata, so the
+    # agent reads them directly (there is no SIP participant to inspect).
+    return {
+        "session_id": room_name,
+        "carrier": {{pyq .Telephony.Carrier}},
+        "connection": {{pyq .Telephony.Connection}},
+        "call_id": metadata.get("call_id"),
+        "stream_id": metadata.get("stream_id"),
+        "direction": metadata.get("direction", "inbound"),
+        "from_number": metadata.get("from_number"),
+        "to_number": metadata.get("to_number"),
+    }
+{{- else}}
+def _livekit_call_context(room_name: str, participant: rtc.RemoteParticipant | None, metadata: dict) -> dict:
+    """Collect the call facts from the SIP participant and the job metadata.
+
+    Args:
+        room_name: The LiveKit room, used as the session id.
+        participant: The SIP participant, or None before it has joined.
+        metadata: The parsed job metadata.
+
+    Returns:
+        The call's carrier, connection, direction and numbers.
+
+    Raises:
+        RuntimeError: The direction the SIP leg reports is not the job's.
+    """
+    expected_direction = (
+        "outbound" if "phone_number" in metadata else "inbound"
+    )
+    direction = metadata.get("direction") or expected_direction
+    if direction != expected_direction:
+        raise RuntimeError("call direction does not match the LiveKit job")
+    attributes = participant.attributes if participant is not None else {}
+    remote_number = attributes.get("sip.phoneNumber") or metadata.get("phone_number")
+    trunk_number = attributes.get("sip.trunkPhoneNumber")
+{{- if or .Telephony.HasOutbound .Telephony.HasWarm}}
+    if not trunk_number and direction == "outbound":
+        trunk_number = _sip_number()
+{{- end}}
+    return {
+        "session_id": room_name,
+        "carrier": {{pyq .Telephony.Carrier}},
+        "connection": {{pyq .Telephony.Connection}},
+        "call_id": attributes.get("sip.callID") or metadata.get("call_id"),
+        "direction": direction,
+        "from_number": trunk_number if direction == "outbound" else remote_number,
+        "to_number": remote_number if direction == "outbound" else trunk_number,
+    }
+{{- end}}
+
+
+{{- if .HasVars}}
+def _hydrate_livekit_context(userdata: Userdata, context: dict, *, require_all: bool = True) -> None:
+    """Copy the call facts a prompt names onto the session state.
+
+    Args:
+        userdata: The state to fill.
+        context: The facts from _livekit_call_context.
+        require_all: Fail when a fact the package reads is absent.
+
+    Raises:
+        RuntimeError: A required fact is absent.
+    """
+    missing: list[str] = []
+{{- range .Telephony.SystemSources}}
+    value = context.get({{pyq .Source}})
+    if value in (None, ""):
+        missing.append({{pyq .Source}})
+    else:
+        userdata.{{.Variable}} = value
+{{- end}}
+    if missing and require_all:
+        raise RuntimeError("Missing LiveKit SIP context fields: " + ", ".join(missing))
+
+
+{{- end}}
+async def _livekit_entry_greeting(session: AgentSession) -> None:
+    """Open the call the way the package's greeting says to.
+
+    Args:
+        session: The running session.
+    """
+{{- if .Telephony.Greeting.Say}}
+    await dev_say(session, {{if .Telephony.Greeting.Templated}}_render({{pyq .Telephony.Greeting.Say}}, session.userdata){{else}}{{pyq .Telephony.Greeting.Say}}{{end}})
+{{- else if .Telephony.Greeting.RunLLM}}
+    session.generate_reply(instructions="Greet the caller and offer to help.")
+{{- else}}
+    pass  # the caller speaks first
+{{- end}}
+
+
+{{- end}}

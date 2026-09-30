@@ -56,7 +56,7 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import ` + module + ` as generated
+generated = _project("` + module + `")
 
 EXPECTED = json.loads(r"""` + typedStateExpectedState + `""")
 

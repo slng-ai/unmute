@@ -25,7 +25,7 @@ func realtimePipecatBot(t *testing.T, mutate func(agent *ir.Agent, target *ir.Ta
 	if err != nil {
 		t.Fatal(err)
 	}
-	return artifactFile(t, artifact, "bot.py")
+	return artifactFile(t, artifact, agentSource)
 }
 
 // turnDetection rewrites the fixture's authored value. The binding and the model
@@ -302,7 +302,7 @@ func TestPipecatRealtimePrerollFollowsTheTurnStartStrategy(t *testing.T) {
 func TestPipecatRealtimeEmitsNothingForAPackageThatDeclaresNone(t *testing.T) {
 	for _, name := range []string{"safe_core", "live_model"} {
 		t.Run(name, func(t *testing.T) {
-			module := artifactFile(t, generateFor(t, name, ir.ProviderPipecat), "bot.py")
+			module := artifactFile(t, generateFor(t, name, ir.ProviderPipecat), agentSource)
 			for _, marker := range []string{
 				"realtime_events", "OpenAIRealtimeLLMService", "_realtime()",
 			} {

@@ -104,14 +104,19 @@ func TestPipecatImageMeetsThePlatformContract(t *testing.T) {
 	if strings.Contains(build, "COPY . .") {
 		t.Error("the Dockerfile copies the build directory over the base image's own /app")
 	}
-	if !strings.Contains(build, "COPY bot.py ./") {
+	if !dockerCopies(build, "bot.py") {
 		t.Error("the Dockerfile does not copy bot.py, which is the one file the base image looks for")
 	}
-	// The invariant, not the spelling: every module the entrypoint imports has to
-	// be reachable inside the image. Asserting one COPY line's wording is what let
-	// `import tools.<name>` ship against an image with no tools/ directory, and
-	// `compose.dev.yaml` has no bind mount, so its optional container run uses the same image.
-	assertImportsAreCopied(t, artifact, build)
+	// The invariant, not the spelling: every module and prompt the agent reads
+	// has to be reachable inside the image. Asserting one COPY line's wording is
+	// what let `import tools.<name>` ship against an image with no tools/
+	// directory, and `compose.dev.yaml` has no bind mount, so its optional
+	// container run uses the same image.
+	for _, file := range artifact.Files {
+		if (strings.HasSuffix(file.Path, ".py") || strings.HasPrefix(file.Path, "prompts/")) && !dockerCopies(build, file.Path) {
+			t.Errorf("the image never receives %s, so the container cannot start:\n%s", file.Path, build)
+		}
+	}
 	// A CMD replaces the base image's server with something the platform cannot
 	// call.
 	if strings.Contains(build, "CMD ") {
@@ -122,36 +127,6 @@ func TestPipecatImageMeetsThePlatformContract(t *testing.T) {
 	for _, forbidden := range []string{"install --system .", "pip install ."} {
 		if strings.Contains(build, forbidden) {
 			t.Errorf("the Dockerfile runs %q, installing the project instead of its dependencies", forbidden)
-		}
-	}
-}
-
-// assertImportsAreCopied reads the entrypoint's own top-level imports and
-// requires every one that names an emitted file to be reachable in the image.
-// It reads the Dockerfile rather than a list of names, so a new emitted module
-// is covered the day it is emitted.
-func assertImportsAreCopied(t *testing.T, artifact Artifact, build string) {
-	t.Helper()
-	emitted := make(map[string]string, len(artifact.Files))
-	for _, file := range artifact.Files {
-		emitted[file.Path] = string(file.Content)
-	}
-	for _, line := range strings.Split(emitted["bot.py"], "\n") {
-		module, ok := strings.CutPrefix(strings.TrimSpace(line), "import ")
-		if !ok {
-			continue
-		}
-		module, _, _ = strings.Cut(module, " ") // `import x as y`
-		path := strings.ReplaceAll(module, ".", "/") + ".py"
-		if _, self := emitted[path]; !self {
-			continue // a dependency from the image's own site-packages
-		}
-		// A package directory is copied whole; a single module by name.
-		dir, _, nested := strings.Cut(module, ".")
-		copied := strings.Contains(build, "COPY "+path) ||
-			nested && (strings.Contains(build, "COPY "+dir+"/ ") || strings.Contains(build, "COPY "+dir+" "))
-		if !copied {
-			t.Errorf("bot.py runs %q and the image never receives %s, so the container cannot start:\n%s", strings.TrimSpace(line), path, build)
 		}
 	}
 }

@@ -59,7 +59,7 @@ The event feed reconnects separately from audio. Retained events can replay;
 a gap stays marked until the next call. Switching Conversation and Logs keeps
 the same microphone connection.
 
-The generated `dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
+The generated `utils/dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
 as `unmute dev` does. Its identified v2 snapshots use `UNMUTE_METRIC ` framing.
 Raw values use seconds. To inspect measurements:
 
@@ -129,7 +129,7 @@ instruction, and `end_after` ends the call.
 model's `backend:` names, on OpenAI's Responses API inside the same live session:
 the live model hands the request over and keeps talking, the backend calls this
 project's tools, and the answer comes back as something the live model says.
-Every tool in `agent.py` is registered exactly as it is for a cascaded package.
+Every tool in `agents.py` is registered exactly as it is for a cascaded package.
 {{else}}
 **No backend is named**, so the live model runs alone and declines any request
 that would need a tool. Add `backend: <a models.think entry>` to the live entry
@@ -142,7 +142,7 @@ to give it one.
 This package is `architecture: realtime`, so one model hears the caller and
 answers. `{{.Realtime.Service.Call.Class}}` sits in the session where a
 transcriber and a reasoning model would sit, and this project's tools run over
-the same socket: every tool in `agent.py` is registered exactly as it is for a
+the same socket: every tool in `agents.py` is registered exactly as it is for a
 cascaded package.
 {{if .Realtime.TTS}}
 **A synthesizer speaks for it.** The agent binds `speak:`, so the model is asked
@@ -769,7 +769,7 @@ No hello, no "how can I help", and no waiting to be asked what the call is about
 When they say they can take it, the caller is put through and this agent says one
 goodbye line and goes quiet.
 
-That prompt is `_BRIEFING_PERSONA` in `agent.py`, and the comment above it says
+That prompt is `_BRIEFING_PERSONA` in `prompts/__init__.py`, and the comment above it says
 why each paragraph is there. The prebuilt ships its own persona, but its lifecycle
 lets the person speak first and never briefs unprompted, so the agent's first turn
 is a reply, and a reply to "hello" is a greeting unless the prompt says otherwise.

@@ -34,8 +34,8 @@ func terminalModule(t *testing.T, targetName, file string) string {
 func terminalModules(t *testing.T) map[string]string {
 	t.Helper()
 	return map[string]string{
-		"livekit": terminalModule(t, "livekit", "agent.py"),
-		"pipecat": terminalModule(t, "pipecat", "bot.py"),
+		"livekit": terminalModule(t, "livekit", agentSource),
+		"pipecat": terminalModule(t, "pipecat", agentSource),
 	}
 }
 
@@ -73,7 +73,7 @@ func TestTerminalHelpersCarryNoLibrarySpecificPlaceholder(t *testing.T) {
 // A step that names a tool under finish: ends on it: the tool's own method hands
 // the result to the step's ending, and the ending completes without a reply.
 func TestTerminalToolEndsTheStepOnBothTargets(t *testing.T) {
-	livekit := terminalModule(t, "livekit", "agent.py")
+	livekit := terminalModule(t, "livekit", agentSource)
 	for _, want := range []string{
 		"return await self._end_on_book_it(ctx, result)",
 		"return await self._end_on_cancel_it(ctx, result)",
@@ -88,7 +88,7 @@ func TestTerminalToolEndsTheStepOnBothTargets(t *testing.T) {
 			t.Errorf("livekit agent.py missing %q", want)
 		}
 	}
-	pipecat := terminalModule(t, "pipecat", "bot.py")
+	pipecat := terminalModule(t, "pipecat", agentSource)
 	for _, want := range []string{
 		"async def _do_book_terminal_book_book_it(\n        self, args: Any, flow_manager: FlowManager\n    ) -> tuple[dict[str, Any], Any]:",
 		"result = await _flow_tool_book_it(args, flow_manager, state=self.state)",
@@ -145,7 +145,7 @@ func TestARefusedSaveKeepsTheResultAndSaysHowToRepair(t *testing.T) {
 // again in the same invocation. Different arguments do not prove a new request:
 // during a save repair the model could change a time and book twice.
 func TestASucceededMutationIsClosedForTheRestOfTheInvocation(t *testing.T) {
-	livekit := terminalModule(t, "livekit", "agent.py")
+	livekit := terminalModule(t, "livekit", agentSource)
 	for _, want := range []string{
 		"if self._terminal is not None:",
 		"book_it already succeeded in this step",
@@ -162,7 +162,7 @@ func TestASucceededMutationIsClosedForTheRestOfTheInvocation(t *testing.T) {
 	if guardAt < 0 || callAt < guardAt {
 		t.Errorf("the closure must be checked before the tool runs: guard=%d call=%d", guardAt, callAt)
 	}
-	pipecat := terminalModule(t, "pipecat", "bot.py")
+	pipecat := terminalModule(t, "pipecat", agentSource)
 	if !strings.Contains(pipecat, "if self._do_book_terminal is not None:") {
 		t.Error("pipecat bot.py does not close the step's mutations")
 	}
@@ -176,7 +176,7 @@ func TestASucceededMutationIsClosedForTheRestOfTheInvocation(t *testing.T) {
 // The step consumed a caller turn the owner never saw, so the owner is handed it
 // back immediately before the status, once.
 func TestTheCarriedTurnReachesTheOwnerOnce(t *testing.T) {
-	livekit := terminalModule(t, "livekit", "agent.py")
+	livekit := terminalModule(t, "livekit", agentSource)
 	for _, want := range []string{
 		"def _newest_caller_turn(chat_ctx: llm.ChatContext) -> llm.ChatMessage | None:",
 		"def _insert_carried_turn(owner_ctx: llm.ChatContext, carried: list[llm.ChatMessage | None]) -> None:",
@@ -187,7 +187,7 @@ func TestTheCarriedTurnReachesTheOwnerOnce(t *testing.T) {
 			t.Errorf("livekit agent.py missing %q", want)
 		}
 	}
-	pipecat := terminalModule(t, "pipecat", "bot.py")
+	pipecat := terminalModule(t, "pipecat", agentSource)
 	for _, want := range []string{
 		"def _newest_caller_message(messages: list[Any]) -> dict[str, Any] | None:",
 		// Decided where the turn is captured, by counting the caller's turns

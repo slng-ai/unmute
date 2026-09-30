@@ -97,9 +97,9 @@ func TestLiveImportsOnlyWhatItUses(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		name := "bot.py"
+		name := agentSource
 		if provider == ir.ProviderLiveKit {
-			name = "agent.py"
+			name = agentSource
 		}
 		if unused := unusedImports(artifactFile(t, artifact, name)); len(unused) > 0 {
 			t.Errorf("%s %s imports and never uses: %s", provider, name, strings.Join(unused, ", "))
@@ -122,7 +122,7 @@ func TestSpeechToSpeechResolvesTheReplyBeforeTheToolEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	module := artifactFile(t, artifact, "dev_metrics.py")
+	module := artifactFile(t, artifact, "utils/dev_metrics.py")
 	lookup := strings.Index(module, "self._live_turn in self._requests")
 	tool := strings.Index(module, "self._tool_event(llm, frame, scope)")
 	if lookup < 0 || tool < 0 {

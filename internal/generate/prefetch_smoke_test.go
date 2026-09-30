@@ -46,7 +46,7 @@ for name in json.load(open("compile-report.json"))["required_env"]:
 # the browser loop has with no --source.
 os.environ.pop("UNMUTE_CALL_FACTS", None)
 
-import agent  # noqa: E402
+agent = _project("agent")
 
 state = agent.Userdata()
 
@@ -156,7 +156,7 @@ for name in json.load(open("compile-report.json"))["required_env"]:
 
 os.environ.pop("UNMUTE_CALL_FACTS", None)
 
-import bot  # noqa: E402
+bot = _project("bot")
 
 
 def fresh():
@@ -220,7 +220,7 @@ from zoneinfo import ZoneInfo
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import agent  # noqa: E402
+agent = _project("agent")
 
 # The zone the package declared, written out here rather than read back off the
 # module. Reading the module's own constant was circular: an emitter that inlined
@@ -271,7 +271,7 @@ func provenanceScript(module, state string) string {
 	return `import os,json
 from copy import deepcopy
 for name in json.load(open("compile-report.json"))["required_env"]: os.environ.setdefault(name,"smoke-placeholder")
-import ` + module + ` as generated
+generated = _project("` + module + `")
 state=generated.` + state + `
 def seed():
     generated._save_batch(state,{"caller_phone":"+34600111222"},inputs=())
@@ -327,7 +327,7 @@ func deadlineScript(module, state string) string {
 	return `import os,json,asyncio,time
 for name in json.load(open("compile-report.json"))["required_env"]: os.environ.setdefault(name,"smoke-placeholder")
 os.environ.pop("UNMUTE_CALL_FACTS",None)
-import ` + module + ` as generated
+generated = _project("` + module + `")
 generated._PREFETCH_BUDGET_S=0.12
 async def main():
     calls=[]

@@ -1,0 +1,85 @@
+"""Build and check the MCP servers an agent reads tools from."""
+
+{{- if .NeedsMCP}}
+# --- required MCP tool sources ----------------------------------------------
+# LiveKit logs MCPToolset setup failures and still starts the AgentActivity.
+# These sources are required by the package, so probe fresh instances before
+# AgentSession.start; runtime agents/tasks get their own fresh instances below.
+def _mcp_toolset(source: str) -> mcp.MCPToolset:
+    """Build a fresh toolset for one required MCP source.
+
+    Args:
+        source: The source's name in the package.
+
+    Returns:
+        A toolset that has not been set up yet.
+
+    Raises:
+        ValueError: The package declares no source by that name.
+    """
+{{- range .MCPServers}}
+    if source == {{pyq .Name}}:
+        return {{template "mcp_constructor" .}}
+{{- end}}
+    raise ValueError(f"Unknown MCP tool source: {source}")
+
+
+async def _preflight_mcp() -> None:
+    """Set up and close every required MCP source, and fail if any could not.
+
+    Raises:
+        BaseException: The first setup failure, or the first cleanup failure when
+            every setup worked. Later failures are logged.
+    """
+
+    async def probe(source: str) -> tuple[BaseException | None, BaseException | None]:
+        # A probe reports every failure, a cancelled setup included, so the caller
+        # can name the source and raise the first one.
+        try:
+            toolset = _mcp_toolset(source)
+        except BaseException as error:  # noqa: BLE001 - reported to the caller, not swallowed
+            return error, None
+
+        setup_error = None
+        try:
+            await toolset.setup()
+        except BaseException as error:  # noqa: BLE001 - reported to the caller, not swallowed
+            setup_error = error
+
+        close_error = None
+        try:
+            await toolset.aclose()
+        except BaseException as error:  # noqa: BLE001 - reported to the caller, not swallowed
+            close_error = error
+        return setup_error, close_error
+
+    sources = ({{range $i, $s := .MCPServers}}{{if $i}}, {{end}}{{pyq $s.Name}}{{end}},)
+    results = await asyncio.gather(
+        *(probe(source) for source in sources),
+        return_exceptions=True,
+    )
+    # A probe that itself raised counts as a setup failure for its source.
+    outcomes = [
+        (source, (result, None) if isinstance(result, BaseException) else result)
+        for source, result in zip(sources, results, strict=True)
+    ]
+    setup_failures = [(source, setup) for source, (setup, _) in outcomes if setup is not None]
+    close_failures = [(source, close) for source, (_, close) in outcomes if close is not None]
+
+    failures = [
+        *(("setup", source, error) for source, error in setup_failures),
+        *(("cleanup", source, error) for source, error in close_failures),
+    ]
+    if failures:
+        _, _, selected = failures[0]
+        for stage, source, error in failures[1:]:
+            logger.error(
+                "MCP preflight %s failed for %s",
+                stage,
+                source,
+                exc_info=(type(error), error, error.__traceback__),
+            )
+        raise selected
+
+
+{{- end}}

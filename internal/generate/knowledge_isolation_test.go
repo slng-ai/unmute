@@ -42,9 +42,9 @@ func TestKnowledgeIsolationIsPerAgent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("generate %s: %v", provider, err)
 		}
-		entry := "agent.py"
+		entry := agentSource
 		if provider == ir.ProviderPipecat {
-			entry = "bot.py"
+			entry = agentSource
 		}
 		body := artifactFile(t, artifact, entry)
 		// Each lookup names exactly one base, and each base is named by exactly
@@ -91,7 +91,7 @@ func TestKnowledgeBasesAreSeparateCollections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	py := artifactFile(t, artifact, "knowledge.py")
+	py := artifactFile(t, artifact, "utils/knowledge.py")
 	for _, base := range []string{"refunds", "services"} {
 		for _, want := range []string{
 			`_INDEXES["` + base + `"] = _start("` + base + `"`,

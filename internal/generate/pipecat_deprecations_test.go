@@ -59,7 +59,7 @@ func TestEmittedPipecatBotAvoidsCurrentDeprecations(t *testing.T) {
 				if !strings.Contains(line, `"role": "system"`) {
 					continue
 				}
-				if strings.HasSuffix(file.Path, "tracing.py") && strings.Contains(line, "messages.insert(0,") {
+				if strings.HasSuffix(file.Path, "utils/tracing.py") && strings.Contains(line, "messages.insert(0,") {
 					continue // the trace viewer's copy, never the context
 				}
 				t.Errorf("%s/%s seeds a system message the framework has deprecated as a prompt carrier; set system_instruction on the service:\n%s", pkg, file.Path, line)
@@ -77,7 +77,7 @@ func TestEmittedPipecatBotAvoidsCurrentDeprecations(t *testing.T) {
 // the InputParams shape that still exists for compatibility.
 func TestEmittedSpeechmaticsAvoidsTheRetiredConstructor(t *testing.T) {
 	for _, fixture := range []string{"speechmatics_local", "speechmatics_listen"} {
-		bot := artifactFile(t, generateFor(t, fixture, ir.ProviderPipecat), "bot.py")
+		bot := artifactFile(t, generateFor(t, fixture, ir.ProviderPipecat), agentSource)
 		call := bot[strings.Index(bot, "return SpeechmaticsSTTService("):]
 		if end := strings.Index(call, "\n    )"); end > 0 {
 			call = call[:end]
@@ -109,7 +109,7 @@ func TestEmittedSpeechmaticsAvoidsTheRetiredConstructor(t *testing.T) {
 // several unrelated calls, and `session_properties=` is the correct spelling one
 // level down.
 func TestEmittedRealtimeAvoidsTheDeprecatedKwargs(t *testing.T) {
-	bot := artifactFile(t, generateFor(t, "realtime_pipecat", ir.ProviderPipecat), "bot.py")
+	bot := artifactFile(t, generateFor(t, "realtime_pipecat", ir.ProviderPipecat), agentSource)
 	start := strings.Index(bot, "return OpenAIRealtimeLLMService(")
 	if start < 0 {
 		t.Fatal("the realtime fixture emitted no OpenAIRealtimeLLMService construction")

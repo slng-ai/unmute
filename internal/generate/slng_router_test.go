@@ -106,18 +106,11 @@ func emitAgentSource(t *testing.T, agent *ir.Agent, provider ir.Provider, module
 	if err != nil {
 		t.Fatalf("%s: generate: %v", provider, err)
 	}
-	var source string
 	var all strings.Builder
 	for _, file := range artifact.Files {
 		all.Write(file.Content)
-		if file.Path == module {
-			source = string(file.Content)
-		}
 	}
-	if source == "" {
-		t.Fatalf("%s: %s not emitted", provider, module)
-	}
-	return source, all.String()
+	return artifactFile(t, artifact, module), all.String()
 }
 
 func routerTargets() []struct {
@@ -128,8 +121,8 @@ func routerTargets() []struct {
 		provider ir.Provider
 		module   string
 	}{
-		{ir.ProviderPipecat, "bot.py"},
-		{ir.ProviderLiveKit, "agent.py"},
+		{ir.ProviderPipecat, agentSource},
+		{ir.ProviderLiveKit, agentSource},
 	}
 }
 
@@ -244,7 +237,7 @@ func TestSlngRouterScopesAgreeAcrossTargets(t *testing.T) {
 // its request, and this fixture uses full history so it emits none at all.
 func TestSlngRouterLiveKitPassesNoConstructorExtras(t *testing.T) {
 	agent := routerFixture(t)
-	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, "agent.py")
+	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, agentSource)
 	for _, banned := range []struct{ text, cost string }{
 		{"extra_headers={", "overwrites the per-request scope"},
 		{"extra_body={", "freezes the variable snapshot at the moment the call started"},
@@ -419,7 +412,7 @@ func TestSlngRouterPipecatReadsTheVariablesPerRequest(t *testing.T) {
 	agent.Controls["run_collect"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "collect", When: "Collect the caller's account details.",
 	}
-	source, _ := emitAgentSource(t, agent, ir.ProviderPipecat, "bot.py")
+	source, _ := emitAgentSource(t, agent, ir.ProviderPipecat, agentSource)
 	for _, want := range []string{
 		`("customer_id", "tier", False)`,
 		`("caller_alias", "alias", False)`,
@@ -479,7 +472,7 @@ func TestSlngRouterSummarizerKeepsConstructionExtras(t *testing.T) {
 		task.Context = ir.TaskContext{History: ir.HistorySummary, Summarizer: "fast_reasoning"}
 		agent.Tasks[name] = task
 	}
-	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, "agent.py")
+	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, agentSource)
 	if !strings.Contains(source, ":summary") {
 		t.Fatalf("no summarizer scope in the emitted module, so this gate is watching nothing:\n%s", source)
 	}
@@ -505,7 +498,7 @@ func TestSlngRouterSummarizerKeepsConstructionExtras(t *testing.T) {
 // back on every way out, or the owner answers as a task that already ended.
 func TestSlngRouterPipecatRestoresTheOwnerScope(t *testing.T) {
 	agent := routerFixture(t)
-	source, _ := emitAgentSource(t, agent, ir.ProviderPipecat, "bot.py")
+	source, _ := emitAgentSource(t, agent, ir.ProviderPipecat, agentSource)
 	owner := `"X-Slng-Agent-Id": "` + routerAgentID + `:intake"`
 	// Entering the group's first step, then each step in turn, then back to the
 	// owner: four swaps at least, and the owner's own construction on top.
@@ -536,7 +529,7 @@ func TestSlngRouterPipecatRestoresTheOwnerScope(t *testing.T) {
 // picks (livekit-agents llm/fallback_adapter.py:152-192).
 func TestSlngRouterFallbackCannotSplitASiteScope(t *testing.T) {
 	agent := routerFixture(t)
-	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, "agent.py")
+	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, agentSource)
 	// Written, not merely mentioned. The provenance hook reads this header off the
 	// request it is describing, which is a read and cannot carry a scope of its
 	// own; counting every mention would fail on that and say nothing true.
@@ -877,8 +870,8 @@ func TestSlngRouterGolden(t *testing.T) {
 		module   string
 		golden   string
 	}{
-		{ir.ProviderPipecat, "bot.py", "slng_pipecat.py"},
-		{ir.ProviderLiveKit, "agent.py", "slng_livekit.py"},
+		{ir.ProviderPipecat, agentSource, "slng_pipecat.py"},
+		{ir.ProviderLiveKit, agentSource, "slng_livekit.py"},
 	} {
 		source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
 		path := filepath.Join("testdata", "golden", tc.golden)
@@ -1118,7 +1111,7 @@ func TestSlngRouterProvenanceAbsentWithoutARouterBinding(t *testing.T) {
 // one connection pool per session.
 func TestSlngRouterLiveKitClosesTheClientItOwns(t *testing.T) {
 	agent := routerFixture(t)
-	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, "agent.py")
+	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, agentSource)
 	// Built once, in the entrypoint, and held on the call's own state object so a
 	// construction inside an agent method reaches the same one.
 	if got := strings.Count(source, "= _slng_router_client()"); got != 1 {
@@ -1150,7 +1143,7 @@ func TestSlngRouterSummarizerCarriesThePromptDirective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, "agent.py")
+	source, _ := emitAgentSource(t, agent, ir.ProviderLiveKit, agentSource)
 	summarize := strings.Index(source, "async def _summarize(")
 	if summarize < 0 {
 		t.Fatal("no _summarize helper emitted, so the fixture no longer summarizes")

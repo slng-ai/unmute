@@ -80,7 +80,7 @@ The event feed reconnects separately from audio. Retained events can replay;
 a gap stays marked until the next call. Switching Conversation and Logs keeps
 the same microphone connection.
 
-The generated `dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
+The generated `utils/dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
 as `unmute dev` does. Its identified v2 snapshots use `UNMUTE_METRIC ` framing.
 Raw values use seconds. To inspect measurements:
 
@@ -122,7 +122,7 @@ model receives one safe failure result. It must not claim success from either.
 
 ## What the caller cannot talk over
 
-`bot.py` passes `user_mute_strategies=[{{range $i, $s := .UserMuteStrategies}}{{if $i}}, {{end}}{{$s}}(){{end}}]` to the context aggregator.
+`call.py` passes `user_mute_strategies=[{{range $i, $s := .UserMuteStrategies}}{{if $i}}, {{end}}{{$s}}(){{end}}]` to the context aggregator.
 {{if .GreetingProtectedByRoute}}
 The greeting is protected because this is a phone route, and a phone leg has no
 echo cancellation. A caller on speakerphone sends your agent's own greeting back
@@ -153,7 +153,7 @@ answer no later than they would without the line. The argument check runs
 first, so a call the model got wrong stays silent. If the caller speaks over
 the line, the tool's `interruption:` value decides what happens.
 
-You will see the line in two shapes in `bot.py`, because a tool listed on an
+You will see the line in two shapes in `agents.py`, because a tool listed on an
 agent and the same tool listed on a task are emitted differently. An agent tool
 holds `FunctionCallParams` and pushes the frame through `params.llm`; a task tool
 is a flows handler and queues it through `flow_manager.worker`. Same frame, same
@@ -177,7 +177,7 @@ rather than reads out, so expect the sense of the line and not its letters.
 model's `backend:` names, on OpenAI's Responses API inside the same live session:
 the live model hands the request over and keeps talking, the backend calls this
 project's tools, and the answer comes back as something the live model says.
-Every tool in `bot.py` is registered exactly as it is for a cascaded pipeline.
+Every tool in `agents.py` is registered exactly as it is for a cascaded pipeline.
 {{else}}
 **No backend is named**, so the live model runs alone and declines any
 request that would need a tool. Add `backend: <a models.think entry>` to the
@@ -277,7 +277,7 @@ The wait does not adapt to the caller on this target. Unlike the LiveKit driver,
 which has a `dynamic` endpointing mode, the ceiling is the same on every turn.
 {{else}}
 Two numbers decide how long a caller waits. **Both are spelled `stop_secs` in
-`bot.py` and they are different fields**, so grep finds two and only this tells
+`call.py` and they are different fields**, so grep finds two and only this tells
 you which is which.
 
 **The floor is {{.Pace.Floor}}s**, in `VADParams(stop_secs={{.Pace.Floor}})`. The VAD waits that
@@ -484,8 +484,8 @@ just to inspect it — a type checker, an editor, a script — reaches the embed
 service too. Give it a valid key, or stub `knowledge._embed_<base>` before the
 import.
 
-Both `knowledge.py` and `knowledge/` have explicit `COPY` lines in the Dockerfile.
-That is not decoration: this image copies named files only, because `/app` belongs
+Both `utils/` and `knowledge/` have explicit `COPY` lines in the Dockerfile.
+That is not decoration: this image copies named paths only, because `/app` belongs
 to the base image, and leaving either one out gives a container that starts,
 raises, and never reaches ready while its own log looks healthy.
 

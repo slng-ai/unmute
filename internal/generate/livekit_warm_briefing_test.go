@@ -88,7 +88,7 @@ func TestWarmBriefingEmittedImports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	warmPy := artifactFile(t, warmArtifact, "agent.py")
+	warmPy := artifactFile(t, warmArtifact, agentSource)
 	for _, want := range []string{
 		"import time",
 		"from livekit.agents.beta.workflows import WarmTransferTask, WorkflowInstructions",
@@ -103,7 +103,7 @@ func TestWarmBriefingEmittedImports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	coldPy := artifactFile(t, coldArtifact, "agent.py")
+	coldPy := artifactFile(t, coldArtifact, agentSource)
 	if !strings.Contains(coldPy, "_refer_uri(") {
 		t.Fatal("fixture is not a cold-only transfer package")
 	}
@@ -150,7 +150,7 @@ func TestWarmTransferLogContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentPy := artifactFile(t, artifact, "agent.py")
+	agentPy := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		`logger.info("human transfer fired: to_human (warm)")`,
 		`"warm transfer dialling out: handing over %d conversation messages",`,
@@ -186,8 +186,8 @@ func TestWarmTransferLogContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, py := range map[string]string{
-		"return_to_caller": artifactFile(t, returnArtifact, "agent.py"),
-		"hangup":           artifactFile(t, hangupArtifact, "agent.py"),
+		"return_to_caller": artifactFile(t, returnArtifact, agentSource),
+		"hangup":           artifactFile(t, hangupArtifact, agentSource),
 	} {
 		if !strings.Contains(py, `"warm transfer unavailable after %ds: %s",`) {
 			t.Errorf("on_unavailable: %s leaves the failure branch unlogged", name)
@@ -203,7 +203,7 @@ func TestColdTransferLogContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentPy := artifactFile(t, artifact, "agent.py")
+	agentPy := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		"(cold)\")",
 		`logger.info("cold transfer referring the caller out")`,
@@ -271,7 +271,7 @@ func TestTransferLogsCarryNoDestinationOrCredential(t *testing.T) {
 		}},
 	} {
 		t.Run(shape.name, func(t *testing.T) {
-			agentPy := artifactFile(t, shape.artifact(t), "agent.py")
+			agentPy := artifactFile(t, shape.artifact(t), agentSource)
 			calls := loggerCalls(agentPy)
 			if len(calls) == 0 {
 				t.Fatal("no logger calls found; the scanner is broken, not the template")
@@ -358,7 +358,7 @@ func TestWarmBriefingInstructionsHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentPy := artifactFile(t, artifact, "agent.py")
+	agentPy := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		"instructions=WorkflowInstructions(",
 		"persona=_BRIEFING_PERSONA,",
@@ -390,7 +390,7 @@ func TestWarmBriefingInstructionsHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plainPy := artifactFile(t, plainArtifact, "agent.py")
+	plainPy := artifactFile(t, plainArtifact, agentSource)
 	if !strings.Contains(plainPy, "persona=_BRIEFING_PERSONA,") {
 		t.Error("a warm transfer with no authored briefing lost its persona too")
 	}
@@ -404,7 +404,7 @@ func TestWarmBriefingInstructionsHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	twoPy := artifactFile(t, twoArtifact, "agent.py")
+	twoPy := artifactFile(t, twoArtifact, agentSource)
 	if got := strings.Count(twoPy, "_BRIEFING_PERSONA = "); got != 1 {
 		t.Errorf("agent.py defines _BRIEFING_PERSONA %d times, want 1", got)
 	}
@@ -423,7 +423,7 @@ func TestWarmBriefingPersonaSaysWhatItMust(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentPy := artifactFile(t, artifact, "agent.py")
+	agentPy := artifactFile(t, artifact, agentSource)
 	for part, want := range map[string]string{
 		"P1 open with the handover, never a greeting": "Your first words are the handover, not a greeting.",
 		"P1 do not wait to be asked":                  "never wait to be asked what the call is about",

@@ -50,9 +50,9 @@ func TestGoogleUsesNativePluginsAndForwardsLocation(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					file := "agent.py"
+					file := agentSource
 					if fw == target.Pipecat {
-						file = "bot.py"
+						file = agentSource
 					}
 					src := artifactFile(t, artifact, file)
 					for _, want := range []string{"gemini-3.5-flash-lite", "GOOGLE_API_KEY", "minimal", "temperature=0.2"} {

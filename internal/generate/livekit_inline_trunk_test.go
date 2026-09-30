@@ -70,7 +70,7 @@ func TestInlineTrunkWarmOnlyPackageBringsAPIIntoScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentPy := artifactFile(t, artifact, "agent.py")
+	agentPy := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		"from livekit import api",
 		"def _sip_trunk() -> api.SIPOutboundConfig:",
@@ -105,7 +105,7 @@ func TestInlineTrunkColdOnlyPackageGetsNoDialOutHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentPy := artifactFile(t, artifact, "agent.py")
+	agentPy := artifactFile(t, artifact, agentSource)
 	if !strings.Contains(agentPy, "_refer_uri(") {
 		t.Fatal("fixture is not a cold transfer package")
 	}
@@ -171,7 +171,7 @@ func TestInlineTrunkRetiredNameIsInert(t *testing.T) {
 	if !strings.Contains(readme, "no longer part of it") {
 		t.Error("README.md names the retired variable without saying it is retired")
 	}
-	agentPy := artifactFile(t, artifact, "agent.py")
+	agentPy := artifactFile(t, artifact, agentSource)
 	if !strings.Contains(agentPy, "sip_connection=_sip_trunk(),") {
 		t.Error("agent.py does not pass the inline trunk, so the retired name would win")
 	}
@@ -186,7 +186,7 @@ func TestInlineTrunkIsReadInOnePlaceAndCalledEverywhere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentPy := artifactFile(t, artifact, "agent.py")
+	agentPy := artifactFile(t, artifact, agentSource)
 	if got := strings.Count(agentPy, "def _sip_trunk("); got != 1 {
 		t.Errorf("agent.py defines _sip_trunk %d times, want 1", got)
 	}
@@ -209,10 +209,7 @@ func TestInlineTrunkIsReadInOnePlaceAndCalledEverywhere(t *testing.T) {
 	// package, so the template itself is where that is checkable. A change
 	// applied to one arm and not the other is exactly the drift FR-002 exists
 	// to prevent, and no single artifact would show it.
-	tmpl, err := livekitV1Templates.ReadFile("templates/livekit_v1/agent.py.tmpl")
-	if err != nil {
-		t.Fatal(err)
-	}
+	tmpl := livekitModuleTemplates(t)
 	if got := strings.Count(string(tmpl), "trunk=_sip_trunk(),"); got != 2 {
 		t.Errorf("the template has %d outbound dial sites carrying the inline trunk, want 2", got)
 	}
@@ -306,7 +303,7 @@ func TestInlineTrunkHonoursCarrierPrefixedNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentPy := artifactFile(t, artifact, "agent.py")
+	agentPy := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		`hostname=os.environ["TWILIO_SIP_ADDRESS"]`,
 		`auth_username=os.environ["TWILIO_SIP_USERNAME"]`,

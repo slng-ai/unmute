@@ -1,169 +1,18 @@
-"""LiveKit voice agent, compiled by Unmute from this package's agent.yaml."""
+"""Every fixed value this agent runs with, in one place.
 
-import asyncio
-import json
+Compiled from the package: names, limits, timeouts, the environment variables
+each kind of session needs, and the logger every module writes to. Nothing here
+reads a secret.
+"""
+
+from __future__ import annotations
+
 import logging
 import os
-import random
-from collections.abc import AsyncIterable
-from dataclasses import dataclass
-from typing import Annotated
-
-import httpx
-from dotenv import load_dotenv
-from livekit import rtc
-from livekit.agents import (
-    NOT_GIVEN,
-    Agent,
-    AgentServer,
-    AgentSession,
-    AgentTask,
-    APIConnectOptions,
-    ChatContext,
-    FlushSentinel,
-    JobContext,
-    JobProcess,
-    ModelSettings,
-    NotGivenOr,
-    RunContext,
-    TurnHandlingOptions,
-    UserStateChangedEvent,
-    function_tool,
-    inference,
-    llm,
-    metrics,
-)
-from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup
-from livekit.agents.llm import ChatChunk, Tool
-from livekit.agents.voice import MetricsCollectedEvent
-
-# Not re-exported from livekit.agents or livekit.agents.voice, so it comes from
-# the module that defines it. Checked against 1.6.10 and 1.8.x.
-from livekit.agents.voice.agent_session import SessionConnectOptions
-from livekit.plugins import openai, silero, slng
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
-
-import dev_metrics
-from dev_metrics import dev_llm_node, dev_say, install_dev_metrics
 
 logger = logging.getLogger("remy-fixture")
 logger.setLevel(logging.INFO)
 
-load_dotenv()
-
-
-
-# --- announcements ---------------------------------------------------------
-
-# A line a package writes as `announce:` is spoken by this code, not written by
-# the model, so one sentence is the same sentence every time it fires. A live
-# call on 2026-09-16 entered the booking flow twice inside a minute and played
-# "Sure, let me get that sorted for you." both times. An author writing several
-# alternatives gets one of them per firing, and never the one that site used
-# last.
-_ANNOUNCE_LAST: dict[str, str] = {}
-
-
-def _announce(key: str, lines: list[str]) -> str:
-    """Pick one of these lines, never the one this key used last.
-
-    Args:
-        key: The announcement site, so each site remembers its own last line.
-        lines: The alternatives the author wrote for that site.
-
-    Returns:
-        The line to speak.
-    """
-    # ponytail: process wide, not per call. Two concurrent callers can only
-    # affect each other's variety, which is the whole thing this is for.
-    choices = [line for line in lines if line != _ANNOUNCE_LAST.get(key)] or lines
-    pick = random.choice(choices)
-    _ANNOUNCE_LAST[key] = pick
-    return pick
-
-# --- prompts ---------------------------------------------------------------
-
-EVENTS_PROMPT = """# Private events
-
-You are Remy, now helping the caller plan a private event. Use what they have already said. Keep every turn to one or two short sentences.
-
-- When you are ready to take the details, call `do_event`. It runs the events flow: qualifying the event, then confirming the details.
-- When the flow returns, tell the caller the events team will follow up, and ask if there is anything else.
-- If the caller actually wants a normal table, or wants to start over, use `back_to_greeter`.
-
-Do not greet again or re-introduce yourself.
-"""
-
-GREETER_PROMPT = """# Remy, the greeter
-
-You are Remy, the phone concierge for Fern and Oak, a small restaurant group. This is a voice call, so keep every turn to one or two short sentences and ask one thing at a time.
-
-Your only job is to greet the caller and send them to the right place.
-
-- If they want to book a table for a normal visit, use `to_reservations`.
-- If they want a private event, a party, or a large group, use `to_events`.
-- If it is unclear, ask one short question: "Is this for a table, or a private event?"
-
-Do not take dates, names, or numbers yourself. Hand off as soon as the intent is clear, in one natural line, without telling the caller they are being transferred. They stay with Remy for the whole call.
-"""
-
-RESERVATIONS_PROMPT = """# Reservations
-
-You are Remy, now helping the caller book a table. Use what they have already said. Keep every turn to one or two short sentences.
-
-- When you are ready to take the booking, call `do_reserve`. It runs the reservation flow: finding a time, then confirming the details.
-- When the flow returns, close warmly in one line and ask if there is anything else.
-- If the caller actually wants a private event, or wants to start over, use `back_to_greeter`.
-
-Do not greet again or re-introduce yourself.
-"""
-
-CONFIRM_BOOKING_PROMPT = """# Confirm and send
-
-You are handling only the confirmation for this caller. Work one question per turn.
-
-1. Ask for the name the booking should be under.
-2. Confirm the phone number for the text. If one is already on file, read it back digit by digit and ask if it is right; otherwise ask for one.
-3. Ask for a clear yes before sending anything, and wait for it. Never send in the same turn you ask.
-4. Only after an explicit yes, call `send_confirmation` with the name, phone, and a one-line summary of the booking.
-
-If the caller declines, send nothing and finish. Do not promise anything beyond the text message.
-
-
-When this step is complete, call `finish`.
-
-`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there."""
-
-FIND_SLOT_PROMPT = """# Find a table
-
-You are handling only the table search for this caller. Work one question per turn.
-
-1. Ask for the date and rough time they want.
-2. Ask how many people.
-3. Call `check_availability` with the date and party size, and offer the open times that come back. Present at most three, as plain spoken options.
-4. When the caller picks one, record the date, time, and party size and finish.
-
-Never promise a table that check_availability did not return. If nothing is open, say so plainly and offer the nearest alternatives it returned.
-
-
-When this step is complete, call `finish`.
-
-`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there."""
-
-QUALIFY_EVENT_PROMPT = """# Qualify a private event
-
-You are handling only the event details for this caller. Work one question per turn.
-
-1. Ask what the occasion is.
-2. Ask roughly how many guests.
-3. Ask the date they have in mind.
-
-When you have all three, record them and finish. Do not quote prices, menus, or availability; the events team handles that after the call.
-
-
-When this step is complete, call `finish`.
-
-`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there."""
 
 # --- required environment ----------------------------------------------------
 # Everything this agent needs to run: the model providers' keys, the connection
@@ -197,6 +46,77 @@ def require_env() -> None:
     if missing:
         raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
 
+
+# The first request plus two retries, when a task's model answers with nothing.
+_TASK_MAX_ATTEMPTS = 3
+
+
+# How long a warm process may take to start, knowledge indexing included.
+LOCAL_INIT_TIMEOUT_SECS = 60.0
+"""The system prompts, one Markdown file each beside this module.
+
+Each file is read once, at import. A prompt's placeholders are filled from the
+call's state where it is used, never here.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+_HERE = Path(__file__).parent
+
+
+def load(name: str) -> str:
+    """Read one prompt exactly as the package wrote it.
+
+    Args:
+        name: The prompt's file name, without the `.md` suffix.
+
+    Returns:
+        The prompt text.
+    """
+    return (_HERE / f"{name}.md").read_text(encoding="utf-8")
+
+
+EVENTS_PROMPT = load("events")
+GREETER_PROMPT = load("greeter")
+RESERVATIONS_PROMPT = load("reservations")
+CONFIRM_BOOKING_PROMPT = load("tasks/confirm_booking")
+FIND_SLOT_PROMPT = load("tasks/find_slot")
+QUALIFY_EVENT_PROMPT = load("tasks/qualify_event")
+"""Shape the conversation a step or an agent is handed."""
+
+from __future__ import annotations
+
+from livekit.agents import llm
+
+
+def _caller_turns(chat_ctx: llm.ChatContext) -> int:
+    """Count the turns the caller has taken in this context.
+
+    The one signal that separates "they asked again" from "the model re-read its
+    own finished work". A step that has already run and returned cannot have a
+    new request in front of it unless somebody spoke, so this is what each
+    delegate's re-entry guard compares.
+
+    Args:
+        chat_ctx: The conversation to count in.
+
+    Returns:
+        The number of caller messages.
+    """
+    return sum(1 for message in chat_ctx.messages() if message.role == "user")
+"""The call's state: its typed variables, how they are read, and what is known first."""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+
+from pydantic import BaseModel, TypeAdapter, ValidationError
+
+from settings import logger
 
 # --- declared state ----------------------------------------------------------
 # Generated from the `shapes:` and the typed `variables:` in agent.yaml. Both
@@ -716,7 +636,76 @@ def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
     if "caller_phone" in values:
         userdata.caller_phone = values["caller_phone"]
     return None
+"""The agents and the task steps they delegate to, with their tools."""
 
+from __future__ import annotations
+
+import json
+import os
+import random
+from collections.abc import AsyncIterable
+from typing import Annotated
+
+import httpx
+from livekit import rtc
+from livekit.agents import (
+    NOT_GIVEN,
+    Agent,
+    AgentTask,
+    ChatContext,
+    FlushSentinel,
+    ModelSettings,
+    NotGivenOr,
+    RunContext,
+    function_tool,
+    llm,
+)
+from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup
+from livekit.agents.llm import ChatChunk, Tool
+from livekit.plugins import slng
+from pydantic import Field
+
+from prompts import (
+    CONFIRM_BOOKING_PROMPT,
+    EVENTS_PROMPT,
+    FIND_SLOT_PROMPT,
+    GREETER_PROMPT,
+    QUALIFY_EVENT_PROMPT,
+    RESERVATIONS_PROMPT,
+)
+from session import _group_status, _save_result, _StateRefused, _task_status
+from settings import _TASK_MAX_ATTEMPTS, logger
+from utils import dev_metrics
+from utils.context import _caller_turns
+from utils.dev_metrics import dev_llm_node, dev_say
+
+# --- announcements ---------------------------------------------------------
+
+# A line a package writes as `announce:` is spoken by this code, not written by
+# the model, so one sentence is the same sentence every time it fires. A live
+# call on 2026-09-16 entered the booking flow twice inside a minute and played
+# "Sure, let me get that sorted for you." both times. An author writing several
+# alternatives gets one of them per firing, and never the one that site used
+# last.
+_ANNOUNCE_LAST: dict[str, str] = {}
+
+
+def _announce(key: str, lines: list[str]) -> str:
+    """Pick one of these lines, never the one this key used last.
+
+    Args:
+        key: The announcement site, so each site remembers its own last line.
+        lines: The alternatives the author wrote for that site.
+
+    Returns:
+        The line to speak.
+    """
+    # ponytail: process wide, not per call. Two concurrent callers can only
+    # affect each other's variety, which is the whole thing this is for.
+    choices = [line for line in lines if line != _ANNOUNCE_LAST.get(key)] or lines
+    pick = random.choice(choices)
+    _ANNOUNCE_LAST[key] = pick
+    return pick
 
 class _GroupStop(Exception):
     """Internal signal that a group step ended unserved, so the group stops.
@@ -734,23 +723,6 @@ class _GroupStop(Exception):
         """
         super().__init__()
         self.results = results
-
-
-def _caller_turns(chat_ctx: llm.ChatContext) -> int:
-    """Count the turns the caller has taken in this context.
-
-    The one signal that separates "they asked again" from "the model re-read its
-    own finished work". A step that has already run and returned cannot have a
-    new request in front of it unless somebody spoke, so this is what each
-    delegate's re-entry guard compares.
-
-    Args:
-        chat_ctx: The conversation to count in.
-
-    Returns:
-        The number of caller messages.
-    """
-    return sum(1 for message in chat_ctx.messages() if message.role == "user")
 
 
 async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent, flow: dict) -> None:
@@ -1123,8 +1095,6 @@ class Reservations(Agent):
 
 
 # --- tasks -----------------------------------------------------------------
-# The first request plus two retries, when a task's model answers with nothing.
-_TASK_MAX_ATTEMPTS = 3
 
 
 def _task_result(values: dict, unserved_request: str) -> dict:
@@ -1504,9 +1474,37 @@ class QualifyEvent(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         dev_metrics.dev_task_finished(ctx, _values)
         self.complete(_values)
         self._finish_call_id = ctx.function_call.call_id
+"""One call: warming the worker, building the session, and wiring the call."""
 
+from __future__ import annotations
 
-# --- session ---------------------------------------------------------------
+import asyncio
+import os
+
+from livekit.agents import (
+    AgentSession,
+    APIConnectOptions,
+    JobContext,
+    JobProcess,
+    TurnHandlingOptions,
+    UserStateChangedEvent,
+    inference,
+    metrics,
+)
+from livekit.agents.voice import MetricsCollectedEvent
+from livekit.agents.voice.agent_session import SessionConnectOptions
+from livekit.plugins import openai, silero, slng
+
+from agents import Greeter
+from session import (
+    Userdata,
+    _dispatched_call_start,
+    _hydrate_call_start,
+    _livekit_job_metadata,
+)
+from settings import require_env
+from utils.dev_metrics import install_dev_metrics
+
 # The loop keeps only a weak reference to a task, so a timer nobody holds can be
 # collected before it fires. Each one is held here until it finishes.
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
@@ -1528,17 +1526,10 @@ def prewarm(proc: JobProcess) -> None:
     # Lowering this alone does not shorten a turn. The ceiling is in the session's
     # turn_handling endpointing below, and that is where a 2.5s turn came from.
     proc.userdata["vad"] = silero.VAD.load(min_silence_duration=0.3)
-server = AgentServer()
-# How long a warm process may take to start, knowledge indexing included.
-LOCAL_INIT_TIMEOUT_SECS = 60.0
-server.setup_fnc = prewarm
-if os.getenv("UNMUTE_LOCAL_RUN") == "1":
-    # One browser call needs one warm spare, not one index build per CPU.
-    server.update_options(num_idle_processes=1, initialize_process_timeout=LOCAL_INIT_TIMEOUT_SECS)
 
 
-@server.rtc_session(agent_name="remy-fixture-livekit")
-async def entrypoint(ctx: JobContext) -> None:
+
+async def run_call(ctx: JobContext) -> None:
     """Run one call: build the session, start the entry agent and wire the call.
 
     Args:
@@ -1617,9 +1608,113 @@ async def entrypoint(ctx: JobContext) -> None:
     _timer = asyncio.create_task(_max_duration())
     _BACKGROUND_TASKS.add(_timer)
     _timer.add_done_callback(_BACKGROUND_TASKS.discard)
+"""LiveKit voice agent, compiled by Unmute from this package's agent.yaml."""
+
+from __future__ import annotations
+
+import os
+
+from dotenv import load_dotenv
+from livekit.agents import AgentServer, JobContext
+
+from call import prewarm, run_call
+from settings import LOCAL_INIT_TIMEOUT_SECS
+
+load_dotenv()
+server = AgentServer()
+server.setup_fnc = prewarm
+if os.getenv("UNMUTE_LOCAL_RUN") == "1":
+    # One browser call needs one warm spare, not one index build per CPU.
+    server.update_options(num_idle_processes=1, initialize_process_timeout=LOCAL_INIT_TIMEOUT_SECS)
+
+
+@server.rtc_session(agent_name="remy-fixture-livekit")
+async def entrypoint(ctx: JobContext) -> None:
+    """Run one call LiveKit dispatched to this worker.
+
+    Args:
+        ctx: The job LiveKit dispatched for this call.
+    """
+    await run_call(ctx)
 
 
 # No __main__ block: this module is started through livekit-agents' supported
 # CLI, `python -m livekit.agents start agent.py`, which imports it and finds the
 # `server` above. The older per-script entry point goes through a CLI upstream
 # has deprecated and will remove.
+# Private events
+
+You are Remy, now helping the caller plan a private event. Use what they have already said. Keep every turn to one or two short sentences.
+
+- When you are ready to take the details, call `do_event`. It runs the events flow: qualifying the event, then confirming the details.
+- When the flow returns, tell the caller the events team will follow up, and ask if there is anything else.
+- If the caller actually wants a normal table, or wants to start over, use `back_to_greeter`.
+
+Do not greet again or re-introduce yourself.
+
+# Remy, the greeter
+
+You are Remy, the phone concierge for Fern and Oak, a small restaurant group. This is a voice call, so keep every turn to one or two short sentences and ask one thing at a time.
+
+Your only job is to greet the caller and send them to the right place.
+
+- If they want to book a table for a normal visit, use `to_reservations`.
+- If they want a private event, a party, or a large group, use `to_events`.
+- If it is unclear, ask one short question: "Is this for a table, or a private event?"
+
+Do not take dates, names, or numbers yourself. Hand off as soon as the intent is clear, in one natural line, without telling the caller they are being transferred. They stay with Remy for the whole call.
+
+# Reservations
+
+You are Remy, now helping the caller book a table. Use what they have already said. Keep every turn to one or two short sentences.
+
+- When you are ready to take the booking, call `do_reserve`. It runs the reservation flow: finding a time, then confirming the details.
+- When the flow returns, close warmly in one line and ask if there is anything else.
+- If the caller actually wants a private event, or wants to start over, use `back_to_greeter`.
+
+Do not greet again or re-introduce yourself.
+
+# Confirm and send
+
+You are handling only the confirmation for this caller. Work one question per turn.
+
+1. Ask for the name the booking should be under.
+2. Confirm the phone number for the text. If one is already on file, read it back digit by digit and ask if it is right; otherwise ask for one.
+3. Ask for a clear yes before sending anything, and wait for it. Never send in the same turn you ask.
+4. Only after an explicit yes, call `send_confirmation` with the name, phone, and a one-line summary of the booking.
+
+If the caller declines, send nothing and finish. Do not promise anything beyond the text message.
+
+
+When this step is complete, call `finish`.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.
+# Find a table
+
+You are handling only the table search for this caller. Work one question per turn.
+
+1. Ask for the date and rough time they want.
+2. Ask how many people.
+3. Call `check_availability` with the date and party size, and offer the open times that come back. Present at most three, as plain spoken options.
+4. When the caller picks one, record the date, time, and party size and finish.
+
+Never promise a table that check_availability did not return. If nothing is open, say so plainly and offer the nearest alternatives it returned.
+
+
+When this step is complete, call `finish`.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.
+# Qualify a private event
+
+You are handling only the event details for this caller. Work one question per turn.
+
+1. Ask what the occasion is.
+2. Ask roughly how many guests.
+3. Ask the date they have in mind.
+
+When you have all three, record them and finish. Do not quote prices, menus, or availability; the events team handles that after the call.
+
+
+When this step is complete, call `finish`.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.

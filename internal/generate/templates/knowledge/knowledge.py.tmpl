@@ -38,8 +38,9 @@ _Hit = tuple[str, str, str, float | None]
 
 MS_PER_SECOND = 1000
 
-# The folder the compiler copied the documents into, beside this file.
-KNOWLEDGE_ROOT = Path(__file__).resolve().parent / "knowledge"
+# The folder the compiler copied the documents into, at the project root: this
+# file sits one level down, in utils/.
+KNOWLEDGE_ROOT = Path(__file__).resolve().parent.parent / "knowledge"
 
 # Where a baked index lives, when the image was built with one.
 #
@@ -51,7 +52,7 @@ KNOWLEDGE_ROOT = Path(__file__).resolve().parent / "knowledge"
 # The distinction matters most on LiveKit, where prewarm runs per job process: a
 # local dev run was observed indexing in 15 separate processes, each paying the
 # full cost for the same content.
-INDEX_ROOT = Path(__file__).resolve().parent / "knowledge_index"
+INDEX_ROOT = Path(__file__).resolve().parent.parent / "knowledge_index"
 
 # Retrieval settings, per knowledge base, as the author declared them.
 #

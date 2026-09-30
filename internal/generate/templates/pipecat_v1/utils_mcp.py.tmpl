@@ -1,0 +1,111 @@
+"""Connect, register and close the MCP servers an agent reads tools from."""
+
+{{if .NeedsMCP}}
+async def _close_mcp(awaitables: Iterable[Awaitable[None]], *, suppress: bool = False) -> None:
+    """Close every MCP client, then report the failures once.
+
+    Every close runs even when an earlier one fails, so one broken client cannot
+    leave the others open.
+
+    Args:
+        awaitables: The close calls, one per MCP client.
+        suppress: When true, only log the failures, because another error is
+            already on its way out and must not be replaced.
+
+    Raises:
+        BaseException: The first close failure, when `suppress` is false.
+    """
+    failures: list[BaseException] = []
+    for awaitable in awaitables:
+        try:
+            await awaitable
+        except BaseException as failure:  # noqa: BLE001 - every close runs; the first failure is re-raised below
+            failures.append(failure)
+    if suppress:
+        for failure in failures:
+            logger.error(
+                "MCP cleanup failed while preserving the primary error ({})",
+                type(failure).__name__,
+            )
+        return
+    for failure in failures[1:]:
+        logger.error(
+            "Additional MCP cleanup failure ({})",
+            type(failure).__name__,
+        )
+    if failures:
+        raise failures[0]
+
+
+async def _register_mcp_tools(
+    clients: list[MCPClient],
+    llm: Any,
+    reserved_names: set[str],
+{{if .Tracing}}    trace_handler: Any,
+{{end}}) -> list[Any]:
+    """Connect each MCP client and register its tools on one agent's LLM.
+
+    Args:
+        clients: The MCP clients of one agent.
+        llm: The LLM service the tools are registered on.
+        reserved_names: Tool names already taken by generated tools.
+{{if .Tracing}}        trace_handler: Wraps a tool handler so its call is traced.
+{{end}}
+    Returns:
+        The standard tool schemas every client exposed.
+
+    Raises:
+        RuntimeError: When two tools, across sources and generated tools, share a name.
+    """
+    discovered = []
+    names = set(reserved_names)
+    for client in clients:
+        await client.start()
+        # Deprecated for MCPClient.tools(); why it waits is the ponytail note below.
+        tools = await client.get_tools_schema()  # ty: ignore[deprecated]
+        for schema in tools.standard_tools:
+            if schema.name in names:
+                raise RuntimeError(
+                    f"MCP tool name collision for {schema.name!r}; names must be unique "
+                    "across generated tools and MCP sources on one agent"
+                )
+            names.add(schema.name)
+        discovered.append((client, tools))
+
+    registered = []
+    for client, tools in discovered:
+        await client.register_tools_schema(tools, llm)  # ty: ignore[deprecated]
+{{if .Tracing}}        for schema in tools.standard_tools:
+            # ponytail: Pipecat 1.8.0 added MCPClient.tools(), which attaches
+            # handlers to the schemas and registers them when LLMContext
+            # advertises its tools. That is the public hook this seam was
+            # waiting for, but taking it moves MCP registration out of this
+            # function and into context construction, so it is its own change.
+            # Until then, reach for the private wrapper.
+            llm.register_function(
+                schema.name,
+                trace_handler(client._tool_wrapper),
+            )
+{{end}}        registered.extend(tools.standard_tools)
+    return registered
+{{end}}{{if .NeedsMCPChooser}}
+def _mcp_params(
+    url: str, headers: dict[str, str] | None = None
+) -> StreamableHttpParameters | SseServerParameters:
+    """Pick the transport for a source that did not state one.
+
+    ponytail: this mirrors livekit-agents' own auto-detect instead of adding a
+    knob, so one server URL behaves the same on both targets: a path ending in
+    /mcp is streamable HTTP, anything else is SSE. Write `transport:` in the
+    tool file to decide it yourself.
+
+    Args:
+        url: The server URL.
+        headers: Headers to send, such as an Authorization header.
+
+    Returns:
+        The connection parameters for the chosen transport.
+    """
+    params_cls = StreamableHttpParameters if url.rstrip("/").endswith("/mcp") else SseServerParameters
+    return params_cls(url=url, headers=headers, timeout={{mcpTimeout}})
+{{end}}

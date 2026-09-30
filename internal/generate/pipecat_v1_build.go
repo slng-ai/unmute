@@ -132,6 +132,9 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		}
 		data.Agents = append(data.Agents, built)
 	}
+	if data.Prompts, err = pipecatPrompts(data.Agents); err != nil {
+		return pipecatData{}, err
+	}
 
 	data.NeedsLanguage = serviceUsesLanguage(data.STT)
 	for _, a := range data.Agents {
@@ -1321,7 +1324,14 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 		}
 	}
 	for i, step := range steps {
-		task, err := buildTask(agent, tgt, step, agent.Tasks[step], env, "finish_"+ref+"_"+step)
+		// A step's prompt names its delegate's own finish function, so it is one
+		// prompt per delegate and step, named for the step alone when the
+		// delegate is the task itself.
+		promptName := ref + "_" + step
+		if ref == step {
+			promptName = step
+		}
+		task, err := buildTask(agent, tgt, step, agent.Tasks[step], env, "finish_"+ref+"_"+step, promptName)
 		if err != nil {
 			return pipecatDelegate{}, err
 		}
@@ -1364,7 +1374,7 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 // buildTask lowers a task to a Flow-node model: instructions, tools, and the
 // finish-function schema derived from the typed result (V1). The node runs on
 // the owning agent's LLM; per-task model is gated (no LLMSwitcher, B7).
-func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet, finishName string) (pipecatTask, error) {
+func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet, finishName, promptName string) (pipecatTask, error) {
 	if strings.TrimSpace(task.Instructions) == "" {
 		return pipecatTask{}, fmt.Errorf("task %q instructions must not be empty", name)
 	}
@@ -1373,8 +1383,9 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 	// per-step here, so the prompt has to name it (livekitTaskPrompt does the
 	// same for a plain `finish`).
 	prompt := task.Instructions + taskFinishContractFor(finishName, sortedResultNames(task.Result), task.EndsOnTools())
+	promptConst := strings.ToUpper(promptName) + "_TASK_PROMPT"
 	built := pipecatTask{
-		Name: name, FinishName: finishName, Prompt: prompt,
+		Name: name, FinishName: finishName, Prompt: prompt, PromptConst: promptConst, PromptFile: "tasks/" + promptName,
 		// The node is built when the step is entered, not at session start, so a
 		// prompt naming a variable an earlier task assigned renders with that
 		// value. Left as a literal, the model would read "{{customer_id}}" and
@@ -1382,7 +1393,7 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 		// A router-bound task ships its placeholders intact like any other router
 		// prompt site: the flow node's role_message goes to the router as the
 		// system message, through the owning agent's LLM.
-		PromptExpr:     promptExpr(pyQuote(prompt), prompt, "self.state", taskRouter, "task:"+name),
+		PromptExpr:     promptExpr(promptConst, prompt, "self.state", taskRouter, "task:"+name),
 		ResultProps:    resultPropsExpr(name, task.Result),
 		Typed:          true,
 		ResultRequired: "[]",

@@ -143,9 +143,9 @@ func TestRefusalNamesTheSupplyingStepAndAsksForTheRest(t *testing.T) {
 	agent.Agents["intake"] = intake
 
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
-		file := "agent.py"
+		file := agentSource
 		if provider == ir.ProviderPipecat {
-			file = "bot.py"
+			file = agentSource
 		}
 		artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
 		if err != nil {
