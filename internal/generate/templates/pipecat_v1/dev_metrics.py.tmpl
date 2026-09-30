@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import json
 import math
@@ -9,17 +10,20 @@ import os
 import re
 import sys
 import time
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
     ErrorFrame,
+    Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
-    InterruptionFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -27,19 +31,23 @@ from pipecat.frames.frames import (
     MetricsFrame,
     ProposedUserStartedSpeakingFrame,
     ProposedUserStoppedSpeakingFrame,
+    TranscriptionFrame,
     TTSSpeakFrame,
     TTSStoppedFrame,
-    TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TextAggregationMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
+from pipecat.runner.types import RunnerArguments
 
 SENTINEL = "UNMUTE_METRIC"
 METRICS_ENV = "UNMUTE_DEV_METRICS"
 _METADATA = "unmute_dev"
+
+# An async event handler registered on a pipecat processor.
+_Handler = Callable[..., Awaitable[None]]
 
 # Handoffs and delegate controls get a row and no duration: they hand over to
 # a task rather than returning a result.
@@ -57,19 +65,27 @@ HANDOFF_CONTROLS: frozenset[str] = frozenset()
 
 
 def metrics_enabled() -> bool:
+    """Report whether the dev loop asked for metric events.
+
+    Returns:
+        True when `UNMUTE_DEV_METRICS` is set to anything but "" or "0".
+    """
     return os.environ.get(METRICS_ENV, "") not in ("", "0")
 
 
-def _emit(record: dict) -> None:
-    try:
+def _emit(record: dict[str, Any]) -> None:
+    """Print one record as a sentinel-prefixed JSON line.
+
+    Args:
+        record: The entity snapshot to send to the dev server.
+    """
+    # A closed local output cannot interrupt the voice pipeline.
+    with contextlib.suppress(OSError, ValueError):
         print(f"{SENTINEL} {json.dumps(record, separators=(',', ':'))}", flush=True)
-    except (OSError, ValueError):
-        # A closed local output cannot interrupt the voice pipeline.
-        pass
 
 
-def _error_kind(text):
-    """The exception's type name, and never the message beside it.
+def _error_kind(text: object) -> str:
+    """Return the exception's type name, and never the message beside it.
 
     A provider's error text quotes the request that failed, and a handler's
     quotes whatever it was working on, so neither belongs on a page that
@@ -77,14 +93,32 @@ def _error_kind(text):
     cannot carry any of that: it is an identifier from the code, so it is
     returned only when it reads as one. The message itself stays in the agent's
     own log, which `unmute dev` writes beside the build.
+
+    Args:
+        text: The error, or the text of one, as the framework reported it.
+
+    Returns:
+        The type name when it reads as an identifier, otherwise "an error".
     """
     head = str(text or "").split(":", 1)[0].strip()
     return head if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", head) else "an error"
 
 
-def _separator(previous, text, previous_includes_spaces, includes_spaces):
-    # Same boundary rule as Pipecat's concatenate_aggregated_text; retain the
-    # source chunks themselves, including their leading and trailing spaces.
+def _separator(previous: str, text: str, previous_includes_spaces: bool, includes_spaces: bool) -> str:
+    """Return the text to put between two transcript chunks.
+
+    Same boundary rule as Pipecat's concatenate_aggregated_text; retain the
+    source chunks themselves, including their leading and trailing spaces.
+
+    Args:
+        previous: The chunk before this one, "" when there is none.
+        text: The chunk being joined.
+        previous_includes_spaces: Whether the previous chunk carries its own spacing.
+        includes_spaces: Whether this chunk carries its own spacing.
+
+    Returns:
+        "" or a single space.
+    """
     if not previous or not text or (previous_includes_spaces and includes_spaces):
         return ""
     if not previous_includes_spaces and not includes_spaces:
@@ -95,7 +129,12 @@ def _separator(previous, text, previous_includes_spaces, includes_spaces):
 class DevReporter:
     """Observe native boundaries without replacing a service or its iterator."""
 
-    def __init__(self, runner_args):
+    def __init__(self, runner_args: RunnerArguments) -> None:
+        """Start reporting when the dev loop asked for it and named the call.
+
+        Args:
+            runner_args: The runner's arguments, whose body carries the dev call identity.
+        """
         self.enabled = metrics_enabled()
         body = getattr(runner_args, "body", None)
         call_id = body.get("unmute_dev_call_id") if isinstance(body, dict) else None
@@ -107,25 +146,27 @@ class DevReporter:
         self.call_id = call_id
         self._closed = False
         self._error = False
-        self._handlers = []
+        self._handlers: list[tuple[Any, str, _Handler]] = []
         self._serial = 0
-        self._records = {}
-        self._scope: contextvars.ContextVar[dict | None] = contextvars.ContextVar("unmute_dev_scope", default=None)
-        self._input = None
-        self._start_frames = set()
-        self._input_messages = {}
-        self._input_segments = {}
-        self._text_spacing = {}
-        self._interim = {}
-        self._requests = {}
-        self._tools = {}
-        self._tool_frames = set()
-        self._tts_contexts = {}
+        self._records: dict[tuple[str, str], dict[str, Any]] = {}
+        self._scope: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+            "unmute_dev_scope", default=None
+        )
+        self._input: str | None = None
+        self._start_frames: set[tuple[Any, ...]] = set()
+        self._input_messages: dict[str, str] = {}
+        self._input_segments: dict[str, list[str]] = {}
+        self._text_spacing: dict[str, bool] = {}
+        self._interim: dict[int, str] = {}
+        self._requests: dict[str, dict[str, Any]] = {}
+        self._tools: dict[tuple[int, str], dict[str, Any]] = {}
+        self._tool_frames: set[tuple[Any, ...]] = set()
+        self._tts_contexts: dict[tuple[int, str], list[str]] = {}
 {{- if .SpeechToSpeech}}
         # The reply the speech to speech model is speaking now. It opens with no context
         # frame in front of it, so the request it records under is kept here
         # rather than read off the frames, which carry no scope of their own.
-        self._live_turn = None
+        self._live_turn: str | None = None
         # The exchange the last reply belonged to, kept after that reply ends.
         # A live model delegates a tool as a response of its OWN, which arrives
         # after the spoken reply has closed, so by then there is no open reply
@@ -134,21 +175,36 @@ class DevReporter:
         # Only the exchange: the delegated response is a different model call,
         # so naming the spoken reply as the tool's parent operation would be a
         # nesting the run never had.
-        self._live_exchange = None
+        self._live_exchange: str | None = None
 {{- end}}
-        self._latency_observer = None
-        self._attached = set()
+        self._latency_observer: UserBotLatencyObserver | None = None
+        self._attached: set[tuple[int, str]] = set()
         if self.enabled:
             self._put("call", "call", {
                 "target": "pipecat", "state": "open", "input_boundaries": "partial",
                 "model_calls": "known", "generated_text": "available",
             })
 
-    def _id(self, prefix):
+    def _id(self, prefix: str) -> str:
+        """Return the next identifier for an entity kind.
+
+        Args:
+            prefix: The kind the identifier names, such as "llm" or "tool".
+
+        Returns:
+            The prefix and a call-wide serial number.
+        """
         self._serial += 1
         return f"{prefix}-{self._serial}"
 
-    def _put(self, kind, identity, payload):
+    def _put(self, kind: str, identity: str, payload: dict[str, Any]) -> None:
+        """Emit an entity snapshot unless it says nothing new.
+
+        Args:
+            kind: The entity kind, which is also the payload's key in the record.
+            identity: The entity's identifier.
+            payload: The entity's whole current state.
+        """
         if not self.enabled or self._closed:
             return
         old = self._records.get((kind, identity))
@@ -163,31 +219,69 @@ class DevReporter:
         self._records[kind, identity] = record
         _emit(record)
 
-    def _update(self, kind, identity, **changes):
+    def _update(self, kind: str, identity: str, **changes: Any) -> None:
+        """Merge changes into an entity already recorded and emit it.
+
+        Args:
+            kind: The entity kind.
+            identity: The entity's identifier.
+            **changes: The payload fields to set.
+        """
         old = self._records.get((kind, identity))
         if old:
             self._put(kind, identity, dict(old[kind], **changes))
 
-    def _frame_scope(self, frame):
+    def _frame_scope(self, frame: Frame) -> dict[str, Any]:
+        """Read the cause a frame carries, or nothing when it is not this call's.
+
+        Args:
+            frame: The frame whose metadata to read.
+
+        Returns:
+            A copy of the captured scope, empty when there is none.
+        """
         value = frame.metadata.get(_METADATA)
         return dict(value) if isinstance(value, dict) and value.get("call_id") == self.call_id else {}
 
-    def stamp(self, frame):
-        """Carry only captured cause, preserving all other frame metadata."""
+    def stamp(self, frame: Frame) -> Frame:
+        """Carry only captured cause, preserving all other frame metadata.
+
+        Args:
+            frame: The frame to mark with the current scope.
+
+        Returns:
+            The same frame.
+        """
         if self.enabled and not self._closed and _METADATA not in frame.metadata:
             scope = self._scope.get()
             if scope:
                 frame.metadata[_METADATA] = dict(scope)
         return frame
 
-    def activation_metadata(self, existing=None):
+    def activation_metadata(self, existing: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Build activation metadata that carries the current cause.
+
+        Args:
+            existing: The metadata the activation already has.
+
+        Returns:
+            A copy of it with the current scope added when there is one.
+        """
         metadata = dict(existing or {})
         scope = self._scope.get()
         if self.enabled and not self._closed and scope:
             metadata[_METADATA] = dict(scope)
         return metadata
 
-    def enter_activation(self, args):
+    def enter_activation(self, args: dict[str, Any] | None) -> contextvars.Token[dict[str, Any] | None] | None:
+        """Adopt the cause an activation was started with.
+
+        Args:
+            args: The activation arguments, whose metadata may carry a scope.
+
+        Returns:
+            The token to hand to `exit_activation`, or None when reporting is off.
+        """
         if not self.enabled or self._closed:
             return None
         metadata = (args or {}).get("metadata") or {}
@@ -196,13 +290,28 @@ class DevReporter:
             scope = None
         return self._scope.set(scope)
 
-    def exit_activation(self, token):
+    def exit_activation(self, token: contextvars.Token[dict[str, Any] | None] | None) -> None:
+        """Restore the scope from before `enter_activation`.
+
+        Args:
+            token: What `enter_activation` returned.
+        """
         if token is not None:
             self._scope.reset(token)
 
-    def _listen(self, source, event):
-        def register(handler):
-            async def active(*args, **kwargs):
+    def _listen(self, source: Any, event: str) -> Callable[[_Handler], _Handler]:
+        """Build a decorator that registers an event handler until `finish`.
+
+        Args:
+            source: The processor or observer to listen on.
+            event: The event name.
+
+        Returns:
+            A decorator that registers the handler and returns the wrapped one.
+        """
+
+        def register(handler: _Handler) -> _Handler:
+            async def active(*args: Any, **kwargs: Any) -> None:
                 # An event task already scheduled at cleanup can still run.
                 if not self._closed:
                     await handler(*args, **kwargs)
@@ -212,7 +321,12 @@ class DevReporter:
             return active
         return register
 
-    def observers(self):
+    def observers(self) -> list[BaseObserver]:
+        """Return the observers to attach to the pipeline task.
+
+        Returns:
+            The latency and speech observers, created on first use, or none when reporting is off.
+        """
         if not self.enabled or self._closed:
             return []
         if self._latency_observer is not None:
@@ -221,16 +335,16 @@ class DevReporter:
         self._latency_observer = observer
 
         @self._listen(observer, "on_first_bot_speech_latency")
-        async def first_speech(_observer, seconds):
+        async def first_speech(_observer: Any, seconds: float | None) -> None:
             self._measure("call:first-speech", "first_speech", seconds, "pipecat-client-connected", scope="call")
 
         @self._listen(observer, "on_latency_measured")
-        async def reply_latency(_observer, seconds):
+        async def reply_latency(_observer: Any, seconds: float | None) -> None:
             self._measure(self._id("reply-latency"), "reply_latency", seconds, "pipecat-user-bot-latency",
                           reason="The native audio callback does not identify its response.")
 
         @self._listen(observer, "on_latency_breakdown")
-        async def breakdown_ready(_observer, breakdown):
+        async def breakdown_ready(_observer: Any, breakdown: Any) -> None:
             if breakdown.user_turn_secs is not None:
                 self._measure(self._id("turn-detection"), "turn_detection", breakdown.user_turn_secs,
                               "pipecat-vad-stop-to-turn-release",
@@ -263,40 +377,77 @@ class DevReporter:
 
         return [observer, _SpeechObserver(self)]
 
-    def speech_measured(self, seconds, response=None):
+    def speech_measured(self, seconds: float, response: str | None = None) -> None:
         """Record how long the bot spoke, which no service reports.
 
         A synthesizer reports when it produced audio, not how long the caller
         listened to it, and a live model reports neither. The transport's own
         speaking frames are the only place the length of a reply shows up.
+
+        Args:
+            seconds: How long the bot's speech lasted.
+            response: The reply the speech belongs to, when one is known.
         """
         self._measure(self._id("speech-duration"), "speech_duration", seconds,
                       "pipecat-bot-speaking-frames",
                       scope="response" if response else "unassigned", exchange_id=response,
                       reason=None if response else "The transport reports the bot's speech without a response identity.")
 
-    def speaking_response(self):
-        """The reply whose speech is starting, when exactly one is in flight.
+    def speaking_response(self) -> str | None:
+        """Return the reply whose speech is starting, when exactly one is in flight.
 
         Read when the speech starts, because synthesis for a reply can finish
         while the caller is still hearing it. Two replies queued behind each
         other, or a live model that runs no synthesis at all, leave the speech
         unassigned rather than attached to a reply by how recent it is.
+
+        Returns:
+            The reply's identifier, or None when there is not exactly one.
         """
         if not self.enabled or self._closed:
             return None
-        responses = set()
-        for operations in self._tts_contexts.values():
-            for operation in operations:
-                record = self._records.get(("operation", operation))
-                if record and record["operation"].get("exchange_id"):
-                    responses.add(record["operation"]["exchange_id"])
+        records = (
+            self._records.get(("operation", operation))
+            for operations in self._tts_contexts.values()
+            for operation in operations
+        )
+        responses = {
+            record["operation"]["exchange_id"] for record in records if record and record["operation"].get("exchange_id")
+        }
         return responses.pop() if len(responses) == 1 else None
 
-    def _measure(self, identity, metric, value, source, *, scope="unassigned", exchange_id=None,
-                 operation_id=None, state=None, reason=None, model=None, provider=None):
+    def _measure(
+        self,
+        identity: str,
+        metric: str,
+        value: float | None,
+        source: str,
+        *,
+        scope: str = "unassigned",
+        exchange_id: str | None = None,
+        operation_id: str | None = None,
+        state: str | None = None,
+        reason: str | None = None,
+        model: str | None = None,
+        provider: str | None = None,
+    ) -> None:
+        """Record one timing, measured or explained as unavailable.
+
+        Args:
+            identity: The measurement's identifier.
+            metric: What was timed, such as "first_response".
+            value: The duration in seconds, or None when it is not known.
+            source: Where the number came from.
+            scope: What the timing belongs to.
+            exchange_id: The exchange it belongs to, when known.
+            operation_id: The operation it belongs to, when known.
+            state: Overrides the measured or unavailable state.
+            reason: Why the value is missing or only partly attributed.
+            model: The model the service reported.
+            provider: The service that reported it.
+        """
         valid = isinstance(value, (float, int)) and math.isfinite(value) and value >= 0
-        payload = {
+        payload: dict[str, Any] = {
             "scope": scope, "metric": metric, "unit": "seconds", "source": source,
             "state": state or ("measured" if valid else "unavailable"),
         }
@@ -304,13 +455,25 @@ class DevReporter:
             payload["value"] = value
         elif value is not None:
             reason = "The SDK did not provide a finite nonnegative measurement."
-        for key, field in (("exchange_id", exchange_id), ("operation_id", operation_id),
-                           ("reason", reason), ("model", model), ("provider", provider)):
-            if field:
-                payload[key] = field
+        optional = {
+            "exchange_id": exchange_id,
+            "operation_id": operation_id,
+            "reason": reason,
+            "model": model,
+            "provider": provider,
+        }
+        payload |= {key: field for key, field in optional.items() if field}
         self._put("measurement", identity, payload)
 
-    def _service_metrics(self, processor, role, frame, cause):
+    def _service_metrics(self, processor: Any, role: str, frame: Frame, cause: dict[str, Any]) -> None:
+        """Record the timings a service's metrics frame carries.
+
+        Args:
+            processor: The service whose frame this is.
+            role: The service's role, "stt", "llm" or "tts".
+            frame: The frame passing the service; anything but a metrics frame is ignored.
+            cause: The scope the frame carries, which says what the timing belongs to.
+        """
         if not isinstance(frame, MetricsFrame):
             return
         if id(processor) in frame.metadata.get("unmute_dev_metric_inputs", []):
@@ -344,19 +507,28 @@ class DevReporter:
             if operation and data.model:
                 self._update("operation", operation, model=data.model)
 
-    def _attach(self, processor, role):
+    def _attach(self, processor: Any, role: str) -> bool:
+        """Watch a service once.
+
+        Args:
+            processor: The service to watch.
+            role: The service's role, "stt", "llm", "tts" or "user".
+
+        Returns:
+            False when reporting is off or the service is already watched.
+        """
         key = (id(processor), role)
         if not self.enabled or self._closed or key in self._attached:
             return False
         self._attached.add(key)
         if role in ("stt", "llm", "tts"):
             @self._listen(processor, "on_before_process_frame")
-            async def metrics_input(_processor, frame):
+            async def metrics_input(_processor: Any, frame: Frame) -> None:
                 if isinstance(frame, MetricsFrame):
                     frame.metadata.setdefault("unmute_dev_metric_inputs", []).append(id(processor))
 
             @self._listen(processor, "on_error")
-            async def source_error(_processor, frame):
+            async def source_error(_processor: Any, frame: ErrorFrame) -> None:
                 if frame.fatal or not processor.is_usable:
                     self._error = True
                     # Which service stopped working, and nothing it said. A
@@ -367,7 +539,12 @@ class DevReporter:
                                  reason=f"{processor.name} reported a fatal error.")
         return True
 
-    def _input_boundary(self, frame):
+    def _input_boundary(self, frame: Frame) -> None:
+        """Open an input exchange when the caller starts speaking.
+
+        Args:
+            frame: A frame passing the user aggregator.
+        """
         if isinstance(frame, UserStartedSpeakingFrame):
             sibling = getattr(frame, "broadcast_sibling_id", None)
             key = tuple(sorted((frame.id, sibling))) if sibling is not None else (frame.id,)
@@ -383,7 +560,13 @@ class DevReporter:
         # A speech-stop SystemFrame can overtake the final transcript. The
         # user aggregator's context emission below is the commit boundary.
 
-    def _associate_text(self, identity, input_id):
+    def _associate_text(self, identity: str, input_id: str) -> None:
+        """Attach a caller's text segment to an input and re-join its segments.
+
+        Args:
+            identity: The text segment's identifier.
+            input_id: The input exchange it belongs to.
+        """
         record = self._records.get(("text", identity))
         if not record:
             return
@@ -402,16 +585,24 @@ class DevReporter:
                 previous = text
                 previous_includes_spaces = includes_spaces
 
-    def observe_stt(self, stt):
+    def observe_stt(self, stt: Any) -> Any:
+        """Watch a transcriber's frames and record what the caller said.
+
+        Args:
+            stt: The speech-to-text service.
+
+        Returns:
+            The same service.
+        """
         if not self._attach(stt, "stt"):
             return stt
 
         @self._listen(stt, "on_before_process_frame")
-        async def stt_before(_processor, frame):
+        async def stt_before(_processor: Any, frame: Frame) -> None:
             self._scope.set(self._frame_scope(frame) or None)
 
         @self._listen(stt, "on_before_push_frame")
-        async def text_ready(_processor, frame):
+        async def text_ready(_processor: Any, frame: Frame) -> None:
             self.stamp(frame)
             self._service_metrics(stt, "stt", frame, self._frame_scope(frame))
             if not isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame)):
@@ -443,12 +634,18 @@ class DevReporter:
 
         return stt
 
-    def observe_aggregators(self, user, assistant):
+    def observe_aggregators(self, user: Any, assistant: Any) -> None:
+        """Watch the context aggregators, where a caller's turn is committed.
+
+        Args:
+            user: The user aggregator.
+            assistant: The assistant aggregator.
+        """
         if not self._attach(user, "user"):
             return
 
         @self._listen(user, "on_before_process_frame")
-        async def user_before(_processor, frame):
+        async def user_before(_processor: Any, frame: Frame) -> None:
             self._input_boundary(frame)
             scope = self._frame_scope(frame)
             # A proposed turn boundary is a caller frame too: when the transcriber
@@ -467,7 +664,7 @@ class DevReporter:
             self._scope.set(scope or None)
 
         @self._listen(user, "on_before_push_frame")
-        async def user_push(_processor, frame):
+        async def user_push(_processor: Any, frame: Frame) -> None:
             self._input_boundary(frame)
             scope = dict(self._scope.get() or {})
             if isinstance(frame, UserStartedSpeakingFrame) and self._input:
@@ -482,15 +679,23 @@ class DevReporter:
                     self._input = None
 
         @self._listen(assistant, "on_before_process_frame")
-        async def assistant_before(_processor, frame):
+        async def assistant_before(_processor: Any, frame: Frame) -> None:
             # A long-lived queue without captured cause stays unassigned.
             self._scope.set(self._frame_scope(frame) or None)
 
         @self._listen(assistant, "on_before_push_frame")
-        async def assistant_push(_processor, frame):
+        async def assistant_push(_processor: Any, frame: Frame) -> None:
             self.stamp(frame)
 
-    def _response(self, scope):
+    def _response(self, scope: dict[str, Any]) -> str:
+        """Return the reply a scope belongs to, opening one when it has none.
+
+        Args:
+            scope: The cause the current work carries.
+
+        Returns:
+            The response exchange's identifier.
+        """
         response = scope.get("response_id")
         if response and ("exchange", response) in self._records:
             return response
@@ -507,7 +712,14 @@ class DevReporter:
                       reason="Pipecat reports audio latency without a response identity.")
         return response
 
-    def _tool_event(self, llm, frame, cause):
+    def _tool_event(self, llm: Any, frame: Frame, cause: dict[str, Any]) -> None:
+        """Track a tool call from the frames the framework pushes for it.
+
+        Args:
+            llm: The service that pushed the frame.
+            frame: A function call frame; any other frame is ignored.
+            cause: The scope the frame carries.
+        """
         if not isinstance(frame, (FunctionCallInProgressFrame, FunctionCallResultFrame, FunctionCallCancelFrame)):
             return
         # A control hands over to a task instead of returning a result, so it
@@ -524,11 +736,9 @@ class DevReporter:
         if isinstance(frame, FunctionCallInProgressFrame):
             kind = "handoff" if control else "tool"
             operation = self._id(kind)
-            payload = {"type": kind, "name": frame.function_name, "state": "running"}
-            for field, value in (("exchange_id", cause.get("response_id")),
-                                 ("parent_operation_id", cause.get("operation_id"))):
-                if value:
-                    payload[field] = value
+            payload: dict[str, Any] = {"type": kind, "name": frame.function_name, "state": "running"}
+            linked = {"exchange_id": cause.get("response_id"), "parent_operation_id": cause.get("operation_id")}
+            payload |= {field: value for field, value in linked.items() if value}
             self._put("operation", operation, payload)
             self._tools[key] = {"id": operation, "scope": dict(cause), "started": time.monotonic(),
                                 "ended": False, "control": control}
@@ -565,7 +775,14 @@ class DevReporter:
         else:
             self._end_tool(tool, "returned")
 
-    def _end_tool(self, tool, state, reason=None):
+    def _end_tool(self, tool: dict[str, Any], state: str, reason: str | None = None) -> None:
+        """Settle a tool call once and time it.
+
+        Args:
+            tool: The tool's bookkeeping entry.
+            state: The state it ended in.
+            reason: What went wrong, when something did.
+        """
         if tool["ended"]:
             return
         tool["ended"] = True
@@ -577,13 +794,21 @@ class DevReporter:
                       "pipecat-function-call-frames", scope="operation", operation_id=operation,
                       exchange_id=tool["scope"].get("response_id"))
 
-    def observe_llm(self, llm):
+    def observe_llm(self, llm: Any) -> Any:
+        """Watch a language model service and record its requests and text.
+
+        Args:
+            llm: The language model service.
+
+        Returns:
+            The same service.
+        """
         if not self._attach(llm, "llm"):
             return llm
-        pending = set()
+        pending: set[str] = set()
 
         @self._listen(llm, "on_before_process_frame")
-        async def llm_before(_processor, frame):
+        async def llm_before(_processor: Any, frame: Frame) -> None:
             if isinstance(frame, (InterruptionFrame, CancelFrame)):
                 for operation in tuple(pending):
                     self._end_request(operation, "cancelled")
@@ -614,7 +839,7 @@ class DevReporter:
             self._scope.set(scope or None)
 
         @self._listen(llm, "on_before_push_frame")
-        async def llm_push(_processor, frame):
+        async def llm_push(_processor: Any, frame: Frame) -> None:
             self.stamp(frame)
             scope = self._frame_scope(frame)
 {{- if .SpeechToSpeech}}
@@ -632,11 +857,11 @@ class DevReporter:
             self._service_metrics(llm, "llm", frame, scope)
             self._tool_event(llm, frame, scope)
             if isinstance(frame, ErrorFrame) and scope.get("tool_operation_id"):
-                for tool in self._tools.values():
-                    if tool["id"] == scope["tool_operation_id"]:
-                        self._end_tool(tool, "failed", reason=f"The handler raised {_error_kind(frame.error)}.")
-                        return
-            operation = scope.get("operation_id")
+                failed = next((tool for tool in self._tools.values() if tool["id"] == scope["tool_operation_id"]), None)
+                if failed is not None:
+                    self._end_tool(failed, "failed", reason=f"The handler raised {_error_kind(frame.error)}.")
+                    return
+            operation: Any = scope.get("operation_id")
             request = self._requests.get(operation)
 {{- if .SpeechToSpeech}}
             if isinstance(frame, LLMFullResponseStartFrame) and not request:
@@ -647,7 +872,7 @@ class DevReporter:
                 operation = self._id("llm")
                 scope = dict(scope, call_id=self.call_id, operation_id=operation)
                 scope["response_id"] = self._response(scope)
-                request = {"scope": dict(scope), "text_id": None, "ended": False}
+                request: dict[str, Any] | None = {"scope": dict(scope), "text_id": None, "ended": False}
                 self._requests[operation] = request
                 self._live_turn = operation
                 self._live_exchange = scope["response_id"]
@@ -694,15 +919,30 @@ class DevReporter:
         return llm
 {{- if .SpeechToSpeech}}
 
-    def observe_live(self, live):
-        # One service where the transcriber, the model and the synthesizer sat.
-        # The caller's words come out of it as recognition frames, so the
-        # transcriber's observer reads them off it; its own words come out as a
-        # reply with no context frame in front, which observe_llm handles above.
+    def observe_live(self, live: Any) -> Any:
+        """Watch a speech to speech service as transcriber and model at once.
+
+        One service where the transcriber, the model and the synthesizer sat.
+        The caller's words come out of it as recognition frames, so the
+        transcriber's observer reads them off it; its own words come out as a
+        reply with no context frame in front, which observe_llm handles above.
+
+        Args:
+            live: The speech to speech service.
+
+        Returns:
+            The same service.
+        """
         return self.observe_stt(self.observe_llm(live))
 {{- end}}
 
-    def _end_request(self, operation, state):
+    def _end_request(self, operation: str, state: str) -> None:
+        """Settle a model request once and close what it left open.
+
+        Args:
+            operation: The request's operation identifier.
+            state: The state it ended in, "ended", "cancelled" or "failed".
+        """
         request = self._requests.get(operation)
         if not request or request["ended"]:
             return
@@ -727,12 +967,20 @@ class DevReporter:
         if state in ("cancelled", "failed"):
             self._update("exchange", request["scope"]["response_id"], state="interrupted" if state == "cancelled" else "incomplete")
 
-    def observe_tts(self, tts):
+    def observe_tts(self, tts: Any) -> Any:
+        """Watch a synthesizer and record its requests.
+
+        Args:
+            tts: The text-to-speech service.
+
+        Returns:
+            The same service.
+        """
         if not self._attach(tts, "tts"):
             return tts
 
         @self._listen(tts, "on_before_process_frame")
-        async def tts_before(_processor, frame):
+        async def tts_before(_processor: Any, frame: Frame) -> None:
             scope = self._frame_scope(frame)
             if isinstance(frame, TTSSpeakFrame) and not scope.get("direct_text_id"):
                 identity = self._id("direct-text")
@@ -746,7 +994,7 @@ class DevReporter:
             self._scope.set(scope or None)
 
         @self._listen(tts, "on_before_push_frame")
-        async def tts_push(_processor, frame):
+        async def tts_push(_processor: Any, frame: Frame) -> None:
             self.stamp(frame)
             self._service_metrics(tts, "tts", frame, self._frame_scope(frame))
             if isinstance(frame, TTSStoppedFrame):
@@ -754,7 +1002,7 @@ class DevReporter:
                     self._update("operation", operation, state="ended")
 
         @self._listen(tts, "on_tts_request")
-        async def tts_request(_processor, context_id, _text):
+        async def tts_request(_processor: Any, context_id: str, _text: str) -> None:
             cause = self._scope.get() or {}
             operation = self._id("tts")
             payload = {"type": "tts", "name": tts.name, "state": "running"}
@@ -765,7 +1013,13 @@ class DevReporter:
 
         return tts
 
-    def finish(self, *, error=False, reason=None):
+    def finish(self, *, error: bool = False, reason: str | None = None) -> None:
+        """Close every open entity, end the call and stop listening.
+
+        Args:
+            error: Whether the call ended in an error.
+            reason: What ended the call, in the words of whatever raised.
+        """
         if not self.enabled or self._closed:
             return
         if reason:
@@ -795,9 +1049,9 @@ class DevReporter:
         completed = (final_text & final_tts) - unfinished
 {{- end}}
         for (kind, identity), record in list(self._records.items()):
-            if kind == "text" and record[kind]["state"] == "provisional":
-                self._update(kind, identity, state="incomplete")
-            elif kind == "operation" and record[kind]["state"] == "running":
+            if (kind == "text" and record[kind]["state"] == "provisional") or (
+                kind == "operation" and record[kind]["state"] == "running"
+            ):
                 self._update(kind, identity, state="incomplete")
             elif kind == "exchange" and record[kind]["state"] == "open":
                 self._update(kind, identity, state="ended" if identity in completed else "incomplete")
@@ -832,13 +1086,23 @@ class _SpeechObserver(BaseObserver):
     land on a closed stretch and are ignored.
     """
 
-    def __init__(self, reporter):
+    def __init__(self, reporter: DevReporter) -> None:
+        """Time speech on behalf of a reporter.
+
+        Args:
+            reporter: The reporter that receives each measured stretch.
+        """
         super().__init__()
         self._reporter = reporter
-        self._started = None
-        self._response = None
+        self._started: float | None = None
+        self._response: str | None = None
 
-    async def on_push_frame(self, data):
+    async def on_push_frame(self, data: Any) -> None:
+        """Open or close the speaking stretch when the bot's speaking frames pass.
+
+        Args:
+            data: The observed frame push.
+        """
         if isinstance(data.frame, BotStartedSpeakingFrame):
             if self._started is None:
                 self._started = time.monotonic()
@@ -849,5 +1113,13 @@ class _SpeechObserver(BaseObserver):
             self._reporter.speech_measured(time.monotonic() - started, response)
 
 
-def install_dev_metrics(runner_args):
+def install_dev_metrics(runner_args: RunnerArguments) -> DevReporter:
+    """Create the call's reporter.
+
+    Args:
+        runner_args: The runner's arguments, whose body carries the dev call identity.
+
+    Returns:
+        A reporter that is inert unless the dev loop enabled it.
+    """
     return DevReporter(runner_args)
