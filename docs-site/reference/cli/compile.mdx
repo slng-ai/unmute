@@ -32,15 +32,21 @@ generated my-agent/build/livekit/.env.example
 generated my-agent/build/livekit/Dockerfile
 generated my-agent/build/livekit/README.md
 generated my-agent/build/livekit/agent.py
+generated my-agent/build/livekit/agents.py
+generated my-agent/build/livekit/call.py
 generated my-agent/build/livekit/compile-report.json
 generated my-agent/build/livekit/compose.dev.yaml
-generated my-agent/build/livekit/dev_metrics.py
+generated my-agent/build/livekit/prompts/__init__.py
+generated my-agent/build/livekit/prompts/<agent>.md
 generated my-agent/build/livekit/pyproject.toml
+generated my-agent/build/livekit/settings.py
+generated my-agent/build/livekit/utils/__init__.py
+generated my-agent/build/livekit/utils/dev_metrics.py
 ```
 
 A package with tools, knowledge files, tracing, or a phone route writes more:
-`tools/<name>.py` per tool, `knowledge.py`, `tracing.py`, and on Pipecat
-`pcc-deploy.toml`.
+`tools/<name>.py` per tool, `utils/knowledge.py`, `utils/tracing.py`,
+`session.py`, and on Pipecat `pcc-deploy.toml`.
 
 Output goes to `<package>/build/<target-instance-name>/`. With no `--target`,
 every declared target is compiled. `--target` is repeatable.

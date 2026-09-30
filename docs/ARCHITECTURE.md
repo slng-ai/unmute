@@ -85,9 +85,11 @@ records its company name, revision and language or region verification gaps.
 The source package describes durable behavior. A target driver owns how that
 behavior is expressed in one framework.
 
-- **LiveKit** emits `agent.py` and uses a separate LiveKit Server for media,
+- **LiveKit** emits `agent.py` (the entry point, with `call.py`, `agents.py`,
+  `session.py`, `settings.py`, `prompts/` and `utils/` beside it) and uses a separate LiveKit Server for media,
   rooms, and job dispatch.
-- **Pipecat** emits `bot.py`. The generated process owns both its network
+- **Pipecat** emits `bot.py` (the entry point, with the same modules beside
+  it). The generated process owns both its network
   endpoint and conversation pipeline.
 - **Twilio** emits `app.py`, a web app on no agent framework. Twilio
   ConversationRelay owns speech and turn taking; the app owns the history, the
@@ -216,7 +218,7 @@ path, including an interrupt during a build.
 The emitted agent prints a flushed, framed stdout line whenever recognized or
 generated text, activity, or a measurement changes. The line is the boundary:
 `internal/devmetrics` owns the typed Go contract and decoder; each target's
-`dev_metrics.py` produces it. Agreement fixtures and SDK smoke tests hold the
+`utils/dev_metrics.py` produces it. Agreement fixtures and SDK smoke tests hold the
 two languages to the same contract.
 
 V2 records are full snapshots of calls, exchanges, text segments, operations,

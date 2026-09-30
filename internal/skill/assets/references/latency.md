@@ -173,7 +173,7 @@ in every compiled package whether or not it was asked for), and then the turn
 waits for the transcriber to mark the transcript final. `endpointing_delay` sets
 the first stage and `pace` sets the second.
 
-Both stages are spelled `stop_secs` in the emitted `bot.py` and they are
+Both stages are spelled `stop_secs` in the emitted `call.py` and they are
 different fields: `VADParams(stop_secs=...)` is the silence window,
 `SmartTurnParams(stop_secs=...)` is the classifier's ceiling.
 
