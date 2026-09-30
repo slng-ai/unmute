@@ -3,7 +3,6 @@ package generate
 import (
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/slng-ai/unmute/internal/ir"
@@ -227,7 +226,18 @@ func builtinClassBody(class ir.Shape) string {
 // stands in, which is Pydantic's own answer for the same input.
 const nameEmailParser = `    @model_validator(mode="before")
     @classmethod
-    def _read_one_string(cls, value):
+    def _read_one_string(cls, value: object) -> object:
+        """Read one string as a name and an email address.
+
+        Args:
+            value: The raw input, a string or the pair itself.
+
+        Returns:
+            The pair as a dict when the input was a string, else the input.
+
+        Raises:
+            ValueError: If the string is not an email address.
+        """
         if not isinstance(value, str):
             return value
         if not value.strip():
@@ -325,16 +335,7 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 	block.NeedsAnnotated = block.NeedsShaped || block.NeedsField
 
 	var b strings.Builder
-	b.WriteString(`# --- declared state ----------------------------------------------------------
-# Generated from the ` + "`shapes:`" + ` and the typed ` + "`variables:`" + ` in agent.yaml. Both
-# target frameworks already depend on Pydantic, so nothing here adds one. The one
-# exception is EmailStr, which is checked by email-validator: declaring it puts
-# that package in this project's pyproject.toml, and declaring no email type
-# leaves both the import and the dependency out.
-#
-# Emitted from one place in the compiler for both targets, so the classes, the
-# checks and the refusal wording cannot differ between them.
-`)
+	b.WriteString(stateHeader)
 	for _, kind := range shapedOrder {
 		if !used[kind] {
 			continue
@@ -351,192 +352,30 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 		// Python and a stray percent sign in one would otherwise be read as a
 		// verb. One token, one owner: shapedExpected.
 		body = strings.ReplaceAll(body, shapedExpected, pyQuote("expected "+row.phrase))
-		fmt.Fprintf(&b, `
-%sdef _shape_%s(value: str) -> str:
-%s
-
-
-# AfterValidator and never a pattern= constraint: a pattern reaches the schema
-# the model is sent, one target's strict converter keeps it, and the provider
-# rejects it. So the schema says str and the shape is checked here.
-#
-# The description is how the format reaches the model at all, and it is the only
-# keyword that can: it travels as prose, so no strict converter strips it. A
-# field that said nothing about its shape was learned from a refusal mid-call,
-# which cost a model round trip on every value the prompt spells one way and
-# this type another. A field carrying its own description keeps that one; the
-# emitter appends this phrase to it.
-%s = Annotated[
-    str,
-    AfterValidator(_shape_%s),
-    Field(description=%s),
-]
-`,
-			check, lower, body, string(kind), lower, pyQuote(row.phrase))
+		fmt.Fprintf(&b, shapedAliasTemplate,
+			check, lower, shapedDocstring, body, string(kind), lower, pyQuote(row.phrase))
 	}
 	for _, class := range classes {
-		b.WriteString("\n\nclass " + class.Name + "(BaseModel):\n")
-		if class.Description != "" {
-			b.WriteString("    " + pyTriple(class.Description) + "\n\n")
-		}
+		fmt.Fprintf(&b, "\n\nclass %s(BaseModel):\n", class.Name)
+		fmt.Fprintf(&b, "    %s\n\n", classDocstring(class))
 		for _, field := range class.Fields {
-			b.WriteString("    " + field.Name + ": " + pyFieldAnno(field) + "\n")
+			fmt.Fprintf(&b, "    %s: %s\n", field.Name, pyFieldAnno(field))
 		}
 		if body := builtinClassBody(class); body != "" {
-			b.WriteString("\n" + body)
+			fmt.Fprintf(&b, "\n%s", body)
 		}
 	}
-	b.WriteString(`
-
-class _StateRefused(Exception):
-    """A value that does not fit its declared type, refused where it enters.
-
-    Carried as an exception rather than a return so the write cannot happen by
-    accident: the previous contents stay exactly as they were, and the message
-    goes back to the model, which is what lets it correct itself on the next
-    turn instead of the step recording something wrong.
-    """
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-        self.message = message
-
-
-def _typed(field, adapter, value):
-    """Validate one value entering the declared state."""
-    try:
-        return adapter.validate_python(value)
-    except ValidationError as error:
-        first = error.errors()[0]
-        where = ".".join(str(part) for part in first["loc"])
-        named = f"{field}.{where}" if where else field
-        raise _StateRefused(f"{named}: {first['msg']}") from None
-
-
-def _append_entry(entries, value):
-    """One entry onto a declared list, unless it is already on it.
-
-    A step re-entered mid-call can read a value through an explicit prompt
-    reference and hand it straight back, which is not a second thing happening. One live call
-    entered the booking step four times and finished three of them immediately,
-    each with the same appointment it had recorded on the first, so one booking
-    became four entries and the caller's recap listed a booking four times.
-
-    An object carries its own identity, so an identical one is the same thing
-    reported twice. A plain value is not: two bookings really do give two
-    reasons of "create_booking", and both of those count. So the skip is for
-    structured entries only.
-
-    Nothing absent is added either, which is how a step that concluded nothing
-    this time finishes without inventing an entry.
-    """
-    if value is None:
-        return
-    if isinstance(value, (dict, list)) and value in entries:
-        return
-    entries.append(value)
-
-
-def _plain(value):
-    """A validated value as plain data.
-
-    Plain data is the only shape both frameworks accept back from a tool: one
-    refuses a BaseModel outright and drops the whole tool result with a log
-    line, the other cannot serialise one at all.
-    """
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, list):
-        return [_plain(entry) for entry in value]
-    if isinstance(value, dict):
-        return {key: _plain(entry) for key, entry in value.items()}
-    return value
-`)
-	b.WriteString(`
-
-def _schema(adapter):
-    """One declared type's schema, with every $ref resolved into place.
-
-    Pydantic emits $defs and a $ref for a shape that contains another shape, and
-    this is not a formatting preference. Measured on one real request to the
-    provider, three ways:
-
-    - the schema as Pydantic emits it, nested inside one tool property with no
-      strict flag: accepted with a 200, and the model invented field names for
-      the nested object because it never read the definition. Every result would
-      then have been refused where it entered, on every call.
-    - the same schema with the refs inlined: accepted, and the model filled the
-      shape's own fields exactly, the nullable one included.
-    - the shape the other target sends, with the $defs hoisted to the
-      parameters root and strict on: accepted, and correct. A $defs anywhere but
-      that root is a 400 naming the pointer.
-
-    This target nests the schema inside one property and sends no strict flag,
-    so it is the first case unless the refs are resolved here.
-    """
-    schema = adapter.json_schema()
-    defs = schema.pop("$defs", {})
-
-    def resolve(node):
-        if isinstance(node, list):
-            return [resolve(item) for item in node]
-        if not isinstance(node, dict):
-            return node
-        target = node.get("$ref")
-        if isinstance(target, str) and target.startswith("#/$defs/"):
-            found = defs.get(target.rsplit("/", 1)[1], {})
-            siblings = {key: value for key, value in node.items() if key != "$ref"}
-            return {**resolve(found), **siblings}
-        return {key: resolve(value) for key, value in node.items()}
-
-    return resolve(schema)
-`)
+	b.WriteString(stateRuntimeHelpers)
+	b.WriteString(stateSchemaHelper)
 	b.WriteString("\n\n_FINISH_TYPES = {\n")
 	for _, step := range finish {
-		b.WriteString("    " + pyQuote(step.Task) + ": {\n")
+		fmt.Fprintf(&b, "    %s: {\n", pyQuote(step.Task))
 		for _, field := range step.Fields {
-			b.WriteString("        " + pyQuote(field.Name) + ": TypeAdapter(" + field.Anno + "),\n")
+			fmt.Fprintf(&b, "        %s: TypeAdapter(%s),\n", pyQuote(field.Name), field.Anno)
 		}
 		b.WriteString("    },\n")
 	}
-	b.WriteString(`}
-
-
-def _task_status(values):
-    return {"status": "unserved" if values.get("unserved_request") else "completed"}
-
-
-def _group_status(results):
-    return {"status": "unserved" if any(value.get("unserved_request") for value in results.values()) else "completed"}
-
-
-def _typed_result(step, values):
-    """Validate a step's declared results where they enter the state.
-
-    Refused here rather than carried into a later step that assumes it is
-    right, and refused on both targets rather than on the one whose framework
-    happens to validate tool arguments: one of them validates through Pydantic
-    and lets the model self-correct, the other splats raw JSON into the handler.
-    """
-    if values.get("unserved_request"):
-        return {"unserved_request": values["unserved_request"]}
-    adapters = _FINISH_TYPES.get(step)
-    if not adapters:
-        return values
-    out = dict(values)
-    for name, adapter in adapters.items():
-        # Absent goes through the adapter too, rather than being skipped. A
-        # field the model left out is a field with no value, and that is what a
-        # prompt telling it to leave one out asks for: a value that may be
-        # absent validates as None and the append drops it, and a value that
-        # may not is refused here with the message that lets the model correct
-        # itself. Skipping an absent field instead left the key missing from
-        # the result, and the assignment that reads it by name raised a
-        # KeyError inside the finish handler on the target whose framework
-        # validates no argument of its own.
-        out[name] = _plain(_typed(name, adapter, out.get(name)))
-    return out
-`)
+	b.WriteString(stateFinishHelpers)
 	b.WriteString("\n\n_STATE_TYPES = {\n")
 	for _, name := range sortedKeys(agent.Variables) {
 		variable := agent.Variables[name]
@@ -575,255 +414,22 @@ def _typed_result(step, values):
 			}
 		}
 	}
-	b.WriteString(`}
-
-
-def _save_result(step, state, values):
-    """Validate all assignments before changing any call state."""
-    values = _typed_result(step, values)
-    if values.get("unserved_request"):
-        return values
-    pending = {}
-    for name, path, append in _TASK_ASSIGNMENTS.get(step, ()):
-        value = values
-        for part in path.split("."):
-            value = value.get(part) if isinstance(value, dict) else None
-        if append:
-            if value is None:
-                continue
-            entries = list(getattr(state, name, None) or [])
-            _append_entry(entries, value)
-            value = entries
-        pending[name] = _plain(_typed(name, _STATE_TYPES[name], value))
-    _save_batch(state, pending, step=step)
-    return values
-
-
-def _save_batch(state, values, *, step=None, inputs=None):
-    """Commit a validated batch and invalidate older results of changed inputs."""
-    if not values:
-        return
-    pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
-    unconfirmed: set[str] = set(getattr(state, "_unconfirmed", ()))
-    provenance = dict(getattr(state, "_prefetch_provenance", {}))
-    affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
-    while True:
-        more = {name for name, reads in provenance.items() if set(reads) & affected} - affected
-        if not more:
-            break
-        affected.update(more)
-    invalidated = affected - pending.keys()
-    for name in invalidated:
-        provenance.pop(name, None)
-    for name, value in pending.items():
-        if inputs is not None:
-            provenance[name] = tuple(inputs)
-        else:
-            provenance.pop(name, None)
-        if name in _STATE_CONFIRM:
-            if _STATE_CONFIRM[name] == step and value is not None and value != "":
-                unconfirmed.discard(name)
-            else:
-                unconfirmed.add(name)
-    def current(name):
-        return None if name in invalidated else pending.get(name, getattr(state, name, None))
-    # Dependencies are acyclic: prefetch can only read earlier entries.
-    for _ in range(len(_STATE_DEPENDENCIES) + 1):
-        before = set(unconfirmed)
-        for name, reads in _STATE_DEPENDENCIES.items():
-            if current(name) is not None and current(name) != "" and all(
-                source not in unconfirmed and current(source) is not None and current(source) != "" for source in reads
-            ):
-                unconfirmed.discard(name)
-            else:
-                unconfirmed.add(name)
-        if before == unconfirmed:
-            break
-    for name in invalidated:
-        setattr(state, name, None)
-    for name, value in pending.items():
-        setattr(state, name, value)
-    if hasattr(state, "_unconfirmed"):
-        state._unconfirmed = unconfirmed
-    if inputs is not None or hasattr(state, "_prefetch_provenance"):
-        state._prefetch_provenance = provenance
-
-`)
+	b.WriteString(stateSaveHelpers)
 	if block.NeedsTerminal {
-		b.WriteString(`
-def _success_word(value):
-    """One result value as a success pair reads it.
-
-    The pairs come out of YAML as text, so a boolean has to read as the word the
-    author wrote rather than as Python's own spelling of it: True never matches
-    the word true, and the step would silently never end.
-    """
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return "" if value is None else str(value)
-
-
-def _terminal_success(result, success):
-    """Whether a tool result means this step is done.
-
-    Every field is required and its value has to be one of the listed ones.
-    Anything else is an ordinary result and goes back to the model, which is
-    what keeps a failed booking a conversation rather than a saved one.
-    """
-    if not isinstance(result, dict):
-        return False
-    # The loop variable is name, not field: a package declaring a list imports
-    # dataclasses' own field, and a loop variable of that name shadows it.
-    for name, values in success.items():
-        if _success_word(result.get(name)) not in values:
-            return False
-    return True
-
-
-def _merge_retained(step, args, retained):
-    """The model's finish arguments with the tool's own values put back.
-
-    Reached only when a save was refused and the model is repairing it. A field
-    the tool returned validly is the authoritative one: the model cannot
-    manufacture a booking reference, and a repair that retyped one would record
-    a booking nobody made. A retained value that does not validate is left to
-    the model, because refusing here would leave the step with no way out.
-    """
-    out = dict(args)
-    for name, adapter in _FINISH_TYPES.get(step, {}).items():
-        if name not in retained:
-            continue
-        try:
-            _typed(name, adapter, retained[name])
-        except _StateRefused:
-            continue
-        out[name] = retained[name]
-    return out
-
-
-`)
+		b.WriteString(stateTerminalHelpers)
 	}
 	if block.NeedsWithdrawal {
-		b.WriteString(`
-def _is_confirmed(state, name):
-    """Whether a value is confirmed right now.
-
-    Both halves matter: a value nobody has agreed to is unconfirmed, and so is
-    one that was withdrawn. A group reads this once, as it starts, to decide
-    whether the step that confirms it has to run.
-    """
-    value = getattr(state, name, None)
-    return name not in getattr(state, "_unconfirmed", ()) and value is not None and value != ""
-
-
-def _withdraw_confirmation(state, step):
-    """Withdraw what this step confirms, because this step is about to run again.
-
-    A step a group may skip cannot be trusted to have confirmed anything once it
-    is entered: the caller is correcting the value, or the step is running
-    because the confirmation had already lapsed. Values derived from a withdrawn
-    one follow it, through the same dependency pass a save runs.
-
-    Scoped to the steps a group names with skip_when_confirmed:, so a package
-    that names none behaves exactly as it did.
-    """
-    withdrawn = {name for name, owner in _STATE_CONFIRM.items() if owner == step}
-    if not withdrawn:
-        return
-    unconfirmed = set(getattr(state, "_unconfirmed", ())) | withdrawn
-    # Dependencies are acyclic, so one pass per entry settles them. The same
-    # loop _save_batch runs, deliberately not shared with it: sharing would mean
-    # editing a function every package emits, and every package that writes none
-    # of this has to keep emitting exactly what it emitted.
-    for _ in range(len(_STATE_DEPENDENCIES) + 1):
-        before = set(unconfirmed)
-        for name, reads in _STATE_DEPENDENCIES.items():
-            if any(source in unconfirmed for source in reads):
-                unconfirmed.add(name)
-        if before == unconfirmed:
-            break
-    if hasattr(state, "_unconfirmed"):
-        state._unconfirmed = unconfirmed
-    logger.info("withdrew confirmation on entering " + step)
-
-
-`)
+		b.WriteString(stateWithdrawalHelpers)
 	}
-	b.WriteString(`
-
-_STATE_STRUCTURED = {`)
+	structured := make([]string, len(block.Structured))
 	for i, name := range block.Structured {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString(pyQuote(name))
+		structured[i] = pyQuote(name)
 	}
-	b.WriteString(`}
-_STATE_EMPTY = ` + pyQuote(ir.StateEmptyText()) + `
-`)
-	b.WriteString(`# The bound on one rendered value, in characters. The same number the router
-# bounds a template variable by, because this is the same value travelling the
-# same way, and one number cannot be two.
-_STATE_VALUE_MAX = ` + strconv.Itoa(slngVariableLimit) + `
-
-
-def _state_text(name, value):
-    """One value as a prompt reads it.
-
-    Compact JSON for anything declared structured, never a Python repr: a repr
-    writes single quotes and None, which is not JSON and is not what any
-    provider produced. Words for a declared value with no contents, so a step
-    cannot mistake "not yet known" for "known to be nothing".
-
-    A value that was never declared structured renders exactly as it did before
-    this existed, which is what keeps every package written before it unchanged.
-    """
-    if value is None or value == "":
-        return _STATE_EMPTY
-    if not isinstance(value, str):
-        value = json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
-    text = str(value)
-    if len(text) > _STATE_VALUE_MAX:
-        # The length is only knowable here, at run time, so this cannot be a
-        # compile-time refusal. What it must not be is silent: a shortened value
-        # is a value the model reads as complete. An f-string rather than a
-        # placeholder, because this line is emitted into two modules that log
-        # through two different libraries and either style prints literally on
-        # the other one.
-        logger.warning(
-            f"declared state: {name} rendered {len(text)} characters and is shortened to "
-            f"{_STATE_VALUE_MAX}; a value this long also stops the prompt being cached"
-        )
-        text = text[:_STATE_VALUE_MAX]
-    return text
-
-
-def _prompt_value(state, name, site=""):
-    root, value = _state_lookup(state, name)
-    if root in getattr(state, "_unconfirmed", ()) and site != "task:" + _STATE_CONFIRM.get(root, ""):
-        return root, None
-    return root, value
-
-
-def _state_lookup(state, name):
-    """The value a placeholder names, and the declared name it belongs to.
-
-    A path is authored {{customer.status}} and emitted {{customer__status}}: one
-    flat name, because the router substitutes flat names only and both render
-    paths have to agree. Everything before the first "__" is the declared value;
-    each "__" after it starts a field, read as a dict key or an attribute and as
-    None past an absent link, so a field of a record nobody has filled renders
-    as the empty words and never raises. The root's name comes back with the
-    value because the words for an empty value belong to the root variable.
-    """
-    root, _, path = name.partition("__")
-    value = getattr(state, root, None) if state is not None else None
-    for part in path.split("__") if path else ():
-        if value is None:
-            break
-        value = value.get(part) if isinstance(value, dict) else getattr(value, part, None)
-    return root, value
-`)
+	fmt.Fprintf(&b, "\n\n_STATE_STRUCTURED = {%s}\n", strings.Join(structured, ", "))
+	fmt.Fprintf(&b, "_STATE_EMPTY = %s\n", pyQuote(ir.StateEmptyText()))
+	b.WriteString(stateBoundComment)
+	fmt.Fprintf(&b, "_STATE_VALUE_MAX = %d\n\n\n", slngVariableLimit)
+	b.WriteString(stateRenderHelpers)
 	block.Source = b.String()
 	return block, nil
 }
@@ -1140,3 +746,608 @@ func PydanticImports(needsField bool, typed *TypedStateBlock) string {
 	slices.Sort(names)
 	return strings.Join(names, ", ")
 }
+
+// stateHeader opens the typed-state block. The backticks in the comment are
+// concatenated in because a Go raw string cannot hold them.
+const stateHeader = `# --- declared state ----------------------------------------------------------
+# Generated from the ` + "`shapes:`" + ` and the typed ` + "`variables:`" + ` in agent.yaml. Both
+# target frameworks already depend on Pydantic, so nothing here adds one. The one
+# exception is EmailStr, which is checked by email-validator: declaring it puts
+# that package in this project's pyproject.toml, and declaring no email type
+# leaves both the import and the dependency out.
+#
+# Emitted from one place in the compiler for both targets, so the classes, the
+# checks and the refusal wording cannot differ between them.
+`
+
+// shapedAliasTemplate is one shaped text type: its validator function and the
+// Annotated alias that carries it. The verbs are, in order: the compiled
+// pattern (or nothing), the lower-case kind, the docstring, the body, the alias
+// name, the kind again, and the description phrase as a Python string.
+const shapedAliasTemplate = `
+%sdef _shape_%s(value: str) -> str:
+%s%s
+
+
+# AfterValidator and never a pattern= constraint: a pattern reaches the schema
+# the model is sent, one target's strict converter keeps it, and the provider
+# rejects it. So the schema says str and the shape is checked here.
+#
+# The description is how the format reaches the model at all, and it is the only
+# keyword that can: it travels as prose, so no strict converter strips it. A
+# field that said nothing about its shape was learned from a refusal mid-call,
+# which cost a model round trip on every value the prompt spells one way and
+# this type another. A field carrying its own description keeps that one; the
+# emitter appends this phrase to it.
+%s = Annotated[
+    str,
+    AfterValidator(_shape_%s),
+    Field(description=%s),
+]
+`
+
+// shapedDocstring is the docstring every shaped-text validator carries, ahead of
+// its body.
+const shapedDocstring = `    """Check one text value against its declared shape.
+
+    Args:
+        value: The text to check. Empty means no value yet, and always passes.
+
+    Returns:
+        The value, in its normal form where the shape has one.
+
+    Raises:
+        ValueError: If the text is not in the declared shape.
+    """
+`
+
+// classDocstring is the docstring a generated class carries: the shape's own
+// description when it has one, otherwise a plain line naming where it came from,
+// because the emitted ruff gate refuses a class with none.
+func classDocstring(class ir.Shape) string {
+	if class.Description != "" {
+		return pyTriple(class.Description)
+	}
+	return pyTriple("The " + class.Name + " shape declared in agent.yaml.")
+}
+
+// stateRuntimeHelpers is the refusal type and the small helpers every save goes
+// through.
+const stateRuntimeHelpers = `
+
+class _StateRefused(Exception):
+    """A value that does not fit its declared type, refused where it enters.
+
+    Carried as an exception rather than a return so the write cannot happen by
+    accident: the previous contents stay exactly as they were, and the message
+    goes back to the model, which is what lets it correct itself on the next
+    turn instead of the step recording something wrong.
+    """
+
+    def __init__(self, message: str) -> None:
+        """Keep the message the model will be shown.
+
+        Args:
+            message: What was wrong with the value, worded for the model.
+        """
+        super().__init__(message)
+        self.message = message
+
+
+def _typed(field: str, adapter: TypeAdapter, value: object) -> object:
+    """Validate one value entering the declared state.
+
+    Args:
+        field: Name of the declared value, used in the refusal message.
+        adapter: The adapter for the declared type.
+        value: The value to validate.
+
+    Returns:
+        The validated value.
+
+    Raises:
+        _StateRefused: If the value does not fit the declared type.
+    """
+    try:
+        return adapter.validate_python(value)
+    except ValidationError as error:
+        first = error.errors()[0]
+        where = ".".join(str(part) for part in first["loc"])
+        named = f"{field}.{where}" if where else field
+        raise _StateRefused(f"{named}: {first['msg']}") from None
+
+
+def _append_entry(entries: list, value: object) -> None:
+    """Add one entry onto a declared list, unless it is already on it.
+
+    A step re-entered mid-call can read a value through an explicit prompt
+    reference and hand it straight back, which is not a second thing happening.
+    One live call entered the booking step four times and finished three of them
+    immediately, each with the same appointment it had recorded on the first, so
+    one booking became four entries and the caller's recap listed a booking four
+    times.
+
+    An object carries its own identity, so an identical one is the same thing
+    reported twice. A plain value is not: two bookings really do give two
+    reasons of "create_booking", and both of those count. So the skip is for
+    structured entries only.
+
+    Nothing absent is added either, which is how a step that concluded nothing
+    this time finishes without inventing an entry.
+
+    Args:
+        entries: The list to add to, changed in place.
+        value: The entry to add.
+    """
+    if value is None:
+        return
+    if isinstance(value, (dict, list)) and value in entries:
+        return
+    entries.append(value)
+
+
+def _plain(value: object) -> object:
+    """Turn a validated value into plain data.
+
+    Plain data is the only shape both frameworks accept back from a tool: one
+    refuses a BaseModel outright and drops the whole tool result with a log
+    line, the other cannot serialise one at all.
+
+    Args:
+        value: A validated value, possibly holding models.
+
+    Returns:
+        The same value with every model replaced by its JSON-mode dict.
+    """
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, list):
+        return [_plain(entry) for entry in value]
+    if isinstance(value, dict):
+        return {key: _plain(entry) for key, entry in value.items()}
+    return value
+`
+
+// stateSchemaHelper resolves every $ref in one declared type's schema.
+const stateSchemaHelper = `
+
+def _schema(adapter: TypeAdapter) -> object:
+    """Build one declared type's schema, with every $ref resolved into place.
+
+    Pydantic emits $defs and a $ref for a shape that contains another shape, and
+    this is not a formatting preference. Measured on one real request to the
+    provider, three ways:
+
+    - the schema as Pydantic emits it, nested inside one tool property with no
+      strict flag: accepted with a 200, and the model invented field names for
+      the nested object because it never read the definition. Every result would
+      then have been refused where it entered, on every call.
+    - the same schema with the refs inlined: accepted, and the model filled the
+      shape's own fields exactly, the nullable one included.
+    - the shape the other target sends, with the $defs hoisted to the
+      parameters root and strict on: accepted, and correct. A $defs anywhere but
+      that root is a 400 naming the pointer.
+
+    This target nests the schema inside one property and sends no strict flag,
+    so it is the first case unless the refs are resolved here.
+
+    Args:
+        adapter: The adapter for the declared type.
+
+    Returns:
+        The JSON schema with no $defs and no local $ref left in it.
+    """
+    schema = adapter.json_schema()
+    defs = schema.pop("$defs", {})
+
+    def resolve(node: object) -> object:
+        """Inline every local $ref under one schema node.
+
+        Args:
+            node: A schema node, or a list or scalar found inside one.
+
+        Returns:
+            The node with each local $ref replaced by its definition.
+        """
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        target = node.get("$ref")
+        if isinstance(target, str) and target.startswith("#/$defs/"):
+            found = resolve(defs.get(target.rsplit("/", 1)[1], {}))
+            siblings = {key: value for key, value in node.items() if key != "$ref"}
+            return {**found, **siblings} if isinstance(found, dict) else found
+        return {key: resolve(value) for key, value in node.items()}
+
+    return resolve(schema)
+`
+
+// stateFinishHelpers closes _FINISH_TYPES and follows it with what validates a
+// step's finish values.
+const stateFinishHelpers = `}
+
+
+def _task_status(values: dict) -> dict[str, str]:
+    """Say whether a step served the caller or could not.
+
+    Args:
+        values: The step's finish values.
+
+    Returns:
+        A one-key status dict for the agent that owns the step.
+    """
+    return {"status": "unserved" if values.get("unserved_request") else "completed"}
+
+
+def _group_status(results: dict) -> dict[str, str]:
+    """Say whether a group of steps served the caller or one of them could not.
+
+    Args:
+        results: Each step's finish values, by step name.
+
+    Returns:
+        A one-key status dict for the agent that owns the group.
+    """
+    unserved = any(value.get("unserved_request") for value in results.values())
+    return {"status": "unserved" if unserved else "completed"}
+
+
+def _typed_result(step: str, values: dict) -> dict:
+    """Validate a step's declared results where they enter the state.
+
+    Refused here rather than carried into a later step that assumes it is
+    right, and refused on both targets rather than on the one whose framework
+    happens to validate tool arguments: one of them validates through Pydantic
+    and lets the model self-correct, the other splats raw JSON into the handler.
+
+    Args:
+        step: Name of the step whose result this is.
+        values: The step's finish values.
+
+    Returns:
+        The values with each declared field validated and made plain.
+
+    Raises:
+        _StateRefused: If a declared field does not fit its type.
+    """
+    if values.get("unserved_request"):
+        return {"unserved_request": values["unserved_request"]}
+    adapters = _FINISH_TYPES.get(step)
+    if not adapters:
+        return values
+    # Absent goes through the adapter too, rather than being skipped. A
+    # field the model left out is a field with no value, and that is what a
+    # prompt telling it to leave one out asks for: a value that may be
+    # absent validates as None and the append drops it, and a value that
+    # may not is refused here with the message that lets the model correct
+    # itself. Skipping an absent field instead left the key missing from
+    # the result, and the assignment that reads it by name raised a
+    # KeyError inside the finish handler on the target whose framework
+    # validates no argument of its own.
+    validated = {name: _plain(_typed(name, adapter, values.get(name))) for name, adapter in adapters.items()}
+    return values | validated
+`
+
+// stateSaveHelpers closes _STATE_DEPENDENCIES and follows it with the two
+// functions every save goes through.
+const stateSaveHelpers = `}
+
+
+def _save_result(step: str, state: object, values: dict) -> dict:
+    """Validate all assignments before changing any call state.
+
+    Args:
+        step: Name of the step whose result is being saved.
+        state: The call's shared state object.
+        values: The step's finish values.
+
+    Returns:
+        The validated values, or the unserved request alone when the step could
+        not help.
+
+    Raises:
+        _StateRefused: If an assigned value does not fit its declared type.
+    """
+    values = _typed_result(step, values)
+    if values.get("unserved_request"):
+        return values
+    pending = {}
+    for name, path, append in _TASK_ASSIGNMENTS.get(step, ()):
+        # A dotted path walks nested dicts, and is None past any missing link.
+        value = values
+        for part in path.split("."):
+            value = value.get(part) if isinstance(value, dict) else None
+        if append:
+            if value is None:
+                continue
+            entries = list(getattr(state, name, None) or [])
+            _append_entry(entries, value)
+            value = entries
+        pending[name] = _plain(_typed(name, _STATE_TYPES[name], value))
+    _save_batch(state, pending, step=step)
+    return values
+
+
+def _save_batch(state: object, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
+    """Commit a validated batch and invalidate older results of changed inputs.
+
+    Args:
+        state: The call's shared state object.
+        values: Declared value names mapped to what to save.
+        step: The step saving them, which decides whether it confirms them.
+        inputs: Declared names a pre-fetch read to produce them, kept as
+            provenance so a later change to one invalidates the result.
+
+    Raises:
+        _StateRefused: If a value does not fit its declared type.
+    """
+    if not values:
+        return
+    pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
+    unconfirmed: set[str] = set(getattr(state, "_unconfirmed", ()))
+    provenance = dict(getattr(state, "_prefetch_provenance", {}))
+    affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
+    # Grow the changed set with everything derived from it, until nothing new joins.
+    while more := {name for name, reads in provenance.items() if set(reads) & affected} - affected:
+        affected |= more
+    invalidated = affected - pending.keys()
+    provenance = {name: reads for name, reads in provenance.items() if name not in invalidated}
+    for name, value in pending.items():
+        if inputs is not None:
+            provenance[name] = tuple(inputs)
+        else:
+            provenance.pop(name, None)
+        if name in _STATE_CONFIRM:
+            if _STATE_CONFIRM[name] == step and value is not None and value != "":
+                unconfirmed.discard(name)
+            else:
+                unconfirmed.add(name)
+
+    def current(name: str) -> object:
+        """Read a value as it will stand once this batch lands.
+
+        Args:
+            name: Name of the declared value.
+
+        Returns:
+            The pending value, none if it was invalidated, else what state holds.
+        """
+        return None if name in invalidated else pending.get(name, getattr(state, name, None))
+
+    # Dependencies are acyclic: prefetch can only read earlier entries. Each pass
+    # reads what the previous one settled, so this runs to a fixed point.
+    for _ in range(len(_STATE_DEPENDENCIES) + 1):
+        before = set(unconfirmed)
+        for name, reads in _STATE_DEPENDENCIES.items():
+            if current(name) is not None and current(name) != "" and all(
+                source not in unconfirmed and current(source) is not None and current(source) != "" for source in reads
+            ):
+                unconfirmed.discard(name)
+            else:
+                unconfirmed.add(name)
+        if before == unconfirmed:
+            break
+    for name in invalidated:
+        setattr(state, name, None)
+    for name, value in pending.items():
+        setattr(state, name, value)
+    if hasattr(state, "_unconfirmed"):
+        setattr(state, "_unconfirmed", unconfirmed)  # noqa: B010 - state is typed object
+    if inputs is not None or hasattr(state, "_prefetch_provenance"):
+        setattr(state, "_prefetch_provenance", provenance)  # noqa: B010 - state is typed object
+`
+
+// stateTerminalHelpers is what a task ending on its own tool needs.
+const stateTerminalHelpers = `
+
+def _success_word(value: object) -> str:
+    """Spell one result value the way a success pair reads it.
+
+    The pairs come out of YAML as text, so a boolean has to read as the word the
+    author wrote rather than as Python's own spelling of it: True never matches
+    the word true, and the step would silently never end.
+
+    Args:
+        value: One field of a tool result.
+
+    Returns:
+        The value as text, with booleans as true or false and none as empty.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return "" if value is None else str(value)
+
+
+def _terminal_success(result: object, success: dict) -> bool:
+    """Say whether a tool result means this step is done.
+
+    Every field is required and its value has to be one of the listed ones.
+    Anything else is an ordinary result and goes back to the model, which is
+    what keeps a failed booking a conversation rather than a saved one.
+
+    Args:
+        result: What the tool returned.
+        success: Each required result field mapped to the values that count.
+
+    Returns:
+        True when every required field holds one of its listed values.
+    """
+    if not isinstance(result, dict):
+        return False
+    return all(_success_word(result.get(name)) in values for name, values in success.items())
+
+
+def _merge_retained(step: str, args: dict, retained: dict) -> dict:
+    """Put the tool's own values back into the model's finish arguments.
+
+    Reached only when a save was refused and the model is repairing it. A field
+    the tool returned validly is the authoritative one: the model cannot
+    manufacture a booking reference, and a repair that retyped one would record
+    a booking nobody made. A retained value that does not validate is left to
+    the model, because refusing here would leave the step with no way out.
+
+    Args:
+        step: Name of the step being repaired.
+        args: The model's finish arguments.
+        retained: The values the tool returned.
+
+    Returns:
+        The arguments with each validly retained value restored.
+    """
+    out = dict(args)
+    for name, adapter in _FINISH_TYPES.get(step, {}).items():
+        if name not in retained:
+            continue
+        try:
+            _typed(name, adapter, retained[name])
+        except _StateRefused:
+            continue
+        out[name] = retained[name]
+    return out
+`
+
+// stateWithdrawalHelpers is what a group step carrying skip_when_confirmed needs.
+const stateWithdrawalHelpers = `
+
+def _is_confirmed(state: object, name: str) -> bool:
+    """Say whether a value is confirmed right now.
+
+    Both halves matter: a value nobody has agreed to is unconfirmed, and so is
+    one that was withdrawn. A group reads this once, as it starts, to decide
+    whether the step that confirms it has to run.
+
+    Args:
+        state: The call's shared state object.
+        name: Name of the declared value.
+
+    Returns:
+        True when the value is filled and nobody has withdrawn its confirmation.
+    """
+    value = getattr(state, name, None)
+    return name not in getattr(state, "_unconfirmed", ()) and value is not None and value != ""
+
+
+def _withdraw_confirmation(state: object, step: str) -> None:
+    """Withdraw what this step confirms, because this step is about to run again.
+
+    A step a group may skip cannot be trusted to have confirmed anything once it
+    is entered: the caller is correcting the value, or the step is running
+    because the confirmation had already lapsed. Values derived from a withdrawn
+    one follow it, through the same dependency pass a save runs.
+
+    Scoped to the steps a group names with skip_when_confirmed:, so a package
+    that names none behaves exactly as it did.
+
+    Args:
+        state: The call's shared state object.
+        step: Name of the step being entered.
+    """
+    withdrawn = {name for name, owner in _STATE_CONFIRM.items() if owner == step}
+    if not withdrawn:
+        return
+    unconfirmed = set(getattr(state, "_unconfirmed", ())) | withdrawn
+    # Dependencies are acyclic, so one pass per entry settles them. The same
+    # loop _save_batch runs, deliberately not shared with it: sharing would mean
+    # editing a function every package emits, and every package that writes none
+    # of this has to keep emitting exactly what it emitted.
+    for _ in range(len(_STATE_DEPENDENCIES) + 1):
+        before = set(unconfirmed)
+        for name, reads in _STATE_DEPENDENCIES.items():
+            if any(source in unconfirmed for source in reads):
+                unconfirmed.add(name)
+        if before == unconfirmed:
+            break
+    if hasattr(state, "_unconfirmed"):
+        setattr(state, "_unconfirmed", unconfirmed)  # noqa: B010 - state is typed object
+    logger.info("withdrew confirmation on entering " + step)
+`
+
+// stateBoundComment explains the one number the render helpers are bounded by.
+const stateBoundComment = `# The bound on one rendered value, in characters. The same number the router
+# bounds a template variable by, because this is the same value travelling the
+# same way, and one number cannot be two.
+`
+
+// stateRenderHelpers reads a declared value back out for a prompt.
+const stateRenderHelpers = `def _state_text(name: str, value: object) -> str:
+    """Render one value as a prompt reads it.
+
+    Compact JSON for anything declared structured, never a Python repr: a repr
+    writes single quotes and None, which is not JSON and is not what any
+    provider produced. Words for a declared value with no contents, so a step
+    cannot mistake "not yet known" for "known to be nothing".
+
+    A value that was never declared structured renders exactly as it did before
+    this existed, which is what keeps every package written before it unchanged.
+
+    Args:
+        name: Name of the declared value, used in the length warning.
+        value: The value to render.
+
+    Returns:
+        The text, cut to the bound when it is longer.
+    """
+    if value is None or value == "":
+        return _STATE_EMPTY
+    if not isinstance(value, str):
+        value = json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
+    text = str(value)
+    if len(text) > _STATE_VALUE_MAX:
+        # The length is only knowable here, at run time, so this cannot be a
+        # compile-time refusal. What it must not be is silent: a shortened value
+        # is a value the model reads as complete. An f-string rather than a
+        # placeholder, because this line is emitted into two modules that log
+        # through two different libraries and either style prints literally on
+        # the other one.
+        logger.warning(
+            f"declared state: {name} rendered {len(text)} characters and is shortened to "
+            f"{_STATE_VALUE_MAX}; a value this long also stops the prompt being cached"
+        )
+        text = text[:_STATE_VALUE_MAX]
+    return text
+
+
+def _prompt_value(state: object, name: str, site: str = "") -> tuple[str, object]:
+    """Read the value a prompt placeholder names, unless it is still unconfirmed.
+
+    Args:
+        state: The call's shared state object.
+        name: The flat placeholder name.
+        site: The prompt site reading it, so the confirming step still sees it.
+
+    Returns:
+        The declared name and its value, or none for a value not yet confirmed.
+    """
+    root, value = _state_lookup(state, name)
+    if root in getattr(state, "_unconfirmed", ()) and site != "task:" + _STATE_CONFIRM.get(root, ""):
+        return root, None
+    return root, value
+
+
+def _state_lookup(state: object, name: str) -> tuple[str, object]:
+    """Find the value a placeholder names, and the declared name it belongs to.
+
+    A path is authored {{customer.status}} and emitted {{customer__status}}: one
+    flat name, because the router substitutes flat names only and both render
+    paths have to agree. Everything before the first "__" is the declared value;
+    each "__" after it starts a field, read as a dict key or an attribute and as
+    None past an absent link, so a field of a record nobody has filled renders
+    as the empty words and never raises. The root's name comes back with the
+    value because the words for an empty value belong to the root variable.
+
+    Args:
+        state: The call's shared state object, or none.
+        name: The flat placeholder name.
+
+    Returns:
+        The declared root name and the value found at the end of the path.
+    """
+    root, _, path = name.partition("__")
+    value = getattr(state, root, None) if state is not None else None
+    for part in path.split("__") if path else ():
+        if value is None:
+            break
+        value = value.get(part) if isinstance(value, dict) else getattr(value, part, None)
+    return root, value
+`
