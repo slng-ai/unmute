@@ -1319,10 +1319,13 @@ def _sibling_call(ctx: RunContext, names: set[str]) -> bool:
     Returns:
         True when a different call in this response names one of them.
     """
+    # Read by the type field, not isinstance: a call is anything the speech
+    # handle lists with type "function_call", which is what the group smoke
+    # hands it, and what this helper matched before it was a comprehension.
     return any(
-        isinstance(item, llm.FunctionCall)
-        and item.call_id != ctx.function_call.call_id
-        and item.name in names
+        getattr(item, "type", None) == "function_call"
+        and getattr(item, "call_id", None) != ctx.function_call.call_id
+        and getattr(item, "name", None) in names
         for item in ctx.speech_handle.chat_items
     )
 

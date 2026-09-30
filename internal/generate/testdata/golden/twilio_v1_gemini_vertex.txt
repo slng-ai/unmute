@@ -111,7 +111,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:d59fdbc4c4919458d1bc7effae586ed61f59bd5f20550c11040abde1cf08c0a8"
+ARTIFACT_ID = "sha256:6585636fa7d297d9a10bde5a6d1f2e6b1399c5bf262293a75d4f7313cd873977"
 
 def _google_vertex_client(api_key: str, location: str):  # noqa: ANN202 - genai.Client is only imported inside
     """Build a GenAI client that reaches Vertex with an API key.
@@ -1710,7 +1710,7 @@ dev = ["ruff==0.15.7", "ty"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "PERF", "FURB", "RUF", "BLE", "D", "ANN"]
-ignore = ["E501", "ANN401"]
+ignore = ["E501", "ANN401", "RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -1942,7 +1942,7 @@ def opening_hours(day):
     return {"day": day, "open": bool(opens), "opens": opens, "closes": closes}
 === compile-report.json ===
 {
-  "artifact_id": "sha256:d59fdbc4c4919458d1bc7effae586ed61f59bd5f20550c11040abde1cf08c0a8",
+  "artifact_id": "sha256:6585636fa7d297d9a10bde5a6d1f2e6b1399c5bf262293a75d4f7313cd873977",
   "bindings": [
     {
       "binding": {

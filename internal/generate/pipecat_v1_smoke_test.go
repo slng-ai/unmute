@@ -1060,7 +1060,9 @@ asyncio.run(main())
 const pipecatStaticCheckScript = `"""Smoke check: the generated project passes Ruff and ty."""
 import subprocess
 
-subprocess.run(["ruff", "check", "."], check=True)
+# The project, not this script: the emitted pyproject's rules are for
+# generated code, and smoke_check.py is the harness.
+subprocess.run(["ruff", "check", "--extend-exclude", "smoke_check.py", "."], check=True)
 # smoke_check.py is this harness, not generated output, and the knowledge stub
 # spliced into it imports knowledge and llama_index, which a package with no
 # knowledge base does not install. Ruff still reads it; ty resolves imports.

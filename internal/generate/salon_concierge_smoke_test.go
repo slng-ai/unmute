@@ -343,7 +343,7 @@ for local in ("", "0", "1"):
     before = (server._num_idle_processes, server._initialize_process_timeout)
     os.environ["UNMUTE_LOCAL_RUN"] = local
     exec(compile(ast.Module(body=[local_options], type_ignores=[]), "agent.py", "exec"),
-         {"os": os, "server": server})
+         {"os": os, "server": server, "LOCAL_INIT_TIMEOUT_SECS": agent.LOCAL_INIT_TIMEOUT_SECS})
     after = (server._num_idle_processes, server._initialize_process_timeout)
     assert after == ((1, 60.0) if local == "1" else before), after
 ` + salonStoreSmokePrelude + livekitRunContextStandIn + `

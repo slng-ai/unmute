@@ -103,7 +103,9 @@ assert version("livekit-agents") == _report["version"], (version("livekit-agents
 for name in _report["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-subprocess.run(["ruff", "check", "."], check=True)
+# The project, not this script: the emitted pyproject's rules are for
+# generated code, and smoke_check.py is the harness.
+subprocess.run(["ruff", "check", "--extend-exclude", "smoke_check.py", "."], check=True)
 subprocess.run(["ty", "check", "agent.py"], check=True)
 
 import agent  # noqa: E402
@@ -518,7 +520,9 @@ assert version("livekit-agents") == _report["version"], (version("livekit-agents
 for name in _report["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-subprocess.run(["ruff", "check", "."], check=True)
+# The project, not this script: the emitted pyproject's rules are for
+# generated code, and smoke_check.py is the harness.
+subprocess.run(["ruff", "check", "--extend-exclude", "smoke_check.py", "."], check=True)
 subprocess.run(["ty", "check", "agent.py"], check=True)
 
 import agent  # noqa: E402

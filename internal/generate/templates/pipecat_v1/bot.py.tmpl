@@ -529,7 +529,8 @@ async def _register_mcp_tools(
     names = set(reserved_names)
     for client in clients:
         await client.start()
-        tools = await client.get_tools_schema()
+        # Deprecated for MCPClient.tools(); why it waits is the ponytail note below.
+        tools = await client.get_tools_schema()  # ty: ignore[deprecated]
         for schema in tools.standard_tools:
             if schema.name in names:
                 raise RuntimeError(
@@ -541,7 +542,7 @@ async def _register_mcp_tools(
 
     registered = []
     for client, tools in discovered:
-        await client.register_tools_schema(tools, llm)
+        await client.register_tools_schema(tools, llm)  # ty: ignore[deprecated]
 {{if .Tracing}}        for schema in tools.standard_tools:
             # ponytail: Pipecat 1.8.0 added MCPClient.tools(), which attaches
             # handlers to the schemas and registers them when LLMContext

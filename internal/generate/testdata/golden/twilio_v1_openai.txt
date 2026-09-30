@@ -108,7 +108,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # a number at a different one. An Unmute drift check, not a Twilio API and not
 # an attestation. Hashed from the rest of this file, the TwiML, the pins, the
 # image and the tools; never from a credential or the public origin.
-ARTIFACT_ID = "sha256:ae1074a43c8a8ceb990fbfaa6f7810bd8eaff204a39ef759215944411767e6ec"
+ARTIFACT_ID = "sha256:1daccb9840db3f98e58ea4b77bb70f19d287df81e0b3980de64949d74ba7a83b"
 
 # --- tools ---------------------------------------------------------------------
 
@@ -1637,7 +1637,7 @@ dev = ["ruff==0.15.7", "ty"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "PERF", "FURB", "RUF", "BLE", "D", "ANN"]
-ignore = ["E501", "ANN401"]
+ignore = ["E501", "ANN401", "RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -1853,7 +1853,7 @@ change before restoring. Otherwise set its webhook back to the snapshot's
 </Response>
 === compile-report.json ===
 {
-  "artifact_id": "sha256:ae1074a43c8a8ceb990fbfaa6f7810bd8eaff204a39ef759215944411767e6ec",
+  "artifact_id": "sha256:1daccb9840db3f98e58ea4b77bb70f19d287df81e0b3980de64949d74ba7a83b",
   "bindings": [
     {
       "binding": {
