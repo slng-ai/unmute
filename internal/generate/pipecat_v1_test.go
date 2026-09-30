@@ -1258,7 +1258,7 @@ func TestV2_PipecatDelegateSnapshotsCompletedOwnerCall(t *testing.T) {
 	}
 
 	for _, name := range []string{"run_collect", "run_triage"} {
-		start := bytes.Index(bot, []byte("    async def "+name+"(self, params: FunctionCallParams):"))
+		start := bytes.Index(bot, []byte("    async def "+name+"(self, params: FunctionCallParams) -> None:"))
 		if start < 0 {
 			t.Fatalf("missing generated delegate %q", name)
 		}
