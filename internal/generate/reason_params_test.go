@@ -51,7 +51,7 @@ func TestReasonParamsOverflowIntoPipecatSettingsExtra(t *testing.T) {
 		t.Fatal("bot.py has no build_intake_llm; fixture drifted")
 	}
 	block := bot[start:]
-	if end := strings.Index(block, "\n\n"); end > 0 {
+	if end := strings.Index(block, "\n\n\n"); end > 0 {
 		block = block[:end]
 	}
 

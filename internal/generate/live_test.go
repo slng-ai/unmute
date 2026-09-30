@@ -20,7 +20,7 @@ func TestLiveEmitsOneLiveServiceAndNothingItReplaces(t *testing.T) {
 		"from pipecat.services.openai.live.llm import OpenAILiveLLMService",
 		"from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService",
 		"from pipecat.services.openai.live import events as live_events",
-		"def build_desk_live():",
+		"def build_desk_live() -> Any:",
 		"return OpenAILiveLLMService(",
 		`api_key=os.environ["OPENAI_API_KEY"],`,
 		`delegation=OpenAILiveLLMService.ResponsesDelegation(settings=OpenAIResponsesLLMService.Settings(model="gpt-5.6-terra")),`,
