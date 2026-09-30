@@ -372,6 +372,10 @@ type livekitVar struct {
 	PyType      string
 	Default     string // Python literal; "None" when the spec declares none
 	Description string
+	// LiteralDefault marks a variable typed as a set of allowed words that also
+	// starts on a value: the author's default is not checked against the words,
+	// so a type checker can disagree with it (an empty string, say).
+	LiteralDefault bool
 }
 
 // livekitCallStartVar is one dispatched input variable, hydrated from the job
@@ -1073,6 +1077,7 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 		"localRunEnv":  func() string { return LocalRunEnv },
 
 		"triple":     pyTriple,
+		"doc":        pyDoc,
 		"mcpTimeout": func() int { return mcpTimeoutSeconds },
 		// SLNG's contract for a hosted code tool, named once in Go so the
 		// template cannot drift from what internal/generate/hosted_tool.go says
@@ -1155,4 +1160,40 @@ func livekitReport(agent *ir.Agent, data livekitData, files []File, bindings []i
 		return nil, err
 	}
 	return append(out, '\n'), nil
+}
+
+// pyDoc renders a tool description as the docstring the framework reads it
+// from, and marks the docstring rules the text would trip. The words are the
+// model's tool description, so they cannot be reshaped to satisfy a linter (a
+// summary line, a blank second line, a full stop). A noqa is added only for a
+// rule the text really breaks, because an unused one is itself a finding.
+func pyDoc(s string) string {
+	doc := pyTriple(s)
+	body := strings.TrimSpace(s)
+	if body == "" {
+		return doc
+	}
+	lines := strings.Split(body, "\n")
+	var codes []string
+	if len(lines) > 1 && strings.TrimSpace(lines[1]) != "" {
+		codes = append(codes, "D205")
+	}
+	if len(lines) > 1 && !strings.HasSuffix(s, "\n") {
+		codes = append(codes, "D209")
+	}
+	first := strings.TrimSpace(lines[0])
+	if first != "" && !strings.ContainsAny(first[len(first)-1:], ".?!") {
+		codes = append(codes, "D415")
+	}
+	if first != "" && first[0] >= 'a' && first[0] <= 'z' {
+		codes = append(codes, "D403")
+	}
+	if strings.Contains(s, `\`) {
+		codes = append(codes, "D301")
+	}
+	if len(codes) == 0 {
+		return doc
+	}
+	slices.Sort(codes)
+	return doc + "  # noqa: " + strings.Join(codes, ", ")
 }
