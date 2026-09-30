@@ -321,16 +321,12 @@ async def _slng_log_provenance(response: Any) -> None:
             return
         headers = response.headers
         # Field order is the contract, and the gate reads it off this line.
-        fields = [
-            "scope=" + scope,
-            "source=" + headers.get("x-slng-response-source", "unknown"),
-            *(
-                f"{label}={headers[header]}"
-                for label, header in (("layer", "x-slng-cache-layer"), ("model", "x-slng-model"))
-                if headers.get(header)
-            ),
-            "request_id=" + headers.get("x-slng-request-id", "unknown"),
-        ]
+        fields = ["scope=" + scope, "source=" + headers.get("x-slng-response-source", "unknown")]
+        if layer := headers.get("x-slng-cache-layer"):
+            fields.append("layer=" + layer)
+        if model := headers.get("x-slng-model"):
+            fields.append("model=" + model)
+        fields.append("request_id=" + headers.get("x-slng-request-id", "unknown"))
         logger.info("slng router: " + " ".join(fields))
     except Exception:  # noqa: BLE001 - a log line must never end a call
         logger.debug("could not read the router's provenance headers", exc_info=True)
