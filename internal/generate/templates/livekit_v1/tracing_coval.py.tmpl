@@ -35,8 +35,11 @@ import time
 import urllib.error
 import urllib.request
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
+from itertools import chain
+from typing import Any, TypeGuard
 
 from livekit import rtc
 from livekit.agents import AgentSession, JobContext
@@ -87,6 +90,12 @@ SIMULATION_ATTRIBUTES = ("coval.simulation_id", "sip.h." + SIMULATION_HEADER)
 
 MAX_PREACTIVATION_SPANS = 1024
 
+# OpenTelemetry's exporter interface takes its flush budget in milliseconds.
+FLUSH_TIMEOUT_MS = 30000
+
+NS_PER_SECOND = 1_000_000_000
+MS_PER_SECOND = 1000
+
 # Coval's docs require this exact export timeout.
 EXPORT_TIMEOUT_SECONDS = 30
 
@@ -115,8 +124,8 @@ MAX_PROMPT_CHARS = 8192
 # What LiveKit puts in a workflow task group's instructions in place of a prompt.
 PLACEHOLDER_INSTRUCTIONS = "*empty*"
 
-_router: "_CovalRouter | None" = None
-_recorder: "_Conversation | None" = None
+_router: _CovalRouter | None = None
+_recorder: _Conversation | None = None
 
 
 # --------------------------------------------------------------------------
@@ -124,19 +133,18 @@ _recorder: "_Conversation | None" = None
 # --------------------------------------------------------------------------
 
 
-def _simulation_from_attributes(attributes) -> str | None:
+def _simulation_from_attributes(attributes: Mapping[str, Any] | None) -> str | None:
+    """Read the Coval simulation ID out of one attribute mapping, if it holds one."""
     if not attributes:
         return None
-    for key in SIMULATION_ATTRIBUTES:
-        value = attributes.get(key)
-        if value:
-            return str(value)
-    # An operator can map the header to any attribute name they like, so fall
-    # back to matching the header itself rather than failing on a valid trunk.
-    for key, value in attributes.items():
-        if value and str(key).lower().endswith(SIMULATION_HEADER):
-            return str(value)
-    return None
+    candidates = chain(
+        (attributes.get(key) for key in SIMULATION_ATTRIBUTES),
+        # An operator can map the header to any attribute name they like, so fall
+        # back to matching the header itself rather than failing on a valid trunk.
+        (value for key, value in attributes.items() if str(key).lower().endswith(SIMULATION_HEADER)),
+    )
+    found = next((value for value in candidates if value), None)
+    return str(found) if found else None
 
 
 def resolve_simulation_id(ctx: JobContext) -> tuple[str | None, str]:
@@ -167,10 +175,17 @@ def resolve_simulation_id(ctx: JobContext) -> tuple[str | None, str]:
     if found:
         return found, "environment"
 
-    for participant in getattr(ctx.room, "remote_participants", {}).values():
-        found = _simulation_from_attributes(getattr(participant, "attributes", None))
-        if found:
-            return found, "sip_participant_attribute"
+    participants = getattr(ctx.room, "remote_participants", {}).values()
+    found = next(
+        (
+            simulation_id
+            for participant in participants
+            if (simulation_id := _simulation_from_attributes(getattr(participant, "attributes", None)))
+        ),
+        None,
+    )
+    if found:
+        return found, "sip_participant_attribute"
     return None, "none"
 
 
@@ -183,9 +198,11 @@ def resolve_call_origin(ctx: JobContext) -> str | None:
     is worse than a gap in it.
     """
     participants = getattr(ctx.room, "remote_participants", None) or {}
-    for participant in participants.values():
-        if getattr(participant, "kind", None) == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
-            return "phone"
+    if any(
+        getattr(participant, "kind", None) == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+        for participant in participants.values()
+    ):
+        return "phone"
     return "browser" if participants else None
 
 
@@ -202,7 +219,8 @@ class _CovalRouter(SpanExporter):
     span as it starts.
     """
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str) -> None:
+        """Start with no exporter, so every span is held until the ID arrives."""
         self._api_key = api_key
         self._lock = threading.RLock()
         self._buffer: deque[ReadableSpan] = deque(maxlen=MAX_PREACTIVATION_SPANS)
@@ -212,6 +230,7 @@ class _CovalRouter(SpanExporter):
 
     @property
     def active(self) -> bool:
+        """Whether the call has a correlation ID and is exporting."""
         return self._exporter is not None
 
     def held(self) -> list[ReadableSpan]:
@@ -220,6 +239,7 @@ class _CovalRouter(SpanExporter):
             return list(self._buffer)
 
     def activate(self, correlation_id: str, header: str = SIMULATION_EXPORT_HEADER) -> None:
+        """Bind the call to a correlation ID and flush the spans held so far."""
         with self._lock:
             if self.simulation_id == correlation_id:
                 return
@@ -241,6 +261,7 @@ class _CovalRouter(SpanExporter):
             exporter.export(held)
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        """Export the spans, or hold them until the call has an ID."""
         with self._lock:
             exporter = self._exporter
             if exporter is None:
@@ -251,12 +272,14 @@ class _CovalRouter(SpanExporter):
                 return SpanExportResult.SUCCESS
         return exporter.export(spans)
 
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
+    def force_flush(self, timeout_millis: int = FLUSH_TIMEOUT_MS) -> bool:
+        """Flush the bound exporter, if there is one."""
         with self._lock:
             exporter = self._exporter
         return exporter.force_flush(timeout_millis) if exporter else True
 
     def shutdown(self) -> None:
+        """Drop held spans and shut the bound exporter down."""
         with self._lock:
             exporter = self._exporter
             self._exporter = None
@@ -272,7 +295,7 @@ def _timed_out(error: BaseException) -> bool:
     )
 
 
-def submit_conversation(transcript: list[dict], session_id: str, origin: str = "") -> str | None:
+def submit_conversation(transcript: list[dict[str, str]], session_id: str, origin: str = "") -> str | None:
     """Register this call with Coval as a conversation, and return its ID.
 
     This is the route for a call no simulation placed: a local `unmute dev`
@@ -329,14 +352,16 @@ def submit_conversation(transcript: list[dict], session_id: str, origin: str = "
 
 
 def _clip_to(text: str, limit: int) -> str:
+    """Cut text to a budget, marking the cut."""
     return text if len(text) <= limit else text[:limit] + "…"
 
 
 def _clip(value: object) -> str:
+    """Stringify a value and cut it to the general text budget."""
     return _clip_to("" if value is None else str(value), MAX_TEXT_CHARS)
 
 
-def _is_latency(value: object) -> bool:
+def _is_latency(value: object) -> TypeGuard[float]:
     """A latency Coval can average, rather than a stand-in for one.
 
     A streaming provider reports a delay of exactly zero, because there is no
@@ -349,22 +374,25 @@ def _is_latency(value: object) -> bool:
 
 
 def _ns(seconds: float) -> int:
-    return int(seconds * 1_000_000_000)
+    """Convert seconds to the nanoseconds OpenTelemetry timestamps use."""
+    return int(seconds * NS_PER_SECOND)
 
 
-def _role(items: list, index: int) -> str:
+def _role(items: list[Any], index: int) -> str:
+    """The role of one chat item, or an empty string when it is not a mapping."""
     item = items[index]
     return str(item.get("role", "")) if isinstance(item, dict) else ""
 
 
-def _text_of(item: dict) -> str:
+def _text_of(item: dict[str, Any]) -> str:
+    """The plain text of one chat item."""
     content = item.get("content")
     if isinstance(content, list):
         return " ".join(str(part) for part in content if isinstance(part, str))
     return str(content or "")
 
 
-def _prompt(agent) -> tuple[str, str, int, int]:
+def _prompt(agent: Any) -> tuple[str, str, int, int]:
     """What this agent would send the model: its system prompt and its history.
 
     Returns the system prompt, the messages as JSON, how many there were, and
@@ -397,18 +425,22 @@ def _prompt(agent) -> tuple[str, str, int, int]:
     # those is the prompt actually in force. Failing both, the system message.
     instructions = str(getattr(agent, "instructions", "") or "")
     if instructions in ("", PLACEHOLDER_INSTRUCTIONS):
-        instructions = ""
-        for item in reversed(items):
-            if isinstance(item, dict) and item.get("type") == "agent_config_update":
-                instructions = str(item.get("instructions") or "")
-                if instructions:
-                    break
+        instructions = next(
+            (
+                text
+                for item in reversed(items)
+                if isinstance(item, dict)
+                and item.get("type") == "agent_config_update"
+                and (text := str(item.get("instructions") or ""))
+            ),
+            "",
+        )
     if not instructions and system:
         instructions = "\n\n".join(_text_of(items[i]) for i in system)
 
     kept = set(system)
     spent = sum(len(json.dumps(items[i], default=str)) for i in system)
-    for i in range(len(items) - 1, -1, -1):
+    for i in reversed(range(len(items))):
         if i in kept:
             continue
         blob = json.dumps(items[i], default=str)
@@ -426,13 +458,11 @@ def _prompt(agent) -> tuple[str, str, int, int]:
     )
 
 
-def _tool_names(agent) -> list[str]:
-    names = []
-    for tool in getattr(agent, "tools", None) or []:
-        name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
-        if name:
-            names.append(str(name))
-    return sorted(names)
+def _tool_names(agent: Any) -> list[str]:
+    """The names of the tools an agent offers the model, sorted."""
+    tools = getattr(agent, "tools", None) or []
+    names = (getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools)
+    return sorted(str(name) for name in names if name)
 
 
 @dataclass
@@ -456,7 +486,7 @@ class _Round:
     prompt_messages: int = 0
     prompt_messages_traced: int = 0
     offered_tools: list[str] = field(default_factory=list)
-    tools: list[dict] = field(default_factory=list)
+    tools: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -529,7 +559,7 @@ class _Conversation:
     def __init__(self, provider: TracerProvider, session: AgentSession, session_id: str) -> None:
         self._tracer = provider.get_tracer("unmute.coval")
         self._session = session
-        self._last_agent = None
+        self._last_agent: Any = None
         self._started = time.time()
         self._root: Span = self._tracer.start_span(
             "conversation", start_time=_ns(self._started)
@@ -545,7 +575,7 @@ class _Conversation:
         self._messages = 0
         self._closed = False
         self._origin = ""
-        self._transcript: list[dict] = []
+        self._transcript: list[dict[str, str]] = []
 
     # -- recording -------------------------------------------------------
 
@@ -553,7 +583,7 @@ class _Conversation:
     def session_id(self) -> str:
         return self._session_id
 
-    def transcript(self) -> list[dict]:
+    def transcript(self) -> list[dict[str, str]]:
         """What was said, in order, as Coval's conversation submit wants it."""
         return list(self._transcript)
 
@@ -596,6 +626,7 @@ class _Conversation:
         )
 
     def simulation_found(self, simulation_id: str, route: str, source: str) -> None:
+        """Record on the root which simulation this call belongs to and how it was found."""
         self._root.set_attribute("coval.simulation_id", simulation_id)
         self._root.set_attribute("coval.correlation.method", route)
         self._root.add_event(
@@ -603,17 +634,15 @@ class _Conversation:
             {"coval.correlation.method": route, "coval.correlation.source": source},
         )
 
-    def _agent(self):
+    def _agent(self) -> Any:
         """The agent holding the floor.
 
         LiveKit raises while it swaps agents, and a round's metrics can land in
         that window, so the last one seen stands in rather than the round
         arriving with no prompt and no name at all.
         """
-        try:
+        with suppress(AttributeError, RuntimeError):
             self._last_agent = self._session.current_agent
-        except (AttributeError, RuntimeError):
-            pass
         return self._last_agent
 
     def _current(self, at: float) -> _Turn:
@@ -642,7 +671,8 @@ class _Conversation:
         self._turn = turn
         return turn
 
-    def item_added(self, item) -> None:
+    def item_added(self, item: Any) -> None:
+        """Record one chat item: a handoff, or a caller or agent message."""
         kind = getattr(item, "type", "")
         at = float(getattr(item, "created_at", 0.0) or time.time())
         if kind == "agent_handoff":
@@ -687,7 +717,8 @@ class _Conversation:
             turn.e2e_latency = metrics.get("e2e_latency")
             turn.replied_at = at
 
-    def metrics(self, m) -> None:
+    def metrics(self, m: Any) -> None:
+        """Record one LiveKit metrics event on the turn it belongs to."""
         kind = getattr(m, "type", "")
         stamp = float(getattr(m, "timestamp", 0.0) or time.time())
         duration = float(getattr(m, "duration", 0.0) or 0.0)
@@ -753,7 +784,8 @@ class _Conversation:
             if heard.end_of_turn_delay is None:
                 heard.end_of_turn_delay = getattr(m, "end_of_utterance_delay", None)
 
-    def tools_executed(self, ev) -> None:
+    def tools_executed(self, ev: Any) -> None:
+        """Record the tools a round ran, with their results, on that round."""
         at = float(getattr(ev, "created_at", 0.0) or time.time())
         turn = self._current(at)
         # zipped() pairs each call with its result. Older builds have only the
@@ -789,7 +821,8 @@ class _Conversation:
                     _Round(started=started, ended=at, tools=[record])
                 )
 
-    def failed(self, ev) -> None:
+    def failed(self, ev: Any) -> None:
+        """Record a session error as an event on the root and mark it failed."""
         error = getattr(ev, "error", None)
         self._root.add_event(
             "session_error",
@@ -803,12 +836,14 @@ class _Conversation:
     # -- writing ---------------------------------------------------------
 
     def flush_turn(self) -> None:
+        """Write the turn still open, if there is one."""
         turn, self._turn = self._turn, None
         if turn is None:
             return
         self._write_turn(turn)
 
     def close(self) -> None:
+        """Write the last turn and end the root span, once."""
         if self._closed:
             return
         self._closed = True
@@ -830,7 +865,10 @@ class _Conversation:
         )
         self._root.end(end_time=_ns(ended))
 
-    def _child(self, name: str, parent, started: float, ended: float, attributes: dict) -> Span:
+    def _child(
+        self, name: str, parent: Span, started: float, ended: float, attributes: dict[str, Any]
+    ) -> Span:
+        """Write one finished span under a parent, leaving out empty attributes."""
         span = self._tracer.start_span(
             name,
             context=trace.set_span_in_context(parent),
@@ -894,13 +932,13 @@ class _Conversation:
             if vad_end is not None:
                 ends.append(vad_end)
         reply = turn.rounds[-1] if turn.rounds else None
-        for round_ in turn.rounds:
-            ends.append(self._write_round(turn, round_, span, reply=round_ is reply))
-        first_speech = True
-        for speech in turn.speeches:
-            self._write_tts(turn, speech, span, first_speech)
+        # Each call writes that round's span and returns where it ends.
+        ends.extend(
+            self._write_round(turn, round_, span, reply=round_ is reply) for round_ in turn.rounds
+        )
+        for position, speech in enumerate(turn.speeches):
+            self._write_tts(turn, speech, span, position == 0)
             ends.append(speech.ended)
-            first_speech = False
 
         # The turn ends when its last piece of work ends. A turn is only
         # written when the next one opens, and the silence between the reply
@@ -918,7 +956,7 @@ class _Conversation:
         started = heard.speech_started or stopped
         delay = heard.transcription_delay
         ended = stopped + float(delay) if _is_latency(delay) else max(heard.at, stopped)
-        attributes: dict[str, AttributeValue] = {
+        attributes: dict[str, AttributeValue | None] = {
             "transcript": heard.text,
             "stt.transcription_delay": float(delay) if delay is not None else None,
             "stt.end_of_turn_delay": (
@@ -1026,15 +1064,13 @@ class _Conversation:
         # over its tool children rather than letting a child end after its
         # parent. The request itself still reads from metrics.ttfb and the
         # children's own windows.
-        ended = round_.ended
-        for tool in round_.tools:
-            ended = max(ended, float(tool["ended"]))
+        ended = max([round_.ended, *(float(tool["ended"]) for tool in round_.tools)])
         span = self._child("llm", parent, round_.started, ended, attributes)
         for tool in round_.tools:
             self._write_tool(tool, span)
         return ended
 
-    def _write_tool(self, tool: dict, parent: Span) -> None:
+    def _write_tool(self, tool: dict[str, Any], parent: Span) -> None:
         call = self._tracer.start_span(
             "llm_tool_call",
             context=trace.set_span_in_context(parent),
@@ -1049,7 +1085,7 @@ class _Conversation:
                 # average the attribute, so a failure rate needs 1 and 0 to
                 # average over.
                 "tool.error": 1 if tool["failed"] else 0,
-                "tool.latency_ms": round((tool["ended"] - tool["started"]) * 1000, 3),
+                "tool.latency_ms": round((tool["ended"] - tool["started"]) * MS_PER_SECOND, 3),
             },
         )
         if tool["failed"]:
@@ -1057,7 +1093,7 @@ class _Conversation:
         call.end(end_time=_ns(max(tool["ended"], tool["started"])))
 
     def _write_tts(self, turn: _Turn, speech: _Speech, parent: Span, first: bool) -> None:
-        attributes: dict[str, AttributeValue] = {
+        attributes: dict[str, AttributeValue | None] = {
             "tts.characters_count": speech.characters,
             "tts.request_id": speech.request_id,
             "tts.audio_duration": speech.audio_seconds or None,
@@ -1078,7 +1114,7 @@ class _Conversation:
 # --------------------------------------------------------------------------
 
 
-async def file_this_call(recorder: "_Conversation") -> None:
+async def file_this_call(recorder: _Conversation) -> None:
     """Give this call a Coval identity if nothing has claimed it yet.
 
     Exactly one line is written whichever way this ends, because a trace that
@@ -1220,21 +1256,21 @@ def instrument_session(session: AgentSession, recorder: _Conversation) -> None:
     """
 
     @session.on("conversation_item_added")
-    def _on_item(ev) -> None:
+    def _on_item(ev: Any) -> None:
         recorder.item_added(ev.item)
 
     @session.on("metrics_collected")
-    def _on_metrics(ev) -> None:
+    def _on_metrics(ev: Any) -> None:
         recorder.metrics(ev.metrics)
 
     @session.on("function_tools_executed")
-    def _on_tools(ev) -> None:
+    def _on_tools(ev: Any) -> None:
         recorder.tools_executed(ev)
 
     @session.on("error")
-    def _on_error(ev) -> None:
+    def _on_error(ev: Any) -> None:
         recorder.failed(ev)
 
     @session.on("close")
-    def _on_close(_ev) -> None:
+    def _on_close(_ev: Any) -> None:
         recorder.close()

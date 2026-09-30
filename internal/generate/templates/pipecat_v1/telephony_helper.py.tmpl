@@ -22,17 +22,17 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 {{if .DailyCarrier.HasInbound}}from urllib.parse import parse_qsl, urlsplit
 {{end}}
-
 import aiohttp
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request{{if .DailyCarrier.HasInbound}}, Response{{end}}
 from loguru import logger
 {{if .DailyCarrier.HasInbound}}from twilio.request_validator import RequestValidator
 {{end}}
-
 load_dotenv()
 
 logger.remove()
@@ -61,6 +61,8 @@ REQUIRED_ENV = [
 # Optional. Unset is a supported state, not a missing value.
 HOLD_AUDIO_URL_ENV = "DAILY_HOLD_AUDIO_URL"
 ROOM_GEO_ENV = "DAILY_ROOM_GEO"
+
+DEFAULT_PORT = 7860
 
 # Dial-out is requested on the room only when this package can use it. Asking for
 # it otherwise would need a Daily domain permission this package does not need.
@@ -101,7 +103,8 @@ def require_env() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Check the environment, then share one HTTP session for the life of the app."""
     require_env()
     async with aiohttp.ClientSession() as session:
         app.state.session = session
@@ -133,8 +136,11 @@ def _hold_answer() -> Response:
 
 
 def _failure_answer() -> Response:
-    """Said when no agent will join: the caller is told and the call ends, rather
-    than parked on hold for something that is not coming."""
+    """Say the call cannot be taken, then hang up.
+
+    Used when no agent will join: the caller is told and the call ends, rather
+    than parked on hold for something that is not coming.
+    """
     return Response(
         content=(
             "<Response><Say>Sorry, we cannot take your call right now. "
@@ -144,13 +150,13 @@ def _failure_answer() -> Response:
     )
 
 
-def _room_properties(caller: str) -> dict:
+def _room_properties(caller: str) -> dict[str, Any]:
     """The room the platform should make for this call: one SIP leg in, no video.
 
     `provider` is what makes this the carrier interconnect rather than a phone
     number bought from Daily. The caller's number is only a display name.
     """
-    properties: dict = {
+    properties: dict[str, Any] = {
         "start_video_off": True,
         "sip": {
             "display_name": caller,
@@ -168,7 +174,9 @@ def _room_properties(caller: str) -> dict:
     return properties
 
 
-async def _start_agent(request: Request, *, caller: str, from_number: str, call_sid: str) -> dict:
+async def _start_agent(
+    request: Request, *, caller: str, from_number: str, call_sid: str
+) -> dict[str, Any]:
     """Start the deployed agent on a new room with the SIP interconnect on.
 
     The room is the platform's to create, not this process's. The platform hands
@@ -228,7 +236,7 @@ async def inbound_call(request: Request) -> Response:
             request, caller=caller or "caller", from_number=caller, call_sid=call_sid
         )
         logger.info("inbound call {} started session {}", call_sid, started.get("sessionId"))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - any start failure is answered, never a 500
         # Named cause in the log, spoken failure to the caller.
         logger.error("inbound call {} could not be set up: {}", call_sid, exc)
         return _failure_answer()
@@ -249,13 +257,16 @@ async def inbound_call(request: Request) -> Response:
 
 
 @app.get("/healthz")
-async def healthz() -> dict:
-    """Up, nothing more. It exists so troubleshooting can tell "helper down" from
-    "helper up, flow broken"."""
+async def healthz() -> dict[str, str]:
+    """Report that the helper is up, nothing more.
+
+    It exists so troubleshooting can tell "helper down" from "helper up, flow
+    broken".
+    """
     return {"status": "ok"}
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "7860")))
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", str(DEFAULT_PORT))))

@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 {{if or .NeedsFunctionCalls .NeedsMCP}}import asyncio
-{{end}}
-import base64
+{{end}}import base64
 {{if or .NeedsFunctionCalls .NeedsMCP}}import functools
 {{end}}import json
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import {{if or .NeedsFunctionCalls .NeedsMCP}}Awaitable, {{end}}Callable, Mapping, Sequence
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.context import Context
@@ -18,8 +18,8 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider
 from opentelemetry.util.types import AttributeValue
 from pipecat.pipeline.worker import PipelineWorker
-from pipecat.workers.llm import LLMWorker
 from pipecat.utils.tracing.setup import setup_tracing
+from pipecat.workers.llm import LLMWorker
 
 TRACE_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .AgentName}}
 _TRACE_PROVIDER: TracerProvider | None = None
@@ -63,6 +63,7 @@ class CallTrace(SpanProcessor):
         _CURRENT_CALL.set(_Call(attributes))
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
+        """Copy the current call's attributes onto a span as it opens."""
         call = _CURRENT_CALL.get()
         if call is not None:
             call.on_start(span)
@@ -84,6 +85,7 @@ class _Call:
         self._transcript: list[dict[str, str]] = []
 
     def on_start(self, span: Span) -> None:
+        """Stamp the call's attributes on a span and remember the call and turn roots."""
         span.set_attributes(self._attributes)
         if span.name == CALL_SPAN:
             self._call = span
@@ -91,6 +93,7 @@ class _Call:
             self._turn = span
 
     def said(self, role: str, text: str) -> None:
+        """Record one line on the current turn and on the call's root."""
         self._transcript.append({"role": role, "content": text})
         if self._turn is not None and self._turn.is_recording():
             side = "input" if role == "user" else "output"
@@ -118,13 +121,15 @@ def _patch_pipecat_tracing() -> None:
     if getattr(service_decorators.add_stt_span_attributes, "__langfuse_patch__", False):
         return
 
-    def patch(original, kind):
-        def patched(span, *args, **kwargs):
+    def patch(original: Callable[..., Any], kind: str) -> Any:
+        """Wrap one Pipecat span-attribute function so it also writes Langfuse keys."""
+
+        def patched(span: Span, *args: Any, **kwargs: Any) -> None:
             set_attribute = span.set_attribute
 
             # ponytail: Pipecat 1.9.0 emits speech data under generic keys that
             # Langfuse does not map. Remove when Pipecat emits Langfuse I/O.
-            def mapped_set_attribute(key, value):
+            def mapped_set_attribute(key: str, value: Any) -> None:
                 set_attribute(key, value)
                 encoded = json.dumps(value, default=str)
                 if kind == "stt" and key == "transcript":
@@ -137,7 +142,7 @@ def _patch_pipecat_tracing() -> None:
                     set_attribute("langfuse.observation.metadata.ttfb_seconds", value)
                     set_attribute(
                         "langfuse.observation.completion_start_time",
-                        datetime.now(timezone.utc).isoformat(),
+                        datetime.now(UTC).isoformat(),
                     )
                 elif kind == "tts" and key == "metrics.character_count":
                     set_attribute("langfuse.observation.metadata.character_count", value)
@@ -146,14 +151,15 @@ def _patch_pipecat_tracing() -> None:
                         json.dumps({"characters": value}),
                     )
 
-            span.set_attribute = mapped_set_attribute
+            span.set_attribute = mapped_set_attribute  # ty: ignore[invalid-assignment]
             original(span, *args, **kwargs)
             mapped_set_attribute(
                 "langfuse.observation.input" if kind == "stt" else "langfuse.observation.output",
                 json.dumps("audio"),
             )
 
-        setattr(patched, "__langfuse_patch__", True)
+        # Plain assignment fails type checking: a function declares no attributes.
+        setattr(patched, "__langfuse_patch__", True)  # noqa: B010
         return patched
 
     service_decorators.add_stt_span_attributes = patch(
@@ -165,7 +171,7 @@ def _patch_pipecat_tracing() -> None:
 
     original_add_llm_span_attributes = service_decorators.add_llm_span_attributes
 
-    def patched_llm(span, *args, **kwargs):
+    def patched_llm(span: Span, *args: Any, **kwargs: Any) -> None:
         original_add_llm_span_attributes(span, *args, **kwargs)
         messages = json.loads(kwargs.get("messages") or "[]")
         system_instruction = kwargs.get("system_instructions")
@@ -176,11 +182,13 @@ def _patch_pipecat_tracing() -> None:
             span.set_attribute("input", encoded)
             span.set_attribute("langfuse.observation.input", encoded)
 
-    setattr(patched_llm, "__langfuse_patch__", True)
-    setattr(service_decorators, "add_llm_span_attributes", patched_llm)
+    setattr(patched_llm, "__langfuse_patch__", True)  # noqa: B010 - a function declares no attributes
+    # setattr: the replacement has a looser signature than the function it patches.
+    setattr(service_decorators, "add_llm_span_attributes", patched_llm)  # noqa: B010
 
 
 def setup_langfuse_tracing() -> TracerProvider:
+    """Install the Langfuse OTLP exporter and call processor once per process."""
     global _TRACE_PROVIDER
     if _TRACE_PROVIDER is not None:
         return _TRACE_PROVIDER
@@ -220,6 +228,7 @@ def start_call(attributes: Mapping[str, AttributeValue]) -> None:
 
 
 def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:
+    """Point every agent worker at the main worker's tracing context."""
     # ponytail: Pipecat 1.9.0 LLMWorker exposes no tracing kwargs. Share the main
     # worker's context until its public constructor accepts them.
     for agent in agents:
@@ -228,6 +237,7 @@ def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> N
 
 
 def flush_tracing(provider: TracerProvider) -> None:
+    """Send any buffered spans before the process exits."""
     provider.force_flush()
 
 
@@ -236,7 +246,14 @@ def flush_tracing(provider: TracerProvider) -> None:
 class TracedLLMWorker(LLMWorker):
     """Add the tool spans missing from Pipecat's standard LLM tracing."""
 
-    async def _trace_tool(self, name, arguments, call, tool_call_id=None):
+    async def _trace_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        call: Callable[[trace.Span | None], Awaitable[Any]],
+        tool_call_id: str | None = None,
+    ) -> Any:
+        """Run one tool call inside its own span, or bare when tracing is off."""
         context = self._tracing_context
         if not self._enable_tracing or context is None:
             return await call(None)
@@ -270,16 +287,17 @@ class TracedLLMWorker(LLMWorker):
             span.set_attribute("tool.result_status", "completed")
             return result
 
-    def _track_tool_call(self, method):
+    def _track_tool_call(self, method: Callable[..., Any]) -> Callable[..., Any]:
+        """Wrap Pipecat's tool tracker so each call gets a span."""
         tracked = super()._track_tool_call(method)
 
         @functools.wraps(tracked)
-        async def wrapper(params, *args, **kwargs):
-            async def call(span):
+        async def wrapper(params: Any, *args: Any, **kwargs: Any) -> Any:
+            async def call(span: trace.Span | None) -> Any:
                 if span:
                     result_callback = params.result_callback
 
-                    async def traced_result_callback(result, **callback_kwargs):
+                    async def traced_result_callback(result: Any, **callback_kwargs: Any) -> Any:
                         span.set_attribute(
                             "langfuse.observation.output", json.dumps(result, default=str)
                         )
@@ -297,10 +315,12 @@ class TracedLLMWorker(LLMWorker):
 
         return wrapper
 
-    def _trace_flow_tool(self, name, method):
+    def _trace_flow_tool(self, name: str, method: Callable[..., Awaitable[Any]]) -> Callable[..., Any]:
+        """Wrap one Pipecat Flows tool function so it gets a span."""
+
         @functools.wraps(method)
-        async def wrapper(args, flow_manager):
-            async def call(_span):
+        async def wrapper(args: Mapping[str, Any], flow_manager: Any) -> Any:
+            async def call(_span: trace.Span | None) -> Any:
                 return await method(args, flow_manager)
 
             return await self._trace_tool(name, dict(args), call)

@@ -13,16 +13,15 @@ Nothing here writes outside this container.
 
 import json
 import logging
-import re
 {{- if .AnyEmbeds}}
 import os
 {{- end}}
+import re
 import time
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
-
-from llama_index.core import SimpleDirectoryReader{{if .AnyEmbeds}}, StorageContext, VectorStoreIndex, load_index_from_storage{{end}}
+from llama_index.core import Document, SimpleDirectoryReader{{if .AnyEmbeds}}, StorageContext, VectorStoreIndex, load_index_from_storage{{end}}
 from llama_index.core.node_parser import SentenceSplitter
 {{- range .KnowledgeImports}}
 from {{.Module}} import {{.Class}}
@@ -32,6 +31,12 @@ from llama_index.retrievers.bm25 import BM25Retriever
 {{- end}}
 
 log = logging.getLogger("knowledge")
+
+# One search hit: node id, passage text, source file name, and a similarity score
+# (None for a keyword-only hit, which has none).
+_Hit = tuple[str, str, str, float | None]
+
+MS_PER_SECOND = 1000
 
 # The folder the compiler copied the documents into, beside this file.
 KNOWLEDGE_ROOT = Path(__file__).resolve().parent / "knowledge"
@@ -58,6 +63,8 @@ INDEX_ROOT = Path(__file__).resolve().parent / "knowledge_index"
 # sizes. Measured: a price list split at 90 tokens ranked an opening-hours passage
 # above the price a caller asked for.
 class _Settings(TypedDict):
+    """The retrieval settings one knowledge base was declared with."""
+
     mode: str
     chunk_size: int
     chunk_overlap: int
@@ -87,7 +94,7 @@ class KnowledgeError(RuntimeError):
     """
 
 
-def _read(name: str) -> list:
+def _read(name: str) -> list[Document]:
     """Read one knowledge base's documents, failing loudly on an empty read.
 
     `exclude_hidden=False` is load-bearing. With the default,
@@ -146,7 +153,7 @@ def _clean(text: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", _CONTROL.sub("", text))
 
 
-def _source_name(metadata: dict) -> str:
+def _source_name(metadata: dict[str, Any]) -> str:
     """A document's file name, never its path.
 
     The path is the author's own folder layout and the file name is what the
@@ -155,7 +162,7 @@ def _source_name(metadata: dict) -> str:
     return Path(metadata.get("file_name") or metadata.get("file_path") or "").name
 
 
-def _with_text(name: str, documents: list) -> list:
+def _with_text(name: str, documents: list[Document]) -> list[Document]:
     """Drop documents that yielded no text, and decide whether that is fatal.
 
     A scanned PDF has pages and no text layer. Extracting nothing from it is not
@@ -165,7 +172,8 @@ def _with_text(name: str, documents: list) -> list:
     Some documents empty and at least one not: warn by name and carry on.
     Every document empty: fail, because the agent would confidently know nothing.
     """
-    kept, empty = [], []
+    kept: list[Document] = []
+    empty: list[str] = []
     for document in documents:
         text = document.text or ""
         source = _source_name(document.metadata or {})
@@ -222,7 +230,7 @@ def _with_text(name: str, documents: list) -> list:
     return kept
 {{range .Knowledge}}{{if .Embeds}}
 
-def _embed_{{.Name}}():
+def _embed_{{.Name}}() -> {{.EmbedClass}}:
     """The embedding service for {{.Name}}, and the credential it needs.
 {{- if .CredentialEnv}}
 
@@ -243,7 +251,7 @@ def _embed_{{.Name}}():
     return {{.EmbedClass}}({{.ModelKwarg}}={{pyq .EmbedModel}})
 {{end}}{{end}}
 
-def _merge(meaning: list, keyword: list, top_k: int) -> list:
+def _merge(meaning: list[_Hit], keyword: list[_Hit], top_k: int) -> list[_Hit]:
     """Interleave the two halves, meaning first at each step, then truncate.
 
     Interleaved, NOT one-then-the-other. Measured on 15 questions built to defeat
@@ -256,8 +264,9 @@ def _merge(meaning: list, keyword: list, top_k: int) -> list:
 
     With one half absent, as in a single-mode base, this is just a truncation.
     """
-    merged, seen = [], set()
-    for pair in zip(meaning + [None] * top_k, keyword + [None] * top_k):
+    merged: list[_Hit] = []
+    seen: set[str] = set()
+    for pair in zip(meaning + [None] * top_k, keyword + [None] * top_k, strict=False):
         for item in pair:
             if item is None or item[0] in seen or len(merged) >= top_k:
                 continue
@@ -266,7 +275,7 @@ def _merge(meaning: list, keyword: list, top_k: int) -> list:
     return merged[:top_k]
 
 
-def _nodes(name: str) -> list:
+def _nodes(name: str) -> list[Any]:
     """Read and split one knowledge base into passages."""
     settings = SETTINGS[name]
     return SentenceSplitter(
@@ -294,14 +303,16 @@ def _baked(name: str) -> Path | None:
 {{if .AnyEmbeds}}
 
 def _vector_dir(folder: Path) -> Path:
+    """Where a baked vector index lives inside one base's folder."""
     return folder / "vector"
 {{end}}{{if .AnyKeyword}}
 
 def _keyword_dir(folder: Path) -> Path:
+    """Where a baked keyword index lives inside one base's folder."""
     return folder / "keyword"
 {{end}}
 
-def _index(name: str, embed_model=None) -> dict:
+def _index(name: str, embed_model: Any = None) -> dict[str, Any]:
     """Build one knowledge base's retrievers from its documents, per its mode.
 
     A keyword-only base builds no vector index and is handed no embedder, so it
@@ -311,7 +322,7 @@ def _index(name: str, embed_model=None) -> dict:
     mode, top_k = settings["mode"], settings["top_k"]
     nodes = _nodes(name)
 
-    built = {"vector": None, "keyword": None}
+    built: dict[str, Any] = {"vector": None, "keyword": None}
 {{- if .AnyKeyword}}
     if mode in ("keyword", "hybrid"):
         # BM25 ranks the words themselves. No embedding, no network, about 1 ms a
@@ -347,7 +358,7 @@ def _index(name: str, embed_model=None) -> dict:
     return built
 
 
-def _load(name: str, folder: Path, embed_model=None) -> dict:
+def _load(name: str, folder: Path, embed_model: Any = None) -> dict[str, Any]:
     """Load one knowledge base from the index baked into this image.
 
     Reads only. The corpus is not re-embedded, which is the entire point: on
@@ -369,7 +380,7 @@ def _load(name: str, folder: Path, embed_model=None) -> dict:
             "answers from passages that do not match the configuration."
         )
 
-    built = {"vector": None, "keyword": None}
+    built: dict[str, Any] = {"vector": None, "keyword": None}
 {{- if .AnyKeyword}}
     if mode in ("keyword", "hybrid"):
         built["keyword"] = BM25Retriever.from_persist_dir(str(_keyword_dir(folder)))
@@ -417,7 +428,7 @@ def bake() -> None:
     log.info("knowledge: baked %d base(s) into %s", len(SETTINGS), INDEX_ROOT)
 
 
-def _bake_one(name: str, embed_model=None) -> None:
+def _bake_one(name: str, embed_model: Any = None) -> None:
     """Embed and persist one base. Build time only."""
     settings = SETTINGS[name]
     mode, top_k = settings["mode"], settings["top_k"]
@@ -461,7 +472,7 @@ def build_indexes() -> None:
 {{- end}}
 
 
-def _start(name: str, embed_model=None) -> dict:
+def _start(name: str, embed_model: Any = None) -> dict[str, Any]:
     """One base, from the baked index if the image has one."""
     folder = _baked(name)
     if folder is not None:
@@ -479,7 +490,7 @@ def _start(name: str, embed_model=None) -> dict:
     return _index(name, embed_model)
 
 
-async def look_up(name: str, query: str) -> dict:
+async def look_up(name: str, query: str) -> dict[str, Any]:
     """Search one knowledge base and return at most its top_k passages.
 
     Three shapes, and the model has to be able to tell them apart:
@@ -504,7 +515,8 @@ async def look_up(name: str, query: str) -> dict:
     settings = SETTINGS[name]
     top_k = settings["top_k"]
     try:
-        meaning, keyword = [], []
+        meaning: list[_Hit] = []
+        keyword: list[_Hit] = []
         if entry["vector"] is not None:
             meaning = [
                 (
@@ -533,7 +545,8 @@ async def look_up(name: str, query: str) -> dict:
         # words are call content, and a log is not where call content belongs.
         log.exception("knowledge %r: lookup failed", name)
         return {"error": "lookup unavailable"}
-    results, dropped = [], 0
+    results: list[dict[str, Any]] = []
+    dropped = 0
     cutoff = settings["min_score"]
     for _, text, source, score in _merge(meaning, keyword, top_k):
         # A cutoff of 0 filters nothing, because every score is above it.
@@ -545,7 +558,7 @@ async def look_up(name: str, query: str) -> dict:
         if cutoff and score is not None and float(score) < cutoff:
             dropped += 1
             continue
-        result = {"text": text, "source": source}
+        result: dict[str, Any] = {"text": text, "source": source}
         # No fabricated score. A passage found only by the keyword half has no
         # similarity, and is reported without the field: a made-up number is worse
         # than a missing one for a model being asked to weigh it.
@@ -572,6 +585,6 @@ async def look_up(name: str, query: str) -> dict:
         "knowledge %r: returned %d result(s) in %d ms",
         name,
         len(results),
-        int((time.monotonic() - started) * 1000),
+        int((time.monotonic() - started) * MS_PER_SECOND),
     )
     return {"results": results}
