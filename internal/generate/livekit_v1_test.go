@@ -359,7 +359,7 @@ func TestLiveKitV1UnconfiguredGolden(t *testing.T) { // V24
 		t.Fatal(err)
 	}
 	bot := artifactFile(t, artifact, agentSource)
-	path := filepath.Join("testdata", "golden", "livekit_v1_remy_unconfigured_agent.py")
+	path := filepath.Join("testdata", "golden", "livekit_v1_remy_unconfigured_agent.txt")
 	if *updateLiveKitV1 {
 		if err := os.WriteFile(path, []byte(bot), 0o644); err != nil {
 			t.Fatal(err)

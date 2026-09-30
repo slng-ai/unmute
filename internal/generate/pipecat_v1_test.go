@@ -1162,7 +1162,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		t.Errorf("bot.py drains delegate results and owner role updates %d times, want 4", got)
 	}
 
-	path := filepath.Join("testdata", "golden", "pipecat_v1_tasks_bot.py")
+	path := filepath.Join("testdata", "golden", "pipecat_v1_tasks_bot.txt")
 	if *updatePipecatV1 {
 		if err := os.WriteFile(path, []byte(bot), 0o644); err != nil {
 			t.Fatal(err)
@@ -1239,7 +1239,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 }
 
 func TestV2_PipecatDelegateSnapshotsCompletedOwnerCall(t *testing.T) {
-	bot, err := os.ReadFile(filepath.Join("testdata", "golden", "pipecat_v1_tasks_bot.py"))
+	bot, err := os.ReadFile(filepath.Join("testdata", "golden", "pipecat_v1_tasks_bot.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1281,7 +1281,7 @@ func TestV2_PipecatDelegateSnapshotsCompletedOwnerCall(t *testing.T) {
 // 2026-08-21: the session died half a second in and the only line it left
 // behind was a failed trace flush, which says nothing about the cause.
 func TestPipecatWorkerStartFailureSaysWhy(t *testing.T) {
-	bot, err := os.ReadFile(filepath.Join("testdata", "golden", "pipecat_v1_tasks_bot.py"))
+	bot, err := os.ReadFile(filepath.Join("testdata", "golden", "pipecat_v1_tasks_bot.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}

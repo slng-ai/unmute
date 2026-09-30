@@ -870,8 +870,8 @@ func TestSlngRouterGolden(t *testing.T) {
 		module   string
 		golden   string
 	}{
-		{ir.ProviderPipecat, agentSource, "slng_pipecat.py"},
-		{ir.ProviderLiveKit, agentSource, "slng_livekit.py"},
+		{ir.ProviderPipecat, agentSource, "slng_pipecat.txt"},
+		{ir.ProviderLiveKit, agentSource, "slng_livekit.txt"},
 	} {
 		source, _ := emitAgentSource(t, agent, tc.provider, tc.module)
 		path := filepath.Join("testdata", "golden", tc.golden)
