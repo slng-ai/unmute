@@ -110,15 +110,17 @@ func TestKnowledgeBakeIsBuildTimeOnly(t *testing.T) {
 			t.Errorf("the run-time path calls %s: baking writes, and a call must not", called)
 		}
 	}
-	// And the Dockerfile is what does call it, on both targets.
+	// And the Dockerfile is what does call it, on both targets, from where the
+	// module is: a bare `import knowledge` fails the image build only when
+	// KNOWLEDGE_BAKE=1, which no default build sets.
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		agent := knowledgeAgent(t)
 		artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
 		if err != nil {
 			t.Fatalf("generate: %v", err)
 		}
-		if !strings.Contains(artifactFile(t, artifact, "Dockerfile"), "knowledge.bake()") {
-			t.Errorf("%s: the Dockerfile must run the bake, or no image ever carries an index", provider)
+		if !strings.Contains(artifactFile(t, artifact, "Dockerfile"), "from utils import knowledge; knowledge.bake()") {
+			t.Errorf("%s: the Dockerfile must run the bake from utils/knowledge.py, or no image ever carries an index", provider)
 		}
 	}
 }
