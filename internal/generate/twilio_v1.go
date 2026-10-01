@@ -253,8 +253,8 @@ func buildTwilioData(agent *ir.Agent, resolved ir.Target) (twilioData, error) {
 	data := twilioData{
 		Target: resolved.Name, Project: cmp.Or(agent.Name, resolved.Name), Python: targetcap.TwilioPython,
 		OpenAI: thinkEntry.Vendor == "openai", Model: think.Model, ModelKeyEnv: thinkEntry.Call.APIKeyEnv,
-		Prompts:      []pyPrompt{{Const: "INSTRUCTIONS", File: "instructions", Text: entry.Instructions}},
-		MaxRounds:    targetcap.TwilioMaxToolRounds, ToolDeadline: targetcap.TwilioToolDeadlineSeconds,
+		Prompts:   []pyPrompt{{Const: "INSTRUCTIONS", File: "instructions", Text: entry.Instructions}},
+		MaxRounds: targetcap.TwilioMaxToolRounds, ToolDeadline: targetcap.TwilioToolDeadlineSeconds,
 		Docs: targetcap.TwilioDocs,
 	}
 	if agent.Capacity != nil {
