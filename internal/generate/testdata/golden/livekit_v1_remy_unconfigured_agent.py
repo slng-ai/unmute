@@ -1,41 +1,50 @@
+"""LiveKit voice agent, compiled by Unmute from this package's agent.yaml."""
+
 import asyncio
 import json
 import logging
 import os
 import random
+from collections.abc import AsyncIterable
 from dataclasses import dataclass
 from typing import Annotated
+
 import httpx
 from dotenv import load_dotenv
-
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from livekit import rtc
 from livekit.agents import (
-    APIConnectOptions,
     NOT_GIVEN,
     Agent,
-    AgentTask,
     AgentServer,
     AgentSession,
+    AgentTask,
+    APIConnectOptions,
+    ChatContext,
+    FlushSentinel,
     JobContext,
     JobProcess,
+    ModelSettings,
     NotGivenOr,
     RunContext,
     TurnHandlingOptions,
+    UserStateChangedEvent,
     function_tool,
     inference,
     llm,
     metrics,
 )
 from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup
+from livekit.agents.llm import ChatChunk, Tool
 from livekit.agents.voice import MetricsCollectedEvent
+
 # Not re-exported from livekit.agents or livekit.agents.voice, so it comes from
 # the module that defines it. Checked against 1.6.10 and 1.8.x.
 from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import openai, silero, slng
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 import dev_metrics
 from dev_metrics import dev_llm_node, dev_say, install_dev_metrics
-
 
 logger = logging.getLogger("remy-fixture")
 logger.setLevel(logging.INFO)
@@ -56,7 +65,15 @@ _ANNOUNCE_LAST: dict[str, str] = {}
 
 
 def _announce(key: str, lines: list[str]) -> str:
-    """One of these lines, never the one this key used last."""
+    """Pick one of these lines, never the one this key used last.
+
+    Args:
+        key: The announcement site, so each site remembers its own last line.
+        lines: The alternatives the author wrote for that site.
+
+    Returns:
+        The line to speak.
+    """
     # ponytail: process wide, not per call. Two concurrent callers can only
     # affect each other's variety, which is the whole thing this is for.
     choices = [line for line in lines if line != _ANNOUNCE_LAST.get(key)] or lines
@@ -171,6 +188,11 @@ REQUIRED_ENV = [
 
 
 def require_env() -> None:
+    """Refuse to start a session when a required variable is unset.
+
+    Raises:
+        RuntimeError: Naming every unset variable in REQUIRED_ENV.
+    """
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
@@ -197,12 +219,29 @@ class _StateRefused(Exception):
     """
 
     def __init__(self, message: str) -> None:
+        """Keep the message the model will be shown.
+
+        Args:
+            message: What was wrong with the value, worded for the model.
+        """
         super().__init__(message)
         self.message = message
 
 
-def _typed(field, adapter, value):
-    """Validate one value entering the declared state."""
+def _typed(field: str, adapter: TypeAdapter, value: object) -> object:
+    """Validate one value entering the declared state.
+
+    Args:
+        field: Name of the declared value, used in the refusal message.
+        adapter: The adapter for the declared type.
+        value: The value to validate.
+
+    Returns:
+        The validated value.
+
+    Raises:
+        _StateRefused: If the value does not fit the declared type.
+    """
     try:
         return adapter.validate_python(value)
     except ValidationError as error:
@@ -212,14 +251,15 @@ def _typed(field, adapter, value):
         raise _StateRefused(f"{named}: {first['msg']}") from None
 
 
-def _append_entry(entries, value):
-    """One entry onto a declared list, unless it is already on it.
+def _append_entry(entries: list, value: object) -> None:
+    """Add one entry onto a declared list, unless it is already on it.
 
     A step re-entered mid-call can read a value through an explicit prompt
-    reference and hand it straight back, which is not a second thing happening. One live call
-    entered the booking step four times and finished three of them immediately,
-    each with the same appointment it had recorded on the first, so one booking
-    became four entries and the caller's recap listed a booking four times.
+    reference and hand it straight back, which is not a second thing happening.
+    One live call entered the booking step four times and finished three of them
+    immediately, each with the same appointment it had recorded on the first, so
+    one booking became four entries and the caller's recap listed a booking four
+    times.
 
     An object carries its own identity, so an identical one is the same thing
     reported twice. A plain value is not: two bookings really do give two
@@ -228,6 +268,10 @@ def _append_entry(entries, value):
 
     Nothing absent is added either, which is how a step that concluded nothing
     this time finishes without inventing an entry.
+
+    Args:
+        entries: The list to add to, changed in place.
+        value: The entry to add.
     """
     if value is None:
         return
@@ -236,12 +280,18 @@ def _append_entry(entries, value):
     entries.append(value)
 
 
-def _plain(value):
-    """A validated value as plain data.
+def _plain(value: object) -> object:
+    """Turn a validated value into plain data.
 
     Plain data is the only shape both frameworks accept back from a tool: one
     refuses a BaseModel outright and drops the whole tool result with a log
     line, the other cannot serialise one at all.
+
+    Args:
+        value: A validated value, possibly holding models.
+
+    Returns:
+        The same value with every model replaced by its JSON-mode dict.
     """
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
@@ -252,8 +302,8 @@ def _plain(value):
     return value
 
 
-def _schema(adapter):
-    """One declared type's schema, with every $ref resolved into place.
+def _schema(adapter: TypeAdapter) -> object:
+    """Build one declared type's schema, with every $ref resolved into place.
 
     Pydantic emits $defs and a $ref for a shape that contains another shape, and
     this is not a formatting preference. Measured on one real request to the
@@ -271,20 +321,34 @@ def _schema(adapter):
 
     This target nests the schema inside one property and sends no strict flag,
     so it is the first case unless the refs are resolved here.
+
+    Args:
+        adapter: The adapter for the declared type.
+
+    Returns:
+        The JSON schema with no $defs and no local $ref left in it.
     """
     schema = adapter.json_schema()
     defs = schema.pop("$defs", {})
 
-    def resolve(node):
+    def resolve(node: object) -> object:
+        """Inline every local $ref under one schema node.
+
+        Args:
+            node: A schema node, or a list or scalar found inside one.
+
+        Returns:
+            The node with each local $ref replaced by its definition.
+        """
         if isinstance(node, list):
             return [resolve(item) for item in node]
         if not isinstance(node, dict):
             return node
         target = node.get("$ref")
         if isinstance(target, str) and target.startswith("#/$defs/"):
-            found = defs.get(target.rsplit("/", 1)[1], {})
+            found = resolve(defs.get(target.rsplit("/", 1)[1], {}))
             siblings = {key: value for key, value in node.items() if key != "$ref"}
-            return {**resolve(found), **siblings}
+            return {**found, **siblings} if isinstance(found, dict) else found
         return {key: resolve(value) for key, value in node.items()}
 
     return resolve(schema)
@@ -300,40 +364,65 @@ _FINISH_TYPES = {
 }
 
 
-def _task_status(values):
+def _task_status(values: dict) -> dict[str, str]:
+    """Say whether a step served the caller or could not.
+
+    Args:
+        values: The step's finish values.
+
+    Returns:
+        A one-key status dict for the agent that owns the step.
+    """
     return {"status": "unserved" if values.get("unserved_request") else "completed"}
 
 
-def _group_status(results):
-    return {"status": "unserved" if any(value.get("unserved_request") for value in results.values()) else "completed"}
+def _group_status(results: dict) -> dict[str, str]:
+    """Say whether a group of steps served the caller or one of them could not.
+
+    Args:
+        results: Each step's finish values, by step name.
+
+    Returns:
+        A one-key status dict for the agent that owns the group.
+    """
+    unserved = any(value.get("unserved_request") for value in results.values())
+    return {"status": "unserved" if unserved else "completed"}
 
 
-def _typed_result(step, values):
+def _typed_result(step: str, values: dict) -> dict:
     """Validate a step's declared results where they enter the state.
 
     Refused here rather than carried into a later step that assumes it is
     right, and refused on both targets rather than on the one whose framework
     happens to validate tool arguments: one of them validates through Pydantic
     and lets the model self-correct, the other splats raw JSON into the handler.
+
+    Args:
+        step: Name of the step whose result this is.
+        values: The step's finish values.
+
+    Returns:
+        The values with each declared field validated and made plain.
+
+    Raises:
+        _StateRefused: If a declared field does not fit its type.
     """
     if values.get("unserved_request"):
         return {"unserved_request": values["unserved_request"]}
     adapters = _FINISH_TYPES.get(step)
     if not adapters:
         return values
-    out = dict(values)
-    for name, adapter in adapters.items():
-        # Absent goes through the adapter too, rather than being skipped. A
-        # field the model left out is a field with no value, and that is what a
-        # prompt telling it to leave one out asks for: a value that may be
-        # absent validates as None and the append drops it, and a value that
-        # may not is refused here with the message that lets the model correct
-        # itself. Skipping an absent field instead left the key missing from
-        # the result, and the assignment that reads it by name raised a
-        # KeyError inside the finish handler on the target whose framework
-        # validates no argument of its own.
-        out[name] = _plain(_typed(name, adapter, out.get(name)))
-    return out
+    # Absent goes through the adapter too, rather than being skipped. A
+    # field the model left out is a field with no value, and that is what a
+    # prompt telling it to leave one out asks for: a value that may be
+    # absent validates as None and the append drops it, and a value that
+    # may not is refused here with the message that lets the model correct
+    # itself. Skipping an absent field instead left the key missing from
+    # the result, and the assignment that reads it by name raised a
+    # KeyError inside the finish handler on the target whose framework
+    # validates no argument of its own.
+    validated = {name: _plain(_typed(name, adapter, values.get(name))) for name, adapter in adapters.items()}
+    return values | validated
 
 
 _STATE_TYPES = {
@@ -353,13 +442,27 @@ _STATE_DEPENDENCIES = {
 }
 
 
-def _save_result(step, state, values):
-    """Validate all assignments before changing any call state."""
+def _save_result(step: str, state: object, values: dict) -> dict:
+    """Validate all assignments before changing any call state.
+
+    Args:
+        step: Name of the step whose result is being saved.
+        state: The call's shared state object.
+        values: The step's finish values.
+
+    Returns:
+        The validated values, or the unserved request alone when the step could
+        not help.
+
+    Raises:
+        _StateRefused: If an assigned value does not fit its declared type.
+    """
     values = _typed_result(step, values)
     if values.get("unserved_request"):
         return values
     pending = {}
     for name, path, append in _TASK_ASSIGNMENTS.get(step, ()):
+        # A dotted path walks nested dicts, and is None past any missing link.
         value = values
         for part in path.split("."):
             value = value.get(part) if isinstance(value, dict) else None
@@ -374,22 +477,30 @@ def _save_result(step, state, values):
     return values
 
 
-def _save_batch(state, values, *, step=None, inputs=None):
-    """Commit a validated batch and invalidate older results of changed inputs."""
+def _save_batch(state: object, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
+    """Commit a validated batch and invalidate older results of changed inputs.
+
+    Args:
+        state: The call's shared state object.
+        values: Declared value names mapped to what to save.
+        step: The step saving them, which decides whether it confirms them.
+        inputs: Declared names a pre-fetch read to produce them, kept as
+            provenance so a later change to one invalidates the result.
+
+    Raises:
+        _StateRefused: If a value does not fit its declared type.
+    """
     if not values:
         return
     pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
     unconfirmed: set[str] = set(getattr(state, "_unconfirmed", ()))
     provenance = dict(getattr(state, "_prefetch_provenance", {}))
     affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
-    while True:
-        more = {name for name, reads in provenance.items() if set(reads) & affected} - affected
-        if not more:
-            break
-        affected.update(more)
+    # Grow the changed set with everything derived from it, until nothing new joins.
+    while more := {name for name, reads in provenance.items() if set(reads) & affected} - affected:
+        affected |= more
     invalidated = affected - pending.keys()
-    for name in invalidated:
-        provenance.pop(name, None)
+    provenance = {name: reads for name, reads in provenance.items() if name not in invalidated}
     for name, value in pending.items():
         if inputs is not None:
             provenance[name] = tuple(inputs)
@@ -400,9 +511,20 @@ def _save_batch(state, values, *, step=None, inputs=None):
                 unconfirmed.discard(name)
             else:
                 unconfirmed.add(name)
-    def current(name):
+
+    def current(name: str) -> object:
+        """Read a value as it will stand once this batch lands.
+
+        Args:
+            name: Name of the declared value.
+
+        Returns:
+            The pending value, none if it was invalidated, else what state holds.
+        """
         return None if name in invalidated else pending.get(name, getattr(state, name, None))
-    # Dependencies are acyclic: prefetch can only read earlier entries.
+
+    # Dependencies are acyclic: prefetch can only read earlier entries. Each pass
+    # reads what the previous one settled, so this runs to a fixed point.
     for _ in range(len(_STATE_DEPENDENCIES) + 1):
         before = set(unconfirmed)
         for name, reads in _STATE_DEPENDENCIES.items():
@@ -419,10 +541,9 @@ def _save_batch(state, values, *, step=None, inputs=None):
     for name, value in pending.items():
         setattr(state, name, value)
     if hasattr(state, "_unconfirmed"):
-        state._unconfirmed = unconfirmed
+        setattr(state, "_unconfirmed", unconfirmed)  # noqa: B010 - state is typed object
     if inputs is not None or hasattr(state, "_prefetch_provenance"):
-        state._prefetch_provenance = provenance
-
+        setattr(state, "_prefetch_provenance", provenance)  # noqa: B010 - state is typed object
 
 
 _STATE_STRUCTURED = {}
@@ -433,8 +554,8 @@ _STATE_EMPTY = "none recorded yet."
 _STATE_VALUE_MAX = 4000
 
 
-def _state_text(name, value):
-    """One value as a prompt reads it.
+def _state_text(name: str, value: object) -> str:
+    """Render one value as a prompt reads it.
 
     Compact JSON for anything declared structured, never a Python repr: a repr
     writes single quotes and None, which is not JSON and is not what any
@@ -443,6 +564,13 @@ def _state_text(name, value):
 
     A value that was never declared structured renders exactly as it did before
     this existed, which is what keeps every package written before it unchanged.
+
+    Args:
+        name: Name of the declared value, used in the length warning.
+        value: The value to render.
+
+    Returns:
+        The text, cut to the bound when it is longer.
     """
     if value is None or value == "":
         return _STATE_EMPTY
@@ -464,15 +592,25 @@ def _state_text(name, value):
     return text
 
 
-def _prompt_value(state, name, site=""):
+def _prompt_value(state: object, name: str, site: str = "") -> tuple[str, object]:
+    """Read the value a prompt placeholder names, unless it is still unconfirmed.
+
+    Args:
+        state: The call's shared state object.
+        name: The flat placeholder name.
+        site: The prompt site reading it, so the confirming step still sees it.
+
+    Returns:
+        The declared name and its value, or none for a value not yet confirmed.
+    """
     root, value = _state_lookup(state, name)
     if root in getattr(state, "_unconfirmed", ()) and site != "task:" + _STATE_CONFIRM.get(root, ""):
         return root, None
     return root, value
 
 
-def _state_lookup(state, name):
-    """The value a placeholder names, and the declared name it belongs to.
+def _state_lookup(state: object, name: str) -> tuple[str, object]:
+    """Find the value a placeholder names, and the declared name it belongs to.
 
     A path is authored {{customer.status}} and emitted {{customer__status}}: one
     flat name, because the router substitutes flat names only and both render
@@ -481,6 +619,13 @@ def _state_lookup(state, name):
     None past an absent link, so a field of a record nobody has filled renders
     as the empty words and never raises. The root's name comes back with the
     value because the words for an empty value belong to the root variable.
+
+    Args:
+        state: The call's shared state object, or none.
+        name: The flat placeholder name.
+
+    Returns:
+        The declared root name and the value found at the end of the path.
     """
     root, _, path = name.partition("__")
     value = getattr(state, root, None) if state is not None else None
@@ -495,11 +640,23 @@ def _state_lookup(state, name):
 # Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
 @dataclass
 class Userdata:
+    """The session state every agent and task of one call shares."""
     caller_phone: str | None = None
 
 
 # --- job metadata ------------------------------------------------------------
 def _livekit_job_metadata(raw: str) -> dict:
+    """Parse the job metadata LiveKit hands to this worker.
+
+    Args:
+        raw: The metadata string, possibly empty.
+
+    Returns:
+        The metadata object, empty when none was sent.
+
+    Raises:
+        RuntimeError: The metadata is not a JSON object.
+    """
     if not raw:
         return {}
     try:
@@ -513,8 +670,21 @@ def _livekit_job_metadata(raw: str) -> dict:
 
 # --- dispatched input variables ----------------------------------------------
 def _dispatched_call_start(metadata: dict | None = None) -> dict:
-    """Input variables arrive with the dispatch: the job metadata in production,
-    or UNMUTE_CALL_START for a local `unmute dev --var` session."""
+    """Read the input variables that arrive with the dispatch.
+
+    They come in the job metadata in production, or in UNMUTE_CALL_START for a
+    local `unmute dev --var` session.
+
+    Args:
+        metadata: The parsed job metadata, if any.
+
+    Returns:
+        The variables, checked against their declared types.
+
+    Raises:
+        RuntimeError: A value has the wrong type, a required one is missing, or
+            UNMUTE_CALL_START is not a JSON object.
+    """
     values = dict((metadata or {}).get("call_start", {}))
     raw = os.getenv("UNMUTE_CALL_START")
     if raw:
@@ -525,9 +695,8 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
         if not isinstance(supplied, dict):
             raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
         # The dispatch wins: env is the local stand-in for it.
-        for name, value in supplied.items():
-            values.setdefault(name, value)
-    missing = []
+        values = supplied | values
+    missing: list[str] = []
     if "caller_phone" in values:
         value = values["caller_phone"]
         if not (isinstance(value, str)):
@@ -537,7 +706,13 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
     return values
 
 
-def _hydrate_call_start(userdata, values: dict) -> None:
+def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
+    """Copy the dispatched input variables onto the session state.
+
+    Args:
+        userdata: The state to fill.
+        values: The variables from _dispatched_call_start.
+    """
     if "caller_phone" in values:
         userdata.caller_phone = values["caller_phone"]
     return None
@@ -552,17 +727,28 @@ class _GroupStop(Exception):
     """
 
     def __init__(self, results: dict) -> None:
+        """Carry the results the group reached.
+
+        Args:
+            results: Each finished step's result, by step id.
+        """
         super().__init__()
         self.results = results
 
 
-def _caller_turns(chat_ctx) -> int:
-    """How many turns the caller has taken in this context.
+def _caller_turns(chat_ctx: llm.ChatContext) -> int:
+    """Count the turns the caller has taken in this context.
 
     The one signal that separates "they asked again" from "the model re-read its
     own finished work". A step that has already run and returned cannot have a
     new request in front of it unless somebody spoke, so this is what each
     delegate's re-entry guard compares.
+
+    Args:
+        chat_ctx: The conversation to count in.
+
+    Returns:
+        The number of caller messages.
     """
     return sum(1 for message in chat_ctx.messages() if message.role == "user")
 
@@ -574,6 +760,14 @@ async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent, flow: 
     and any caller turn a step consumed. The group's own results are not
     readable from here, and a group that stops early has to hand back what it
     did do.
+
+    Args:
+        group: The running group.
+        event: The step that just completed.
+        flow: The delegate's record of the run.
+
+    Raises:
+        RuntimeError: The completed step left no usable finish output.
     """
     flow["results"][event.task_id] = event.result
     flow["carried"].append(getattr(event.agent_task, "_carried_turn", None))
@@ -634,13 +828,43 @@ async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent, flow: 
 # --- agents ----------------------------------------------------------------
 
 class Events(Agent):
-    def tts_node(self, text, model_settings):
+    """The events agent, compiled from its entry in agent.yaml."""
+
+    def tts_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[rtc.AudioFrame]:
+        """Synthesize speech through the dev feed's wrapper.
+
+        Args:
+            text: The text to speak.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The synthesized audio frames.
+        """
         return dev_metrics.dev_tts_node(self, text, model_settings)
 
-    def llm_node(self, chat_ctx, tools, model_settings):
+    def llm_node(
+        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+        """Ask the model, through the dev feed's wrapper.
+
+        Args:
+            chat_ctx: The conversation to send.
+            tools: The tools the model may call.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The model's chunks.
+        """
         return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
 
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+        """Build the agent.
+
+        Args:
+            chat_ctx: The conversation a handoff carries in.
+        """
         super().__init__(
             instructions=EVENTS_PROMPT,
             chat_ctx=chat_ctx,
@@ -650,6 +874,7 @@ class Events(Agent):
             self._chat_ctx = chat_ctx.copy()
 
     async def on_enter(self) -> None:
+        """Open this agent's turn as it takes over the call."""
         # This agent took over via handoff; let its own instructions drive the
         # opening (the prompt already says not to re-greet).
         # This opening turn withholds the agent's own handoffs (B3: an agent that can
@@ -658,10 +883,10 @@ class Events(Agent):
         # its filter follows the context of everything this reply starts: a live call
         # offered one specialist nothing but its delegate for ten turns while the
         # caller asked for another one (B: salon handoffs, 2026-08-20).
-        self.session.generate_reply(tools=[t.id for t in self.tools if t.id not in {"back_to_greeter"}])
+        self.session.generate_reply(tools=[t.id for t in self.tools if t.id != "back_to_greeter"])
 
     @function_tool
-    async def back_to_greeter(self, ctx: RunContext):
+    async def back_to_greeter(self, ctx: RunContext) -> Agent:
         """Caller wants something else, or to start over."""
         return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
 
@@ -715,13 +940,44 @@ class Events(Agent):
 
 
 class Greeter(Agent):
-    def tts_node(self, text, model_settings):
+    """The greeter agent, compiled from its entry in agent.yaml."""
+
+    def tts_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[rtc.AudioFrame]:
+        """Synthesize speech through the dev feed's wrapper.
+
+        Args:
+            text: The text to speak.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The synthesized audio frames.
+        """
         return dev_metrics.dev_tts_node(self, text, model_settings)
 
-    def llm_node(self, chat_ctx, tools, model_settings):
+    def llm_node(
+        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+        """Ask the model, through the dev feed's wrapper.
+
+        Args:
+            chat_ctx: The conversation to send.
+            tools: The tools the model may call.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The model's chunks.
+        """
         return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
 
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, initial: bool = False) -> None:
+        """Build the agent.
+
+        Args:
+            chat_ctx: The conversation a handoff carries in.
+            initial: True for the call's first agent, which greets the caller.
+        """
         self._initial = initial
         super().__init__(
             instructions=GREETER_PROMPT,
@@ -731,6 +987,7 @@ class Greeter(Agent):
             self._chat_ctx = chat_ctx.copy()
 
     async def on_enter(self) -> None:
+        """Open this agent's turn as it takes over the call."""
         if not self._initial:
         # This opening turn withholds the agent's own handoffs (B3: an agent that can
         # hand the call back before it has said anything ping-pongs). The framework's
@@ -743,24 +1000,54 @@ class Greeter(Agent):
         await dev_say(self.session, "Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?")
 
     @function_tool
-    async def to_reservations(self, ctx: RunContext):
+    async def to_reservations(self, ctx: RunContext) -> Agent:
         """Caller wants to book a table for a normal dine-in visit."""
         return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
 
     @function_tool
-    async def to_events(self, ctx: RunContext):
+    async def to_events(self, ctx: RunContext) -> Agent:
         """Caller wants to plan a private event, party, or large group booking."""
         return Events(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
 
 
 class Reservations(Agent):
-    def tts_node(self, text, model_settings):
+    """The reservations agent, compiled from its entry in agent.yaml."""
+
+    def tts_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[rtc.AudioFrame]:
+        """Synthesize speech through the dev feed's wrapper.
+
+        Args:
+            text: The text to speak.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The synthesized audio frames.
+        """
         return dev_metrics.dev_tts_node(self, text, model_settings)
 
-    def llm_node(self, chat_ctx, tools, model_settings):
+    def llm_node(
+        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+        """Ask the model, through the dev feed's wrapper.
+
+        Args:
+            chat_ctx: The conversation to send.
+            tools: The tools the model may call.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The model's chunks.
+        """
         return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
 
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+        """Build the agent.
+
+        Args:
+            chat_ctx: The conversation a handoff carries in.
+        """
         super().__init__(
             instructions=RESERVATIONS_PROMPT,
             chat_ctx=chat_ctx,
@@ -770,6 +1057,7 @@ class Reservations(Agent):
             self._chat_ctx = chat_ctx.copy()
 
     async def on_enter(self) -> None:
+        """Open this agent's turn as it takes over the call."""
         # This agent took over via handoff; let its own instructions drive the
         # opening (the prompt already says not to re-greet).
         # This opening turn withholds the agent's own handoffs (B3: an agent that can
@@ -778,10 +1066,10 @@ class Reservations(Agent):
         # its filter follows the context of everything this reply starts: a live call
         # offered one specialist nothing but its delegate for ten turns while the
         # caller asked for another one (B: salon handoffs, 2026-08-20).
-        self.session.generate_reply(tools=[t.id for t in self.tools if t.id not in {"back_to_greeter"}])
+        self.session.generate_reply(tools=[t.id for t in self.tools if t.id != "back_to_greeter"])
 
     @function_tool
-    async def back_to_greeter(self, ctx: RunContext):
+    async def back_to_greeter(self, ctx: RunContext) -> Agent:
         """Caller wants something else, or to start over."""
         return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
 
@@ -835,32 +1123,84 @@ class Reservations(Agent):
 
 
 # --- tasks -----------------------------------------------------------------
+# The first request plus two retries, when a task's model answers with nothing.
+_TASK_MAX_ATTEMPTS = 3
+
+
 def _task_result(values: dict, unserved_request: str) -> dict:
-    """A step that could not serve a request names it on the way out, so the
-    agent that owns the step reads it off the result and takes it from there."""
+    """Add the unserved request to a step's result, if it named one.
+
+    A step that could not serve a request names it on the way out, so the agent
+    that owns the step reads it off the result and takes it from there.
+
+    Args:
+        values: The values the step recorded.
+        unserved_request: What the step could not serve, or an empty string.
+
+    Returns:
+        The values, with the unserved request added when there is one.
+    """
     if not unserved_request:
         return values
     return {**values, "unserved_request": unserved_request}
 
 
 class _RetryEmptyTaskResponseMixin:
+    """Retry a task's model request when it comes back empty."""
+
     _response_tool_call_ids: set[str]
 
-    def tts_node(self, text, model_settings):
+    def tts_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[rtc.AudioFrame]:
+        """Synthesize speech through the dev feed's wrapper.
+
+        Args:
+            text: The text to speak.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The synthesized audio frames.
+        """
         return dev_metrics.dev_tts_node(self, text, model_settings)
 
-    async def update_chat_ctx(self, chat_ctx, *, exclude_invalid_function_calls=False):
+    async def update_chat_ctx(
+        self, chat_ctx: ChatContext, *, exclude_invalid_function_calls: bool = False
+    ) -> None:
+        """Replace the task's context, keeping tool records the task cannot run.
+
+        Args:
+            chat_ctx: The context to install.
+            exclude_invalid_function_calls: Drop calls whose tool is gone.
+        """
         # History policy owns old tool records, including tools this task cannot run.
         assert isinstance(self, Agent)
         await Agent.update_chat_ctx(self, chat_ctx, exclude_invalid_function_calls=exclude_invalid_function_calls)
 
-    async def update_tools(self, tools):
+    async def update_tools(self, tools: list[Tool | llm.Toolset]) -> None:
+        """Replace the task's tools without losing its context.
+
+        Args:
+            tools: The tools the task may call from now on.
+        """
         assert isinstance(self, Agent)
         history = self.chat_ctx.copy()
         await Agent.update_tools(self, tools)
         await self.update_chat_ctx(history, exclude_invalid_function_calls=False)
 
-    async def llm_node(self, chat_ctx, tools, model_settings):
+    async def llm_node(
+        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+        """Ask the model, retrying up to twice when it answers with nothing.
+
+        Args:
+            chat_ctx: The conversation to send.
+            tools: The tools the model may call.
+            model_settings: The framework's per-turn model settings.
+
+        Yields:
+            The model's chunks, or a short apology when every attempt was empty.
+        """
         # Every generated user of this mixin is an AgentTask; narrow that
         # invariant here so the emitted project type-checks without a new base.
         assert isinstance(self, Agent)
@@ -903,7 +1243,7 @@ class _RetryEmptyTaskResponseMixin:
         finish_only = False
         request_tools: list[llm.Tool] = tools
         request_chat_ctx = chat_ctx
-        for attempt in range(3):
+        for attempt in range(_TASK_MAX_ATTEMPTS):
             has_response = False
             async for chunk in dev_llm_node(
                 self, Agent.default.llm_node, request_chat_ctx, request_tools, model_settings
@@ -943,8 +1283,10 @@ class _RetryEmptyTaskResponseMixin:
                     completed_tool_call_ids
                 )
                 return
-            if attempt < 2:
-                logger.warning("task response was empty; retrying %d/2", attempt + 1)
+            if attempt < _TASK_MAX_ATTEMPTS - 1:
+                logger.warning(
+                    "task response was empty; retrying %d/%d", attempt + 1, _TASK_MAX_ATTEMPTS - 1
+                )
 
                 if attempt == 0 and post_tool:
                     finish_only = True
@@ -1017,7 +1359,14 @@ class _RetryEmptyTaskResponseMixin:
 
 
 class ConfirmBooking(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
+    """The confirm_booking step, compiled from its entry in agent.yaml."""
+
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+        """Build the step.
+
+        Args:
+            chat_ctx: The conversation the step starts from.
+        """
         super().__init__(instructions=CONFIRM_BOOKING_PROMPT, chat_ctx=chat_ctx)
         if isinstance(chat_ctx, llm.ChatContext):
             self._chat_ctx = chat_ctx.copy()
@@ -1028,6 +1377,7 @@ class ConfirmBooking(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
+        """Open this step's turn as it is entered."""
         await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
         # The task's own instructions describe this step; let them drive the opening.
         self.session.generate_reply()
@@ -1058,7 +1408,15 @@ class ConfirmBooking(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         self._finish_call_id = ctx.function_call.call_id
 
 class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
+    """The find_slot step, compiled from its entry in agent.yaml."""
+
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, speak_opening: bool = False) -> None:
+        """Build the step.
+
+        Args:
+            chat_ctx: The conversation the step starts from.
+            speak_opening: Say the step's announcement as it is entered.
+        """
         super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx)
         if isinstance(chat_ctx, llm.ChatContext):
             self._chat_ctx = chat_ctx.copy()
@@ -1074,6 +1432,7 @@ class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
+        """Open this step's turn as it is entered."""
         await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
         # Said here, not at the seam, so it lands in this step's own context and
         # the model can see the sentence it just spoke. Not awaited: the opening
@@ -1109,7 +1468,14 @@ class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         self._finish_call_id = ctx.function_call.call_id
 
 class QualifyEvent(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
+    """The qualify_event step, compiled from its entry in agent.yaml."""
+
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+        """Build the step.
+
+        Args:
+            chat_ctx: The conversation the step starts from.
+        """
         super().__init__(instructions=QUALIFY_EVENT_PROMPT, chat_ctx=chat_ctx)
         if isinstance(chat_ctx, llm.ChatContext):
             self._chat_ctx = chat_ctx.copy()
@@ -1120,6 +1486,7 @@ class QualifyEvent(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
+        """Open this step's turn as it is entered."""
         await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
         # The task's own instructions describe this step; let them drive the opening.
         self.session.generate_reply()
@@ -1140,7 +1507,17 @@ class QualifyEvent(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
 
 
 # --- session ---------------------------------------------------------------
+# The loop keeps only a weak reference to a task, so a timer nobody holds can be
+# collected before it fires. Each one is held here until it finishes.
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+
+
 def prewarm(proc: JobProcess) -> None:
+    """Load what every call needs once, before the worker accepts a job.
+
+    Args:
+        proc: The worker process being warmed.
+    """
     # The FLOOR: how long silence has to last before the runtime treats the
     # caller as finished. From pace: balanced.
     #
@@ -1152,14 +1529,21 @@ def prewarm(proc: JobProcess) -> None:
     # turn_handling endpointing below, and that is where a 2.5s turn came from.
     proc.userdata["vad"] = silero.VAD.load(min_silence_duration=0.3)
 server = AgentServer()
+# How long a warm process may take to start, knowledge indexing included.
+LOCAL_INIT_TIMEOUT_SECS = 60.0
 server.setup_fnc = prewarm
 if os.getenv("UNMUTE_LOCAL_RUN") == "1":
     # One browser call needs one warm spare, not one index build per CPU.
-    server.update_options(num_idle_processes=1, initialize_process_timeout=60.0)
+    server.update_options(num_idle_processes=1, initialize_process_timeout=LOCAL_INIT_TIMEOUT_SECS)
 
 
 @server.rtc_session(agent_name="remy-fixture-livekit")
 async def entrypoint(ctx: JobContext) -> None:
+    """Run one call: build the session, start the entry agent and wire the call.
+
+    Args:
+        ctx: The job LiveKit dispatched for this call.
+    """
     require_env()
     session = AgentSession[Userdata](
         userdata=Userdata(),
@@ -1210,13 +1594,15 @@ async def entrypoint(ctx: JobContext) -> None:
             session.shutdown()
 
     @session.on("user_state_changed")
-    def _on_user_state_changed(ev) -> None:
+    def _on_user_state_changed(ev: UserStateChangedEvent) -> None:
         if ev.new_state != "away":
             return
         session.generate_reply(
             instructions="The caller went quiet. Briefly check whether they are still there."
         )
-        asyncio.create_task(_end_if_still_away())
+        _timer = asyncio.create_task(_end_if_still_away())
+        _BACKGROUND_TASKS.add(_timer)
+        _timer.add_done_callback(_BACKGROUND_TASKS.discard)
 
     # Input variables land before the session starts, so the greeting and the
     # prompts already see them (I.dispatch).
@@ -1228,7 +1614,9 @@ async def entrypoint(ctx: JobContext) -> None:
         await asyncio.sleep(1200)
         session.shutdown()  # conversation.max_duration
 
-    asyncio.create_task(_max_duration())
+    _timer = asyncio.create_task(_max_duration())
+    _BACKGROUND_TASKS.add(_timer)
+    _timer.add_done_callback(_BACKGROUND_TASKS.discard)
 
 
 # No __main__ block: this module is started through livekit-agents' supported

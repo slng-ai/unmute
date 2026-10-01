@@ -77,7 +77,7 @@ _FREE_CRACKERS_OVER = 25.00
 def _weekday():
     """The shop's own day. The container clock is UTC, and the offer's two
     excluded days are the whole reason this is read rather than assumed."""
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%A")
+    return datetime.datetime.now(datetime.UTC).strftime("%A")
 
 
 def _normalise(spoken):

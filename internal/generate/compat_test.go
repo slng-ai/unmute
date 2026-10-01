@@ -124,6 +124,24 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // monitor's parentless `event_loop_blocked` span, which made each of three
 // concurrent calls arrive as three traces.
 //
+// And on 2026-09-30, for the whole emitted Python surface: every module the
+// code targets write now passes the ruff rule set and ty check its own
+// pyproject.toml declares (internal/generate/pyproject.go). Type hints and
+// Google docstrings on every function, comprehensions and built-ins where a
+// loop only collected, named constants, sorted imports, and the checker block
+// at the end of every pyproject.toml. Nothing here changes what a call does;
+// the few rewrites that are not byte-for-byte equivalent (a malformed local
+// call-facts seed now logs a warning instead of raising, fire-and-forget
+// tasks are held in a set so they cannot be collected mid-flight, a hosted
+// api_request tool imports the httpx it calls) are named in the commits.
+// One changes what a model reads, and only on Pipecat: a tool whose
+// description runs to several lines (every knowledge tool) wrote those lines
+// flush left, so docstring_parser never found the Args section below them. The
+// model read the Args block as the end of the description, and the parameter
+// went out with no description at all. The lines are indented now, the section
+// parses, and the parameter carries its description. LiveKit reads the same
+// text as before, measured on salon-concierge and pharmacy-refills.
+//
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {

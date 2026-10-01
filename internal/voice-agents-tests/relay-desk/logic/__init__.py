@@ -14,8 +14,8 @@ from typing import Any, Literal
 # phone app's log.
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
-from pydantic_ai import Agent  # noqa: E402 - after the banner switch
-from pydantic_ai.messages import (  # noqa: E402
+from pydantic_ai import Agent
+from pydantic_ai.messages import (
     FunctionToolResultEvent,
     ModelMessage,
     ModelRequest,
@@ -26,9 +26,13 @@ from pydantic_ai.messages import (  # noqa: E402
     TextPartDelta,
     UserPromptPart,
 )
-from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings  # noqa: E402
-from pydantic_ai.providers.openai import OpenAIProvider  # noqa: E402
-from tools.opening_hours import opening_hours as read_hours  # noqa: E402
+from pydantic_ai.models.openai import (
+    OpenAIChatModel,
+    OpenAIChatModelSettings,
+)
+from pydantic_ai.providers.openai import OpenAIProvider
+
+from tools.opening_hours import opening_hours as read_hours
 
 Day = Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 

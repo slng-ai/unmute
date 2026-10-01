@@ -372,6 +372,10 @@ type livekitVar struct {
 	PyType      string
 	Default     string // Python literal; "None" when the spec declares none
 	Description string
+	// LiteralDefault marks a variable typed as a set of allowed words that also
+	// starts on a value: the author's default is not checked against the words,
+	// so a type checker can disagree with it (an empty string, say).
+	LiteralDefault bool
 }
 
 // livekitCallStartVar is one dispatched input variable, hydrated from the job
@@ -1069,9 +1073,11 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 		"pyq":          pyQuote,
 		"resultAccess": resultAccess,
 		"join":         strings.Join,
+		"checkers":     pythonCheckers,
 		"localRunEnv":  func() string { return LocalRunEnv },
 
 		"triple":     pyTriple,
+		"doc":        pyDoc,
 		"mcpTimeout": func() int { return mcpTimeoutSeconds },
 		// SLNG's contract for a hosted code tool, named once in Go so the
 		// template cannot drift from what internal/generate/hosted_tool.go says
@@ -1085,6 +1091,9 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("livekit template %s: %w", name, err)
+	}
+	if strings.HasSuffix(name, ".py") {
+		return wrapLongImports(buf.Bytes()), nil
 	}
 	return buf.Bytes(), nil
 }
@@ -1154,4 +1163,60 @@ func livekitReport(agent *ir.Agent, data livekitData, files []File, bindings []i
 		return nil, err
 	}
 	return append(out, '\n'), nil
+}
+
+// pyDoc renders a tool description as the docstring the framework reads it
+// from, at the indent of the body it opens, and marks the docstring rules the
+// text would trip. The words are the model's tool description, so they cannot
+// be reshaped to satisfy a linter (a summary line, a blank second line, a full
+// stop). The layout can: every continuation line is indented to the body and a
+// multi-line docstring closes on its own line, which is what ruff format would
+// write anyway, and Python strips that indent (inspect.cleandoc) before the
+// framework reads it, so the model sees the same text either way. A noqa is
+// added only for a rule the text really breaks, because an unused one is
+// itself a finding.
+func pyDoc(indent int, s string) string {
+	body := strings.TrimSpace(s)
+	if body == "" {
+		return pyTriple(s)
+	}
+	lines := strings.Split(body, "\n")
+	var codes []string
+	if len(lines) > 1 && strings.TrimSpace(lines[1]) != "" {
+		codes = append(codes, "D205")
+	}
+	first := strings.TrimSpace(lines[0])
+	if !strings.ContainsAny(first[len(first)-1:], ".?!") {
+		codes = append(codes, "D415")
+	}
+	if first[0] >= 'a' && first[0] <= 'z' {
+		codes = append(codes, "D403")
+	}
+	if strings.Contains(s, `\`) {
+		codes = append(codes, "D301")
+	}
+	doc := pyTriple(indentDocLines(lines, strings.Repeat(" ", indent)))
+	if len(codes) == 0 {
+		return doc
+	}
+	slices.Sort(codes)
+	return doc + "  # noqa: " + strings.Join(codes, ", ")
+}
+
+// indentDocLines joins a docstring's lines with every continuation line at
+// pad, blank lines left empty, and a closing line of its own when there is
+// more than one line.
+func indentDocLines(lines []string, pad string) string {
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(lines[0]))
+	for _, line := range lines[1:] {
+		b.WriteString("\n")
+		if line = strings.TrimRight(line, " \t\r"); strings.TrimSpace(line) != "" {
+			b.WriteString(pad + line)
+		}
+	}
+	if len(lines) > 1 {
+		b.WriteString("\n" + pad)
+	}
+	return b.String()
 }

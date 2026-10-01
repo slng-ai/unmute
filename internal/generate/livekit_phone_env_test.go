@@ -15,7 +15,7 @@ func TestLiveKitSIPBuildsCallContextBeforeHydration(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentPy := artifactFile(t, artifact, "agent.py")
-	if !strings.Contains(agentPy, "from livekit import rtc") {
+	if !pyImports(agentPy, "livekit", "rtc") {
 		t.Error("warm-only SIP variables use rtc.ParticipantKind without importing rtc")
 	}
 	entryAt := strings.Index(agentPy, "async def entrypoint(ctx: JobContext) -> None:")

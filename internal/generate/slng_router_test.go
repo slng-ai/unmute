@@ -343,7 +343,9 @@ func TestSlngRouterSnapshotReadsLiveState(t *testing.T) {
 		want := "_slng_template_variables(session.userdata,"
 		frozen := "_slng_template_variables(slng_state,"
 		if tc.provider == ir.ProviderPipecat {
-			want = "_slng_template_variables(state,"
+			// The service holds the live state object it was given and reads it on
+			// every request, so the argument is `self._slng_state`, not a copy.
+			want = "_slng_template_variables(\n            self._slng_state, _SLNG_TEMPLATE_PATHS"
 			frozen = ""
 		}
 		if !strings.Contains(source, want) {
@@ -434,7 +436,7 @@ func TestSlngRouterPipecatReadsTheVariablesPerRequest(t *testing.T) {
 	// every request, so there is nothing to count and nothing to forget: a write
 	// anywhere reaches the next request, including one made mid-turn, which is
 	// the gap the three frames left open.
-	if !strings.Contains(source, "def build_chat_completion_params(self, params_from_context) -> dict:") {
+	if !strings.Contains(source, "def build_chat_completion_params(self, params_from_context: Any) -> dict[str, Any]:") {
 		t.Errorf("pipecat emits no per-request parameter override, so a value written mid-turn is one turn late:\n%s",
 			source)
 	}

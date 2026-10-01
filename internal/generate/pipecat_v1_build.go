@@ -162,6 +162,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		pt, def := stateField(v, false)
 		data.Variables = append(data.Variables, pipecatVariable{
 			Name: name, PyType: pt, Default: def, Source: string(v.Source), Description: oneLine(v.Description),
+			LiteralDefault: defaultOutsideLiteral(pt, def),
 		})
 		// Dispatched input variables hydrate before the greeting on every
 		// channel, not just telephony: the web and console dev paths read the
@@ -273,6 +274,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		data.NeedsPrefetchClock, data.NeedsPrefetchAsync = block.NeedsClock, block.NeedsAsync
 		data.NeedsPrefetchLocal, data.NeedsPrefetchSeed = block.NeedsLocal, block.NeedsSeed
 		data.NeedsHTTPX = data.NeedsHTTPX || prefetchNeedsHTTPX(agent)
+		data.UsesHTTPX = data.UsesHTTPX || prefetchNeedsHTTPX(agent)
 		data.NeedsInspect = data.NeedsInspect || block.NeedsLocal
 		data.PrefetchRunbook, _ = PrefetchRunbook(agent, target)
 		// A pre-fetched tool reaches no agent's tools: list by design (FR-003),
@@ -700,8 +702,8 @@ func setImportNeeds(data *pipecatData) {
 			// never used, failed the emitted project's own ruff gate, and declared
 			// no httpx in pyproject.toml to back it up. livekit reads URLEnv here
 			// and always did.
-			if t.URLEnv != "" {
-				data.NeedsHTTPX = true // webhook tool POSTs with httpx
+			if t.URLEnv != "" || t.HostedRequest {
+				data.NeedsHTTPX, data.UsesHTTPX = true, true // webhook tool POSTs with httpx
 			}
 			if t.Auth != nil {
 				data.AuthKinds.add(t.Auth.Kind) // one helper per scheme in use (V8)
@@ -741,8 +743,8 @@ func setImportNeeds(data *pipecatData) {
 					if t.Local {
 						data.NeedsInspect = true
 					}
-					if t.URLEnv != "" {
-						data.NeedsHTTPX = true // flows tool handlers POST with httpx
+					if t.URLEnv != "" || t.HostedRequest {
+						data.NeedsHTTPX, data.UsesHTTPX = true, true // flows tool handlers POST with httpx
 					}
 					if t.Auth != nil {
 						data.AuthKinds.add(t.Auth.Kind)

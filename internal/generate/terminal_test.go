@@ -90,14 +90,14 @@ func TestTerminalToolEndsTheStepOnBothTargets(t *testing.T) {
 	}
 	pipecat := terminalModule(t, "pipecat", "bot.py")
 	for _, want := range []string{
-		"async def _do_book_terminal_book_book_it(self, args, flow_manager):",
+		"async def _do_book_terminal_book_book_it(\n        self, args: Any, flow_manager: FlowManager\n    ) -> tuple[dict[str, Any], Any]:",
 		"result = await _flow_tool_book_it(args, flow_manager, state=self.state)",
 		`_values = _save_result("book", self.state, result)`,
 		// The wrapper saves once and hands the saved values to the finish
 		// handler's tail. Going through the finish handler saved twice, and a
 		// second save is a second entry on every list an assign appends to.
 		"return await self._do_book_advance_book(_values)",
-		"async def _do_book_advance_book(self, _values):",
+		"async def _do_book_advance_book(\n        self, _values: dict[str, Any]\n    ) -> tuple[dict[str, Any], Any]:",
 	} {
 		if !strings.Contains(pipecat, want) {
 			t.Errorf("pipecat bot.py missing %q", want)
@@ -178,9 +178,9 @@ func TestASucceededMutationIsClosedForTheRestOfTheInvocation(t *testing.T) {
 func TestTheCarriedTurnReachesTheOwnerOnce(t *testing.T) {
 	livekit := terminalModule(t, "livekit", "agent.py")
 	for _, want := range []string{
-		"def _newest_caller_turn(chat_ctx):",
-		"def _insert_carried_turn(owner_ctx, carried):",
-		"if owner_ctx.get_by_id(item.id) is None:",
+		"def _newest_caller_turn(chat_ctx: llm.ChatContext) -> llm.ChatMessage | None:",
+		"def _insert_carried_turn(owner_ctx: llm.ChatContext, carried: list[llm.ChatMessage | None]) -> None:",
+		"if item is not None and owner_ctx.get_by_id(item.id) is None:",
 		"_insert_carried_turn(owner_ctx, _carried)",
 	} {
 		if !strings.Contains(livekit, want) {
@@ -189,11 +189,11 @@ func TestTheCarriedTurnReachesTheOwnerOnce(t *testing.T) {
 	}
 	pipecat := terminalModule(t, "pipecat", "bot.py")
 	for _, want := range []string{
-		"def _newest_caller_message(messages):",
+		"def _newest_caller_message(messages: list[Any]) -> dict[str, Any] | None:",
 		// Decided where the turn is captured, by counting the caller's turns
 		// against the owner's snapshot: matching on text dropped a caller who
 		// said the same word twice.
-		"def _caller_turns(messages):",
+		"def _caller_turns(messages: list[Any]) -> int:",
 		"self._do_book_snapshot_turns = _caller_turns(self.context.get_messages())",
 		"if _caller_turns(_messages) > self._do_book_snapshot_turns:",
 		"_carried_messages(self._do_book_carried_turn)",

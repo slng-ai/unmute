@@ -255,14 +255,21 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 	data.PydanticImports = PydanticImports(data.NeedsField, data.TypedState)
 	data.NeedsDataclassField = StateNeedsDataclassField(agent) || PrefetchUnconfirmed(agent)
-	var typingNames []string
-	if needAnnotated {
-		typingNames = append(typingNames, "Annotated")
+	// Sorted the way the emitted import line has to be: Annotated, Any, Literal.
+	typingImports := func(needAny bool) string {
+		var names []string
+		if needAnnotated {
+			names = append(names, "Annotated")
+		}
+		if needAny {
+			names = append(names, "Any")
+		}
+		if needLiteral {
+			names = append(names, "Literal")
+		}
+		return strings.Join(names, ", ")
 	}
-	if needLiteral {
-		typingNames = append(typingNames, "Literal")
-	}
-	data.TypingImports = strings.Join(typingNames, ", ")
+	data.TypingImports = typingImports(false)
 
 	// Local handler files ride the artifact (tools/<name>.py); mcp mounts and
 	// local wrappers pull their imports.
@@ -280,7 +287,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			}
 		}
 		for _, tool := range tools {
-			if tool.URLEnv != "" {
+			if tool.URLEnv != "" || tool.HostedRequest {
 				data.NeedsHTTPX = true // webhook tool POSTs with httpx (agents + tasks own them)
 			}
 			if tool.Auth != nil {
@@ -404,6 +411,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		anno, def := stateField(v, true)
 		data.Vars = append(data.Vars, livekitVar{
 			Name: name, PyType: pyType(v.Type), Anno: anno, Default: def, Description: oneLine(v.Description),
+			LiteralDefault: defaultOutsideLiteral(anno, def),
 		})
 		if v.Source == ir.VariableSourceCallStart || v.Source == "" {
 			data.CallStartVars = append(data.CallStartVars, livekitCallStartVar{
@@ -581,6 +589,11 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// The emitted mixin names llm.LLM to tell a per-class model override from
 	// the session default, the way the framework's own activity does.
 	data.NeedsLLM = data.NeedsLLM || slng.Any()
+	// The provenance hook annotates its argument as an httpx.Response.
+	data.NeedsHTTPX = data.NeedsHTTPX || slng.Any()
+	// _slng_llm_node serves agents and tasks, which share no base class that
+	// declares _slng_scope, so its first argument is typed Any.
+	data.TypingImports = typingImports(slng.Any())
 	knowledge, err := loweredKnowledge(agent, env)
 	if err != nil {
 		return livekitData{}, err
@@ -2045,4 +2058,15 @@ func pySuccessLiteral(success map[string][]string) string {
 		parts = append(parts, pyQuote(field)+": ("+strings.Join(values, ", ")+",)")
 	}
 	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// defaultOutsideLiteral reports a state variable typed as a set of allowed
+// words whose authored default is not one of them, which a type checker refuses.
+func defaultOutsideLiteral(anno, def string) bool {
+	_, words, found := strings.Cut(anno, "Literal[")
+	if !found || !strings.HasPrefix(def, `"`) {
+		return false
+	}
+	words, _, _ = strings.Cut(words, "]")
+	return !strings.Contains(words, def)
 }

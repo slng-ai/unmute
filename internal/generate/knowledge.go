@@ -202,7 +202,7 @@ func renderKnowledgeModule(data knowledgeData) ([]byte, error) {
 	if err := tmpl.Execute(&out, data); err != nil {
 		return nil, fmt.Errorf("knowledge template: %w", err)
 	}
-	return out.Bytes(), nil
+	return wrapLongImports(out.Bytes()), nil
 }
 
 // knowledgeRelevanceInstruction is appended to every knowledge tool's

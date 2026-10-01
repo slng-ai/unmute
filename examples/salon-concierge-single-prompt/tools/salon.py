@@ -338,7 +338,7 @@ def _demo():
     with ThreadPoolExecutor(max_workers=16) as pool:
         for suffix in range(20, 30):
             concurrent = list(
-                pool.map(lambda _: find_or_create_customer(f"1555010 20{suffix}"), range(16))
+                pool.map(lambda _, suffix=suffix: find_or_create_customer(f"1555010 20{suffix}"), range(16))
             )
             assert {result["status"] for result in concurrent} <= {"created", "existing"}
             assert len({result["customer_phone"] for result in concurrent}) == 1

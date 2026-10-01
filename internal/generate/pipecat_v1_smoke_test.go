@@ -1060,7 +1060,9 @@ asyncio.run(main())
 const pipecatStaticCheckScript = `"""Smoke check: the generated project passes Ruff and ty."""
 import subprocess
 
-subprocess.run(["ruff", "check", "."], check=True)
+# The project, not this script: the emitted pyproject's rules are for
+# generated code, and smoke_check.py is the harness.
+subprocess.run(["ruff", "check", "--extend-exclude", "smoke_check.py", "."], check=True)
 # smoke_check.py is this harness, not generated output, and the knowledge stub
 # spliced into it imports knowledge and llama_index, which a package with no
 # knowledge base does not install. Ruff still reads it; ty resolves imports.
@@ -2227,57 +2229,8 @@ func TestSmokeV24PipecatDailyTransferStaticCheck(t *testing.T) {
 	runPipecatSmokeScript(t, "daily_carrier", nil, nil, pipecatStaticCheckScript)
 }
 
-// TestSmokeV24PipecatExamplesStaticCheck holds raw Pipecat output to the bar
-// LiveKit has had since V26, over the same examples: `uv run ruff check .`, the
-// exact command a user would run in a generated project. It closes the gap where
-// a lint regression in a Pipecat template was caught on one driver and missed on
-// the other, and it only became runnable once the emitted pyproject declared a
-// pinned ruff of its own.
-//
-// ty stays on simple-prompt (TestSmokeV24PipecatSimplePromptStaticCheck) rather
-// than widening here: run over a task-bearing package it reports real type
-// errors in emitted task code (self.context is `Unknown | None` at the snapshot
-// and aggregator call sites, self.state likewise where results are assigned).
-// Those are driver bugs to fix in their own change, not something to widen the
-// gate into and leave red.
-func TestSmokeV24PipecatExamplesStaticCheck(t *testing.T) {
-	if _, err := exec.LookPath("uv"); err != nil {
-		t.Skip("uv not available")
-	}
-	for _, example := range []string{"simple-prompt", "salon-concierge", "remy"} {
-		t.Run(example, func(t *testing.T) {
-			pkg, err := spec.Load(examplePackagePath(example))
-			if err != nil {
-				t.Fatal(err)
-			}
-			agent, err := ir.Build(pkg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
-			if err != nil {
-				t.Fatal(err)
-			}
-			// Only the emitted project lands here: no smoke script alongside, so
-			// ruff sees exactly what a user would compile.
-			dir := t.TempDir()
-			for _, file := range artifact.Files {
-				path := filepath.Join(dir, file.Path)
-				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(path, file.Content, 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			cmd := uvCommand("run", "ruff", "check", ".")
-			cmd.Dir = dir
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("uv run ruff check . failed:\n%s", out)
-			}
-		})
-	}
-}
+// TestSmokeEmittedProjectsPassTheirOwnGate (emitted_static_smoke_test.go)
+// holds every example's Pipecat output to ruff, ty, format and an import.
 
 func runPipecatSmoke(t *testing.T, example string, mutate func(*ir.Target), mutateAgent func(*ir.Agent)) {
 	t.Helper()

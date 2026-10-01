@@ -21,22 +21,36 @@ import os
 import re
 import sys
 import uuid
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
-from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from dotenv import load_dotenv
 from loguru import logger
-from pydantic import BaseModel, TypeAdapter, ValidationError
-
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.bus import BusBridgeProcessor
-from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE
-from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMRunFrame, LLMUpdateSettingsFrame, TTSSpeakFrame
+from pipecat.flows import (
+    NO_RESPONSE,
+    ContextStrategy,
+    ContextStrategyConfig,
+    FlowManager,
+    FlowsFunctionSchema,
+    NodeConfig,
+)
+from pipecat.frames.frames import (
+    EndFrame,
+    FunctionCallResultProperties,
+    LLMMessagesAppendFrame,
+    LLMRunFrame,
+    LLMUpdateSettingsFrame,
+    TTSSpeakFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -46,21 +60,24 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams, LLMService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import LLMSettings
+from pipecat.services.stt_service import STTService
+from pipecat.services.tts_service import TTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.utils.http import connection_limits
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
-
-from dev_metrics import install_dev_metrics
-
-from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai.llm import OpenAILLMService
 from pipecat_slng import SlngTTSService
+from pydantic import BaseModel, TypeAdapter, ValidationError
+
+from dev_metrics import DevReporter, install_dev_metrics
 
 load_dotenv()
 
@@ -68,6 +85,7 @@ _LOGGING_CONFIGURED = False
 
 
 def _configure_logging() -> None:
+    """Send log output to stderr at UNMUTE_LOG_LEVEL, once per process."""
     global _LOGGING_CONFIGURED
     if _LOGGING_CONFIGURED:
         return
@@ -77,6 +95,14 @@ def _configure_logging() -> None:
 
 
 MAIN_NAME = "main"
+# The longest a webhook tool waits for its endpoint before the call fails.
+WEBHOOK_TIMEOUT_SECS = 30.0
+# The router client's connection limits, restated from the base service's own.
+ROUTER_KEEPALIVE_CONNECTIONS = 100
+ROUTER_MAX_CONNECTIONS = 1000
+# Tasks that end the call later. A task nobody references can be collected
+# while it sleeps, so each is held here until it finishes.
+_END_TASKS: set[asyncio.Task[None]] = set()
 # Provider credentials only. The telephony route's environment (Redis, carrier
 # keys, the public URL) is required by telephony.py, not here, so a telephony
 # package still runs in the browser with nothing but model keys (V10/B3).
@@ -91,6 +117,11 @@ IGNORE_PHRASES = ["okay", "right", "uh-huh"]
 
 
 def require_env() -> None:
+    """Fail at startup, naming every required environment variable that is unset.
+
+    Raises:
+        RuntimeError: When at least one name in REQUIRED_ENV has no value.
+    """
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
@@ -111,17 +142,20 @@ def require_env() -> None:
 # every way out swaps the owner's back.
 
 
-def _slng_config_fast_reasoning() -> dict:
-    """The model configuration, sent inline in the body of every think request.
+def _slng_config_fast_reasoning() -> dict[str, Any]:
+    """Build the model configuration sent inline in every think request.
 
     Credentials are read here rather than at import, so a missing one is reported
     by require_env() alongside every other name instead of raising a KeyError
     before anything has checked. No value is written into this file: each is the
     name of an environment variable.
+
+    Returns:
+        The configuration body for the router's think request.
     """
     return {"tiers": {"1": [{"endpoint": {"api_key": os.environ["OPENAI_API_KEY"], "url": "https://api.openai.com/v1"}, "model": "gpt-5.6-luna", "weight": 100}]}}
 
-async def _slng_log_provenance(response) -> None:
+async def _slng_log_provenance(response: Any) -> None:
     """Say where this answer came from, once per think request.
 
     The router states this only in response headers, and neither framework hands
@@ -139,19 +173,22 @@ async def _slng_log_provenance(response) -> None:
     It also logs only a router think request. The scope header is what lets the
     line name a scope at all, so a request without one is a request this hook
     could not describe.
+
+    Args:
+        response: The httpx response, whose body has not been read yet.
     """
     try:
         scope = response.request.headers.get("X-Slng-Agent-Id")
         if not scope:
             return
+        headers = response.headers
         # Field order is the contract, and the gate reads it off this line.
-        fields = ["scope=" + scope]
-        fields.append("source=" + response.headers.get("x-slng-response-source", "unknown"))
-        if response.headers.get("x-slng-cache-layer"):
-            fields.append("layer=" + response.headers["x-slng-cache-layer"])
-        if response.headers.get("x-slng-model"):
-            fields.append("model=" + response.headers["x-slng-model"])
-        fields.append("request_id=" + response.headers.get("x-slng-request-id", "unknown"))
+        fields = ["scope=" + scope, "source=" + headers.get("x-slng-response-source", "unknown")]
+        if layer := headers.get("x-slng-cache-layer"):
+            fields.append("layer=" + layer)
+        if model := headers.get("x-slng-model"):
+            fields.append("model=" + model)
+        fields.append("request_id=" + headers.get("x-slng-request-id", "unknown"))
         logger.info("slng router: " + " ".join(fields))
     except Exception:  # noqa: BLE001 - a log line must never end a call
         logger.debug("could not read the router's provenance headers", exc_info=True)
@@ -181,11 +218,26 @@ class _SlngRouterLLMService(OpenAILLMService):
     what makes the two targets refresh at the same point.
     """
 
-    def __init__(self, *args, slng_state=None, **kwargs):
+    def __init__(self, *args: Any, slng_state: Any = None, **kwargs: Any) -> None:
+        """Build the service and keep the call state its request body reads.
+
+        Args:
+            *args: Passed to the base service.
+            slng_state: The live call state, read on every request.
+            **kwargs: Passed to the base service.
+        """
         super().__init__(*args, **kwargs)
         self._slng_state = slng_state
 
-    def build_chat_completion_params(self, params_from_context) -> dict:
+    def build_chat_completion_params(self, params_from_context: Any) -> dict[str, Any]:
+        """Add the live template variables to the request body.
+
+        Args:
+            params_from_context: The invocation parameters the base service built.
+
+        Returns:
+            The request parameters with `template_variables` filled from state.
+        """
         params = super().build_chat_completion_params(params_from_context)
         scope = (params.get("extra_headers") or {}).get("X-Slng-Agent-Id", "")
         body = dict(params.get("extra_body") or {})
@@ -195,14 +247,35 @@ class _SlngRouterLLMService(OpenAILLMService):
         params["extra_body"] = body
         return params
 
-    def create_client(self, api_key=None, base_url=None, **kwargs):
+    def create_client(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        organization: str | None = None,
+        project: str | None = None,
+        default_headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> AsyncOpenAI:
+        """Build the client with a hook that logs where each answer came from.
+
+        Args:
+            api_key: The router's API key.
+            base_url: The router's base URL.
+            organization: Accepted for the base signature and not forwarded.
+            project: Accepted for the base signature and not forwarded.
+            default_headers: Accepted for the base signature and not forwarded.
+            **kwargs: Accepted for the base signature and not forwarded.
+
+        Returns:
+            An AsyncOpenAI client with the provenance response hook installed.
+        """
         return AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
             http_client=DefaultAsyncHttpxClient(
-                limits=httpx.Limits(
-                    max_keepalive_connections=100,
-                    max_connections=1000,
+                limits=connection_limits(
+                    max_keepalive_connections=ROUTER_KEEPALIVE_CONNECTIONS,
+                    max_connections=ROUTER_MAX_CONNECTIONS,
                     keepalive_expiry=None,
                 ),
                 event_hooks={"response": [_slng_log_provenance]},
@@ -216,12 +289,22 @@ _SLNG_TEMPLATE_PATHS = {"safe-core-router-v3:billing": ["customer_id", "caller_a
 _SLNG_SCOPE_SITES = {"safe-core-router-v3:task.collect": "task:collect", "safe-core-router-v3:task.confirm": "task:confirm"}
 
 
-def _slng_template_variables(state, names, *, scope="") -> dict:
-    """The values the router substitutes into the prompt's placeholders.
+def _slng_template_variables(
+    state: Any, names: Sequence[str], *, scope: str = ""
+) -> dict[str, str]:
+    """Build the values the router substitutes into the prompt's placeholders.
 
     A name with no value yet sends the empty string, never None and never the text
     "None". A value over the router's limit is truncated with a warning rather
     than dropped: an over-long value must not end a live call.
+
+    Args:
+        state: The call state, or None before one exists.
+        names: The placeholder names the prompt at this scope reads.
+        scope: The cache scope, which picks the prompt site for a path lookup.
+
+    Returns:
+        Each name mapped to its text, bounded by the router's limit.
     """
     values = {}
     for name in names:
@@ -243,15 +326,31 @@ def _slng_template_variables(state, names, *, scope="") -> dict:
     return values
 
 
-def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None):
-    """Keep every direct function call terminal, even on malformed input."""
+def _direct_tool(
+    fn: Callable[..., Any] | None = None,
+    *,
+    cancel_on_interruption: bool = True,
+    timeout_secs: float | None = None,
+) -> Any:
+    """Keep every direct function call terminal, even on malformed input.
 
-    def decorate(handler):
+    Args:
+        fn: The handler, when used as a bare `@_direct_tool`.
+        cancel_on_interruption: Whether the caller speaking cancels the call.
+        timeout_secs: How long the framework waits for the handler.
+
+    Returns:
+        The decorated handler, or a decorator when called with options.
+    """
+
+    def decorate(handler: Callable[..., Any]) -> Any:
+        """Wrap one handler so a bad or failing call still resolves."""
         signature = inspect.signature(handler)
         declared = set(signature.parameters) - {"self", "params"}
 
         @functools.wraps(handler)
-        async def guarded(*args, **kwargs):
+        async def guarded(*args: Any, **kwargs: Any) -> Any:
+            """Run the handler, resolving the call itself on bad input or failure."""
             params = kwargs.get("params")
             if params is None:
                 params_index = 1 if "self" in signature.parameters else 0
@@ -272,7 +371,8 @@ def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None):
             resolved = False
             original_result_callback = params.result_callback
 
-            async def resolve(result, **callback_kwargs):
+            async def resolve(result: Any, **callback_kwargs: Any) -> Any:
+                """Record that the call was resolved, then hand the result on."""
                 nonlocal resolved
                 resolved = True
                 return await original_result_callback(result, **callback_kwargs)
@@ -327,7 +427,7 @@ require_env()
 # no phone route, so nothing real dials it. It is here for a simulated caller,
 # such as a Coval run against this bot on your laptop.
 async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
-    """The carrier's stream, with the call ended by closing the socket.
+    """Build the carrier's stream, with the call ended by closing the socket.
 
     Used by a package that holds no carrier credentials at all, which needs a
     transport that never asks a carrier to hang a call up.
@@ -344,24 +444,33 @@ async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
     number points at has nothing after `<Connect>`. Declare a connection and this
     function is not emitted at all: the framework's path is used, and the agent
     ends calls through the carrier's own call control.
+
+    Args:
+        runner_args: The runner's arguments for a websocket session.
+
+    Returns:
+        The Twilio Media Streams transport for this call.
     """
+    from pipecat.runner.types import WebSocketRunnerArguments
     from pipecat.runner.utils import parse_telephony_websocket
     from pipecat.serializers.twilio import TwilioFrameSerializer
     from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
 
-    transport_type, call_data = await parse_telephony_websocket(runner_args.websocket)
+    # Only a websocket session reaches this function; the base type has no socket.
+    websocket_args = cast(WebSocketRunnerArguments, runner_args)
+    transport_type, call_data = await parse_telephony_websocket(websocket_args.websocket)
     # Set the same two attributes the framework's path sets, so _phone_session
     # above reads the handshake the same way whichever path built the transport.
-    runner_args.transport_type = transport_type
+    setattr(runner_args, "transport_type", transport_type)  # noqa: B010 - not declared on RunnerArguments
     runner_args.call_data = call_data
-    params = transport_params[transport_type]()
+    params = cast(FastAPIWebsocketParams, transport_params[transport_type]())
     params.add_wav_header = False
     params.serializer = TwilioFrameSerializer(
         stream_sid=call_data["stream_id"],
         call_sid=call_data["call_id"],
         params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
     )
-    return FastAPIWebsocketTransport(websocket=runner_args.websocket, params=params)
+    return FastAPIWebsocketTransport(websocket=websocket_args.websocket, params=params)
 
 
 # --- declared state ----------------------------------------------------------
@@ -385,12 +494,29 @@ class _StateRefused(Exception):
     """
 
     def __init__(self, message: str) -> None:
+        """Keep the message the model will be shown.
+
+        Args:
+            message: What was wrong with the value, worded for the model.
+        """
         super().__init__(message)
         self.message = message
 
 
-def _typed(field, adapter, value):
-    """Validate one value entering the declared state."""
+def _typed(field: str, adapter: TypeAdapter, value: object) -> object:
+    """Validate one value entering the declared state.
+
+    Args:
+        field: Name of the declared value, used in the refusal message.
+        adapter: The adapter for the declared type.
+        value: The value to validate.
+
+    Returns:
+        The validated value.
+
+    Raises:
+        _StateRefused: If the value does not fit the declared type.
+    """
     try:
         return adapter.validate_python(value)
     except ValidationError as error:
@@ -400,14 +526,15 @@ def _typed(field, adapter, value):
         raise _StateRefused(f"{named}: {first['msg']}") from None
 
 
-def _append_entry(entries, value):
-    """One entry onto a declared list, unless it is already on it.
+def _append_entry(entries: list, value: object) -> None:
+    """Add one entry onto a declared list, unless it is already on it.
 
     A step re-entered mid-call can read a value through an explicit prompt
-    reference and hand it straight back, which is not a second thing happening. One live call
-    entered the booking step four times and finished three of them immediately,
-    each with the same appointment it had recorded on the first, so one booking
-    became four entries and the caller's recap listed a booking four times.
+    reference and hand it straight back, which is not a second thing happening.
+    One live call entered the booking step four times and finished three of them
+    immediately, each with the same appointment it had recorded on the first, so
+    one booking became four entries and the caller's recap listed a booking four
+    times.
 
     An object carries its own identity, so an identical one is the same thing
     reported twice. A plain value is not: two bookings really do give two
@@ -416,6 +543,10 @@ def _append_entry(entries, value):
 
     Nothing absent is added either, which is how a step that concluded nothing
     this time finishes without inventing an entry.
+
+    Args:
+        entries: The list to add to, changed in place.
+        value: The entry to add.
     """
     if value is None:
         return
@@ -424,12 +555,18 @@ def _append_entry(entries, value):
     entries.append(value)
 
 
-def _plain(value):
-    """A validated value as plain data.
+def _plain(value: object) -> object:
+    """Turn a validated value into plain data.
 
     Plain data is the only shape both frameworks accept back from a tool: one
     refuses a BaseModel outright and drops the whole tool result with a log
     line, the other cannot serialise one at all.
+
+    Args:
+        value: A validated value, possibly holding models.
+
+    Returns:
+        The same value with every model replaced by its JSON-mode dict.
     """
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
@@ -440,8 +577,8 @@ def _plain(value):
     return value
 
 
-def _schema(adapter):
-    """One declared type's schema, with every $ref resolved into place.
+def _schema(adapter: TypeAdapter) -> object:
+    """Build one declared type's schema, with every $ref resolved into place.
 
     Pydantic emits $defs and a $ref for a shape that contains another shape, and
     this is not a formatting preference. Measured on one real request to the
@@ -459,20 +596,34 @@ def _schema(adapter):
 
     This target nests the schema inside one property and sends no strict flag,
     so it is the first case unless the refs are resolved here.
+
+    Args:
+        adapter: The adapter for the declared type.
+
+    Returns:
+        The JSON schema with no $defs and no local $ref left in it.
     """
     schema = adapter.json_schema()
     defs = schema.pop("$defs", {})
 
-    def resolve(node):
+    def resolve(node: object) -> object:
+        """Inline every local $ref under one schema node.
+
+        Args:
+            node: A schema node, or a list or scalar found inside one.
+
+        Returns:
+            The node with each local $ref replaced by its definition.
+        """
         if isinstance(node, list):
             return [resolve(item) for item in node]
         if not isinstance(node, dict):
             return node
         target = node.get("$ref")
         if isinstance(target, str) and target.startswith("#/$defs/"):
-            found = defs.get(target.rsplit("/", 1)[1], {})
+            found = resolve(defs.get(target.rsplit("/", 1)[1], {}))
             siblings = {key: value for key, value in node.items() if key != "$ref"}
-            return {**resolve(found), **siblings}
+            return {**found, **siblings} if isinstance(found, dict) else found
         return {key: resolve(value) for key, value in node.items()}
 
     return resolve(schema)
@@ -488,40 +639,65 @@ _FINISH_TYPES = {
 }
 
 
-def _task_status(values):
+def _task_status(values: dict) -> dict[str, str]:
+    """Say whether a step served the caller or could not.
+
+    Args:
+        values: The step's finish values.
+
+    Returns:
+        A one-key status dict for the agent that owns the step.
+    """
     return {"status": "unserved" if values.get("unserved_request") else "completed"}
 
 
-def _group_status(results):
-    return {"status": "unserved" if any(value.get("unserved_request") for value in results.values()) else "completed"}
+def _group_status(results: dict) -> dict[str, str]:
+    """Say whether a group of steps served the caller or one of them could not.
+
+    Args:
+        results: Each step's finish values, by step name.
+
+    Returns:
+        A one-key status dict for the agent that owns the group.
+    """
+    unserved = any(value.get("unserved_request") for value in results.values())
+    return {"status": "unserved" if unserved else "completed"}
 
 
-def _typed_result(step, values):
+def _typed_result(step: str, values: dict) -> dict:
     """Validate a step's declared results where they enter the state.
 
     Refused here rather than carried into a later step that assumes it is
     right, and refused on both targets rather than on the one whose framework
     happens to validate tool arguments: one of them validates through Pydantic
     and lets the model self-correct, the other splats raw JSON into the handler.
+
+    Args:
+        step: Name of the step whose result this is.
+        values: The step's finish values.
+
+    Returns:
+        The values with each declared field validated and made plain.
+
+    Raises:
+        _StateRefused: If a declared field does not fit its type.
     """
     if values.get("unserved_request"):
         return {"unserved_request": values["unserved_request"]}
     adapters = _FINISH_TYPES.get(step)
     if not adapters:
         return values
-    out = dict(values)
-    for name, adapter in adapters.items():
-        # Absent goes through the adapter too, rather than being skipped. A
-        # field the model left out is a field with no value, and that is what a
-        # prompt telling it to leave one out asks for: a value that may be
-        # absent validates as None and the append drops it, and a value that
-        # may not is refused here with the message that lets the model correct
-        # itself. Skipping an absent field instead left the key missing from
-        # the result, and the assignment that reads it by name raised a
-        # KeyError inside the finish handler on the target whose framework
-        # validates no argument of its own.
-        out[name] = _plain(_typed(name, adapter, out.get(name)))
-    return out
+    # Absent goes through the adapter too, rather than being skipped. A
+    # field the model left out is a field with no value, and that is what a
+    # prompt telling it to leave one out asks for: a value that may be
+    # absent validates as None and the append drops it, and a value that
+    # may not is refused here with the message that lets the model correct
+    # itself. Skipping an absent field instead left the key missing from
+    # the result, and the assignment that reads it by name raised a
+    # KeyError inside the finish handler on the target whose framework
+    # validates no argument of its own.
+    validated = {name: _plain(_typed(name, adapter, values.get(name))) for name, adapter in adapters.items()}
+    return values | validated
 
 
 _STATE_TYPES = {
@@ -541,13 +717,27 @@ _STATE_DEPENDENCIES = {
 }
 
 
-def _save_result(step, state, values):
-    """Validate all assignments before changing any call state."""
+def _save_result(step: str, state: object, values: dict) -> dict:
+    """Validate all assignments before changing any call state.
+
+    Args:
+        step: Name of the step whose result is being saved.
+        state: The call's shared state object.
+        values: The step's finish values.
+
+    Returns:
+        The validated values, or the unserved request alone when the step could
+        not help.
+
+    Raises:
+        _StateRefused: If an assigned value does not fit its declared type.
+    """
     values = _typed_result(step, values)
     if values.get("unserved_request"):
         return values
     pending = {}
     for name, path, append in _TASK_ASSIGNMENTS.get(step, ()):
+        # A dotted path walks nested dicts, and is None past any missing link.
         value = values
         for part in path.split("."):
             value = value.get(part) if isinstance(value, dict) else None
@@ -562,22 +752,30 @@ def _save_result(step, state, values):
     return values
 
 
-def _save_batch(state, values, *, step=None, inputs=None):
-    """Commit a validated batch and invalidate older results of changed inputs."""
+def _save_batch(state: object, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
+    """Commit a validated batch and invalidate older results of changed inputs.
+
+    Args:
+        state: The call's shared state object.
+        values: Declared value names mapped to what to save.
+        step: The step saving them, which decides whether it confirms them.
+        inputs: Declared names a pre-fetch read to produce them, kept as
+            provenance so a later change to one invalidates the result.
+
+    Raises:
+        _StateRefused: If a value does not fit its declared type.
+    """
     if not values:
         return
     pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
     unconfirmed: set[str] = set(getattr(state, "_unconfirmed", ()))
     provenance = dict(getattr(state, "_prefetch_provenance", {}))
     affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
-    while True:
-        more = {name for name, reads in provenance.items() if set(reads) & affected} - affected
-        if not more:
-            break
-        affected.update(more)
+    # Grow the changed set with everything derived from it, until nothing new joins.
+    while more := {name for name, reads in provenance.items() if set(reads) & affected} - affected:
+        affected |= more
     invalidated = affected - pending.keys()
-    for name in invalidated:
-        provenance.pop(name, None)
+    provenance = {name: reads for name, reads in provenance.items() if name not in invalidated}
     for name, value in pending.items():
         if inputs is not None:
             provenance[name] = tuple(inputs)
@@ -588,9 +786,20 @@ def _save_batch(state, values, *, step=None, inputs=None):
                 unconfirmed.discard(name)
             else:
                 unconfirmed.add(name)
-    def current(name):
+
+    def current(name: str) -> object:
+        """Read a value as it will stand once this batch lands.
+
+        Args:
+            name: Name of the declared value.
+
+        Returns:
+            The pending value, none if it was invalidated, else what state holds.
+        """
         return None if name in invalidated else pending.get(name, getattr(state, name, None))
-    # Dependencies are acyclic: prefetch can only read earlier entries.
+
+    # Dependencies are acyclic: prefetch can only read earlier entries. Each pass
+    # reads what the previous one settled, so this runs to a fixed point.
     for _ in range(len(_STATE_DEPENDENCIES) + 1):
         before = set(unconfirmed)
         for name, reads in _STATE_DEPENDENCIES.items():
@@ -607,10 +816,9 @@ def _save_batch(state, values, *, step=None, inputs=None):
     for name, value in pending.items():
         setattr(state, name, value)
     if hasattr(state, "_unconfirmed"):
-        state._unconfirmed = unconfirmed
+        setattr(state, "_unconfirmed", unconfirmed)  # noqa: B010 - state is typed object
     if inputs is not None or hasattr(state, "_prefetch_provenance"):
-        state._prefetch_provenance = provenance
-
+        setattr(state, "_prefetch_provenance", provenance)  # noqa: B010 - state is typed object
 
 
 _STATE_STRUCTURED = {}
@@ -621,8 +829,8 @@ _STATE_EMPTY = "none recorded yet."
 _STATE_VALUE_MAX = 4000
 
 
-def _state_text(name, value):
-    """One value as a prompt reads it.
+def _state_text(name: str, value: object) -> str:
+    """Render one value as a prompt reads it.
 
     Compact JSON for anything declared structured, never a Python repr: a repr
     writes single quotes and None, which is not JSON and is not what any
@@ -631,6 +839,13 @@ def _state_text(name, value):
 
     A value that was never declared structured renders exactly as it did before
     this existed, which is what keeps every package written before it unchanged.
+
+    Args:
+        name: Name of the declared value, used in the length warning.
+        value: The value to render.
+
+    Returns:
+        The text, cut to the bound when it is longer.
     """
     if value is None or value == "":
         return _STATE_EMPTY
@@ -652,15 +867,25 @@ def _state_text(name, value):
     return text
 
 
-def _prompt_value(state, name, site=""):
+def _prompt_value(state: object, name: str, site: str = "") -> tuple[str, object]:
+    """Read the value a prompt placeholder names, unless it is still unconfirmed.
+
+    Args:
+        state: The call's shared state object.
+        name: The flat placeholder name.
+        site: The prompt site reading it, so the confirming step still sees it.
+
+    Returns:
+        The declared name and its value, or none for a value not yet confirmed.
+    """
     root, value = _state_lookup(state, name)
     if root in getattr(state, "_unconfirmed", ()) and site != "task:" + _STATE_CONFIRM.get(root, ""):
         return root, None
     return root, value
 
 
-def _state_lookup(state, name):
-    """The value a placeholder names, and the declared name it belongs to.
+def _state_lookup(state: object, name: str) -> tuple[str, object]:
+    """Find the value a placeholder names, and the declared name it belongs to.
 
     A path is authored {{customer.status}} and emitted {{customer__status}}: one
     flat name, because the router substitutes flat names only and both render
@@ -669,6 +894,13 @@ def _state_lookup(state, name):
     None past an absent link, so a field of a record nobody has filled renders
     as the empty words and never raises. The root's name comes back with the
     value because the words for an empty value belong to the root variable.
+
+    Args:
+        state: The call's shared state object, or none.
+        name: The flat placeholder name.
+
+    Returns:
+        The declared root name and the value found at the end of the path.
     """
     root, _, path = name.partition("__")
     value = getattr(state, root, None) if state is not None else None
@@ -688,9 +920,21 @@ class State:
     verified: bool = False
 
 
-def _dispatched_call_start(call_context: dict | None) -> dict:
-    """Input variables arrive with the dispatch: the call context on a telephony
-    route, or UNMUTE_CALL_START for a local `unmute dev --var` session."""
+def _dispatched_call_start(call_context: dict[str, Any] | None) -> dict[str, Any]:
+    """Read the input variables that arrived with the dispatch.
+
+    They come in the call context on a telephony route, or in UNMUTE_CALL_START
+    for a local `unmute dev --var` session.
+
+    Args:
+        call_context: The call's context, or None when there is none.
+
+    Returns:
+        The dispatched values, the dispatch winning over the environment.
+
+    Raises:
+        RuntimeError: When UNMUTE_CALL_START is not a JSON object.
+    """
     values = dict((call_context or {}).get("call_start", {}))
     raw = os.getenv("UNMUTE_CALL_START")
     if raw:
@@ -701,35 +945,51 @@ def _dispatched_call_start(call_context: dict | None) -> dict:
         if not isinstance(supplied, dict):
             raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
         # The dispatch wins: env is the local stand-in for it.
-        for name, value in supplied.items():
-            values.setdefault(name, value)
+        values |= {name: value for name, value in supplied.items() if name not in values}
     return values
 
 
-def build_state(call_context: dict | None = None) -> State:
+def build_state(call_context: dict[str, Any] | None = None) -> State:
+    """Build the call's typed variables from the dispatch and the call's own facts.
+
+    Args:
+        call_context: The call's context, or None when there is none.
+
+    Returns:
+        The state every agent on the call shares.
+    """
     state = State()
-    missing = []
     call_start = _dispatched_call_start(call_context)
     if "caller_alias" in call_start:
-        setattr(state, "caller_alias", call_start["caller_alias"])
+        state.caller_alias = call_start["caller_alias"]
     if "customer_id" in call_start:
-        setattr(state, "customer_id", call_start["customer_id"])
+        state.customer_id = call_start["customer_id"]
     if "verified" in call_start:
-        setattr(state, "verified", call_start["verified"])
-    if missing:
-        raise RuntimeError(f"Missing call context fields: {', '.join(missing)}")
+        state.verified = call_start["verified"]
     return state
 
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
-def _render(text: str, state, *, quote_values: bool = False, site: str = "") -> str:
+def _render(text: str, state: Any, *, quote_values: bool = False, site: str = "") -> str:
     """Substitute each variable token from the call state (SCHEMA 4.4 templates).
-    Only substituted values are URL-encoded, never the surrounding literal."""
+
+    Only substituted values are URL-encoded, never the surrounding literal.
+
+    Args:
+        text: The template, with variable tokens in double braces.
+        state: The call state, or None to leave the text as written.
+        quote_values: Whether to URL-encode each substituted value.
+        site: The prompt site, which picks the variables a path may read.
+
+    Returns:
+        The text with every token replaced.
+    """
     if state is None:
         return text
 
     def _one(match: re.Match[str]) -> str:
+        """Render one token."""
         # Through _state_lookup, which walks a path emitted as one flat name, and
         # _state_text, so a declared value renders as compact JSON and an empty
         # one as words. Anything not declared structured comes back exactly as
@@ -740,8 +1000,26 @@ def _render(text: str, state, *, quote_values: bool = False, site: str = "") -> 
     return _TEMPLATE.sub(_one, text)
 
 async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
+    """End the call once `timeout_secs` have passed.
+
+    Args:
+        worker: The pipeline worker to send the end frame to.
+        timeout_secs: How long to wait first.
+    """
     await asyncio.sleep(timeout_secs)
     await worker.queue_frame(EndFrame())
+
+
+def _schedule_end_after(worker: PipelineWorker, timeout_secs: float) -> None:
+    """Schedule `_end_after` and hold its task until it finishes.
+
+    Args:
+        worker: The pipeline worker to send the end frame to.
+        timeout_secs: How long to wait first.
+    """
+    task = asyncio.create_task(_end_after(worker, timeout_secs))
+    _END_TASKS.add(task)
+    task.add_done_callback(_END_TASKS.discard)
 
 # --- prompts ----------------------------------------------------------------
 # Agent system instructions as module constants: one copy each, referenced by
@@ -774,7 +1052,20 @@ The caller is {{customer_id}}, who goes by {{caller_alias}}."""
 
 
 
-def build_billing_llm(state=None, *, slng_session_id):
+def build_billing_llm(
+    state: State | None = None,
+    *,
+    slng_session_id: str,
+) -> LLMService[Any]:
+    """Build the language model for this agent.
+
+    Args:
+        state: The call state, read by the router for its template variables.
+        slng_session_id: This call's SLNG router session id.
+
+    Returns:
+        The configured LLM service.
+    """
     return _SlngRouterLLMService(
         api_key=os.environ["SLNG_API_KEY"],
         base_url="https://eu-west.context-router.slng.ai/v1",
@@ -787,7 +1078,12 @@ def build_billing_llm(state=None, *, slng_session_id):
     )
 
 
-def build_billing_tts():
+def build_billing_tts() -> TTSService:
+    """Build the voice for this agent.
+
+    Returns:
+        The configured TTS service.
+    """
     return SlngTTSService(
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-orion-en",
@@ -798,8 +1094,26 @@ def build_billing_tts():
 class BillingAgent(LLMWorker):
     """Agent: billing."""
 
-    def __init__(self, state=None, context=None, call_context=None, dev_metrics=None, *, slng_session_id) -> None:
-        self.state = state
+    def __init__(
+        self,
+        state: State | None = None,
+        context: LLMContext | None = None,
+        call_context: dict[str, Any] | None = None,
+        dev_metrics: DevReporter | None = None,
+        *,
+        slng_session_id: str,
+    ) -> None:
+        """Build this agent's model and voice and join the call's shared context.
+
+        Args:
+            state: The call's typed variables, shared by every agent.
+            context: The LLM context every agent on the call shares.
+            call_context: The call's own facts and transport handles.
+            dev_metrics: The dev-page reporter, or None outside `unmute dev`.
+            slng_session_id: This call's SLNG router session id.
+        """
+        # Always supplied when the package declares variables; None only in a test.
+        self.state: State = cast(State, state)
         if context is not None:
             self.context = context
         # Kept on self because a task's headers are swapped in from a method
@@ -815,12 +1129,24 @@ class BillingAgent(LLMWorker):
             self._dev.observe_tts(tts)
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, tts]), bridged=())
 
-    async def queue_frame(self, frame, *args, **kwargs) -> None:
+    async def queue_frame(self, frame: Any, *args: Any, **kwargs: Any) -> None:
+        """Stamp the frame for the dev page, then queue it as usual.
+
+        Args:
+            frame: The frame to queue.
+            *args: Passed to the base worker.
+            **kwargs: Passed to the base worker.
+        """
         if self._dev:
             self._dev.stamp(frame)
         await super().queue_frame(frame, *args, **kwargs)
 
-    async def on_activated(self, args) -> None:
+    async def on_activated(self, args: dict[str, Any] | None) -> None:
+        """Set this agent's prompt and scope, then ask for its first reply when told to.
+
+        Args:
+            args: The activation arguments the previous agent or the entry passed.
+        """
         token = self._dev.enter_activation(args) if self._dev else None
         try:
             await self.queue_frame(LLMUpdateSettingsFrame(
@@ -840,24 +1166,38 @@ class BillingAgent(LLMWorker):
 
 
     @_direct_tool
-    async def get_invoice(self, params: FunctionCallParams, customer_id: str):
+    async def get_invoice(self, params: FunctionCallParams, customer_id: str) -> None:
         """Fetch the most recent invoice for a customer id. Returns the invoice total and status.
 
         Args:
+            params (FunctionCallParams): The call handle; the result goes back through it.
             customer_id (str): The customer id from lookup_customer
         """
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 os.environ["GET_INVOICE_URL"],
                 json={"customer_id": customer_id},
-                timeout=30.0,
+                timeout=WEBHOOK_TIMEOUT_SECS,
             )
             response.raise_for_status()
             await params.result_callback(response.json())
 
 
 
-def build_intake_llm(state=None, *, slng_session_id):
+def build_intake_llm(
+    state: State | None = None,
+    *,
+    slng_session_id: str,
+) -> LLMService[Any]:
+    """Build the language model for this agent.
+
+    Args:
+        state: The call state, read by the router for its template variables.
+        slng_session_id: This call's SLNG router session id.
+
+    Returns:
+        The configured LLM service.
+    """
     return _SlngRouterLLMService(
         api_key=os.environ["SLNG_API_KEY"],
         base_url="https://eu-west.context-router.slng.ai/v1",
@@ -870,7 +1210,12 @@ def build_intake_llm(state=None, *, slng_session_id):
     )
 
 
-def build_intake_tts():
+def build_intake_tts() -> TTSService:
+    """Build the voice for this agent.
+
+    Returns:
+        The configured TTS service.
+    """
     return SlngTTSService(
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-thalia-en",
@@ -881,8 +1226,26 @@ def build_intake_tts():
 class IntakeAgent(LLMWorker):
     """Agent: intake."""
 
-    def __init__(self, state=None, context=None, call_context=None, dev_metrics=None, *, slng_session_id) -> None:
-        self.state = state
+    def __init__(
+        self,
+        state: State | None = None,
+        context: LLMContext | None = None,
+        call_context: dict[str, Any] | None = None,
+        dev_metrics: DevReporter | None = None,
+        *,
+        slng_session_id: str,
+    ) -> None:
+        """Build this agent's model and voice and join the call's shared context.
+
+        Args:
+            state: The call's typed variables, shared by every agent.
+            context: The LLM context every agent on the call shares.
+            call_context: The call's own facts and transport handles.
+            dev_metrics: The dev-page reporter, or None outside `unmute dev`.
+            slng_session_id: This call's SLNG router session id.
+        """
+        # Always supplied when the package declares variables; None only in a test.
+        self.state: State = cast(State, state)
         if context is not None:
             self.context = context
         # Kept on self because a task's headers are swapped in from a method
@@ -898,12 +1261,24 @@ class IntakeAgent(LLMWorker):
             self._dev.observe_tts(tts)
         super().__init__("intake", llm=llm, pipeline=Pipeline([llm, tts]), bridged=())
 
-    async def queue_frame(self, frame, *args, **kwargs) -> None:
+    async def queue_frame(self, frame: Any, *args: Any, **kwargs: Any) -> None:
+        """Stamp the frame for the dev page, then queue it as usual.
+
+        Args:
+            frame: The frame to queue.
+            *args: Passed to the base worker.
+            **kwargs: Passed to the base worker.
+        """
         if self._dev:
             self._dev.stamp(frame)
         await super().queue_frame(frame, *args, **kwargs)
 
-    async def on_activated(self, args) -> None:
+    async def on_activated(self, args: dict[str, Any] | None) -> None:
+        """Set this agent's prompt and scope, then ask for its first reply when told to.
+
+        Args:
+            args: The activation arguments the previous agent or the entry passed.
+        """
         token = self._dev.enter_activation(args) if self._dev else None
         try:
             await self.queue_frame(LLMUpdateSettingsFrame(
@@ -923,8 +1298,12 @@ class IntakeAgent(LLMWorker):
 
 
     @_direct_tool(cancel_on_interruption=False)
-    async def to_billing(self, params: FunctionCallParams):
-        """Caller asks about billing, an invoice, or a refund."""
+    async def to_billing(self, params: FunctionCallParams) -> None:
+        """Caller asks about billing, an invoice, or a refund.
+
+        Args:
+            params (FunctionCallParams): The call handle; the result goes back through it.
+        """
         # context.history on this handoff. One LLMContext is shared for the whole
         # call, so the receiver is given the shaped list rather than a copy.
         self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
@@ -940,10 +1319,11 @@ class IntakeAgent(LLMWorker):
         )
 
     @_direct_tool
-    async def lookup_customer(self, params: FunctionCallParams, email: str = "", phone: str = ""):
+    async def lookup_customer(self, params: FunctionCallParams, email: str = "", phone: str = "") -> None:
         """Look up a customer record by phone number or email. Returns the customer id and name.
 
         Args:
+            params (FunctionCallParams): The call handle; the result goes back through it.
             email (str): Caller email address
             phone (str): Caller phone number in E.164 form
         """
@@ -951,14 +1331,18 @@ class IntakeAgent(LLMWorker):
             response = await client.post(
                 os.environ["LOOKUP_CUSTOMER_URL"],
                 json={"email": email, "phone": phone},
-                timeout=30.0,
+                timeout=WEBHOOK_TIMEOUT_SECS,
             )
             response.raise_for_status()
             await params.result_callback(response.json())
 
     @_direct_tool
-    async def run_collect(self, params: FunctionCallParams):
-        """Collect the caller's account details."""
+    async def run_collect(self, params: FunctionCallParams) -> None:
+        """Collect the caller's account details.
+
+        Args:
+            params (FunctionCallParams): The call handle; the result goes back through it.
+        """
         # Already ran, and nobody has spoken since. Then this is not a second
         # request, it is the model reading its own completed result as though it
         # were one. On a live call on 2026-09-16 (trace 917975e9, LiveKit, same
@@ -1012,6 +1396,11 @@ class IntakeAgent(LLMWorker):
         await flow.initialize(await self._run_collect_node_collect())
 
     async def _run_collect_node_collect(self) -> NodeConfig:
+        """Build the flow node for the collect step.
+
+        Returns:
+            The node that runs this step's prompt and tools.
+        """
         self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
         return NodeConfig(
             name="collect",
@@ -1035,7 +1424,18 @@ class IntakeAgent(LLMWorker):
             ],
         )
 
-    async def _run_collect_finish_collect(self, args, flow_manager):
+    async def _run_collect_finish_collect(
+        self, args: Any, flow_manager: FlowManager
+    ) -> tuple[dict[str, Any], Any]:
+        """Record this step's result and move the flow on.
+
+        Args:
+            args: The result fields the model supplied.
+            flow_manager: The flow this step runs in.
+
+        Returns:
+            The result the model sees, and the next node or None.
+        """
         if self._run_collect_active_step != "collect":
             return {"status": "already handled"}, NO_RESPONSE
         # Validated before anything is recorded: a value that does not fit its
@@ -1062,10 +1462,13 @@ class IntakeAgent(LLMWorker):
                 extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": self._slng_session_id}}),
         ))
         await self.flush_pipeline()
-        self.context.set_messages(messages + [{
-            "role": "developer",
-            "content": json.dumps(_group_status(self._run_collect_results)),
-        }])
+        self.context.set_messages([
+            *messages,
+            {
+                "role": "developer",
+                "content": json.dumps(_group_status(self._run_collect_results)),
+            },
+        ])
         self.context.set_tools(tools)
         # Counted after the restore, so a turn a step consumed and carried back
         # is included: that turn is the one the owner is about to read, and it
@@ -1074,8 +1477,12 @@ class IntakeAgent(LLMWorker):
         return {"status": "ok"}, None
 
     @_direct_tool
-    async def run_triage(self, params: FunctionCallParams):
-        """Run the triage group."""
+    async def run_triage(self, params: FunctionCallParams) -> None:
+        """Run the triage group.
+
+        Args:
+            params (FunctionCallParams): The call handle; the result goes back through it.
+        """
         # Already ran, and nobody has spoken since. Then this is not a second
         # request, it is the model reading its own completed result as though it
         # were one. On a live call on 2026-09-16 (trace 917975e9, LiveKit, same
@@ -1131,20 +1538,39 @@ class IntakeAgent(LLMWorker):
         self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
         await flow.initialize(await self._run_triage_node(self._run_triage_active_step))
 
-    async def _run_triage_node(self, name) -> NodeConfig:
-        """One step's node by name, because the chain is decided at run time."""
+    async def _run_triage_node(self, name: str) -> NodeConfig:
+        """Build one step's node by name, because the chain is decided at run time.
+
+        Args:
+            name: The step to enter.
+
+        Returns:
+            The step's flow node.
+        """
         return await {
             "collect": self._run_triage_node_collect,
             "confirm": self._run_triage_node_confirm,
         }[name]()
 
-    def _run_triage_next(self, name):
-        """The step after this one in this invocation's plan, or None."""
+    def _run_triage_next(self, name: str) -> str | None:
+        """Find the step after this one in this invocation's plan.
+
+        Args:
+            name: The step that just finished.
+
+        Returns:
+            The next step's name, or None when this was the last.
+        """
         plan = self._run_triage_plan
         position = plan.index(name) + 1
         return plan[position] if position < len(plan) else None
 
     async def _run_triage_node_collect(self) -> NodeConfig:
+        """Build the flow node for the collect step.
+
+        Returns:
+            The node that runs this step's prompt and tools.
+        """
         self.context.set_messages([])
         return NodeConfig(
             name="collect",
@@ -1169,7 +1595,18 @@ class IntakeAgent(LLMWorker):
             context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
         )
 
-    async def _run_triage_finish_collect(self, args, flow_manager):
+    async def _run_triage_finish_collect(
+        self, args: Any, flow_manager: FlowManager
+    ) -> tuple[dict[str, Any], Any]:
+        """Record this step's result and move the flow on.
+
+        Args:
+            args: The result fields the model supplied.
+            flow_manager: The flow this step runs in.
+
+        Returns:
+            The result the model sees, and the next node or None.
+        """
         if self._run_triage_active_step != "collect":
             return {"status": "already handled"}, NO_RESPONSE
         # Validated before anything is recorded: a value that does not fit its
@@ -1212,10 +1649,13 @@ class IntakeAgent(LLMWorker):
                 extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": self._slng_session_id}}),
         ))
         await self.flush_pipeline()
-        self.context.set_messages(messages + [{
-            "role": "developer",
-            "content": json.dumps(_group_status(self._run_triage_results)),
-        }])
+        self.context.set_messages([
+            *messages,
+            {
+                "role": "developer",
+                "content": json.dumps(_group_status(self._run_triage_results)),
+            },
+        ])
         self.context.set_tools(tools)
         # Counted after the restore, so a turn a step consumed and carried back
         # is included: that turn is the one the owner is about to read, and it
@@ -1224,6 +1664,11 @@ class IntakeAgent(LLMWorker):
         return {"status": "ok"}, None
 
     async def _run_triage_node_confirm(self) -> NodeConfig:
+        """Build the flow node for the confirm step.
+
+        Returns:
+            The node that runs this step's prompt and tools.
+        """
         self.context.set_messages([])
         return NodeConfig(
             name="confirm",
@@ -1241,7 +1686,18 @@ class IntakeAgent(LLMWorker):
             context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
         )
 
-    async def _run_triage_finish_confirm(self, args, flow_manager):
+    async def _run_triage_finish_confirm(
+        self, args: Any, flow_manager: FlowManager
+    ) -> tuple[dict[str, Any], Any]:
+        """Record this step's result and move the flow on.
+
+        Args:
+            args: The result fields the model supplied.
+            flow_manager: The flow this step runs in.
+
+        Returns:
+            The result the model sees, and the next node or None.
+        """
         if self._run_triage_active_step != "confirm":
             return {"status": "already handled"}, NO_RESPONSE
         # Validated before anything is recorded: a value that does not fit its
@@ -1284,10 +1740,13 @@ class IntakeAgent(LLMWorker):
                 extra={"extra_headers": {"X-Slng-Agent-Id": "safe-core-router-v3:intake", "X-Slng-Session-Id": self._slng_session_id}}),
         ))
         await self.flush_pipeline()
-        self.context.set_messages(messages + [{
-            "role": "developer",
-            "content": json.dumps(_group_status(self._run_triage_results)),
-        }])
+        self.context.set_messages([
+            *messages,
+            {
+                "role": "developer",
+                "content": json.dumps(_group_status(self._run_triage_results)),
+            },
+        ])
         self.context.set_tools(tools)
         # Counted after the restore, so a turn a step consumed and carried back
         # is included: that turn is the one the owner is about to read, and it
@@ -1296,32 +1755,68 @@ class IntakeAgent(LLMWorker):
         return {"status": "ok"}, None
 
 
-def _caller_turns(messages):
-    """How many turns the caller has taken in this message list.
+def _caller_turns(messages: list[Any]) -> int:
+    """Count the turns the caller has taken in this message list.
 
     Read by every delegate, not just the ones that carry a turn: it is the one
     signal that separates "they asked again" from "the model re-read its own
     finished work", which is what the re-entry guard compares.
+
+    Args:
+        messages: The context's messages.
+
+    Returns:
+        The number of user messages.
     """
     return sum(1 for message in messages if isinstance(message, dict) and message.get("role") == "user")
 
 
-def _settle_task_call(messages, name, status):
-    """Replace this invocation's running reply before restoring the owner."""
-    for message in reversed(messages):
-        if not isinstance(message, dict):
-            continue
-        for call in message.get("tool_calls", []):
-            if call.get("function", {}).get("name") == name:
-                for reply in messages:
-                    if isinstance(reply, dict) and reply.get("role") == "tool" and reply.get("tool_call_id") == call["id"]:
-                        reply["content"] = json.dumps(status)
-                return
+def _settle_task_call(messages: list[Any], name: str, status: Any) -> None:
+    """Replace this invocation's running reply before restoring the owner.
+
+    Args:
+        messages: The owner's messages, edited in place.
+        name: The delegate tool whose call is being settled.
+        status: The result to record in place of the running reply.
+    """
+    running = next(
+        (
+            call
+            for message in reversed(messages)
+            if isinstance(message, dict)
+            for call in message.get("tool_calls", [])
+            if call.get("function", {}).get("name") == name
+        ),
+        None,
+    )
+    if running is None:
+        return
+    for reply in messages:
+        if (
+            isinstance(reply, dict)
+            and reply.get("role") == "tool"
+            and reply.get("tool_call_id") == running["id"]
+        ):
+            reply["content"] = json.dumps(status)
 
 
-def _flow_visit(worker, delegate, handler):
+def _flow_visit(
+    worker: Any, delegate: str, handler: Callable[..., Awaitable[Any]]
+) -> Callable[[Any, FlowManager], Awaitable[Any]]:
+    """Wrap a step handler so it does nothing once its flow has been left.
+
+    Args:
+        worker: The worker that owns the flow.
+        delegate: The delegate tool that started this flow.
+        handler: The step's handler.
+
+    Returns:
+        The guarded handler.
+    """
     visit = getattr(worker, "_" + delegate + "_visit", None)
-    async def invoke(args, flow_manager):
+
+    async def invoke(args: Any, flow_manager: FlowManager) -> Any:
+        """Run the handler only while this visit is still the current one."""
         if getattr(worker, "_" + delegate + "_visit", None) is not visit:
             return {"status": "already handled"}, NO_RESPONSE
         return await handler(args, flow_manager)
@@ -1333,16 +1828,21 @@ def _flow_visit(worker, delegate, handler):
 # re-registered function name always resolves to the same callable.
 
 
-async def _flow_tool_lookup_customer(args, flow_manager):
-    """Look up a customer record by phone number or email. Returns the customer id and name."""
+async def _flow_tool_lookup_customer(args: Any, flow_manager: FlowManager) -> Any:
+    """Look up a customer record by phone number or email. Returns the customer id and name.
+
+    Args:
+        args (Any): The arguments the model supplied.
+        flow_manager (FlowManager): The flow the step runs in.
+    """
     async with httpx.AsyncClient() as client:
-        response = await client.post(os.environ["LOOKUP_CUSTOMER_URL"], json={**dict(args)}, timeout=30.0)
+        response = await client.post(os.environ["LOOKUP_CUSTOMER_URL"], json={**dict(args)}, timeout=WEBHOOK_TIMEOUT_SECS)
         response.raise_for_status()
         return response.json()
 
 
 # --- transport & run --------------------------------------------------------
-transport_params: dict = {
+transport_params: dict[str, Callable[[], TransportParams]] = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     # The runner assigns an inbound call's dial-in settings and Daily credentials
     # onto whatever this returns, so on the Daily route it has to be the params
@@ -1356,7 +1856,12 @@ transport_params: dict = {
 
 
 
-def build_stt():
+def build_stt() -> STTService:
+    """Build the transcriber.
+
+    Returns:
+        The configured STT service.
+    """
     return DeepgramSTTService(
         api_key=os.environ["DEEPGRAM_API_KEY"],
         settings=DeepgramSTTService.Settings(
@@ -1365,9 +1870,16 @@ def build_stt():
     )
 
 
-async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) -> None:
+async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev: DevReporter) -> None:
+    """Build the pipeline for one session and run it until the call ends.
+
+    Args:
+        transport: The transport the caller is connected on.
+        runner_args: The arguments the runner started this session with.
+        dev: The dev-page reporter that observes the session.
+    """
     require_env()
-    call_context = {}
+    call_context: dict[str, Any] = {}
     # One SLNG Context Router session id per call, passed as an argument from here
     # on. It groups this call's think requests for support and scopes nothing:
     # the agent id is what scopes the router's cache, so this may differ freely
@@ -1444,7 +1956,8 @@ async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) 
 
 
     @user_aggregator.event_handler("on_user_turn_idle")
-    async def on_user_turn_idle(aggregator):
+    async def on_user_turn_idle(aggregator: Any) -> None:
+        """Nudge the caller when they have gone quiet."""
         await aggregator.push_frame(
             LLMMessagesAppendFrame(
                 [{"role": "developer", "content": "The caller has gone quiet. Politely check if they are still there."}],
@@ -1456,10 +1969,11 @@ async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) 
     # second. Without it an idle call is nudged forever and never hung up, which
     # on a phone line is a billed open call. The clock starts at the first idle
     # turn and is cancelled by the caller speaking again.
-    _idle_end: asyncio.Task | None = None
+    _idle_end: asyncio.Task[None] | None = None
 
     @user_aggregator.event_handler("on_user_turn_idle")
-    async def on_user_turn_idle_end(aggregator):
+    async def on_user_turn_idle_end(aggregator: Any) -> None:
+        """Start the clock that ends an idle call."""
         nonlocal _idle_end
         if _idle_end is None or _idle_end.done():
             _idle_end = asyncio.create_task(
@@ -1467,7 +1981,8 @@ async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) 
             )
 
     @user_aggregator.event_handler("on_user_turn_started")
-    async def on_user_turn_started(aggregator, strategy):
+    async def on_user_turn_started(aggregator: Any, strategy: Any) -> None:
+        """Stop the hangup clock when the caller speaks again."""
         nonlocal _idle_end
         if _idle_end is not None and not _idle_end.done():
             _idle_end.cancel()
@@ -1475,10 +1990,11 @@ async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) 
 
     runner_ready = asyncio.Event()
     pipeline_started = asyncio.Event()
-    worker_start_error = None
+    worker_start_error: Exception | None = None
     entry_started = False
 
-    async def activate_entry():
+    async def activate_entry() -> None:
+        """Activate the entry agent once, when the client and the pipeline are ready."""
         nonlocal entry_started
         if entry_started or worker_start_error is not None:
             return
@@ -1491,19 +2007,21 @@ async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) 
             TTSSpeakFrame("Hi, you have reached Acme Support. How can I help you today?")
         )
 
-        asyncio.create_task(_end_after(main, 1200))
+        _schedule_end_after(main, 1200)
 
     @runner.event_handler("on_ready")
-    async def on_runner_ready(runner):
+    async def on_runner_ready(runner: WorkerRunner) -> None:
+        """Note that the runner can take workers."""
         runner_ready.set()
 
     @main.event_handler("on_pipeline_started")
-    async def on_pipeline_started(worker, frame):
+    async def on_pipeline_started(worker: PipelineWorker, frame: Any) -> None:
+        """Add the agent workers once the main pipeline has started."""
         nonlocal worker_start_error
         await runner_ready.wait()
         try:
             await runner.add_workers(*agents)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - logged with its traceback, then the runner is cancelled
             worker_start_error = error
             # Logged here, where it is still known. Cancelling the runner makes
             # run() raise CancelledError, and that reaches the caller before the
@@ -1517,14 +2035,16 @@ async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) 
         pipeline_started.set()
 
     @main.rtvi.event_handler("on_client_ready")
-    async def on_client_ready(rtvi):
+    async def on_client_ready(rtvi: Any) -> None:
+        """Activate the entry agent once the client and the pipeline are ready."""
         # Wait for both client media readiness and main's StartFrame before
         # activating tools or emitting the greeting (SPEC V2).
         await pipeline_started.wait()
         await activate_entry()
 
     @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport, client):
+    async def on_client_disconnected(transport: BaseTransport, client: Any) -> None:
+        """Stop the runner when the caller leaves."""
         await runner.cancel()
 
     await runner.add_workers(main)
@@ -1536,6 +2056,12 @@ async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev) 
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
+    """Run one session, reporting to the dev page and naming any error that stops it.
+
+    Args:
+        transport: The transport the caller is connected on.
+        runner_args: The arguments the runner started this session with.
+    """
     dev = install_dev_metrics(runner_args)
     try:
         await _run_bot(transport, runner_args, dev)
@@ -1551,6 +2077,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
 
 async def bot(runner_args: RunnerArguments) -> None:
+    """Handle one session: build its transport, then run the agent on it.
+
+    This is the entry point the Pipecat runner and Pipecat Cloud call.
+
+    Args:
+        runner_args: The arguments the runner started this session with.
+    """
     _configure_logging()
 
     # A websocket session is a phone call on this route, and this package holds no

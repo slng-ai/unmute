@@ -20,17 +20,19 @@ under the live one.
 from __future__ import annotations
 
 {{if or .NeedsFunctionCalls .NeedsMCP}}import asyncio
+import functools
 {{end}}import json
-{{if or .NeedsFunctionCalls .NeedsMCP}}import functools
-{{end}}import logging
+import logging
 import os
 import threading
 import urllib.error
 import urllib.request
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import {{if or .NeedsFunctionCalls .NeedsMCP}}Awaitable, Callable, Mapping, {{end}}Sequence
+from typing import Any
 
 from opentelemetry import trace
+from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
@@ -77,6 +79,9 @@ MAX_PREACTIVATION_SPANS = 1024
 # resend only the batch that failed. The docs require this exact timeout.
 EXPORT_TIMEOUT_SECONDS = 30
 
+# OpenTelemetry's exporter interface takes its flush budget in milliseconds.
+FLUSH_TIMEOUT_MS = 30000
+
 # Registering the call is the last thing that happens, inside the host's
 # shutdown window, and LiveKit force-kills a job process ten seconds after
 # shutdown begins. So this is deliberately not EXPORT_TIMEOUT_SECONDS: sharing
@@ -107,12 +112,12 @@ _SPAN_ALIASES = {
     "tts_request_run": "tts",
 }
 
-_router: "_CovalRouter | None" = None
+_router: _CovalRouter | None = None
 _provider: TracerProvider | None = None
 _origin: str | None = None
 
 
-def _simulation_from_mapping(values) -> str | None:
+def _simulation_from_mapping(values: Any) -> str | None:
     """Case-insensitive lookup of the Coval key in one mapping."""
     if not values:
         return None
@@ -120,13 +125,10 @@ def _simulation_from_mapping(values) -> str | None:
         items = values.items()
     except AttributeError:
         return None
-    for key, value in items:
-        if str(key).lower() == SIMULATION_KEY and value:
-            return str(value)
-    return None
+    return next((str(value) for key, value in items if str(key).lower() == SIMULATION_KEY and value), None)
 
 
-def resolve_simulation_id(runner_args) -> tuple[str | None, str]:
+def resolve_simulation_id(runner_args: Any) -> tuple[str | None, str]:
     """Find the Coval simulation ID for this call, and say where it came from.
 
     Four sources, because this project can be compiled onto four transports and
@@ -174,7 +176,7 @@ def resolve_simulation_id(runner_args) -> tuple[str | None, str]:
     return None, "none"
 
 
-def resolve_call_origin(runner_args) -> str | None:
+def resolve_call_origin(runner_args: Any) -> str | None:
     """How this caller reached the agent, in Coval's vocabulary.
 
     `phone` is a carrier call, over a SIP dial-in body or a carrier's media
@@ -201,7 +203,8 @@ def resolve_call_origin(runner_args) -> str | None:
 class _CovalTagger(SpanProcessor):
     """Stamp each span with the call it belongs to, and its simulation if known."""
 
-    def on_start(self, span: Span, parent_context=None) -> None:
+    def on_start(self, span: Span, parent_context: Context | None = None) -> None:
+        """Rename legacy spans, then stamp the call token, simulation and origin."""
         alias = _SPAN_ALIASES.get(span.name)
         if alias:
             span.update_name(alias)
@@ -219,12 +222,13 @@ class _CovalTagger(SpanProcessor):
             span.set_attribute(CALL_ORIGIN_ATTR, _origin)
 
     def on_end(self, span: ReadableSpan) -> None:
-        pass
+        """Ignore ended spans, because the router exports them."""
 
     def shutdown(self) -> None:
-        pass
+        """Do nothing, because the tagger holds no resources."""
 
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
+    def force_flush(self, timeout_millis: int = FLUSH_TIMEOUT_MS) -> bool:
+        """Report success, because the tagger buffers nothing."""
         return True
 
 
@@ -239,7 +243,8 @@ class _CovalRouter(SpanExporter):
     and ``export`` only ever sends spans carrying the current token.
     """
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str) -> None:
+        """Start with no call, no exporter and an empty span buffer."""
         self._api_key = api_key
         self._lock = threading.RLock()
         self._buffer: deque[ReadableSpan] = deque(maxlen=MAX_PREACTIVATION_SPANS)
@@ -250,6 +255,7 @@ class _CovalRouter(SpanExporter):
 
     @property
     def active(self) -> bool:
+        """Whether this call has a correlation ID and is exporting."""
         return self._exporter is not None
 
     def begin_call(self) -> int:
@@ -275,6 +281,7 @@ class _CovalRouter(SpanExporter):
             return list(self._buffer)
 
     def activate(self, correlation_id: str, header: str = SIMULATION_EXPORT_HEADER) -> None:
+        """Bind this call to a correlation ID and flush the spans held so far."""
         with self._lock:
             if self.simulation_id == correlation_id:
                 return
@@ -296,6 +303,7 @@ class _CovalRouter(SpanExporter):
             exporter.export(held)
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        """Export this call's spans, or hold them until the call has an ID."""
         with self._lock:
             token = self.call_token
             mine = [s for s in spans if (s.attributes or {}).get(_CALL_TOKEN_ATTR) == token]
@@ -324,12 +332,14 @@ class _CovalRouter(SpanExporter):
         # never ride out under the live call's correlation ID.
         return exporter.export(mine)
 
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
+    def force_flush(self, timeout_millis: int = FLUSH_TIMEOUT_MS) -> bool:
+        """Flush the bound exporter, if there is one."""
         with self._lock:
             exporter = self._exporter
         return exporter.force_flush(timeout_millis) if exporter else True
 
     def shutdown(self) -> None:
+        """Drop held spans and shut the bound exporter down."""
         with self._lock:
             exporter = self._exporter
             self._exporter = None
@@ -338,7 +348,7 @@ class _CovalRouter(SpanExporter):
             exporter.shutdown()
 
 
-def _transcript_from(spans: Sequence[ReadableSpan]) -> list[dict]:
+def _transcript_from(spans: Sequence[ReadableSpan]) -> list[dict[str, str]]:
     """Rebuild the conversation from the spans that are already held.
 
     Pipecat puts the caller's words on its `stt` spans and the agent's on its
@@ -351,7 +361,7 @@ def _transcript_from(spans: Sequence[ReadableSpan]) -> list[dict]:
         (span for span in spans if span.name in roles),
         key=lambda span: span.start_time or 0,
     )
-    transcript: list[dict] = []
+    transcript: list[dict[str, str]] = []
     for span in ordered:
         role, key = roles[span.name]
         text = str((span.attributes or {}).get(key) or "").strip()
@@ -373,7 +383,7 @@ def _timed_out(error: BaseException) -> bool:
     )
 
 
-def submit_conversation(transcript: list[dict], session_id: str, origin: str = "") -> str | None:
+def submit_conversation(transcript: list[dict[str, str]], session_id: str, origin: str = "") -> str | None:
     """Register this call with Coval as a conversation, and return its ID.
 
     This is the route for a call no simulation placed: a local `unmute dev`
@@ -470,7 +480,7 @@ def setup_coval_tracing() -> TracerProvider:
     return provider
 
 
-def activate_simulation(runner_args) -> str | None:
+def activate_simulation(runner_args: Any) -> str | None:
     """Resolve the simulation ID for this call and start exporting against it.
 
     Also records how the call arrived, which is read off the same arguments and
@@ -514,6 +524,7 @@ def activate_simulation(runner_args) -> str | None:
 
 
 def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:
+    """Point every agent worker at the main worker's tracing context."""
     # ponytail: Pipecat 1.9.0 LLMWorker exposes no tracing kwargs. Share the main
     # worker's context until its public constructor accepts them.
     for agent in agents:
@@ -574,7 +585,14 @@ def flush_tracing(provider: TracerProvider, session_id: str = "") -> None:
 class TracedLLMWorker(LLMWorker):
     """Add the `llm_tool_call` spans missing from Pipecat's standard tracing."""
 
-    async def _trace_tool(self, name, arguments, call, tool_call_id=None):
+    async def _trace_tool(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        call: Callable[[trace.Span | None], Awaitable[Any]],
+        tool_call_id: str | None = None,
+    ) -> Any:
+        """Run one tool call inside its own span, or bare when tracing is off."""
         context = self._tracing_context
         if not self._enable_tracing or context is None:
             return await call(None)
@@ -598,16 +616,17 @@ class TracedLLMWorker(LLMWorker):
                 span.set_attribute("tool.result", json.dumps(result, default=str))
             return result
 
-    def _track_tool_call(self, method):
+    def _track_tool_call(self, method: Callable[..., Any]) -> Callable[..., Any]:
+        """Wrap Pipecat's tool tracker so each call gets a span."""
         tracked = super()._track_tool_call(method)
 
         @functools.wraps(tracked)
-        async def wrapper(params, *args, **kwargs):
-            async def call(span):
+        async def wrapper(params: Any, *args: Any, **kwargs: Any) -> Any:
+            async def call(span: trace.Span | None) -> Any:
                 if span:
                     result_callback = params.result_callback
 
-                    async def traced_result_callback(result, **callback_kwargs):
+                    async def traced_result_callback(result: Any, **callback_kwargs: Any) -> Any:
                         span.set_attribute("tool.result", json.dumps(result, default=str))
                         return await result_callback(result, **callback_kwargs)
 
@@ -623,10 +642,12 @@ class TracedLLMWorker(LLMWorker):
 
         return wrapper
 
-    def _trace_flow_tool(self, name, method):
+    def _trace_flow_tool(self, name: str, method: Callable[..., Awaitable[Any]]) -> Callable[..., Any]:
+        """Wrap one Pipecat Flows tool function so it gets a span."""
+
         @functools.wraps(method)
-        async def wrapper(args, flow_manager):
-            async def call(_span):
+        async def wrapper(args: Mapping[str, Any], flow_manager: Any) -> Any:
+            async def call(_span: trace.Span | None) -> Any:
                 return await method(args, flow_manager)
 
             return await self._trace_tool(name, dict(args), call)

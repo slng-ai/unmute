@@ -29,7 +29,7 @@ func TestAGroupSkipsAConfirmedStep(t *testing.T) {
 		"self._do_book_plan = [",
 		`("verify", "customer_phone"),`,
 		"if not (confirmed and _is_confirmed(self.state, confirmed))",
-		"def _do_book_next(self, name):",
+		"def _do_book_next(self, name: str) -> str | None:",
 	} {
 		if !strings.Contains(pipecat, want) {
 			t.Errorf("pipecat bot.py missing %q", want)
@@ -68,12 +68,12 @@ func TestAWithdrawingTaskUnconfirmsOnEntry(t *testing.T) {
 // dependency pass a save runs.
 func TestWithdrawalClearsDerivedValuesToo(t *testing.T) {
 	for name, module := range terminalModules(t) {
-		body := blockAfter(t, module, "def _withdraw_confirmation(state, step):")
+		body := blockAfter(t, module, "def _withdraw_confirmation(state: object, step: str) -> None:")
 		for _, want := range []string{
 			"_STATE_CONFIRM.items()",
 			"for name, reads in _STATE_DEPENDENCIES.items():",
 			"if any(source in unconfirmed for source in reads):",
-			"state._unconfirmed = unconfirmed",
+			`setattr(state, "_unconfirmed", unconfirmed)`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s: _withdraw_confirmation missing %q", name, want)
@@ -117,7 +117,7 @@ func TestAHandoffWaitsForATerminalCallToSettle(t *testing.T) {
 		// Waits on a mutation in flight from any response, or one called
 		// beside it in this response and not started yet.
 		`if self._terminal_pending or _sibling_call(ctx, {"book_it", "cancel_it"}):`,
-		"await asyncio.wait_for(self._terminal_settled.wait(), timeout=30.0)",
+		"await asyncio.wait_for(self._terminal_settled.wait(), timeout=_TERMINAL_WAIT_SECS)",
 		"if self._finish_call_id is None:",
 		"The action did not complete, so the caller was not moved.",
 	} {
@@ -134,8 +134,9 @@ func TestAHandoffWaitsForATerminalCallToSettle(t *testing.T) {
 	}
 	pipecat := terminalModule(t, "pipecat", "bot.py")
 	for _, want := range []string{
-		`if self._do_book_pending or any(name in {"book_it", "cancel_it"} for name in self._response_calls):`,
-		"await asyncio.wait_for(self._do_book_settled.wait(), timeout=30.0)",
+		`if self._do_book_pending or not {"book_it", "cancel_it"}.isdisjoint(self._response_calls):`,
+		"self._do_book_settled.wait(), timeout=TERMINAL_SETTLE_TIMEOUT_SECS",
+		"TERMINAL_SETTLE_TIMEOUT_SECS = 30.0",
 		`if "book" not in self._do_book_results:`,
 		`return {"status": "not transferred: the action did not complete"}, None`,
 	} {

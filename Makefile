@@ -18,6 +18,8 @@ smoke:   ; go test -timeout 20m -tags smoke ./...
 # drift, and a vendored copy with no refresh check cannot notice anything.
 contracts: ; go test -tags contracts -run TestSlngContractsHaveNotDrifted ./internal/generate/
 lint:    ; golangci-lint run
+# Every example compiled and held to its own generated ruff rules. Needs uv.
+lint-emitted: build ; sh scripts/lint_emitted.sh
 fmt:     ; gofmt -w . && go vet ./...
 install: ; go install -ldflags "$(LDFLAGS)" .
 docs:    ; cd docs-site && npx --yes mint dev --no-open
@@ -34,4 +36,4 @@ release-dry: ; goreleaser release --snapshot --clean --skip=sign
 # `cloudflared` on PATH, which is why it is nowhere near the PR gate.
 sim:     ; uv run --project utils/coval_sim coval-sim run $(TEST_SET)
 
-.PHONY: build test smoke contracts lint fmt install docs release-dry sim
+.PHONY: build test smoke contracts lint lint-emitted fmt install docs release-dry sim

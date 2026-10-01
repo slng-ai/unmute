@@ -167,6 +167,29 @@ jobs:
       - run: pip install uv==0.11.16
       - run: uv run --project utils/coval_sim pytest -q utils/coval_sim/tests
 
+  # Generated Python, not checked-in Python: every example compiled on every
+  # target it declares and held to the ruff rules its own pyproject.toml
+  # selects. Those rules are the readability bar in
+  # internal/generate/pyproject.go, and without this job they would only ever
+  # run in `make smoke`, which is off the PR gate.
+  emitted-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # compile formats emitted Python with whatever ruff is on PATH, so the
+      # job installs the one every generated pyproject.toml pins. A test in
+      # internal/generate/pyproject_test.go keeps the two versions equal.
+      - run: pip install uv==0.11.16 ruff==0.15.7
+      - run: make lint-emitted
+
   # Known vulnerabilities, both in what we import and in the standard library we
   # link into every released binary. Same go.mod version as every other job, so
   # what this scans is what ships. That is also why go.mod tracks a supported Go
