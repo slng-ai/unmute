@@ -6,7 +6,7 @@ _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
 def _render(text: str, userdata: object, *, quote_values: bool = False, site: str = "") -> str:
-    """Substitute each variable token from the session userdata (SCHEMA 4.4).
+    """Substitute each variable token from the session userdata.
 
     Only substituted values are URL-encoded, never the surrounding literal.
 
@@ -79,7 +79,7 @@ def _refusal(tool: str, userdata: object, needed: list[tuple[str, str]]) -> str:
 {{end}}
 {{- if .HasUserdata}}
 # --- shared state ------------------------------------------------------------
-# Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
+# Typed session state: tasks assign into it, transfers read it.
 @dataclass
 class Userdata:
     """The session state every agent and task of one call shares."""

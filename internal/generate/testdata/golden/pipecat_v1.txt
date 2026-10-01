@@ -1958,7 +1958,7 @@ def _state_lookup(state: object, name: str) -> tuple[str, object]:
 
 @dataclass
 class State:
-    """Typed call variables (SCHEMA 4.4), shared across agents."""
+    """Typed call variables, shared across agents."""
 
     customer_id: str | None = None
     verified: bool = False

@@ -572,7 +572,7 @@ def _state_lookup(state: object, name: str) -> tuple[str, object]:
 
 @dataclass
 class State:
-    """Typed call variables (SCHEMA 4.4), shared across agents."""
+    """Typed call variables, shared across agents."""
 
     caller_alias: str | None = None  # What the caller says to call them.
     customer_id: str | None = None
@@ -631,7 +631,7 @@ _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
 def _render(text: str, state: Any, *, quote_values: bool = False, site: str = "") -> str:
-    """Substitute each variable token from the call state (SCHEMA 4.4 templates).
+    """Substitute each variable token from the call state.
 
     Only substituted values are URL-encoded, never the surrounding literal.
 
