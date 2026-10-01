@@ -1,98 +1,12 @@
-"""Generated Pipecat agent for safe-core-fixture.
+"""Every fixed value this agent runs with, in one place.
 
-Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
-graph are baked in from the package. Secret values are read from the environment
-and never written here. The agency model uses the Pipecat workers API: a main
-PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
-LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
-run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
-context, a FlowManager walks the steps as nodes, and control returns with only
-a completed or unserved status.
+Compiled from the package: names, limits, timeouts, and the environment
+variables each kind of session needs. Nothing here reads a secret.
 """
 
 from __future__ import annotations
 
-import asyncio
-import copy
-import functools
-import inspect
-import json
 import os
-import re
-import sys
-import uuid
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
-from typing import Any, cast
-from urllib.parse import quote
-
-import httpx
-from dotenv import load_dotenv
-from loguru import logger
-from openai import AsyncOpenAI, DefaultAsyncHttpxClient
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.bus import BusBridgeProcessor
-from pipecat.flows import (
-    NO_RESPONSE,
-    ContextStrategy,
-    ContextStrategyConfig,
-    FlowManager,
-    FlowsFunctionSchema,
-    NodeConfig,
-)
-from pipecat.frames.frames import (
-    EndFrame,
-    FunctionCallResultProperties,
-    LLMMessagesAppendFrame,
-    LLMRunFrame,
-    LLMUpdateSettingsFrame,
-    TTSSpeakFrame,
-)
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
-from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
-from pipecat.runner.types import RunnerArguments
-from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.llm_service import FunctionCallParams, LLMService
-from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.settings import LLMSettings
-from pipecat.services.stt_service import STTService
-from pipecat.services.tts_service import TTSService
-from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
-from pipecat.utils.http import connection_limits
-from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
-from pipecat.workers.runner import WorkerRunner
-from pipecat_slng import SlngTTSService
-from pydantic import BaseModel, TypeAdapter, ValidationError
-
-from dev_metrics import DevReporter, install_dev_metrics
-
-load_dotenv()
-
-_LOGGING_CONFIGURED = False
-
-
-def _configure_logging() -> None:
-    """Send log output to stderr at UNMUTE_LOG_LEVEL, once per process."""
-    global _LOGGING_CONFIGURED
-    if _LOGGING_CONFIGURED:
-        return
-    logger.remove()
-    logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
-    _LOGGING_CONFIGURED = True
-
 
 MAIN_NAME = "main"
 # The longest a webhook tool waits for its endpoint before the call fails.
@@ -100,9 +14,7 @@ WEBHOOK_TIMEOUT_SECS = 30.0
 # The router client's connection limits, restated from the base service's own.
 ROUTER_KEEPALIVE_CONNECTIONS = 100
 ROUTER_MAX_CONNECTIONS = 1000
-# Tasks that end the call later. A task nobody references can be collected
-# while it sleeps, so each is held here until it finishes.
-_END_TASKS: set[asyncio.Task[None]] = set()
+
 # Provider credentials only. The telephony route's environment (Redis, carrier
 # keys, the public URL) is required by telephony.py, not here, so a telephony
 # package still runs in the browser with nothing but model keys (V10/B3).
@@ -125,353 +37,100 @@ def require_env() -> None:
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+"""The system prompts, one Markdown file each beside this module.
 
-# --- SLNG Context Router ----------------------------------------------------
-# The router answers a repeated turn from its cache instead of calling the model.
-# That is why a router-bound system prompt below keeps its placeholders instead of
-# being rendered here: the router substitutes them from template_variables, so the
-# prompt it sees is identical on every call, which is what lets a turn repeat. A
-# first turn never caches, and the router decides which later turns are
-# repeatable, so a repeat served by the model is expected rather than a fault.
-#
-# The agent id header scopes that cache, and it is one value per prompt rather
-# than one for the package: each agent and each task sends the authored agent_id,
-# a colon, then its own name. The cache key is the last exchange and carries no
-# system prompt, so two prompts under one scope get served each other's answers.
-# A task runs on its owner's service here, so entering one swaps its scope in and
-# every way out swaps the owner's back.
+Each file is read once, at import. A prompt's placeholders are filled from the
+call's state where it is used, never here.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+_HERE = Path(__file__).parent
 
 
-def _slng_config_fast_reasoning() -> dict[str, Any]:
-    """Build the model configuration sent inline in every think request.
-
-    Credentials are read here rather than at import, so a missing one is reported
-    by require_env() alongside every other name instead of raising a KeyError
-    before anything has checked. No value is written into this file: each is the
-    name of an environment variable.
-
-    Returns:
-        The configuration body for the router's think request.
-    """
-    return {"tiers": {"1": [{"endpoint": {"api_key": os.environ["OPENAI_API_KEY"], "url": "https://api.openai.com/v1"}, "model": "gpt-5.6-luna", "weight": 100}]}}
-
-async def _slng_log_provenance(response: Any) -> None:
-    """Say where this answer came from, once per think request.
-
-    The router states this only in response headers, and neither framework hands
-    them to us, so a hook on the client is the one place that sees them. Without
-    it the question an operator actually asks about a cache, whether it is
-    working, has no answer in this run's own log.
-
-    Three rules, from httpx's own event-hooks documentation, each of which would
-    be a live-call defect if broken. It has to be async, because a sync callable
-    on an AsyncClient is never awaited. It reads headers only: the hook runs
-    before the body is read, so touching the body would consume the stream the
-    framework is about to iterate. And it cannot raise, because a raising
-    response hook fails the request it was only meant to describe.
-
-    It also logs only a router think request. The scope header is what lets the
-    line name a scope at all, so a request without one is a request this hook
-    could not describe.
+def load(name: str) -> str:
+    """Read one prompt exactly as the package wrote it.
 
     Args:
-        response: The httpx response, whose body has not been read yet.
-    """
-    try:
-        scope = response.request.headers.get("X-Slng-Agent-Id")
-        if not scope:
-            return
-        headers = response.headers
-        # Field order is the contract, and the gate reads it off this line.
-        fields = ["scope=" + scope, "source=" + headers.get("x-slng-response-source", "unknown")]
-        if layer := headers.get("x-slng-cache-layer"):
-            fields.append("layer=" + layer)
-        if model := headers.get("x-slng-model"):
-            fields.append("model=" + model)
-        fields.append("request_id=" + headers.get("x-slng-request-id", "unknown"))
-        logger.info("slng router: " + " ".join(fields))
-    except Exception:  # noqa: BLE001 - a log line must never end a call
-        logger.debug("could not read the router's provenance headers", exc_info=True)
-
-
-
-class _SlngRouterLLMService(OpenAILLMService):
-    """The router's LLM service: a response hook, and per-request variables.
-
-    Two overrides, two different seams, and the second one is why this class
-    holds any state.
-
-    create_client is the only seam for reading the response headers: the service
-    builds its own AsyncOpenAI and hands us neither the raw response nor its
-    headers, and the router states where an answer came from only in a header.
-    The connection limits restate the base class's own (pipecat
-    services/openai/base_llm.py create_client at the pinned version). Restating
-    them is deliberate. Anything different here would change connection reuse,
-    which is a latency change nobody asked for and nothing would report.
-
-    build_chat_completion_params is the seam for the request body. The base
-    class's last statement before returning is params.update(self._settings.extra),
-    which reads a settings snapshot mutated only by an explicit update: nothing
-    re-evaluates the expression that filled it, so a value written part way
-    through a step reached the model one turn late. This override reads the live
-    state instead, on the streaming path and the one-shot path both, which is
-    what makes the two targets refresh at the same point.
-    """
-
-    def __init__(self, *args: Any, slng_state: Any = None, **kwargs: Any) -> None:
-        """Build the service and keep the call state its request body reads.
-
-        Args:
-            *args: Passed to the base service.
-            slng_state: The live call state, read on every request.
-            **kwargs: Passed to the base service.
-        """
-        super().__init__(*args, **kwargs)
-        self._slng_state = slng_state
-
-    def build_chat_completion_params(self, params_from_context: Any) -> dict[str, Any]:
-        """Add the live template variables to the request body.
-
-        Args:
-            params_from_context: The invocation parameters the base service built.
-
-        Returns:
-            The request parameters with `template_variables` filled from state.
-        """
-        params = super().build_chat_completion_params(params_from_context)
-        scope = (params.get("extra_headers") or {}).get("X-Slng-Agent-Id", "")
-        body = dict(params.get("extra_body") or {})
-        body["template_variables"] = _slng_template_variables(
-            self._slng_state, _SLNG_TEMPLATE_PATHS.get(scope, ()), scope=scope
-        )
-        params["extra_body"] = body
-        return params
-
-    def create_client(
-        self,
-        api_key: str | None = None,
-        base_url: str | None = None,
-        organization: str | None = None,
-        project: str | None = None,
-        default_headers: dict[str, str] | None = None,
-        **kwargs: Any,
-    ) -> AsyncOpenAI:
-        """Build the client with a hook that logs where each answer came from.
-
-        Args:
-            api_key: The router's API key.
-            base_url: The router's base URL.
-            organization: Accepted for the base signature and not forwarded.
-            project: Accepted for the base signature and not forwarded.
-            default_headers: Accepted for the base signature and not forwarded.
-            **kwargs: Accepted for the base signature and not forwarded.
-
-        Returns:
-            An AsyncOpenAI client with the provenance response hook installed.
-        """
-        return AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            http_client=DefaultAsyncHttpxClient(
-                limits=connection_limits(
-                    max_keepalive_connections=ROUTER_KEEPALIVE_CONNECTIONS,
-                    max_connections=ROUTER_MAX_CONNECTIONS,
-                    keepalive_expiry=None,
-                ),
-                event_hooks={"response": [_slng_log_provenance]},
-            ),
-        )
-
-
-
-_SLNG_VARIABLE_LIMIT = 4000
-_SLNG_TEMPLATE_PATHS = {"safe-core-router-v3:billing": ["customer_id", "caller_alias"], "safe-core-router-v3:intake": ["customer_id", "caller_alias"], "safe-core-router-v3:task.collect": ["customer_id"], "safe-core-router-v3:task.confirm": []}
-_SLNG_SCOPE_SITES = {"safe-core-router-v3:task.collect": "task:collect", "safe-core-router-v3:task.confirm": "task:confirm"}
-
-
-def _slng_template_variables(
-    state: Any, names: Sequence[str], *, scope: str = ""
-) -> dict[str, str]:
-    """Build the values the router substitutes into the prompt's placeholders.
-
-    A name with no value yet sends the empty string, never None and never the text
-    "None". A value over the router's limit is truncated with a warning rather
-    than dropped: an over-long value must not end a live call.
-
-    Args:
-        state: The call state, or None before one exists.
-        names: The placeholder names the prompt at this scope reads.
-        scope: The cache scope, which picks the prompt site for a path lookup.
+        name: The prompt's file name, without the `.md` suffix.
 
     Returns:
-        Each name mapped to its text, bounded by the router's limit.
+        The prompt text.
     """
-    values = {}
-    for name in names:
-        # The bound is measured on the JSON rendering, not on the repr of the
-        # object: they are different lengths, and the one the router receives is
-        # the one that has to fit. _state_text carries its own bound and its own
-        # warning, so a declared value is already shortened by here. A path
-        # arrives as one flat name, and _state_lookup walks it.
-        text = _state_text(*_prompt_value(state, name, _SLNG_SCOPE_SITES.get(scope, "")))
-        if len(text) > _SLNG_VARIABLE_LIMIT:
-            logger.warning(
-                "template variable {} is {} characters; truncating to {} for the router",
-                name,
-                len(text),
-                _SLNG_VARIABLE_LIMIT,
-            )
-            text = text[:_SLNG_VARIABLE_LIMIT]
-        values[name] = text
-    return values
+    return (_HERE / f"{name}.md").read_text(encoding="utf-8")
 
 
-def _direct_tool(
-    fn: Callable[..., Any] | None = None,
-    *,
-    cancel_on_interruption: bool = True,
-    timeout_secs: float | None = None,
-) -> Any:
-    """Keep every direct function call terminal, even on malformed input.
+BILLING_PROMPT = load("billing")
+INTAKE_PROMPT = load("intake")
+RUN_COLLECT_COLLECT_TASK_PROMPT = load("tasks/run_collect_collect")
+RUN_TRIAGE_COLLECT_TASK_PROMPT = load("tasks/run_triage_collect")
+RUN_TRIAGE_CONFIRM_TASK_PROMPT = load("tasks/run_triage_confirm")
+"""Shape the conversation a step or an agent is handed."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+
+def _caller_turns(messages: list[Any]) -> int:
+    """Count the turns the caller has taken in this message list.
+
+    Read by every delegate, not just the ones that carry a turn: it is the one
+    signal that separates "they asked again" from "the model re-read its own
+    finished work", which is what the re-entry guard compares.
 
     Args:
-        fn: The handler, when used as a bare `@_direct_tool`.
-        cancel_on_interruption: Whether the caller speaking cancels the call.
-        timeout_secs: How long the framework waits for the handler.
+        messages: The context's messages.
 
     Returns:
-        The decorated handler, or a decorator when called with options.
+        The number of user messages.
     """
-
-    def decorate(handler: Callable[..., Any]) -> Any:
-        """Wrap one handler so a bad or failing call still resolves."""
-        signature = inspect.signature(handler)
-        declared = set(signature.parameters) - {"self", "params"}
-
-        @functools.wraps(handler)
-        async def guarded(*args: Any, **kwargs: Any) -> Any:
-            """Run the handler, resolving the call itself on bad input or failure."""
-            params = kwargs.get("params")
-            if params is None:
-                params_index = 1 if "self" in signature.parameters else 0
-                params = args[params_index]
-
-            unexpected = sorted(set(kwargs) - declared - {"params"})
-            if unexpected:
-                allowed = ", ".join(sorted(declared)) or "none"
-                await params.result_callback({
-                    "error": (
-                        f"Unexpected arguments for {params.function_name}: "
-                        f"{', '.join(unexpected)}. Allowed arguments: {allowed}. "
-                        "Retry with only allowed arguments."
-                    )
-                })
-                return
-
-            resolved = False
-            original_result_callback = params.result_callback
-
-            async def resolve(result: Any, **callback_kwargs: Any) -> Any:
-                """Record that the call was resolved, then hand the result on."""
-                nonlocal resolved
-                resolved = True
-                return await original_result_callback(result, **callback_kwargs)
-
-            params.result_callback = resolve
-            try:
-                return await handler(*args, **kwargs)
-            except Exception:
-                logger.exception("tool failed before completing: {}", params.function_name)
-                if not resolved:
-                    await original_result_callback({
-                        "error": (
-                            f"{params.function_name} failed before completing. "
-                            "Do not claim success; retry only with corrected input."
-                        )
-                    })
-                    return
-                raise
-            finally:
-                params.result_callback = original_result_callback
-
-        return tool(
-            cancel_on_interruption=cancel_on_interruption,
-            timeout_secs=timeout_secs,
-        )(guarded)
-
-    if fn is not None:
-        return decorate(fn)
-    return decorate
+    return sum(1 for message in messages if isinstance(message, dict) and message.get("role") == "user")
 
 
-
-# Checked at import, which is what makes the container refuse to start rather
-# than start and go quiet.
-#
-# It used to be checked only inside run_bot, once per session. The container
-# then reported healthy, the platform marked the deployment ready, the browser
-# got a valid answer to its offer — and the failure happened in a background
-# task where only the log saw it. A caller heard silence. That is the exact
-# trade Principle II calls the worst one available, and two documentation pages
-# already promised the opposite: "the container starts, checks the keys the
-# agent needs, and stops with the names it did not find" (Wave C, 2026-08-15).
-#
-# run_bot still calls it, because a session that somehow starts without them
-# should fail before the caller hears anything either.
-require_env()
-
-
-# --- a caller on a Twilio-shaped websocket ----------------------------------
-# `python bot.py -t twilio -x <public host>` serves a TwiML webhook and a Media
-# Streams websocket, the way Twilio would reach a phone route. This package has
-# no phone route, so nothing real dials it. It is here for a simulated caller,
-# such as a Coval run against this bot on your laptop.
-async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
-    """Build the carrier's stream, with the call ended by closing the socket.
-
-    Used by a package that holds no carrier credentials at all, which needs a
-    transport that never asks a carrier to hang a call up.
-
-    A package that receives calls and never places or redirects one holds no
-    carrier credentials. The framework's own telephony path cannot be used
-    for that: it always asks the serializer to hang the call up through the
-    carrier's REST API, and the serializer refuses to be built without credentials
-    for it (`auto_hang_up is enabled but missing required parameters`, verified
-    against pipecat-ai 1.5.0 on 2026-08-13). So the transport is built here, with
-    automatic hangup off.
-
-    Nothing is lost. Closing the stream ends the call, because the markup your
-    number points at has nothing after `<Connect>`. Declare a connection and this
-    function is not emitted at all: the framework's path is used, and the agent
-    ends calls through the carrier's own call control.
+def _settle_task_call(messages: list[Any], name: str, status: Any) -> None:
+    """Replace this invocation's running reply before restoring the owner.
 
     Args:
-        runner_args: The runner's arguments for a websocket session.
-
-    Returns:
-        The Twilio Media Streams transport for this call.
+        messages: The owner's messages, edited in place.
+        name: The delegate tool whose call is being settled.
+        status: The result to record in place of the running reply.
     """
-    from pipecat.runner.types import WebSocketRunnerArguments
-    from pipecat.runner.utils import parse_telephony_websocket
-    from pipecat.serializers.twilio import TwilioFrameSerializer
-    from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
-
-    # Only a websocket session reaches this function; the base type has no socket.
-    websocket_args = cast(WebSocketRunnerArguments, runner_args)
-    transport_type, call_data = await parse_telephony_websocket(websocket_args.websocket)
-    # Set the same two attributes the framework's path sets, so _phone_session
-    # above reads the handshake the same way whichever path built the transport.
-    setattr(runner_args, "transport_type", transport_type)  # noqa: B010 - not declared on RunnerArguments
-    runner_args.call_data = call_data
-    params = cast(FastAPIWebsocketParams, transport_params[transport_type]())
-    params.add_wav_header = False
-    params.serializer = TwilioFrameSerializer(
-        stream_sid=call_data["stream_id"],
-        call_sid=call_data["call_id"],
-        params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
+    running = next(
+        (
+            call
+            for message in reversed(messages)
+            if isinstance(message, dict)
+            for call in message.get("tool_calls", [])
+            if call.get("function", {}).get("name") == name
+        ),
+        None,
     )
-    return FastAPIWebsocketTransport(websocket=websocket_args.websocket, params=params)
+    if running is None:
+        return
+    for reply in messages:
+        if (
+            isinstance(reply, dict)
+            and reply.get("role") == "tool"
+            and reply.get("tool_call_id") == running["id"]
+        ):
+            reply["content"] = json.dumps(status)
+"""The call's state: its typed variables, how they are read, and what is known first."""
 
+from __future__ import annotations
+
+import json
+import os
+import re
+from dataclasses import dataclass
+from typing import Any
+from urllib.parse import quote
+
+from loguru import logger
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 # --- declared state ----------------------------------------------------------
 # Generated from the `shapes:` and the typed `variables:` in agent.yaml. Both
@@ -998,57 +657,360 @@ def _render(text: str, state: Any, *, quote_values: bool = False, site: str = ""
         return quote(value, safe="") if quote_values else value
 
     return _TEMPLATE.sub(_one, text)
+"""The SLNG Context Router: its model configuration, client and template variables."""
 
-async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
-    """End the call once `timeout_secs` have passed.
+from __future__ import annotations
+
+import os
+from collections.abc import Sequence
+from typing import Any
+
+from loguru import logger
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.http import connection_limits
+
+from session import _prompt_value, _state_text
+from settings import ROUTER_KEEPALIVE_CONNECTIONS, ROUTER_MAX_CONNECTIONS
+
+# --- SLNG Context Router ----------------------------------------------------
+# The router answers a repeated turn from its cache instead of calling the model.
+# That is why a router-bound system prompt below keeps its placeholders instead of
+# being rendered here: the router substitutes them from template_variables, so the
+# prompt it sees is identical on every call, which is what lets a turn repeat. A
+# first turn never caches, and the router decides which later turns are
+# repeatable, so a repeat served by the model is expected rather than a fault.
+#
+# The agent id header scopes that cache, and it is one value per prompt rather
+# than one for the package: each agent and each task sends the authored agent_id,
+# a colon, then its own name: `<agent_id>:<agent>` for an agent and
+# `<agent_id>:task.<task>` for a task. The cache key is the last exchange and carries no
+# system prompt, so two prompts under one scope get served each other's answers.
+# A task runs on its owner's service here, so entering one swaps its scope in and
+# every way out swaps the owner's back.
+
+
+def _slng_config_fast_reasoning() -> dict[str, Any]:
+    """Build the model configuration sent inline in every think request.
+
+    Credentials are read here rather than at import, so a missing one is reported
+    by require_env() alongside every other name instead of raising a KeyError
+    before anything has checked. No value is written into this file: each is the
+    name of an environment variable.
+
+    Returns:
+        The configuration body for the router's think request.
+    """
+    return {"tiers": {"1": [{"endpoint": {"api_key": os.environ["OPENAI_API_KEY"], "url": "https://api.openai.com/v1"}, "model": "gpt-5.6-luna", "weight": 100}]}}
+
+async def _slng_log_provenance(response: Any) -> None:
+    """Say where this answer came from, once per think request.
+
+    The router states this only in response headers, and neither framework hands
+    them to us, so a hook on the client is the one place that sees them. Without
+    it the question an operator actually asks about a cache, whether it is
+    working, has no answer in this run's own log.
+
+    Three rules, from httpx's own event-hooks documentation, each of which would
+    be a live-call defect if broken. It has to be async, because a sync callable
+    on an AsyncClient is never awaited. It reads headers only: the hook runs
+    before the body is read, so touching the body would consume the stream the
+    framework is about to iterate. And it cannot raise, because a raising
+    response hook fails the request it was only meant to describe.
+
+    It also logs only a router think request. The scope header is what lets the
+    line name a scope at all, so a request without one is a request this hook
+    could not describe.
 
     Args:
-        worker: The pipeline worker to send the end frame to.
-        timeout_secs: How long to wait first.
+        response: The httpx response, whose body has not been read yet.
     """
-    await asyncio.sleep(timeout_secs)
-    await worker.queue_frame(EndFrame())
+    try:
+        scope = response.request.headers.get("X-Slng-Agent-Id")
+        if not scope:
+            return
+        headers = response.headers
+        # Field order is the contract, and the gate reads it off this line.
+        fields = ["scope=" + scope, "source=" + headers.get("x-slng-response-source", "unknown")]
+        if layer := headers.get("x-slng-cache-layer"):
+            fields.append("layer=" + layer)
+        if model := headers.get("x-slng-model"):
+            fields.append("model=" + model)
+        fields.append("request_id=" + headers.get("x-slng-request-id", "unknown"))
+        logger.info("slng router: " + " ".join(fields))
+    except Exception:  # noqa: BLE001 - a log line must never end a call
+        logger.debug("could not read the router's provenance headers", exc_info=True)
 
 
-def _schedule_end_after(worker: PipelineWorker, timeout_secs: float) -> None:
-    """Schedule `_end_after` and hold its task until it finishes.
+
+class _SlngRouterLLMService(OpenAILLMService):
+    """The router's LLM service: a response hook, and per-request variables.
+
+    Two overrides, two different seams, and the second one is why this class
+    holds any state.
+
+    create_client is the only seam for reading the response headers: the service
+    builds its own AsyncOpenAI and hands us neither the raw response nor its
+    headers, and the router states where an answer came from only in a header.
+    The connection limits restate the base class's own (pipecat
+    services/openai/base_llm.py create_client at the pinned version). Restating
+    them is deliberate. Anything different here would change connection reuse,
+    which is a latency change nobody asked for and nothing would report.
+
+    build_chat_completion_params is the seam for the request body. The base
+    class's last statement before returning is params.update(self._settings.extra),
+    which reads a settings snapshot mutated only by an explicit update: nothing
+    re-evaluates the expression that filled it, so a value written part way
+    through a step reached the model one turn late. This override reads the live
+    state instead, on the streaming path and the one-shot path both, which is
+    what makes the two targets refresh at the same point.
+    """
+
+    def __init__(self, *args: Any, slng_state: Any = None, **kwargs: Any) -> None:
+        """Build the service and keep the call state its request body reads.
+
+        Args:
+            *args: Passed to the base service.
+            slng_state: The live call state, read on every request.
+            **kwargs: Passed to the base service.
+        """
+        super().__init__(*args, **kwargs)
+        self._slng_state = slng_state
+
+    def build_chat_completion_params(self, params_from_context: Any) -> dict[str, Any]:
+        """Add the live template variables to the request body.
+
+        Args:
+            params_from_context: The invocation parameters the base service built.
+
+        Returns:
+            The request parameters with `template_variables` filled from state.
+        """
+        params = super().build_chat_completion_params(params_from_context)
+        scope = (params.get("extra_headers") or {}).get("X-Slng-Agent-Id", "")
+        body = dict(params.get("extra_body") or {})
+        body["template_variables"] = _slng_template_variables(
+            self._slng_state, _SLNG_TEMPLATE_PATHS.get(scope, ()), scope=scope
+        )
+        params["extra_body"] = body
+        return params
+
+    def create_client(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        organization: str | None = None,
+        project: str | None = None,
+        default_headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> AsyncOpenAI:
+        """Build the client with a hook that logs where each answer came from.
+
+        Args:
+            api_key: The router's API key.
+            base_url: The router's base URL.
+            organization: Accepted for the base signature and not forwarded.
+            project: Accepted for the base signature and not forwarded.
+            default_headers: Accepted for the base signature and not forwarded.
+            **kwargs: Accepted for the base signature and not forwarded.
+
+        Returns:
+            An AsyncOpenAI client with the provenance response hook installed.
+        """
+        return AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            http_client=DefaultAsyncHttpxClient(
+                limits=connection_limits(
+                    max_keepalive_connections=ROUTER_KEEPALIVE_CONNECTIONS,
+                    max_connections=ROUTER_MAX_CONNECTIONS,
+                    keepalive_expiry=None,
+                ),
+                event_hooks={"response": [_slng_log_provenance]},
+            ),
+        )
+
+
+
+_SLNG_VARIABLE_LIMIT = 4000
+_SLNG_TEMPLATE_PATHS = {"safe-core-router-v3:billing": ["customer_id", "caller_alias"], "safe-core-router-v3:intake": ["customer_id", "caller_alias"], "safe-core-router-v3:task.collect": ["customer_id"], "safe-core-router-v3:task.confirm": []}
+_SLNG_SCOPE_SITES = {"safe-core-router-v3:task.collect": "task:collect", "safe-core-router-v3:task.confirm": "task:confirm"}
+
+
+def _slng_template_variables(
+    state: Any, names: Sequence[str], *, scope: str = ""
+) -> dict[str, str]:
+    """Build the values the router substitutes into the prompt's placeholders.
+
+    A name with no value yet sends the empty string, never None and never the text
+    "None". A value over the router's limit is truncated with a warning rather
+    than dropped: an over-long value must not end a live call.
 
     Args:
-        worker: The pipeline worker to send the end frame to.
-        timeout_secs: How long to wait first.
+        state: The call state, or None before one exists.
+        names: The placeholder names the prompt at this scope reads.
+        scope: The cache scope, which picks the prompt site for a path lookup.
+
+    Returns:
+        Each name mapped to its text, bounded by the router's limit.
     """
-    task = asyncio.create_task(_end_after(worker, timeout_secs))
-    _END_TASKS.add(task)
-    task.add_done_callback(_END_TASKS.discard)
+    values = {}
+    for name in names:
+        # The bound is measured on the JSON rendering, not on the repr of the
+        # object: they are different lengths, and the one the router receives is
+        # the one that has to fit. _state_text carries its own bound and its own
+        # warning, so a declared value is already shortened by here. A path
+        # arrives as one flat name, and _state_lookup walks it.
+        text = _state_text(*_prompt_value(state, name, _SLNG_SCOPE_SITES.get(scope, "")))
+        if len(text) > _SLNG_VARIABLE_LIMIT:
+            logger.warning(
+                "template variable {} is {} characters; truncating to {} for the router",
+                name,
+                len(text),
+                _SLNG_VARIABLE_LIMIT,
+            )
+            text = text[:_SLNG_VARIABLE_LIMIT]
+        values[name] = text
+    return values
+"""The agents, their tools, and the task steps they run as flows."""
 
-# --- prompts ----------------------------------------------------------------
-# Agent system instructions as module constants: one copy each, referenced by
-# the LLM builder and any Flow restore (V2).
-BILLING_PROMPT = """# Billing agent (placeholder prompt)
+from __future__ import annotations
 
-You are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+import copy
+import functools
+import inspect
+import json
+import os
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
-- The caller was handed to you because they have a billing question. The conversation so far is in your context.
-- Use `get_invoice` to look up the caller's invoices. It takes the customer id, which the earlier lookup already established.
-- Explain charges calmly and clearly, one item at a time.
-- If the caller is not satisfied, explain what a human support team would need to review.
+import httpx
+from loguru import logger
+from pipecat.flows import (
+    NO_RESPONSE,
+    ContextStrategy,
+    ContextStrategyConfig,
+    FlowManager,
+    FlowsFunctionSchema,
+    NodeConfig,
+)
+from pipecat.frames.frames import (
+    FunctionCallResultProperties,
+    LLMRunFrame,
+    LLMUpdateSettingsFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+)
+from pipecat.services.llm_service import FunctionCallParams, LLMService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import LLMSettings
+from pipecat.services.tts_service import TTSService
+from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
+from pipecat_slng import SlngTTSService
+from pydantic import TypeAdapter
+
+from prompts import (
+    BILLING_PROMPT,
+    INTAKE_PROMPT,
+    RUN_COLLECT_COLLECT_TASK_PROMPT,
+    RUN_TRIAGE_COLLECT_TASK_PROMPT,
+    RUN_TRIAGE_CONFIRM_TASK_PROMPT,
+)
+from session import (
+    State,
+    _group_status,
+    _save_result,
+    _schema,
+    _StateRefused,
+    _task_status,
+)
+from settings import WEBHOOK_TIMEOUT_SECS
+from utils.context import _caller_turns, _settle_task_call
+from utils.dev_metrics import DevReporter
+from utils.router import _slng_config_fast_reasoning, _SlngRouterLLMService
 
 
-The caller is {{customer_id}}, who goes by {{caller_alias}}."""
-INTAKE_PROMPT = """# Intake agent (placeholder prompt)
+def _direct_tool(
+    fn: Callable[..., Any] | None = None,
+    *,
+    cancel_on_interruption: bool = True,
+    timeout_secs: float | None = None,
+) -> Any:
+    """Keep every direct function call terminal, even on malformed input.
 
-You are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+    Args:
+        fn: The handler, when used as a bare `@_direct_tool`.
+        cancel_on_interruption: Whether the caller speaking cancels the call.
+        timeout_secs: How long the framework waits for the handler.
 
-- Greet the caller and find out what they need.
-- When they give a phone number or email, use `lookup_customer` to find their record.
-- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.
-- Never guess account details. If you cannot find the customer, say so and ask again.
+    Returns:
+        The decorated handler, or a decorator when called with options.
+    """
+
+    def decorate(handler: Callable[..., Any]) -> Any:
+        """Wrap one handler so a bad or failing call still resolves."""
+        signature = inspect.signature(handler)
+        declared = set(signature.parameters) - {"self", "params"}
+
+        @functools.wraps(handler)
+        async def guarded(*args: Any, **kwargs: Any) -> Any:
+            """Run the handler, resolving the call itself on bad input or failure."""
+            params = kwargs.get("params")
+            if params is None:
+                params_index = 1 if "self" in signature.parameters else 0
+                params = args[params_index]
+
+            unexpected = sorted(set(kwargs) - declared - {"params"})
+            if unexpected:
+                allowed = ", ".join(sorted(declared)) or "none"
+                await params.result_callback({
+                    "error": (
+                        f"Unexpected arguments for {params.function_name}: "
+                        f"{', '.join(unexpected)}. Allowed arguments: {allowed}. "
+                        "Retry with only allowed arguments."
+                    )
+                })
+                return
+
+            resolved = False
+            original_result_callback = params.result_callback
+
+            async def resolve(result: Any, **callback_kwargs: Any) -> Any:
+                """Record that the call was resolved, then hand the result on."""
+                nonlocal resolved
+                resolved = True
+                return await original_result_callback(result, **callback_kwargs)
+
+            params.result_callback = resolve
+            try:
+                return await handler(*args, **kwargs)
+            except Exception:
+                logger.exception("tool failed before completing: {}", params.function_name)
+                if not resolved:
+                    await original_result_callback({
+                        "error": (
+                            f"{params.function_name} failed before completing. "
+                            "Do not claim success; retry only with corrected input."
+                        )
+                    })
+                    return
+                raise
+            finally:
+                params.result_callback = original_result_callback
+
+        return tool(
+            cancel_on_interruption=cancel_on_interruption,
+            timeout_secs=timeout_secs,
+        )(guarded)
+
+    if fn is not None:
+        return decorate(fn)
+    return decorate
 
 
-The caller is {{customer_id}}, who goes by {{caller_alias}}."""
-
-
-# --- agents -----------------------------------------------------------------
 
 
 
@@ -1404,7 +1366,7 @@ class IntakeAgent(LLMWorker):
         self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
         return NodeConfig(
             name="collect",
-            role_message="Ask for the caller's email and confirm the account for {{customer_id}}.\n\nWhen this step is complete, call `finish_run_collect_collect` with: tier.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_collect_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.",
+            role_message=RUN_COLLECT_COLLECT_TASK_PROMPT,
             task_messages=[{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}],
             functions=[
                 FlowsFunctionSchema(
@@ -1574,7 +1536,7 @@ class IntakeAgent(LLMWorker):
         self.context.set_messages([])
         return NodeConfig(
             name="collect",
-            role_message="Ask for the caller's email and confirm the account for {{customer_id}}.\n\nWhen this step is complete, call `finish_run_triage_collect` with: tier.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_triage_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.",
+            role_message=RUN_TRIAGE_COLLECT_TASK_PROMPT,
             task_messages=[{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}],
             functions=[
                 FlowsFunctionSchema(
@@ -1672,7 +1634,7 @@ class IntakeAgent(LLMWorker):
         self.context.set_messages([])
         return NodeConfig(
             name="confirm",
-            role_message="Read the booking back and ask the caller to confirm.\n\nWhen this step is complete, call `finish_run_triage_confirm` with: confirmed.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_triage_confirm` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.",
+            role_message=RUN_TRIAGE_CONFIRM_TASK_PROMPT,
             task_messages=[{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}],
             functions=[
                 FlowsFunctionSchema(
@@ -1755,51 +1717,6 @@ class IntakeAgent(LLMWorker):
         return {"status": "ok"}, None
 
 
-def _caller_turns(messages: list[Any]) -> int:
-    """Count the turns the caller has taken in this message list.
-
-    Read by every delegate, not just the ones that carry a turn: it is the one
-    signal that separates "they asked again" from "the model re-read its own
-    finished work", which is what the re-entry guard compares.
-
-    Args:
-        messages: The context's messages.
-
-    Returns:
-        The number of user messages.
-    """
-    return sum(1 for message in messages if isinstance(message, dict) and message.get("role") == "user")
-
-
-def _settle_task_call(messages: list[Any], name: str, status: Any) -> None:
-    """Replace this invocation's running reply before restoring the owner.
-
-    Args:
-        messages: The owner's messages, edited in place.
-        name: The delegate tool whose call is being settled.
-        status: The result to record in place of the running reply.
-    """
-    running = next(
-        (
-            call
-            for message in reversed(messages)
-            if isinstance(message, dict)
-            for call in message.get("tool_calls", [])
-            if call.get("function", {}).get("name") == name
-        ),
-        None,
-    )
-    if running is None:
-        return
-    for reply in messages:
-        if (
-            isinstance(reply, dict)
-            and reply.get("role") == "tool"
-            and reply.get("tool_call_id") == running["id"]
-        ):
-            reply["content"] = json.dumps(status)
-
-
 def _flow_visit(
     worker: Any, delegate: str, handler: Callable[..., Awaitable[Any]]
 ) -> Callable[[Any, FlowManager], Awaitable[Any]]:
@@ -1839,9 +1756,72 @@ async def _flow_tool_lookup_customer(args: Any, flow_manager: FlowManager) -> An
         response = await client.post(os.environ["LOOKUP_CUSTOMER_URL"], json={**dict(args)}, timeout=WEBHOOK_TIMEOUT_SECS)
         response.raise_for_status()
         return response.json()
+"""One call: its transport, pipeline, event handlers and the end of it."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import uuid
+from collections.abc import Callable
+from typing import Any, cast
+
+from loguru import logger
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.bus import BusBridgeProcessor
+from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.stt_service import STTService
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.workers.llm import LLMWorkerActivationArgs
+from pipecat.workers.runner import WorkerRunner
+
+from agents import BillingAgent, IntakeAgent
+from session import build_state
+from settings import MAIN_NAME, require_env
+from utils.dev_metrics import DevReporter, install_dev_metrics
+
+# Tasks that end the call later. A task nobody references can be collected
+# while it sleeps, so each is held here until it finishes.
+_END_TASKS: set[asyncio.Task[None]] = set()
 
 
-# --- transport & run --------------------------------------------------------
+async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
+    """End the call once `timeout_secs` have passed.
+
+    Args:
+        worker: The pipeline worker to send the end frame to.
+        timeout_secs: How long to wait first.
+    """
+    await asyncio.sleep(timeout_secs)
+    await worker.queue_frame(EndFrame())
+
+
+def _schedule_end_after(worker: PipelineWorker, timeout_secs: float) -> None:
+    """Schedule `_end_after` and hold its task until it finishes.
+
+    Args:
+        worker: The pipeline worker to send the end frame to.
+        timeout_secs: How long to wait first.
+    """
+    task = asyncio.create_task(_end_after(worker, timeout_secs))
+    _END_TASKS.add(task)
+    task.add_done_callback(_END_TASKS.discard)
 transport_params: dict[str, Callable[[], TransportParams]] = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     # The runner assigns an inbound call's dial-in settings and Daily credentials
@@ -1870,6 +1850,58 @@ def build_stt() -> STTService:
     )
 
 
+# --- a caller on a Twilio-shaped websocket ----------------------------------
+# `python bot.py -t twilio -x <public host>` serves a TwiML webhook and a Media
+# Streams websocket, the way Twilio would reach a phone route. This package has
+# no phone route, so nothing real dials it. It is here for a simulated caller,
+# such as a Coval run against this bot on your laptop.
+
+async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
+    """Build the carrier's stream, with the call ended by closing the socket.
+
+    Used by a package that holds no carrier credentials at all, which needs a
+    transport that never asks a carrier to hang a call up.
+
+    A package that receives calls and never places or redirects one holds no
+    carrier credentials. The framework's own telephony path cannot be used
+    for that: it always asks the serializer to hang the call up through the
+    carrier's REST API, and the serializer refuses to be built without credentials
+    for it (`auto_hang_up is enabled but missing required parameters`, verified
+    against pipecat-ai 1.5.0 on 2026-08-13). So the transport is built here, with
+    automatic hangup off.
+
+    Nothing is lost. Closing the stream ends the call, because the markup your
+    number points at has nothing after `<Connect>`. Declare a connection and this
+    function is not emitted at all: the framework's path is used, and the agent
+    ends calls through the carrier's own call control.
+
+    Args:
+        runner_args: The runner's arguments for a websocket session.
+
+    Returns:
+        The Twilio Media Streams transport for this call.
+    """
+    from pipecat.runner.types import WebSocketRunnerArguments
+    from pipecat.runner.utils import parse_telephony_websocket
+    from pipecat.serializers.twilio import TwilioFrameSerializer
+    from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
+
+    # Only a websocket session reaches this function; the base type has no socket.
+    websocket_args = cast(WebSocketRunnerArguments, runner_args)
+    transport_type, call_data = await parse_telephony_websocket(websocket_args.websocket)
+    # Set the same two attributes the framework's path sets, so _phone_session
+    # above reads the handshake the same way whichever path built the transport.
+    setattr(runner_args, "transport_type", transport_type)  # noqa: B010 - not declared on RunnerArguments
+    runner_args.call_data = call_data
+    params = cast(FastAPIWebsocketParams, transport_params[transport_type]())
+    params.add_wav_header = False
+    params.serializer = TwilioFrameSerializer(
+        stream_sid=call_data["stream_id"],
+        call_sid=call_data["call_id"],
+        params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
+    )
+    return FastAPIWebsocketTransport(websocket=websocket_args.websocket, params=params)
+
 async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev: DevReporter) -> None:
     """Build the pipeline for one session and run it until the call ends.
 
@@ -1882,7 +1914,8 @@ async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev: 
     call_context: dict[str, Any] = {}
     # One SLNG Context Router session id per call, passed as an argument from here
     # on. It groups this call's think requests for support and scopes nothing:
-    # the agent id is what scopes the router's cache, so this may differ freely
+    # the agent id scopes the router's cache, and the router judges which turns
+    # it caches, so this may differ freely
     # between calls. Not named session_id, because runner_args.session_id is a
     # different thing this file also reads.
     slng_session_id = str(uuid.uuid4())
@@ -2074,6 +2107,60 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         raise
     finally:
         dev.finish()
+"""Generated Pipecat agent for safe-core-fixture.
+
+Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
+graph are baked in from the package. Secret values are read from the environment
+and never written here. The agency model uses the Pipecat workers API: a main
+PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
+LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
+run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
+context, a FlowManager walks the steps as nodes, and control returns with only
+a completed or unserved status.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+from dotenv import load_dotenv
+from loguru import logger
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+
+from call import _carrier_transport, run_bot, transport_params
+from settings import require_env
+
+load_dotenv()
+
+_LOGGING_CONFIGURED = False
+
+
+def _configure_logging() -> None:
+    """Send log output to stderr at UNMUTE_LOG_LEVEL, once per process."""
+    global _LOGGING_CONFIGURED
+    if _LOGGING_CONFIGURED:
+        return
+    logger.remove()
+    logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
+    _LOGGING_CONFIGURED = True
+
+
+# Checked at import, which is what makes the container refuse to start rather
+# than start and go quiet.
+#
+# It used to be checked only inside run_bot, once per session. The container
+# then reported healthy, the platform marked the deployment ready, the browser
+# got a valid answer to its offer — and the failure happened in a background
+# task where only the log saw it. A caller heard silence. That is the exact
+# trade Principle II calls the worst one available, and two documentation pages
+# already promised the opposite: "the container starts, checks the keys the
+# agent needs, and stops with the names it did not find" (Wave C, 2026-08-15).
+#
+# run_bot still calls it, because a session that somehow starts without them
+# should fail before the caller hears anything either.
+require_env()
 
 
 async def bot(runner_args: RunnerArguments) -> None:
@@ -2100,3 +2187,40 @@ if __name__ == "__main__":
     from pipecat.runner.run import main
 
     main()
+# Billing agent (placeholder prompt)
+
+You are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+
+- The caller was handed to you because they have a billing question. The conversation so far is in your context.
+- Use `get_invoice` to look up the caller's invoices. It takes the customer id, which the earlier lookup already established.
+- Explain charges calmly and clearly, one item at a time.
+- If the caller is not satisfied, explain what a human support team would need to review.
+
+
+The caller is {{customer_id}}, who goes by {{caller_alias}}.
+# Intake agent (placeholder prompt)
+
+You are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+
+- Greet the caller and find out what they need.
+- When they give a phone number or email, use `lookup_customer` to find their record.
+- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.
+- Never guess account details. If you cannot find the customer, say so and ask again.
+
+
+The caller is {{customer_id}}, who goes by {{caller_alias}}.
+Ask for the caller's email and confirm the account for {{customer_id}}.
+
+When this step is complete, call `finish_run_collect_collect` with: tier.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_collect_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.
+Ask for the caller's email and confirm the account for {{customer_id}}.
+
+When this step is complete, call `finish_run_triage_collect` with: tier.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_triage_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.
+Read the booking back and ask the caller to confirm.
+
+When this step is complete, call `finish_run_triage_confirm` with: confirmed.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_triage_confirm` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.

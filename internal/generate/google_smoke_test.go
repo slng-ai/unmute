@@ -39,16 +39,21 @@ func TestSmokeNativeGeminiLocations(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			module, dependency := "bot.py", "pipecat-ai"
+			// The agent's modules only: the checker reads the Vertex helpers
+			// from utils/google.py and the constructors from the agent modules.
+			dependency := "pipecat-ai"
 			if provider == ir.ProviderLiveKit {
-				module, dependency = "agent.py", "livekit-agents"
+				dependency = "livekit-agents"
 			}
 			path := filepath.Join(pkg, "build", string(provider))
-			if err := os.MkdirAll(path, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(path, module), []byte(artifactFile(t, artifact, module)), 0o644); err != nil {
-				t.Fatal(err)
+			for _, module := range agentModules(t, artifact) {
+				out := filepath.Join(path, filepath.FromSlash(module.Path))
+				if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(out, module.Content, 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if i == 0 {
 				args = append(args, "--with", fmt.Sprintf("%s[google]==%s", dependency, tgt.Version))

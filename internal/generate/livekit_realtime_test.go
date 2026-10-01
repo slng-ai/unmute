@@ -62,7 +62,7 @@ func bindHalfCascadeVoice(agent *ir.Agent, tgt *ir.Target) {
 // finds the comment and reports the absence as a presence.
 func realtimeModule(t *testing.T, mutate func(*ir.Agent, *ir.Target)) string {
 	t.Helper()
-	return codeOnly(artifactFile(t, realtimeArtifact(t, mutate), "agent.py"))
+	return codeOnly(artifactFile(t, realtimeArtifact(t, mutate), agentSource))
 }
 
 // TestLiveKitRealtimeEmitsOneModelAndNothingItReplaces is the spec 024 contract
@@ -280,7 +280,7 @@ func TestLiveKitRealtimeRunbookSaysWhoDecidesTheTurn(t *testing.T) {
 // swallowed the pipeline on every package, which is the failure the compat
 // digests catch tree-wide and this catches by name.
 func TestLiveKitCascadeStillDecidesItsOwnTurn(t *testing.T) {
-	code := codeOnly(artifactFile(t, generateFor(t, "simple-prompt", ir.ProviderLiveKit), "agent.py"))
+	code := codeOnly(artifactFile(t, generateFor(t, "simple-prompt", ir.ProviderLiveKit), agentSource))
 	for _, want := range []string{
 		"stt=", "tts=", "turn_handling=", "vad=", "silero",
 		"inference.TurnDetector", "TurnHandlingOptions", "dev_say(",
@@ -328,7 +328,7 @@ func TestSpeechToSpeechStillBuildsItsKnowledgeIndexes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			module := artifactFile(t, artifact, "agent.py")
+			module := artifactFile(t, artifact, agentSource)
 			body, ok := prewarmBody(module)
 			if !ok {
 				t.Fatal("agent.py emits no prewarm")
@@ -373,7 +373,7 @@ func prewarmBody(module string) (string, bool) {
 // So the failure mode is a call that connects and never speaks, which is
 // exactly what a compiled fixture catches and an in-memory mutation does not.
 func TestTheHalfCascadeCompilesAsAPackageSomebodyCouldRun(t *testing.T) {
-	module := artifactFile(t, generateFor(t, "realtime_half_cascade", ir.ProviderLiveKit), "agent.py")
+	module := artifactFile(t, generateFor(t, "realtime_half_cascade", ir.ProviderLiveKit), agentSource)
 	code := codeOnly(module)
 
 	for _, want := range []string{
@@ -395,7 +395,7 @@ func TestTheHalfCascadeCompilesAsAPackageSomebodyCouldRun(t *testing.T) {
 
 	// The control. The full realtime fixture speaks for itself, so it builds no
 	// synthesizer and asks for no text-only modality.
-	full := codeOnly(artifactFile(t, generateFor(t, "realtime_model", ir.ProviderLiveKit), "agent.py"))
+	full := codeOnly(artifactFile(t, generateFor(t, "realtime_model", ir.ProviderLiveKit), agentSource))
 	if strings.Contains(full, "tts=") {
 		t.Error("a full realtime package built a synthesizer, which would give the call two voices")
 	}

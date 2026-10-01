@@ -25,13 +25,13 @@ func TestDevMetricsProducerAgreesWithTheGoContract(t *testing.T) {
 		entry    string
 		wiring   string
 	}{
-		{"pipecat", "safe_core", ir.ProviderPipecat, "bot.py", "dev.observers()"},
-		{"livekit", "remy", ir.ProviderLiveKit, "agent.py", "install_dev_metrics(session, call_id=ctx.room.name)"},
+		{"pipecat", "safe_core", ir.ProviderPipecat, agentSource, "dev.observers()"},
+		{"livekit", "remy", ir.ProviderLiveKit, agentSource, "install_dev_metrics(session, call_id=ctx.room.name)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			artifact := generateFor(t, tc.pkg, tc.provider)
 
-			producer := artifactFile(t, artifact, "dev_metrics.py")
+			producer := artifactFile(t, artifact, "utils/dev_metrics.py")
 			if !strings.Contains(producer, `METRICS_ENV = "`+devmetrics.Env+`"`) {
 				t.Errorf("producer does not read %s, so the dev loop cannot switch it on", devmetrics.Env)
 			}
@@ -69,7 +69,7 @@ func TestDevMetricsIsEmittedEvenWhenNothingElseIs(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			artifact := generateFor(t, tc.pkg, tc.provider)
-			if !artifactHasFile(artifact, "dev_metrics.py") {
+			if !artifactHasFile(artifact, "utils/dev_metrics.py") {
 				t.Error("artifact does not carry dev_metrics.py")
 			}
 		})
@@ -165,7 +165,7 @@ func TestAControlIsShownWithoutADuration(t *testing.T) {
 		{"pipecat", "safe_core", ir.ProviderPipecat, []string{"to_billing"}, nil, `if tool["control"]:`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			producer := artifactFile(t, generateFor(t, tc.pkg, tc.provider), "dev_metrics.py")
+			producer := artifactFile(t, generateFor(t, tc.pkg, tc.provider), "utils/dev_metrics.py")
 			set := producer[strings.Index(producer, "HANDOFF_CONTROLS"):]
 			set = set[:strings.Index(set, ")")]
 			for _, name := range tc.handoffs {
@@ -212,7 +212,7 @@ func TestAControlIsShownWithoutADuration(t *testing.T) {
 // the services that reported a metric, is deprecated for removal in 2.0.0, and
 // prints a framework warning on every call.
 func TestPipecatReportsWhereAReplysTimeWent(t *testing.T) {
-	producer := artifactFile(t, generateFor(t, "safe_core", ir.ProviderPipecat), "dev_metrics.py")
+	producer := artifactFile(t, generateFor(t, "safe_core", ir.ProviderPipecat), "utils/dev_metrics.py")
 	for _, want := range []string{
 		"on_latency_breakdown",
 		"breakdown.contributions",
@@ -243,7 +243,7 @@ func TestPipecatReportsWhereAReplysTimeWent(t *testing.T) {
 // framework sets on exactly that one cancellation, rather than off log wording
 // that is nobody's contract.
 func TestPipecatNamesWhyAToolProducedNoResult(t *testing.T) {
-	producer := artifactFile(t, generateFor(t, "safe_core", ir.ProviderPipecat), "dev_metrics.py")
+	producer := artifactFile(t, generateFor(t, "safe_core", ir.ProviderPipecat), "utils/dev_metrics.py")
 	for _, want := range []string{
 		`getattr(frame, "run_llm", False)`,
 		`self._end_tool(tool, "timed_out"`,
@@ -281,7 +281,7 @@ func TestPipecatNamesWhyAToolProducedNoResult(t *testing.T) {
 	}
 	// LiveKit reports its own breakdown and its own tool states, and this change
 	// is Pipecat's observer. Its producer must not have grown any of it.
-	livekit := artifactFile(t, generateFor(t, "remy", ir.ProviderLiveKit), "dev_metrics.py")
+	livekit := artifactFile(t, generateFor(t, "remy", ir.ProviderLiveKit), "utils/dev_metrics.py")
 	for _, absent := range []string{"on_latency_breakdown", "breakdown.contributions", devmetrics.KindBreakdown} {
 		if strings.Contains(livekit, absent) {
 			t.Errorf("the LiveKit producer grew %q, which is the Pipecat observer's", absent)

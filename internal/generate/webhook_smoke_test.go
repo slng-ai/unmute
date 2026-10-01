@@ -68,7 +68,7 @@ os.environ["UNMUTE_CALL_START"] = json.dumps(
 const pipecatWebhookSmokeScript = echoServerPreamble + `
 import asyncio
 
-import bot  # noqa: E402
+bot = _project("bot")
 
 
 class _Params:
@@ -135,7 +135,7 @@ const livekitWebhookSmokeScript = echoServerPreamble + `
 import asyncio
 from types import SimpleNamespace
 
-import agent as generated  # noqa: E402
+generated = _project("agent")
 
 userdata = generated.Userdata()
 generated._hydrate_call_start(userdata, generated._dispatched_call_start({}))
@@ -192,7 +192,7 @@ func TestSmokeLiveKitWebhookSendsInjectedBodyPathAndToken(t *testing.T) {
 const pipecatAPIKeySmokeScript = echoServerPreamble + `
 import asyncio
 
-import bot  # noqa: E402
+bot = _project("bot")
 
 
 class _Params:
@@ -243,7 +243,7 @@ const livekitAPIKeySmokeScript = echoServerPreamble + `
 import asyncio
 from types import SimpleNamespace
 
-import agent as generated  # noqa: E402
+generated = _project("agent")
 
 userdata = generated.Userdata()
 generated._hydrate_call_start(userdata, generated._dispatched_call_start({}))

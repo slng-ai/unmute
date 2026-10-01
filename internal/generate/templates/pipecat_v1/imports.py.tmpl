@@ -1,0 +1,106 @@
+{{- /* The import block every emitted module draws from. Each module keeps the
+statements it references and gains one for each name another module defines
+(linkPython, internal/generate/pylink.go), so no module lists its own. */ -}}
+{{- /* svc renders any resolved ServiceCall: flat kwargs, then the nested
+Class.Settings(...) block for settings-style services (see the provider
+catalogue, internal/target/catalog_pipecat.go). */ -}}
+{{define "svc"}}{{.Class}}(
+{{range .Args}}        {{.Key}}={{.Value}},
+{{end}}{{if .SettingsArgs}}        {{.SettingsArg}}={{.SettingsClass}}(
+{{range .SettingsArgs}}            {{.Key}}={{.Value}},
+{{end}}        ),
+{{end}}    ){{end -}}
+{{- /* mcp_client renders one MCP tool source's client (N40). An absent field
+emits no argument: no tools_filter means every tool the server exposes, no
+headers means no authentication. A source with no transport gets the startup
+chooser instead of a parameter class. */ -}}
+{{define "mcp_client"}}MCPClient(
+            server_params={{if .ParamsClass}}{{.ParamsClass}}(url=os.environ[{{pyq .URLEnv}}]{{if .Auth}}, headers={{.Auth.Expr}}{{end}}, timeout={{mcpTimeout}}){{else}}_mcp_params(os.environ[{{pyq .URLEnv}}]{{if .Auth}}, {{.Auth.Expr}}{{end}}){{end}},
+{{if .Tools}}            tools_filter=[{{range $i, $t := .Tools}}{{if $i}}, {{end}}{{pyq $t}}{{end}}],
+{{end}}        ){{end -}}
+{{- define "imports" -}}
+from pathlib import Path
+from collections.abc import {{.ABCImports}}
+{{if or (not .Inline) .NeedsEndAfter .Inactivity .NeedsPrefetchAsync}}import asyncio
+{{end}}{{if .Slng.Vertex}}import base64
+{{end}}{{if or .HasFlows .NeedsHistoryCopy}}import copy
+{{end}}{{if .NeedsFunctionCalls}}import functools
+{{end}}{{if or .NeedsInspect .NeedsFunctionCalls}}import inspect
+{{end}}{{if or .HasFlows .CallStartVars .Slng.Vertex .NeedsPrefetchSeed .TypedState}}import json
+{{end}}import os
+{{if .NeedsAnnounceChoice}}import random
+{{end}}{{if or .NeedsRender (and .TypedState .TypedState.NeedsRe)}}import re
+{{end}}import sys
+{{if .Slng.Any}}import uuid
+{{end}}{{if .Variables}}from dataclasses import {{if .NeedsDataclassField}}dataclass, field{{else}}dataclass{{end}}
+{{end}}{{if .NeedsPrefetchClock}}from datetime import datetime
+{{end}}from typing import {{.TypingNames}}
+{{if .NeedsRender}}from urllib.parse import quote
+{{end}}{{if .NeedsPrefetchClock}}from zoneinfo import ZoneInfo
+{{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
+import aiohttp
+{{end}}{{end}}{{if .CloudWebsocket}}{{if .HasColdTransfer}}
+import aiohttp
+{{end}}{{end}}{{if .UsesHTTPX}}
+import httpx
+{{end}}{{if and .TypedState .TypedState.NeedsEmailValidator}}from email_validator import EmailNotValidError, validate_email
+{{end}}{{if .Slng.RouterClass}}from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+from pipecat.utils.http import connection_limits
+{{end}}{{if .Knowledge.Knowledge}}from utils import knowledge
+{{end}}{{range .LocalTools}}import tools.{{.Name}}
+{{end}}from dotenv import load_dotenv
+from loguru import logger{{if .PydanticImports}}
+from pydantic import {{.PydanticImports}}{{end}}
+{{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
+{{end}}
+{{if .NeedsFunctionSchema}}from pipecat.adapters.schemas.function_schema import FunctionSchema
+{{end}}{{if and (not .SemanticOff) (not .Pace.ByListener) (not .ExternalTurns)}}from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+{{end}}from pipecat.audio.vad.silero import SileroVADAnalyzer
+{{if and (not .Pace.ByListener) (not .ExternalTurns)}}from pipecat.audio.vad.vad_analyzer import VADParams
+{{end}}{{if not .Inline}}from pipecat.bus import BusBridgeProcessor
+{{end}}{{if .HasFlows}}from pipecat.flows import {{if .NeedsContextStrategy}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE
+{{end}}{{if .FrameImports}}from pipecat.frames.frames import {{join .FrameImports ", "}}
+{{end}}from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+{{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
+{{end}}{{if .NeedsLLMServiceType}}from pipecat.services.llm_service import LLMService
+{{end}}{{if .NeedsMCP}}from pipecat.services.mcp_service import MCPClient
+{{end}}{{if not .Inline}}from pipecat.services.settings import LLMSettings
+{{end}}{{if .NeedsSTTServiceType}}from pipecat.services.stt_service import STTService
+{{end}}{{if .NeedsTTSServiceType}}from pipecat.services.tts_service import TTSService
+{{end}}{{if .NeedsLanguage}}from pipecat.transcriptions.language import Language
+{{end}}from pipecat.transports.base_transport import BaseTransport, TransportParams
+{{if .DailyParams}}{{.DailyParams.Import}}
+{{end}}{{if or .CloudWebsocket .LocalTwilio}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+{{end}}{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
+{{end}}{{if .ExternalTurns}}{{else if .Pace.ByListener}}{{if .Pace.Eager}}from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies
+{{end}}{{else}}from pipecat.turns.user_stop import {{if .SemanticOff}}SpeechTimeoutUserTurnStopStrategy{{else}}TurnAnalyzerUserTurnStopStrategy{{end}}
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
+{{end}}{{if .UserMuteStrategies}}from pipecat.turns.user_mute import {{join .UserMuteStrategies ", "}}
+{{end}}{{if not .Inline}}from pipecat.workers.llm import {{if not (and .Tracing (or .NeedsFunctionCalls .NeedsMCP))}}LLMWorker, {{end}}LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
+{{else if .NeedsFunctionCalls}}from pipecat.workers.llm import tool
+{{end}}from pipecat.workers.runner import WorkerRunner
+
+from utils.dev_metrics import DevReporter, install_dev_metrics
+{{if .Tracing}}from utils.tracing import (
+    TRACE_NAME,
+{{if or .NeedsFunctionCalls .NeedsMCP}}    TracedLLMWorker,
+{{end}}{{if eq .TracingProvider "coval"}}    activate_simulation,
+{{end}}    enable_agent_tracing,
+    flush_tracing,
+{{if eq .TracingProvider "coval"}}    setup_coval_tracing,
+{{else}}    setup_langfuse_tracing,
+    start_call,
+{{end}})
+{{end}}
+{{range .Imports}}{{.}}
+{{end}}
+{{- end -}}

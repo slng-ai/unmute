@@ -87,7 +87,7 @@ func TestPipecatProtectsTheGreetingOnAPhoneRoute(t *testing.T) {
 			if err != nil {
 				t.Fatalf("generate: %v", err)
 			}
-			bot := artifactFile(t, artifact, "bot.py")
+			bot := artifactFile(t, artifact, agentSource)
 
 			match := muteArgs.FindStringSubmatch(bot)
 			if len(tc.want) == 0 {

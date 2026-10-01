@@ -94,8 +94,8 @@ from types import SimpleNamespace
 # asked for.
 _report = json.load(open("compile-report.json"))
 
-import agent
-import dev_metrics
+agent = _project("agent")
+from utils import dev_metrics
 from livekit import rtc
 from livekit.agents import (
     DEFAULT_API_CONNECT_OPTIONS,
@@ -1219,7 +1219,7 @@ from contextlib import redirect_stdout
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402
+bot = _project("bot")
 from pipecat.frames.frames import (  # noqa: E402
     Frame,
     InterimTranscriptionFrame,
@@ -1817,7 +1817,7 @@ async def exercise_live_metrics(call_id="pipecat-live-metrics"):
             print(line + "\n", end="")
 
 
-import dev_metrics
+from utils import dev_metrics
 from pipecat.frames.frames import ErrorFrame, TTSSpeakFrame
 
 

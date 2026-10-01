@@ -1,97 +1,18 @@
-"""LiveKit voice agent, compiled by Unmute from this package's agent.yaml."""
+"""Every fixed value this agent runs with, in one place.
 
-import asyncio
-import json
+Compiled from the package: names, limits, timeouts, the environment variables
+each kind of session needs, and the logger every module writes to. Nothing here
+reads a secret.
+"""
+
+from __future__ import annotations
+
 import logging
 import os
-import re
-import uuid
-from collections.abc import AsyncIterable
-from dataclasses import dataclass
-from typing import Annotated, Any
-from urllib.parse import quote
-
-import httpx
-from dotenv import load_dotenv
-from livekit import rtc
-from livekit.agents import (
-    NOT_GIVEN,
-    Agent,
-    AgentServer,
-    AgentSession,
-    AgentTask,
-    APIConnectOptions,
-    ChatContext,
-    FlushSentinel,
-    JobContext,
-    JobProcess,
-    ModelSettings,
-    NotGivenOr,
-    RunContext,
-    TurnHandlingOptions,
-    UserStateChangedEvent,
-    function_tool,
-    inference,
-    llm,
-    metrics,
-    stt,
-)
-from livekit.agents.llm import ChatChunk, Tool
-from livekit.agents.voice import MetricsCollectedEvent
-
-# Not re-exported from livekit.agents or livekit.agents.voice, so it comes from
-# the module that defines it. Checked against 1.6.10 and 1.8.x.
-from livekit.agents.voice.agent_session import SessionConnectOptions
-from livekit.plugins import deepgram, elevenlabs, openai, silero
-from openai import AsyncOpenAI
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
-
-import dev_metrics
-from dev_metrics import dev_llm_node, dev_say, install_dev_metrics
 
 logger = logging.getLogger("safe-core-fixture")
 logger.setLevel(logging.INFO)
 
-load_dotenv()
-
-
-# --- prompts ---------------------------------------------------------------
-
-BILLING_PROMPT = """# Billing agent (placeholder prompt)
-
-You are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
-
-- The caller was handed to you because they have a billing question. The conversation so far is in your context.
-- Use `get_invoice` to look up the caller's invoices. It takes the customer id, which the earlier lookup already established.
-- Explain charges calmly and clearly, one item at a time.
-- If the caller is not satisfied, explain what a human support team would need to review.
-
-
-The caller is {{customer_id}}, who goes by {{caller_alias}}."""
-
-INTAKE_PROMPT = """# Intake agent (placeholder prompt)
-
-You are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
-
-- Greet the caller and find out what they need.
-- When they give a phone number or email, use `lookup_customer` to find their record.
-- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.
-- Never guess account details. If you cannot find the customer, say so and ask again.
-
-
-The caller is {{customer_id}}, who goes by {{caller_alias}}."""
-
-COLLECT_PROMPT = """Ask for the caller's email and confirm the account for {{customer_id}}.
-
-When this step is complete, call `finish` with: tier.
-
-`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there."""
-
-CONFIRM_PROMPT = """Read the booking back and ask the caller to confirm.
-
-When this step is complete, call `finish` with: confirmed.
-
-`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there."""
 
 # --- required environment ----------------------------------------------------
 # Everything this agent needs to run: the model providers' keys, the connection
@@ -128,151 +49,79 @@ def require_env() -> None:
         raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
 
 
-# --- SLNG Context Router ----------------------------------------------------
-# The router answers a repeated turn from its cache instead of calling the model.
-# That is why a router-bound system prompt below keeps its placeholders instead of
-# being rendered here: the router substitutes them from template_variables, so the
-# prompt it sees is identical on every call, which is what lets a turn repeat. A
-# first turn never caches, and the router decides which later turns are
-# repeatable, so a repeat served by the model is expected rather than a fault.
-#
-# The agent id header scopes that cache, and it is one value per prompt rather
-# than one for the package: each agent and each task sends the authored agent_id,
-# a colon, then its own name. The cache key is the last exchange and carries no
-# system prompt, so two prompts under one scope get served each other's answers.
+IGNORE_PHRASES = ["okay", "right", "uh-huh"]
+
+# The first request plus two retries, when a task's model answers with nothing.
+_TASK_MAX_ATTEMPTS = 3
 
 
-def _slng_config_fast_reasoning() -> dict:
-    """The model configuration, sent inline in the body of every think request.
+# How long a warm process may take to start, knowledge indexing included.
+LOCAL_INIT_TIMEOUT_SECS = 60.0
+"""The system prompts, one Markdown file each beside this module.
 
-    Credentials are read here rather than at import, so a missing one is reported
-    by require_env() alongside every other name instead of raising a KeyError
-    before anything has checked. No value is written into this file: each is the
-    name of an environment variable.
+Each file is read once, at import. A prompt's placeholders are filled from the
+call's state where it is used, never here.
+"""
 
-    Returns:
-        The configuration object for the think request body.
-    """
-    return {"tiers": {"1": [{"endpoint": {"api_key": os.environ["OPENAI_API_KEY"], "url": "https://api.openai.com/v1"}, "model": "gpt-5.6-luna", "weight": 100}]}}
+from __future__ import annotations
 
-async def _slng_log_provenance(response: httpx.Response) -> None:
-    """Say where this answer came from, once per think request.
+from pathlib import Path
 
-    The router states this only in response headers, and neither framework hands
-    them to us, so a hook on the client is the one place that sees them. Without
-    it the question an operator actually asks about a cache, whether it is
-    working, has no answer in this run's own log.
+_HERE = Path(__file__).parent
 
-    Three rules, from httpx's own event-hooks documentation, each of which would
-    be a live-call defect if broken. It has to be async, because a sync callable
-    on an AsyncClient is never awaited. It reads headers only: the hook runs
-    before the body is read, so touching the body would consume the stream the
-    framework is about to iterate. And it cannot raise, because a raising
-    response hook fails the request it was only meant to describe.
 
-    It also logs only a router think request. The scope header is what lets the
-    line name a scope at all, so a request without one is a request this hook
-    could not describe.
+def load(name: str) -> str:
+    """Read one prompt exactly as the package wrote it.
 
     Args:
-        response: The router's response, before its body is read.
-    """
-    try:
-        scope = response.request.headers.get("X-Slng-Agent-Id")
-        if not scope:
-            return
-        headers = response.headers
-        # Field order is the contract, and the gate reads it off this line.
-        fields = ["scope=" + scope, "source=" + headers.get("x-slng-response-source", "unknown")]
-        if layer := headers.get("x-slng-cache-layer"):
-            fields.append("layer=" + layer)
-        if model := headers.get("x-slng-model"):
-            fields.append("model=" + model)
-        fields.append("request_id=" + headers.get("x-slng-request-id", "unknown"))
-        logger.info("slng router: " + " ".join(fields))
-    except Exception:  # noqa: BLE001 - a log line must never end a call
-        logger.debug("could not read the router's provenance headers", exc_info=True)
-
-
-
-def _slng_router_client() -> AsyncOpenAI:
-    """The router client, built here so a response hook can read its headers.
-
-    The plugin builds its own client when it is given none, and it exposes no
-    hook, no raw response and no header callback. Passing one in is the only
-    supported seam (livekit-plugins-openai llm.py, the `client` argument), so the
-    provenance line above costs this function.
-
-    Every value restates the plugin's own default at the pinned version
-    (llm.py:161-176): retries off, and that exact httpx timeout and limit set.
-    Restating them is the point. Anything different here would be a change to
-    retry or connection behaviour that nobody asked for and nothing would report.
-
-    Passing a client also means owning it: the plugin closes only a client it
-    built itself (`_owns_client`), so the entrypoint closes this one on shutdown.
+        name: The prompt's file name, without the `.md` suffix.
 
     Returns:
-        The client every router think request goes through.
+        The prompt text.
     """
-    return AsyncOpenAI(
-        api_key=os.environ["SLNG_API_KEY"],
-        base_url="https://eu-west.context-router.slng.ai/v1",
-        max_retries=0,
-        http_client=httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=15.0, read=5.0, write=5.0, pool=5.0),
-            follow_redirects=True,
-            limits=httpx.Limits(
-                max_connections=50,
-                max_keepalive_connections=50,
-                keepalive_expiry=120,
-            ),
-            event_hooks={"response": [_slng_log_provenance]},
-        ),
-    )
+    return (_HERE / f"{name}.md").read_text(encoding="utf-8")
 
 
+BILLING_PROMPT = load("billing")
+INTAKE_PROMPT = load("intake")
+COLLECT_PROMPT = load("tasks/collect")
+CONFIRM_PROMPT = load("tasks/confirm")
+"""Shape the conversation a step or an agent is handed."""
 
-_SLNG_VARIABLE_LIMIT = 4000
-_SLNG_TEMPLATE_PATHS = {"safe-core-router-v3:billing": ["customer_id", "caller_alias"], "safe-core-router-v3:intake": ["customer_id", "caller_alias"], "safe-core-router-v3:task.collect": ["customer_id"], "safe-core-router-v3:task.confirm": []}
-_SLNG_SCOPE_SITES = {"safe-core-router-v3:task.collect": "task:collect", "safe-core-router-v3:task.confirm": "task:confirm"}
+from __future__ import annotations
+
+from livekit.agents import llm
 
 
-def _slng_template_variables(
-    state: "Userdata | None", names: list[str] | tuple[str, ...], *, scope: str = ""
-) -> dict[str, str]:
-    """Collect the values the router substitutes into the prompt's placeholders.
+def _caller_turns(chat_ctx: llm.ChatContext) -> int:
+    """Count the turns the caller has taken in this context.
 
-    A name with no value yet sends the empty string, never None and never the text
-    "None". A value over the router's limit is truncated with a warning rather
-    than dropped: an over-long value must not end a live call.
+    The one signal that separates "they asked again" from "the model re-read its
+    own finished work". A step that has already run and returned cannot have a
+    new request in front of it unless somebody spoke, so this is what each
+    delegate's re-entry guard compares.
 
     Args:
-        state: The call's shared state, if it has begun.
-        names: The placeholder names the prompt uses.
-        scope: The site whose placeholders these are.
+        chat_ctx: The conversation to count in.
 
     Returns:
-        Each name mapped to its text.
+        The number of caller messages.
     """
-    values: dict[str, str] = {}
-    for name in names:
-        # The bound is measured on the JSON rendering, not on the repr of the
-        # object: they are different lengths, and the one the router receives is
-        # the one that has to fit. _state_text carries its own bound and its own
-        # warning, so a declared value is already shortened by here. A path
-        # arrives as one flat name, and _state_lookup walks it.
-        text = _state_text(*_prompt_value(state, name, _SLNG_SCOPE_SITES.get(scope, "")))
-        if len(text) > _SLNG_VARIABLE_LIMIT:
-            logger.warning(
-                "template variable %s is %d characters; truncating to %d for the router",
-                name,
-                len(text),
-                _SLNG_VARIABLE_LIMIT,
-            )
-            text = text[:_SLNG_VARIABLE_LIMIT]
-        values[name] = text
-    return values
+    return sum(1 for message in chat_ctx.messages() if message.role == "user")
+"""The call's state: its typed variables, how they are read, and what is known first."""
 
+from __future__ import annotations
+
+import json
+import os
+import re
+from dataclasses import dataclass
+from urllib.parse import quote
+
+from openai import AsyncOpenAI
+from pydantic import BaseModel, TypeAdapter, ValidationError
+
+from settings import logger
 
 # --- templates ---------------------------------------------------------------
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
@@ -848,64 +697,168 @@ def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
     if "verified" in values:
         userdata.verified = values["verified"]
     return None
+"""The SLNG Context Router: its model configuration, client, variables and scope."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import AsyncIterable
+from typing import Any
+
+import httpx
+from livekit.agents import NOT_GIVEN, ChatContext, FlushSentinel, ModelSettings, llm
+from livekit.agents.llm import ChatChunk, Tool
+from openai import AsyncOpenAI
+
+from session import Userdata, _prompt_value, _state_text
+from settings import logger
+from utils.dev_metrics import dev_llm_node
+
+# --- SLNG Context Router ----------------------------------------------------
+# The router answers a repeated turn from its cache instead of calling the model.
+# That is why a router-bound system prompt below keeps its placeholders instead of
+# being rendered here: the router substitutes them from template_variables, so the
+# prompt it sees is identical on every call, which is what lets a turn repeat. A
+# first turn never caches, and the router decides which later turns are
+# repeatable, so a repeat served by the model is expected rather than a fault.
+#
+# The agent id header scopes that cache, and it is one value per prompt rather
+# than one for the package: each agent and each task sends the authored agent_id,
+# a colon, then its own name: `<agent_id>:<agent>` for an agent and
+# `<agent_id>:task.<task>` for a task. The cache key is the last exchange and carries no
+# system prompt, so two prompts under one scope get served each other's answers.
 
 
-# --- interruption shaping ----------------------------------------------------
-IGNORE_PHRASES = ["okay", "right", "uh-huh"]
+def _slng_config_fast_reasoning() -> dict:
+    """The model configuration, sent inline in the body of every think request.
 
-
-class IgnorePhrasesMixin:
-    """Drop final transcripts that match interruption.ignore_phrases.
-
-    A matching transcript is dropped before turn handling, so it neither
-    interrupts nor reaches the LLM.
-    """
-
-    def stt_node(
-        self, audio: AsyncIterable[rtc.AudioFrame], model_settings: ModelSettings
-    ) -> AsyncIterable[stt.SpeechEvent | str]:
-        """Filter the speech events of the default transcription node.
-
-        Args:
-            audio: The caller's audio frames.
-            model_settings: The framework's per-turn model settings.
-
-        Returns:
-            The speech events, without the ignored phrases.
-        """
-        # Always an Agent: this mixin is only ever listed beside Agent.
-        assert isinstance(self, Agent)
-        agent: Agent = self
-
-        async def _filtered() -> AsyncIterable[stt.SpeechEvent | str]:
-            async for event in Agent.default.stt_node(agent, audio, model_settings):
-                if (
-                    event.type == stt.SpeechEventType.FINAL_TRANSCRIPT
-                    and event.alternatives
-                    and event.alternatives[0].text.strip().lower().strip(" .,!?") in IGNORE_PHRASES
-                ):
-                    continue
-                yield event
-
-        return _filtered()
-
-
-def _caller_turns(chat_ctx: llm.ChatContext) -> int:
-    """Count the turns the caller has taken in this context.
-
-    The one signal that separates "they asked again" from "the model re-read its
-    own finished work". A step that has already run and returned cannot have a
-    new request in front of it unless somebody spoke, so this is what each
-    delegate's re-entry guard compares.
-
-    Args:
-        chat_ctx: The conversation to count in.
+    Credentials are read here rather than at import, so a missing one is reported
+    by require_env() alongside every other name instead of raising a KeyError
+    before anything has checked. No value is written into this file: each is the
+    name of an environment variable.
 
     Returns:
-        The number of caller messages.
+        The configuration object for the think request body.
     """
-    return sum(1 for message in chat_ctx.messages() if message.role == "user")
+    return {"tiers": {"1": [{"endpoint": {"api_key": os.environ["OPENAI_API_KEY"], "url": "https://api.openai.com/v1"}, "model": "gpt-5.6-luna", "weight": 100}]}}
 
+async def _slng_log_provenance(response: httpx.Response) -> None:
+    """Say where this answer came from, once per think request.
+
+    The router states this only in response headers, and neither framework hands
+    them to us, so a hook on the client is the one place that sees them. Without
+    it the question an operator actually asks about a cache, whether it is
+    working, has no answer in this run's own log.
+
+    Three rules, from httpx's own event-hooks documentation, each of which would
+    be a live-call defect if broken. It has to be async, because a sync callable
+    on an AsyncClient is never awaited. It reads headers only: the hook runs
+    before the body is read, so touching the body would consume the stream the
+    framework is about to iterate. And it cannot raise, because a raising
+    response hook fails the request it was only meant to describe.
+
+    It also logs only a router think request. The scope header is what lets the
+    line name a scope at all, so a request without one is a request this hook
+    could not describe.
+
+    Args:
+        response: The router's response, before its body is read.
+    """
+    try:
+        scope = response.request.headers.get("X-Slng-Agent-Id")
+        if not scope:
+            return
+        headers = response.headers
+        # Field order is the contract, and the gate reads it off this line.
+        fields = ["scope=" + scope, "source=" + headers.get("x-slng-response-source", "unknown")]
+        if layer := headers.get("x-slng-cache-layer"):
+            fields.append("layer=" + layer)
+        if model := headers.get("x-slng-model"):
+            fields.append("model=" + model)
+        fields.append("request_id=" + headers.get("x-slng-request-id", "unknown"))
+        logger.info("slng router: " + " ".join(fields))
+    except Exception:  # noqa: BLE001 - a log line must never end a call
+        logger.debug("could not read the router's provenance headers", exc_info=True)
+
+
+
+def _slng_router_client() -> AsyncOpenAI:
+    """The router client, built here so a response hook can read its headers.
+
+    The plugin builds its own client when it is given none, and it exposes no
+    hook, no raw response and no header callback. Passing one in is the only
+    supported seam (livekit-plugins-openai llm.py, the `client` argument), so the
+    provenance line above costs this function.
+
+    Every value restates the plugin's own default at the pinned version
+    (llm.py:161-176): retries off, and that exact httpx timeout and limit set.
+    Restating them is the point. Anything different here would be a change to
+    retry or connection behaviour that nobody asked for and nothing would report.
+
+    Passing a client also means owning it: the plugin closes only a client it
+    built itself (`_owns_client`), so the entrypoint closes this one on shutdown.
+
+    Returns:
+        The client every router think request goes through.
+    """
+    return AsyncOpenAI(
+        api_key=os.environ["SLNG_API_KEY"],
+        base_url="https://eu-west.context-router.slng.ai/v1",
+        max_retries=0,
+        http_client=httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=15.0, read=5.0, write=5.0, pool=5.0),
+            follow_redirects=True,
+            limits=httpx.Limits(
+                max_connections=50,
+                max_keepalive_connections=50,
+                keepalive_expiry=120,
+            ),
+            event_hooks={"response": [_slng_log_provenance]},
+        ),
+    )
+
+
+
+_SLNG_VARIABLE_LIMIT = 4000
+_SLNG_TEMPLATE_PATHS = {"safe-core-router-v3:billing": ["customer_id", "caller_alias"], "safe-core-router-v3:intake": ["customer_id", "caller_alias"], "safe-core-router-v3:task.collect": ["customer_id"], "safe-core-router-v3:task.confirm": []}
+_SLNG_SCOPE_SITES = {"safe-core-router-v3:task.collect": "task:collect", "safe-core-router-v3:task.confirm": "task:confirm"}
+
+
+def _slng_template_variables(
+    state: Userdata | None, names: list[str] | tuple[str, ...], *, scope: str = ""
+) -> dict[str, str]:
+    """Collect the values the router substitutes into the prompt's placeholders.
+
+    A name with no value yet sends the empty string, never None and never the text
+    "None". A value over the router's limit is truncated with a warning rather
+    than dropped: an over-long value must not end a live call.
+
+    Args:
+        state: The call's shared state, if it has begun.
+        names: The placeholder names the prompt uses.
+        scope: The site whose placeholders these are.
+
+    Returns:
+        Each name mapped to its text.
+    """
+    values: dict[str, str] = {}
+    for name in names:
+        # The bound is measured on the JSON rendering, not on the repr of the
+        # object: they are different lengths, and the one the router receives is
+        # the one that has to fit. _state_text carries its own bound and its own
+        # warning, so a declared value is already shortened by here. A path
+        # arrives as one flat name, and _state_lookup walks it.
+        text = _state_text(*_prompt_value(state, name, _SLNG_SCOPE_SITES.get(scope, "")))
+        if len(text) > _SLNG_VARIABLE_LIMIT:
+            logger.warning(
+                "template variable %s is %d characters; truncating to %d for the router",
+                name,
+                len(text),
+                _SLNG_VARIABLE_LIMIT,
+            )
+            text = text[:_SLNG_VARIABLE_LIMIT]
+        values[name] = text
+    return values
 
 # --- router cache scope ------------------------------------------------------
 async def _slng_llm_node(
@@ -1002,6 +955,78 @@ class _SlngScoped:
             The model's chunks.
         """
         return dev_llm_node(self, _slng_llm_node, chat_ctx, tools, model_settings)
+"""The agents and the task steps they delegate to, with their tools."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import AsyncIterable
+from typing import Annotated
+
+import httpx
+from livekit import rtc
+from livekit.agents import (
+    NOT_GIVEN,
+    Agent,
+    AgentTask,
+    ChatContext,
+    FlushSentinel,
+    ModelSettings,
+    NotGivenOr,
+    RunContext,
+    function_tool,
+    llm,
+    stt,
+)
+from livekit.agents.llm import ChatChunk, Tool
+from livekit.plugins import elevenlabs
+from pydantic import Field
+
+from prompts import BILLING_PROMPT, COLLECT_PROMPT, CONFIRM_PROMPT, INTAKE_PROMPT
+from session import _group_status, _save_result, _StateRefused, _task_status
+from settings import _TASK_MAX_ATTEMPTS, IGNORE_PHRASES, logger
+from utils import dev_metrics
+from utils.context import _caller_turns
+from utils.dev_metrics import dev_llm_node, dev_say
+from utils.router import _slng_llm_node, _SlngScoped
+
+# --- interruption shaping ----------------------------------------------------
+
+
+class IgnorePhrasesMixin:
+    """Drop final transcripts that match interruption.ignore_phrases.
+
+    A matching transcript is dropped before turn handling, so it neither
+    interrupts nor reaches the LLM.
+    """
+
+    def stt_node(
+        self, audio: AsyncIterable[rtc.AudioFrame], model_settings: ModelSettings
+    ) -> AsyncIterable[stt.SpeechEvent | str]:
+        """Filter the speech events of the default transcription node.
+
+        Args:
+            audio: The caller's audio frames.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The speech events, without the ignored phrases.
+        """
+        # Always an Agent: this mixin is only ever listed beside Agent.
+        assert isinstance(self, Agent)
+        agent: Agent = self
+
+        async def _filtered() -> AsyncIterable[stt.SpeechEvent | str]:
+            async for event in Agent.default.stt_node(agent, audio, model_settings):
+                if (
+                    event.type == stt.SpeechEventType.FINAL_TRANSCRIPT
+                    and event.alternatives
+                    and event.alternatives[0].text.strip().lower().strip(" .,!?") in IGNORE_PHRASES
+                ):
+                    continue
+                yield event
+
+        return _filtered()
 
 
 # --- agents ----------------------------------------------------------------
@@ -1209,8 +1234,6 @@ class Intake(_SlngScoped, IgnorePhrasesMixin, Agent):
 
 
 # --- tasks -----------------------------------------------------------------
-# The first request plus two retries, when a task's model answers with nothing.
-_TASK_MAX_ATTEMPTS = 3
 
 
 def _task_result(values: dict, unserved_request: str) -> dict:
@@ -1536,9 +1559,39 @@ class Confirm(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
             return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
         dev_metrics.dev_task_finished(ctx, _values)
         self.complete(_values)
+"""One call: warming the worker, building the session, and wiring the call."""
 
+from __future__ import annotations
 
-# --- session ---------------------------------------------------------------
+import asyncio
+import os
+import uuid
+
+from livekit.agents import (
+    AgentSession,
+    APIConnectOptions,
+    JobContext,
+    JobProcess,
+    TurnHandlingOptions,
+    UserStateChangedEvent,
+    inference,
+    metrics,
+)
+from livekit.agents.voice import MetricsCollectedEvent
+from livekit.agents.voice.agent_session import SessionConnectOptions
+from livekit.plugins import deepgram, elevenlabs, openai, silero
+
+from agents import Intake
+from session import (
+    Userdata,
+    _dispatched_call_start,
+    _hydrate_call_start,
+    _livekit_job_metadata,
+)
+from settings import require_env
+from utils.dev_metrics import install_dev_metrics
+from utils.router import _slng_router_client
+
 # The loop keeps only a weak reference to a task, so a timer nobody holds can be
 # collected before it fires. Each one is held here until it finishes.
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
@@ -1560,17 +1613,10 @@ def prewarm(proc: JobProcess) -> None:
     # Lowering this alone does not shorten a turn. The ceiling is in the session's
     # turn_handling endpointing below, and that is where a 2.5s turn came from.
     proc.userdata["vad"] = silero.VAD.load(min_silence_duration=0.3)
-server = AgentServer()
-# How long a warm process may take to start, knowledge indexing included.
-LOCAL_INIT_TIMEOUT_SECS = 60.0
-server.setup_fnc = prewarm
-if os.getenv("UNMUTE_LOCAL_RUN") == "1":
-    # One browser call needs one warm spare, not one index build per CPU.
-    server.update_options(num_idle_processes=1, initialize_process_timeout=LOCAL_INIT_TIMEOUT_SECS)
 
 
-@server.rtc_session(agent_name="safe-core-fixture-livekit")
-async def entrypoint(ctx: JobContext) -> None:
+
+async def run_call(ctx: JobContext) -> None:
     """Run one call: build the session, start the entry agent and wire the call.
 
     Args:
@@ -1670,9 +1716,69 @@ async def entrypoint(ctx: JobContext) -> None:
     _timer = asyncio.create_task(_max_duration())
     _BACKGROUND_TASKS.add(_timer)
     _timer.add_done_callback(_BACKGROUND_TASKS.discard)
+"""LiveKit voice agent, compiled by Unmute from this package's agent.yaml."""
+
+from __future__ import annotations
+
+import os
+
+from dotenv import load_dotenv
+from livekit.agents import AgentServer, JobContext
+
+from call import prewarm, run_call
+from settings import LOCAL_INIT_TIMEOUT_SECS
+
+load_dotenv()
+server = AgentServer()
+server.setup_fnc = prewarm
+if os.getenv("UNMUTE_LOCAL_RUN") == "1":
+    # One browser call needs one warm spare, not one index build per CPU.
+    server.update_options(num_idle_processes=1, initialize_process_timeout=LOCAL_INIT_TIMEOUT_SECS)
+
+
+@server.rtc_session(agent_name="safe-core-fixture-livekit")
+async def entrypoint(ctx: JobContext) -> None:
+    """Run one call LiveKit dispatched to this worker.
+
+    Args:
+        ctx: The job LiveKit dispatched for this call.
+    """
+    await run_call(ctx)
 
 
 # No __main__ block: this module is started through livekit-agents' supported
 # CLI, `python -m livekit.agents start agent.py`, which imports it and finds the
 # `server` above. The older per-script entry point goes through a CLI upstream
 # has deprecated and will remove.
+# Billing agent (placeholder prompt)
+
+You are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+
+- The caller was handed to you because they have a billing question. The conversation so far is in your context.
+- Use `get_invoice` to look up the caller's invoices. It takes the customer id, which the earlier lookup already established.
+- Explain charges calmly and clearly, one item at a time.
+- If the caller is not satisfied, explain what a human support team would need to review.
+
+
+The caller is {{customer_id}}, who goes by {{caller_alias}}.
+# Intake agent (placeholder prompt)
+
+You are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+
+- Greet the caller and find out what they need.
+- When they give a phone number or email, use `lookup_customer` to find their record.
+- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.
+- Never guess account details. If you cannot find the customer, say so and ask again.
+
+
+The caller is {{customer_id}}, who goes by {{caller_alias}}.
+Ask for the caller's email and confirm the account for {{customer_id}}.
+
+When this step is complete, call `finish` with: tier.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.
+Read the booking back and ask the caller to confirm.
+
+When this step is complete, call `finish` with: confirmed.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.

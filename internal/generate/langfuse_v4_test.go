@@ -174,5 +174,5 @@ func langfuseTracingModule(t *testing.T, provider ir.Provider) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return artifactFile(t, artifact, "tracing.py")
+	return artifactFile(t, artifact, "utils/tracing.py")
 }

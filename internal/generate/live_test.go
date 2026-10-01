@@ -15,7 +15,7 @@ import (
 // of the transcriber, synthesizer or local turn machinery.
 func TestLiveEmitsOneLiveServiceAndNothingItReplaces(t *testing.T) {
 	artifact := generateFor(t, "live_model", ir.ProviderPipecat)
-	bot := artifactFile(t, artifact, "bot.py")
+	bot := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		"from pipecat.services.openai.live.llm import OpenAILiveLLMService",
 		"from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService",
@@ -96,7 +96,7 @@ func TestLiveWithoutABackendRunsAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bot := artifactFile(t, artifact, "bot.py")
+	bot := artifactFile(t, artifact, agentSource)
 	for _, absent := range []string{"delegation=", "OpenAIResponsesLLMService"} {
 		if strings.Contains(bot, absent) {
 			t.Errorf("bot.py carries %q with no backend named", absent)
@@ -110,7 +110,7 @@ func TestLiveWithoutABackendRunsAlone(t *testing.T) {
 // TestCascadedPackagesGainNothingFromLive: a package binding think, listen
 // and speak emits no live-model line.
 func TestCascadedPackagesGainNothingFromLive(t *testing.T) {
-	bot := artifactFile(t, generateFor(t, "simple-prompt", ir.ProviderPipecat), "bot.py")
+	bot := artifactFile(t, generateFor(t, "simple-prompt", ir.ProviderPipecat), agentSource)
 	for _, absent := range []string{"OpenAILiveLLMService", "live_events", "_live()", "ResponsesDelegation"} {
 		if strings.Contains(bot, absent) {
 			t.Errorf("a cascaded package gained %q", absent)

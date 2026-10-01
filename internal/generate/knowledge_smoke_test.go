@@ -33,7 +33,7 @@ from pathlib import Path
 
 from llama_index.core.embeddings import MockEmbedding
 
-import knowledge
+from utils import knowledge
 
 # Stub only the hosted call. Everything else runs.
 for base in ("refunds", "services"):

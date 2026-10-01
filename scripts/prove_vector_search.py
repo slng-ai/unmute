@@ -67,7 +67,7 @@ END_TO_END = [
 
 
 def load(build_dir: Path):
-    module_path = build_dir / "knowledge.py"
+    module_path = build_dir / "utils" / "knowledge.py"
     if not module_path.is_file():
         raise SystemExit(f"{module_path} does not exist; compile the package first")
     spec = importlib.util.spec_from_file_location("emitted_knowledge", module_path)

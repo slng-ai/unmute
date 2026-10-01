@@ -542,11 +542,6 @@ type livekitArg struct {
 	Anno     string   // rendered Python annotation (PyType, Literal[...], or Annotated[...])
 }
 
-type livekitPrompt struct {
-	Const string
-	Body  string
-}
-
 // livekitDeploy is one row of the README's deploy commands: one per declared
 // region, or a single region-less row when the package declares none.
 type livekitDeploy struct {
@@ -618,7 +613,7 @@ type livekitData struct {
 	LocalTools      []livekitLocalTool    // copied handler files (tools/<name>.py)
 	MCPServers      []livekitMCPServer    // unique mounted sources, used by the shared constructor + startup preflight
 	Pins            map[string]string     // plugin pins (C6): raise dep floors
-	Prompts         []livekitPrompt
+	Prompts         []pyPrompt
 	EntryPromptExpr string   // templated entry prompt rendered from session.userdata after outbound SIP hydration
 	PluginModules   []string // merged `from livekit.plugins import ...` names
 	// Slng is the SLNG Context Router's module-level helpers. Empty on a package
@@ -916,13 +911,37 @@ func livekitDeploys(regions []string) []livekitDeploy {
 	return deploys
 }
 
+// livekitModules are the agent's own Python modules, each rendered from its
+// template and given its imports by linkPython. A module whose template renders
+// nothing past its docstring is not emitted. agent.py keeps the server and its
+// rtc_session: that is what `start agent.py` looks for, and what the Coval
+// harness reads the agent name from.
+var livekitModules = []struct{ tmpl, path string }{
+	{"settings.py", "settings.py"},
+	{"prompts.py", "prompts/__init__.py"},
+	{"utils_google.py", "utils/google.py"},
+	{"utils_auth.py", "utils/auth.py"},
+	{"utils_context.py", "utils/context.py"},
+	{"utils_mcp.py", "utils/mcp.py"},
+	{"session.py", "session.py"},
+	{"utils_telephony.py", "utils/telephony.py"},
+	{"utils_router.py", "utils/router.py"},
+	{"agents.py", "agents.py"},
+	{"call.py", "call.py"},
+	{"agent.py", "agent.py"},
+}
+
 func renderLiveKitFiles(data livekitData) ([]File, error) {
+	files, err := renderPythonModules(livekitV1Templates, "templates/livekit_v1/", livekitFuncs(), data, livekitModules)
+	if err != nil {
+		return nil, fmt.Errorf("livekit modules: %w", err)
+	}
+	files = append(files, writePromptFiles(data.Prompts)...)
 	outputs := []struct{ tmpl, path string }{
-		{"agent.py", "agent.py"},
 		// Always emitted, inert unless the dev loop sets devmetrics.Env. Emitting
 		// it only for `dev` would make build/<target>/ depend on which command
 		// last ran, so the dev loop would stop testing the file that ships.
-		{"dev_metrics.py", "dev_metrics.py"},
+		{"dev_metrics.py", "utils/dev_metrics.py"},
 		{"pyproject.toml", "pyproject.toml"},
 		{"README.md", "README.md"},
 		{"env.example", ".env.example"},
@@ -934,7 +953,7 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		// first deploy and unmute compile preserves it from then on.
 	}
 	if data.Tracing {
-		outputs = append(outputs, struct{ tmpl, path string }{tracingTemplate(data.TracingProvider), "tracing.py"})
+		outputs = append(outputs, struct{ tmpl, path string }{tracingTemplate(data.TracingProvider), "utils/tracing.py"})
 	}
 	// Only when the package declares a knowledge base: the module imports
 	// llama-index, which is only in .Deps for the same reason.
@@ -948,7 +967,6 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 			outputs = append(outputs, struct{ tmpl, path string }{"telephony_bridge.py", "telephony_bridge.py"})
 		}
 	}
-	var files []File
 	for _, o := range outputs {
 		content, err := renderLiveKitV1(o.tmpl, data)
 		if err != nil {
@@ -973,7 +991,7 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, File{Path: "knowledge.py", Content: content})
+		files = append(files, File{Path: "utils/knowledge.py", Content: content})
 	}
 	// Both clouds build from this directory, and LiveKit caps the uploaded
 	// context at 1 GB, so local run leftovers are excluded too.
@@ -1069,7 +1087,23 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("livekit template %s: %w", name, err)
 	}
-	tmpl, err := template.New(name).Funcs(template.FuncMap{
+	tmpl, err := template.New(name).Funcs(livekitFuncs()).Parse(string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("livekit template %s: %w", name, err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("livekit template %s: %w", name, err)
+	}
+	if strings.HasSuffix(name, ".py") {
+		return wrapLongImports(buf.Bytes()), nil
+	}
+	return buf.Bytes(), nil
+}
+
+// livekitFuncs are the functions every LiveKit template can call.
+func livekitFuncs() template.FuncMap {
+	return template.FuncMap{
 		"pyq":          pyQuote,
 		"resultAccess": resultAccess,
 		"join":         strings.Join,
@@ -1084,18 +1118,7 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 		// the platform guarantees.
 		"hostedEntry": func() string { return hostedEntryPoint },
 		"hostedInput": func() string { return hostedInputModel },
-	}).Parse(string(raw))
-	if err != nil {
-		return nil, fmt.Errorf("livekit template %s: %w", name, err)
 	}
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return nil, fmt.Errorf("livekit template %s: %w", name, err)
-	}
-	if strings.HasSuffix(name, ".py") {
-		return wrapLongImports(buf.Bytes()), nil
-	}
-	return buf.Bytes(), nil
 }
 
 // pyTriple renders a Go string as a Python triple-quoted string literal, safe

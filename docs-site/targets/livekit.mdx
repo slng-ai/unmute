@@ -17,15 +17,21 @@ unmute compile my-agent --target livekit
 
 ```text
 my-agent/build/livekit/
-├── agent.py              # the agent worker
+├── agent.py              # the entry point
+├── call.py               # prewarm and one session: turn detection, telephony
+├── agents.py             # the agents, their tools and task steps
+├── session.py            # saved values and prefetch
+├── settings.py           # every fixed value: names, timeouts, required variables
+├── prompts/              # one Markdown file per agent, tasks in prompts/tasks/
+├── utils/                # helpers, only the ones this package needs
+│   ├── dev_metrics.py    # per-turn latency for `unmute dev`, inert elsewhere
+│   ├── tracing.py        # present when the package sets tracing
+│   └── knowledge.py      # present when the package sets knowledge
 ├── tools/                # your local handlers, copied
 │   ├── __init__.py
 │   └── <name>.py         # one per local tool
-├── knowledge.py          # present when the package sets knowledge
 ├── knowledge/            # present when the package sets knowledge
 │   └── <name>/           # one directory per knowledge source, its documents copied in
-├── tracing.py            # present when the package sets tracing
-├── dev_metrics.py        # per-turn latency for `unmute dev`, inert elsewhere
 ├── pyproject.toml        # pinned dependencies
 ├── Dockerfile
 ├── .dockerignore
@@ -92,14 +98,21 @@ instance name, used by `--target` and the `build/<name>/` output folder.
   Positive values are refused on LiveKit. Omit this Pipecat setting; Unmute configures no LiveKit warm-instance count. Zero also emits no setting.
 </ParamField>
 
-## agent.py
+## The modules
 
-One worker file: your prompts, the agent classes, the tasks and task groups if
-you declared any, the tool functions, and the session wiring. The entry agent
-becomes a class, named after your agent, and the generated README says which
-one it is.
+`agent.py` is the entry point. It creates the worker and its session
+entrypoint. `call.py` holds the prewarm step and one session: turn detection
+and telephony. `agents.py` holds the agent classes, the tasks and task groups if
+you declared any, and the tool functions. The entry agent becomes a class,
+named after your agent, and the generated README says which one it is.
+`session.py` holds saved values and prefetch. `settings.py` holds every fixed
+value.
 
-It imports LiveKit and your handlers. Nothing from Unmute.
+Each prompt is a Markdown file in `prompts/`, with task prompts in
+`prompts/tasks/`. The file holds the prompt text exactly. Placeholders are
+filled at run time.
+
+The project imports LiveKit and your handlers. Nothing from Unmute.
 
 ## Run it without Unmute
 

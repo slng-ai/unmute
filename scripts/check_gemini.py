@@ -31,8 +31,18 @@ HOSTS = {
 
 
 async def check(package: Path, target: str, live: bool) -> None:
-    filename = "agent.py" if target == "livekit" else "bot.py"
-    tree = ast.parse((package / "build" / target / filename).read_text())
+    # The Vertex helpers live in utils/google.py and the constructors in the
+    # agent modules, so every emitted module is read as one tree.
+    build = package / "build" / target
+    filename = str(build)
+    tree = ast.Module(
+        body=[
+            node
+            for path in sorted([*build.glob("*.py"), *build.glob("utils/*.py")])
+            for node in ast.parse(path.read_text()).body
+        ],
+        type_ignores=[],
+    )
     scope: dict[str, object] = {"os": os}
     if target == "livekit":
         from livekit.plugins import google

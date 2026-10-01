@@ -850,8 +850,8 @@ func slngNoTasks(what string) string {
 
 // slngNoKnowledge is why the slng target refuses a knowledge base.
 //
-// The two code drivers emit knowledge.py and copy the documents beside it, so the
-// index is built inside the image they produce. The slng target emits a README and
+// The two code drivers emit utils/knowledge.py and copy the documents into the
+// project, so the index is built inside the image they produce. The slng target emits a README and
 // pushes a spec: there is no image, nothing to copy the folder into, and no process
 // of ours to build an index in.
 func slngNoKnowledge(what string) string {

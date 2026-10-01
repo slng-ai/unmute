@@ -16,7 +16,7 @@ func emittedKnowledgePy(t *testing.T, provider ir.Provider) string {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	return artifactFile(t, artifact, "knowledge.py")
+	return artifactFile(t, artifact, "utils/knowledge.py")
 }
 
 // pythonCodeOnly strips comments and triple-quoted blocks from emitted Python.
@@ -99,7 +99,7 @@ func TestKnowledgeIndexesAtStartupNotPerLookup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("generate: %v", err)
 		}
-		return artifactFile(t, artifact, "agent.py")
+		return artifactFile(t, artifact, agentSource)
 	}()
 	prewarm, rest, ok := strings.Cut(agentPy, "server.setup_fnc = prewarm")
 	if !ok {
@@ -221,7 +221,7 @@ func TestKnowledgeRelevanceInstructionIsAppendedNotSubstituted(t *testing.T) {
 			if err != nil {
 				t.Fatalf("generate: %v", err)
 			}
-			agentPy := artifactFile(t, artifact, "agent.py")
+			agentPy := artifactFile(t, artifact, agentSource)
 			for _, want := range []string{authored, "say you do not have that information"} {
 				if !strings.Contains(agentPy, want) {
 					t.Errorf("agent.py must carry %q", want)
@@ -244,7 +244,7 @@ func TestKnowledgeToolShapeIsFixed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	agentPy := artifactFile(t, artifact, "agent.py")
+	agentPy := artifactFile(t, artifact, agentSource)
 	if !strings.Contains(agentPy, `async def lookup_customer(self, ctx: RunContext, query: Annotated[str, Field(description="What to look up. Use the caller's own words.")]) -> dict:`) {
 		t.Errorf("the knowledge tool signature is not the fixed one-string shape:\n%s", agentPy)
 	}
@@ -255,7 +255,7 @@ func TestKnowledgeToolShapeIsFixed(t *testing.T) {
 	// a paraphrase the agent is about to rewrite, which spends the whole latency
 	// budget twice. This is the one place the LiveKit example's recommended
 	// variant is deliberately not followed.
-	py := artifactFile(t, artifact, "knowledge.py")
+	py := artifactFile(t, artifact, "utils/knowledge.py")
 	for _, forbidden := range []string{"as_query_engine", "aquery(", "query_engine"} {
 		if strings.Contains(py, forbidden) {
 			t.Errorf("knowledge.py must not use %q: a retriever returns passages, a query engine spends a second LLM call writing prose", forbidden)
@@ -288,7 +288,7 @@ func TestKnowledgeEmittedOnlyWhenDeclared(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	for _, file := range without.Files {
-		if file.Path == "knowledge.py" || strings.HasPrefix(file.Path, "knowledge/") {
+		if file.Path == "utils/knowledge.py" || strings.HasPrefix(file.Path, "knowledge/") {
 			t.Errorf("a package with no knowledge: section emitted %s", file.Path)
 		}
 	}
@@ -298,7 +298,7 @@ func TestKnowledgeEmittedOnlyWhenDeclared(t *testing.T) {
 			t.Errorf("a package with no knowledge base must not declare %q", forbidden)
 		}
 	}
-	agentPy := artifactFile(t, without, "agent.py")
+	agentPy := artifactFile(t, without, agentSource)
 	for _, forbidden := range []string{"import knowledge", "build_indexes"} {
 		if strings.Contains(agentPy, forbidden) {
 			t.Errorf("a package with no knowledge base must not reference %q", forbidden)
@@ -654,7 +654,7 @@ func TestEveryEmbeddingServiceEmitsAValidConstruction(t *testing.T) {
 			if err != nil {
 				t.Fatalf("a package naming embed %q must compile: %v", name, err)
 			}
-			py := artifactFile(t, artifact, "knowledge.py")
+			py := artifactFile(t, artifact, "utils/knowledge.py")
 			for _, want := range []string{
 				"from " + service.PythonModule + " import " + service.PythonClass,
 				service.PythonClass + "(" + service.ModelKwarg + `="` + service.Model + `")`,
@@ -699,7 +699,7 @@ func TestKnowledgeSettingsAreEmittedPerBase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	py := artifactFile(t, artifact, "knowledge.py")
+	py := artifactFile(t, artifact, "utils/knowledge.py")
 	// The example tunes services and leaves refunds on the defaults, so this
 	// asserts both halves at once: an authored value travels, and an absent one
 	// resolves.
@@ -871,7 +871,7 @@ func TestKnowledgeModeEmitsOnlyWhatItNeeds(t *testing.T) {
 			if err != nil {
 				t.Fatalf("mode %q must compile: %v", tc.mode, err)
 			}
-			py := artifactFile(t, artifact, "knowledge.py")
+			py := artifactFile(t, artifact, "utils/knowledge.py")
 			// Code only for both directions. The module explains each mode in
 			// docstrings that name the store and BM25 whatever the mode is, so a
 			// check that reads prose fails on the explanation.

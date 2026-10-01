@@ -2,7 +2,6 @@ package generate
 
 import (
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -10,11 +9,6 @@ import (
 	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
-
-// botImport matches a module-scope import in the emitted bot.py, capturing the
-// top-level module name: `import dev_metrics`, `from dev_metrics import x`,
-// `import tools.fetch_notes` all yield the first dotted segment.
-var botImport = regexp.MustCompile(`(?m)^(?:from|import) ([A-Za-z_][A-Za-z0-9_]*)`)
 
 // The Pipecat image copies named files, never `COPY . .`, because /app is the
 // base image's own directory and copying over it replaces the server that
@@ -25,9 +19,10 @@ var botImport = regexp.MustCompile(`(?m)^(?:from|import) ([A-Za-z_][A-Za-z0-9_]*
 // compose.dev.yaml bind-mounts the directory over the image's copy.
 //
 // That has now shipped twice: once as tools/ (v0.1.0 through v0.1.2), and again
-// as dev_metrics.py. So the gate reads the emitted bot.py's own imports and
-// requires a COPY for every emitted module it names. There is no list to keep in
-// step by hand.
+// as dev_metrics.py. So the gate requires every emitted Python module, and every
+// prompt file the prompts package reads, to be reached by a COPY line. There is
+// no list to keep in step by hand, and no import parser to widen when a module
+// starts importing another one.
 func TestPipecatImageCopiesEveryModuleBotImports(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -47,42 +42,21 @@ func TestPipecatImageCopiesEveryModuleBotImports(t *testing.T) {
 				t.Fatalf("generate: %v", err)
 			}
 
-			// Every emitted module bot.py could import: a root-level .py file, or
-			// the tools package. Mapped to the path a COPY line would name.
-			emitted := map[string]string{}
-			for _, f := range artifact.Files {
-				switch {
-				case f.Path == "bot.py":
-				case strings.HasPrefix(f.Path, "tools/"):
-					emitted["tools"] = "tools/"
-				case strings.HasSuffix(f.Path, ".py") && !strings.Contains(f.Path, "/"):
-					emitted[strings.TrimSuffix(f.Path, ".py")] = f.Path
-				}
-			}
-
-			// The blind spot, stated rather than discovered: botImport matches
-			// module-scope imports only, so an import written inside a function
-			// is invisible to this loop. Every emitted import is module-scope
-			// today; a driver that starts writing one inside a handler needs
-			// this parser widened rather than a note.
-			bot := artifactFile(t, artifact, "bot.py")
 			dockerfile := artifactFile(t, artifact, "Dockerfile")
-			imported := 0
-			for _, m := range botImport.FindAllStringSubmatch(bot, -1) {
-				path, local := emitted[m[1]]
-				if !local {
-					continue // pipecat, stdlib, a third-party package
+			checked := 0
+			for _, f := range artifact.Files {
+				if !strings.HasSuffix(f.Path, ".py") && !strings.HasPrefix(f.Path, "prompts/") {
+					continue
 				}
-				imported++
-				if !regexp.MustCompile(`(?m)^COPY .*` + regexp.QuoteMeta(path)).MatchString(dockerfile) {
-					t.Errorf("bot.py imports %s but the Dockerfile never copies %s: the container will raise ModuleNotFoundError before it answers /bot", m[1], path)
+				checked++
+				if !dockerCopies(dockerfile, f.Path) {
+					t.Errorf("the project emits %s but the Dockerfile never copies it: the container will raise before it answers /bot", f.Path)
 				}
 			}
-			// A regex that matched nothing would pass this test forever.
-			if imported == 0 {
-				t.Fatal("found no local imports in bot.py, so this test proves nothing")
+			// A filter that matched nothing would pass this test forever.
+			if checked == 0 {
+				t.Fatal("found no emitted module, so this test proves nothing")
 			}
-
 		})
 	}
 }
@@ -152,7 +126,7 @@ func TestPipecatHTTPXImportMatchesItsUseAndItsDependency(t *testing.T) {
 			// is invisible to this loop. Every emitted import is module-scope
 			// today; a driver that starts writing one inside a handler needs
 			// this parser widened rather than a note.
-			bot := artifactFile(t, artifact, "bot.py")
+			bot := artifactFile(t, artifact, agentSource)
 			pyproject := artifactFile(t, artifact, "pyproject.toml")
 
 			imported := strings.Contains(bot, "\nimport httpx\n")
@@ -174,4 +148,25 @@ func TestPipecatHTTPXImportMatchesItsUseAndItsDependency(t *testing.T) {
 	if !checkedWith || !checkedWithout {
 		t.Errorf("covered a package that imports httpx = %v and one that does not = %v; this agreement needs both", checkedWith, checkedWithout)
 	}
+}
+
+// dockerCopies reports whether a COPY line of the Dockerfile puts path, a file
+// of the build directory, into the image: named as itself, matched by a glob,
+// or inside a directory the line copies whole.
+func dockerCopies(dockerfile, path string) bool {
+	for _, line := range strings.Split(dockerfile, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] != "COPY" {
+			continue
+		}
+		for _, source := range fields[1 : len(fields)-1] {
+			if strings.HasPrefix(source, "--") {
+				continue
+			}
+			if matched, _ := filepath.Match(source, path); matched || strings.HasSuffix(source, "/") && strings.HasPrefix(path, source) {
+				return true
+			}
+		}
+	}
+	return false
 }

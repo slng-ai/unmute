@@ -35,7 +35,7 @@ func codeOnly(module string) string {
 // specs/023 contracts/authoring.md §3, read off the emitted module.
 func TestLiveKitLiveEmitsOneServiceAndNothingItReplaces(t *testing.T) {
 	artifact := generateFor(t, "live_model", ir.ProviderLiveKit)
-	module := artifactFile(t, artifact, "agent.py")
+	module := artifactFile(t, artifact, agentSource)
 	code := codeOnly(module)
 
 	for _, want := range []string{
@@ -93,7 +93,7 @@ func TestLiveKitLiveEmitsOneServiceAndNothingItReplaces(t *testing.T) {
 // runtime rather than at import if it were wrong, and it should fail loudly
 // here instead.
 func TestLiveKitLiveGreetsThroughTheModel(t *testing.T) {
-	module := artifactFile(t, generateFor(t, "live_model", ir.ProviderLiveKit), "agent.py")
+	module := artifactFile(t, generateFor(t, "live_model", ir.ProviderLiveKit), agentSource)
 	code := codeOnly(module)
 	if !strings.Contains(code, "self.session.generate_reply(") {
 		t.Error("agent.py does not open the call through the model")
@@ -132,7 +132,7 @@ func TestLiveKitLiveGreetsThroughTheModel(t *testing.T) {
 // swallowed every service on every package, which is the failure mode the
 // compat digests catch at the whole-tree level and this catches by name.
 func TestLiveKitCascadeStillBuildsAllFour(t *testing.T) {
-	code := codeOnly(artifactFile(t, generateFor(t, "simple-prompt", ir.ProviderLiveKit), "agent.py"))
+	code := codeOnly(artifactFile(t, generateFor(t, "simple-prompt", ir.ProviderLiveKit), agentSource))
 	for _, want := range []string{"stt=", "tts=", "turn_handling=", "vad=", "silero"} {
 		if !strings.Contains(code, want) {
 			t.Errorf("a cascaded package no longer emits %q; the live branch is leaking", want)

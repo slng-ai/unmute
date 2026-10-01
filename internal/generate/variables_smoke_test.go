@@ -25,7 +25,7 @@ os.environ["UNMUTE_CALL_START"] = json.dumps(
     {"name": "Ada", "customer_phone": "+34600111222", "appointment_time": "tomorrow at 3 pm"}
 )
 
-import bot  # noqa: E402
+bot = _project("bot")
 
 state = bot.build_state()
 assert state.name == "Ada", state.name
@@ -88,7 +88,7 @@ for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 os.environ["REDIS_URL"] = "redis://127.0.0.1:6379/0"
 
-import agent as generated  # noqa: E402
+generated = _project("agent")
 
 userdata = generated.Userdata()
 userdata.name = "Ada"

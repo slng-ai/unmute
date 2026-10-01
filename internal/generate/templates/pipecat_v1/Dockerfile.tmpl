@@ -44,32 +44,26 @@ RUN mkdir -p "$NLTK_DATA" && \
     done; \
     python -c "import nltk.data; nltk.data.find('tokenizers/punkt_tab')"
 
-# Named files, never `COPY . .`: /app is the base image's own directory, and
+# Named paths, never `COPY . .`: /app is the base image's own directory, and
 # copying over it replaces the server that answers /bot.
 #
-# tools/ is a directory rather than a file, and it is named the same way. bot.py
-# does `import tools.<name>` for every local tool, so leaving it out builds an
-# image that cannot import its own emitted code: the container starts, raises
-# ModuleNotFoundError, and the deployment never reaches ready. That shipped in
-# v0.1.0 through v0.1.2 and broke five of the eleven examples, `unmute dev`
-# included, because compose.dev.yaml runs this same image with no bind mount.
-COPY bot.py ./
-# dev_metrics.py is emitted unconditionally and imported at bot.py's module
-# scope, so this line is unconditional too. Leaving it out is the same failure
-# tools/ was: the container starts, raises ModuleNotFoundError before it ever
-# answers /bot, and the deployment never reaches ready.
-COPY dev_metrics.py ./
-{{if .Tracing}}COPY tracing.py ./
-{{end}}{{if .LocalTools}}COPY tools/ ./tools/
-{{end}}{{if .Knowledge.Knowledge}}# knowledge.py and the documents it reads. Both lines are needed, and for the
-# same reason tools/ is: bot.py imports knowledge at module scope, and
-# knowledge.py reads knowledge/<base>/ from the working directory. Leave either
-# out and the container starts, raises, and the deployment never reaches ready
-# while its own log looks healthy.
+# Every module and folder bot.py imports is named, because one left out builds an
+# image that cannot import its own code: the container starts, raises
+# ModuleNotFoundError before it ever answers /bot, and the deployment never
+# reaches ready. That shipped in v0.1.0 through v0.1.2 for tools/ and broke five
+# of the eleven examples, `unmute dev` included, because compose.dev.yaml runs
+# this same image with no bind mount. `*.py` is the agent's own modules, which
+# differ by package, and utils/ holds the helpers they share.
+COPY *.py ./
+COPY prompts/ ./prompts/
+COPY utils/ ./utils/
+{{if .LocalTools}}COPY tools/ ./tools/
+{{end}}{{if .Knowledge.Knowledge}}# The documents utils/knowledge.py reads, from knowledge/<base>/ in the working
+# directory. Leave it out and the container starts, raises, and the deployment
+# never reaches ready while its own log looks healthy.
 #
 # The documents ride in the image because a managed platform offers no mounted
 # storage to read them from.
-COPY knowledge.py ./
 COPY knowledge/ ./knowledge/
 
 # Bake the knowledge index into the image, so that no worker process embeds the
@@ -111,7 +105,7 @@ RUN {{range .Knowledge.Credentials}}--mount=type=secret,id={{.}} {{end}}\
     fi; \
     export {{.}}="$(cat /run/secrets/{{.}})"; \
 {{- end}}
-    python -c "import logging; logging.basicConfig(level=logging.INFO, format='unmute: %(message)s'); import knowledge; knowledge.bake()"
+    python -c "import logging; logging.basicConfig(level=logging.INFO, format='unmute: %(message)s'); from utils import knowledge; knowledge.bake()"
 {{end}}
 # No CMD: the base image imports bot.py and calls its bot() itself. A local
 # browser run overrides the command instead (see compose.dev.yaml).

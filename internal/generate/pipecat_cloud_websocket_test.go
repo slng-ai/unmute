@@ -120,6 +120,11 @@ func TestCloudWebsocketEmitsNoProcessArtifact(t *testing.T) {
 	// The comparison is the plain Pipecat Cloud build of the same fixture: same
 	// agent, no telephony at all.
 	plain := artifactPaths(plainPipecatArtifact(t))
+	// The agent's own modules differ, and should: the phone route's code lives
+	// in utils/telephony.py. A module is not something an operator runs.
+	modules := agentModulePaths()
+	notModule := func(path string) bool { return slices.Contains(modules, path) }
+	withPhone, plain = slices.DeleteFunc(withPhone, notModule), slices.DeleteFunc(plain, notModule)
 	if !slices.Equal(withPhone, plain) {
 		t.Errorf("this route's file list differs from a plain Pipecat Cloud build:\n  route: %v\n  plain: %v", withPhone, plain)
 	}
@@ -201,7 +206,7 @@ func TestCloudWebsocketMarkupCarriesNoUnreadParameter(t *testing.T) {
 	artifact := cloudWebsocketArtifact(t, cloudWebsocketOptions{
 		inbound: true, outbound: true, transfer: true, connection: true,
 	})
-	bot := artifactFile(t, artifact, "bot.py")
+	bot := artifactFile(t, artifact, agentSource)
 	names := regexp.MustCompile(`<Parameter name="([^"]+)"`).FindAllStringSubmatch(telephonySection(t, artifact), -1)
 	if len(names) == 0 {
 		t.Fatal("no markup parameter is dictated anywhere, so this is asserting nothing")
@@ -229,7 +234,7 @@ func TestCloudWebsocketMarkupCarriesNoUnreadParameter(t *testing.T) {
 func TestCloudWebsocketLiftsTheCallsFactsIntoTheContext(t *testing.T) {
 	bot := artifactFile(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{
 		inbound: true, outbound: true, transfer: true, connection: true,
-	}), "bot.py")
+	}), agentSource)
 	for _, want := range []string{
 		`call_context["call_id"] = phone_call.get("call_id") or ""`,
 		`call_context["stream_id"] = phone_call.get("stream_id") or ""`,
@@ -251,7 +256,7 @@ func TestCloudWebsocketRegionPicksTheEndpoint(t *testing.T) {
 		inbound: true, outbound: true, transfer: true, connection: true, region: "eu-central",
 	})
 	host := regexp.MustCompile(`wss://[a-z0-9.\-]*api\.pipecat\.daily\.co/ws/twilio`)
-	found := host.FindAllString(artifactFile(t, regional, "README.md")+artifactFile(t, regional, "bot.py"), -1)
+	found := host.FindAllString(artifactFile(t, regional, "README.md")+artifactFile(t, regional, agentSource), -1)
 	if len(found) == 0 {
 		t.Fatal("no stream address is rendered anywhere, so the operator has nothing to paste")
 	}
@@ -261,7 +266,7 @@ func TestCloudWebsocketRegionPicksTheEndpoint(t *testing.T) {
 		}
 	}
 	plain := cloudWebsocketArtifact(t, cloudWebsocketOptions{inbound: true, transfer: true, connection: true})
-	for _, address := range host.FindAllString(artifactFile(t, plain, "README.md")+artifactFile(t, plain, "bot.py"), -1) {
+	for _, address := range host.FindAllString(artifactFile(t, plain, "README.md")+artifactFile(t, plain, agentSource), -1) {
 		if address != "wss://api.pipecat.daily.co/ws/twilio" {
 			t.Errorf("with no region declared the rendered address is %q, not the default", address)
 		}

@@ -1,0 +1,323 @@
+{{- /* The import block every emitted module draws from. Each module keeps the
+statements it references and gains one for each name another module defines
+(linkPython, internal/generate/pylink.go), so no module lists its own. */ -}}
+{{- /* terminal_guard closes a step's mutations once one of them has succeeded.
+It sits before the handler body, not after it: a second create_booking that
+ran and was then refused is a second booking. A new intentional action needs a
+new invocation of the step. */ -}}
+{{define "terminal_guard"}}{{if .Terminal}}
+        if self._terminal is not None:
+            logger.info({{pyq (printf "terminal tool refused: %s cannot run again in this step" .Method)}})
+            return {"refused": {{pyq (printf "%s already succeeded in this step. Call finish to record it; a new action is a new request from the caller." .Method)}}}
+        # In flight from here until _end_on_ settles it, whichever response it
+        # was called in: a handoff or a finish arriving while it runs waits for
+        # it rather than moving the caller past an action nobody recorded.
+        self._begin_terminal()
+{{- end}}{{end -}}
+{{define "opening_guard_note"}}        # This opening turn withholds the agent's own handoffs (B3: an agent that can
+        # hand the call back before it has said anything ping-pongs). The framework's
+        # on-enter tool flag would hide them for the rest of the call instead, because
+        # its filter follows the context of everything this reply starts: a live call
+        # offered one specialist nothing but its delegate for ten turns while the
+        # caller asked for another one (B: salon handoffs, 2026-08-20).
+{{end}}{{- /* delegate_announce covers the entry to a step: two model requests
+pass between the caller finishing and the step's first word, and this puts
+speech in them. Rendered at the very start of every delegate shape, before
+anything else runs: ordering between steps is the prompt's job (the step's
+`when:` sentence and the owning agent's instructions), not a code gate, so
+there is nothing left to hold this back. */ -}}
+{{define "delegate_announce"}}{{if .Announce}}
+        # Not awaited, for the same reason the tool announcement is not: awaiting
+        # the handle holds the step until playout finishes, which is the delay
+        # this line exists to hide.
+        dev_say(self.session, {{.Announce}}){{end}}{{end}}{{define "opening_tools"}}tools=[t.id for t in self.tools if {{if eq (len .Transfers) 1}}t.id != {{pyq (index .Transfers 0).Method}}{{else}}t.id not in { {{- range $i, $t := .Transfers}}{{if $i}}, {{end}}{{pyq $t.Method}}{{end -}} }{{end}}]{{end}}
+{{- /* svc renders any resolved ServiceCall inline (session/agent kwargs).
+Classes, kwargs, and model-route forms come from the provider catalogue
+(internal/target/catalog_livekit.go). */ -}}
+{{define "svc"}}{{.Class}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Key}}={{$a.Value}}{{end}}{{if .SettingsArgs}}{{if .Args}}, {{end}}{{.SettingsArg}}={{.SettingsClass}}({{range $i, $a := .SettingsArgs}}{{if $i}}, {{end}}{{$a.Key}}={{$a.Value}}{{end}}){{end}}){{end -}}
+{{- /* llmexpr renders a reason profile: bare service, or the native
+llm.FallbackAdapter around its fallback chain (V4). */ -}}
+{{define "llmexpr"}}{{if .Chain}}llm.FallbackAdapter(llm=[{{template "svc" .Primary.Call}}{{range .Chain}}, {{template "svc" .Call}}{{end}}]){{else}}{{template "svc" .Primary.Call}}{{end}}{{end -}}
+{{- /* sttexpr renders the listen model: bare service, or the native
+stt.FallbackAdapter around its fallback chain (T16). */ -}}
+{{define "sttexpr"}}{{if .Chain}}stt.FallbackAdapter(stt=[{{template "svc" .Primary.Call}}{{range .Chain}}, {{template "svc" .Call}}{{end}}]){{else}}{{template "svc" .Primary.Call}}{{end}}{{end -}}
+{{- /* webhook_tool renders one webhook tool as a @function_tool method;
+agents and tasks share the shape (T15). */ -}}
+{{define "webhook_tool"}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict{{if .Terminal}} | None{{end}}:
+        {{doc 8 .Description}}
+{{- if .Needed}}
+        refusal = _refusal({{pyq .Method}}, ctx.userdata, {{.NeededLiteral}})
+        if refusal:
+            return {"refused": refusal}
+{{- end}}
+{{- template "terminal_guard" .}}
+{{- if .Announce}}
+        # Cover the wait: say() returns a SpeechHandle, so speech starts and the
+        # request goes out behind it. Deliberately not awaited: awaiting the
+        # handle holds the tool until playout finishes, which is the delay this
+        # line exists to hide. Announced after any refusal, so a refused call
+        # stays silent.
+        dev_say(self.session, {{.Announce}})
+{{- end}}
+{{- if .Terminal}}
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    {{.URLExpr}},
+{{- if .Auth}}
+                    headers={{.Auth.Expr}},
+{{- end}}
+                    json={{.JSONBody}},
+                )
+                resp.raise_for_status()
+        except BaseException:
+            self._settle_terminal()
+            raise
+{{- if .EndsConversation}}
+        self.session.shutdown()  # effect: ends_conversation
+{{- end}}
+        return await self._end_on_{{.Method}}(ctx, resp.json())
+{{- else}}
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                {{.URLExpr}},
+{{- if .Auth}}
+                headers={{.Auth.Expr}},
+{{- end}}
+                json={{.JSONBody}},
+            )
+            resp.raise_for_status()
+{{- if .EndsConversation}}
+            self.session.shutdown()  # effect: ends_conversation
+{{- end}}
+            return resp.json()
+{{- end}}
+{{end -}}
+{{- /* local_tool calls the handler copied from the source package (SCHEMA §5:
+the file defines a callable named like the tool; sync or async). */ -}}
+{{define "local_tool"}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict{{if .Terminal}} | None{{end}}:
+        {{doc 8 .Description}}
+{{- if .Needed}}
+        refusal = _refusal({{pyq .Method}}, ctx.userdata, {{.NeededLiteral}})
+        if refusal:
+            return {"refused": refusal}
+{{- end}}
+{{- template "terminal_guard" .}}
+{{- if .Announce}}
+        # Not awaited, on purpose: see the same line in webhook_tool.
+        dev_say(self.session, {{.Announce}})
+{{- end}}
+{{- if .Terminal}}
+        try:
+            result = tools.{{.Method}}.{{.Method}}({{.CallKwargs}})
+            if inspect.isawaitable(result):
+                result = await result
+        except BaseException:
+            self._settle_terminal()
+            raise
+{{- else}}
+        result = tools.{{.Method}}.{{.Method}}({{.CallKwargs}})
+        if inspect.isawaitable(result):
+            result = await result
+{{- end}}
+{{- if .EndsConversation}}
+        self.session.shutdown()  # effect: ends_conversation
+{{- end}}
+{{- if .Terminal}}
+        return await self._end_on_{{.Method}}(ctx, result)
+{{- else}}
+        return result
+{{- end}}
+{{end -}}
+{{- /* knowledge_tool renders one knowledge lookup as a @function_tool method.
+The index is built in prewarm and read from the job's userdata, so a lookup
+never reads a file and never re-indexes (FR-017). */ -}}
+{{define "knowledge_tool"}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict{{if .Terminal}} | None{{end}}:
+        {{doc 8 .Description}}
+{{- if .Announce}}
+        # Not awaited, on purpose: see the same line in webhook_tool.
+        dev_say(self.session, {{.Announce}})
+{{- end}}
+        return await knowledge.look_up({{pyq .KnowledgeBase}}, query)
+{{end -}}
+{{- /* hosted_tool calls a mirrored SLNG module through the platform's own
+contract: the module defines an Input model and a handler taking one, so the
+call is handler(Input(**args)) rather than a bare function named like the tool.
+The result is a pydantic model, so it is dumped to a dict for the model. */ -}}
+{{define "hosted_tool"}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict{{if .Terminal}} | None{{end}}:
+        {{doc 8 .Description}}
+{{- if .Needed}}
+        refusal = _refusal({{pyq .Method}}, ctx.userdata, {{.NeededLiteral}})
+        if refusal:
+            return {"refused": refusal}
+{{- end}}
+{{- template "terminal_guard" .}}
+{{- if .Announce}}
+        # Not awaited, on purpose: see the same line in webhook_tool.
+        dev_say(self.session, {{.Announce}})
+{{- end}}
+{{- if .Terminal}}
+        try:
+            result = tools.{{.Method}}.{{hostedEntry}}(tools.{{.Method}}.{{hostedInput}}({{.CallKwargs}}))
+            if inspect.isawaitable(result):
+                result = await result
+        except BaseException:
+            self._settle_terminal()
+            raise
+{{- else}}
+        result = tools.{{.Method}}.{{hostedEntry}}(tools.{{.Method}}.{{hostedInput}}({{.CallKwargs}}))
+        if inspect.isawaitable(result):
+            result = await result
+{{- end}}
+{{- if .EndsConversation}}
+        self.session.shutdown()  # effect: ends_conversation
+{{- end}}
+{{- if .Terminal}}
+        return await self._end_on_{{.Method}}(ctx, result.model_dump() if hasattr(result, "model_dump") else result)
+{{- else}}
+        return result.model_dump() if hasattr(result, "model_dump") else result
+{{- end}}
+{{end -}}
+{{- /* method_tool dispatches on execution. Every arm is written out, including
+the one that renders the same body as a webhook: this dispatch's final else IS
+webhook_tool, so a kind with no arm renders an HTTP POST to an environment name
+nobody registered rather than rendering nothing. buildLiveKitTool refuses an
+unlowerable kind for the same reason. */ -}}
+{{define "method_tool"}}{{if .KnowledgeBase}}{{template "knowledge_tool" .}}{{else if .Local}}{{template "local_tool" .}}{{else if .HostedCode}}{{template "hosted_tool" .}}{{else if .HostedRequest}}{{template "webhook_tool" .}}{{else}}{{template "webhook_tool" .}}{{end}}{{end -}}
+{{- /* prebuilt_list renders execution: builtin tools as SDK helper instances
+spread into the tools= kwarg. */ -}}
+{{define "prebuilt_list"}}{{range $i, $p := .}}{{if $i}}, {{end}}{{if eq $p.Builtin "end_call"}}*EndCallTool(extra_description={{pyq $p.Description}}{{if $p.Instructions}}, end_instructions={{pyq $p.Instructions}}{{end}}).tools{{end}}{{end}}{{end -}}
+{{- /* mcp_mounts renders an agent's/task's MCP tool sources (N40): one
+MCPToolset per source, on the tools surface. An absent field emits no argument,
+so the SDK's own default stands: no transport_type means it reads the URL (a
+path ending in /mcp is streamable HTTP), no allowed_tools means every tool the
+server exposes, no headers means no authentication.
+
+The two timeouts are the exception, and they are written out because leaving
+them off makes the same package behave differently on the two targets.
+MCPServerHTTP defaults both to 5 seconds, which no web search or crawl answers
+inside; Pipecat's MCP client defaults to 30. 30 wins because it is the value one
+target already had, so this closes the gap without inventing a number. A tool
+slower than that needs `timeout:` on the mcp block, which does not exist yet. */ -}}
+{{define "mcp_constructor"}}mcp.MCPToolset(id={{pyq .Name}}, mcp_server=mcp.MCPServerHTTP(url=os.environ[{{pyq .URLEnv}}]{{if .Transport}}, transport_type={{pyq .Transport}}{{end}}{{if .Tools}}, allowed_tools=[{{range $j, $t := .Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]{{end}}{{if .Auth}}, headers={{.Auth.Expr}}{{end}}, timeout={{mcpTimeout}}, client_session_timeout_seconds={{mcpTimeout}})){{end -}}
+{{define "mcp_mounts"}}{{range $i, $s := .}}{{if $i}}, {{end}}_mcp_toolset({{pyq $s.Name}}){{end}}{{end -}}
+{{- /* tools_list is the whole tools= surface: prebuilt tools first, then the
+MCP sources, in the order the package lists them. */ -}}
+{{define "tools_list"}}{{template "prebuilt_list" .Prebuilt}}{{if and .Prebuilt .MCPServers}}, {{end}}{{template "mcp_mounts" .MCPServers}}{{end -}}
+{{- define "imports" -}}
+from pathlib import Path
+{{if or .NeedsAsyncio .NeedsMCP .NeedsPrefetchAsync}}import asyncio
+{{end}}{{if .Slng.Vertex}}import base64
+{{end}}{{if or .NeedsInspect .NeedsPrefetchLocal}}import inspect
+{{end}}{{if or .Outbound .Telephony .CallStartVars .NeedsTaskGroups .Slng.Vertex .NeedsPrefetchSeed .TypedState}}import json
+{{end}}import logging
+import os
+{{if .NeedsAnnounceChoice}}import random
+{{end}}{{if or .NeedsRender (and .TypedState .TypedState.NeedsRe)}}import re
+{{end}}{{if or .HasWarmTransfer .HasColdTransfer}}import time
+{{end}}{{if .Slng.Any}}import uuid
+{{end}}from collections.abc import AsyncIterable
+{{if .HasUserdata}}from dataclasses import {{if .NeedsDataclassField}}dataclass, field{{else}}dataclass{{end}}
+{{end}}{{if .NeedsPrefetchClock}}from datetime import datetime
+{{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
+{{end}}{{if .NeedsRender}}from urllib.parse import quote
+{{end}}{{if .NeedsPrefetchClock}}from zoneinfo import ZoneInfo
+{{end}}
+{{if .NeedsHTTPX}}import httpx
+{{end}}from dotenv import load_dotenv
+{{if and .TypedState .TypedState.NeedsEmailValidator}}from email_validator import EmailNotValidError, validate_email
+{{end}}from livekit import {{if or .Outbound .HasColdTransfer .HasWarmTransfer}}api, {{end}}rtc
+from livekit.agents import (
+{{- if .Outbound}}
+    AMD,
+{{- end}}
+{{- if not .SingleAgentMinimal}}
+    NOT_GIVEN,
+{{- end}}
+    Agent,
+    AgentServer,
+    AgentSession,
+{{- if .NeedsTasks}}
+    AgentTask,
+{{- end}}
+    APIConnectOptions,
+{{- if .ThinkingAudio}}
+    BackgroundAudioPlayer,
+    BuiltinAudioClip,
+{{- end}}
+    ChatContext,
+    FlushSentinel,
+    JobContext,
+    JobProcess,
+    ModelSettings,
+{{- if not .SingleAgentMinimal}}
+    NotGivenOr,
+{{- end}}
+{{- if .NeedsFunctionTools}}
+    RunContext,
+{{- end}}
+{{- if .LocalTurnTaking}}
+    TurnHandlingOptions,
+{{- end}}
+{{- if or .InactivityNudgeSecs .InactivityEndSecs}}
+    UserStateChangedEvent,
+{{- end}}
+{{- if .NeedsFunctionTools}}
+    function_tool,
+{{- end}}
+{{- if .HasColdTransfer}}
+    get_job_context,
+{{- end}}
+{{- if .LocalTurnTaking}}
+    inference,
+{{- end}}
+{{- if .NeedsLLM}}
+    llm,
+{{- end}}
+{{- if .NeedsMCP}}
+    mcp,
+{{- end}}
+    metrics,
+{{- if .HasWarmTransfer}}
+    room_io,
+{{- end}}
+{{- if or .IgnorePhrases .STT.Chain}}
+    stt,
+{{- end}}
+)
+{{- if .NeedsEndCallTool}}
+{{/* The prebuilt end_call tool, from the beta namespace. */}}from livekit.agents.beta.tools import EndCallTool
+{{- end}}
+{{- if or .NeedsTaskGroups .HasWarmTransfer}}
+from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskCompletedEvent, TaskGroup{{end}}{{if and .NeedsTaskGroups .HasWarmTransfer}}, {{end}}{{if .HasWarmTransfer}}WarmTransferTask, WorkflowInstructions{{end}}
+{{- end}}
+from livekit.agents.llm import ChatChunk, Tool{{if .HasWarmTransfer}}, ToolError{{end}}
+from livekit.agents.voice import MetricsCollectedEvent
+
+{{/* Not re-exported from livekit.agents or livekit.agents.voice, so it comes from
+the module that defines it. Checked against 1.6.10 and 1.8.x. */}}from livekit.agents.voice.agent_session import SessionConnectOptions
+{{if .Live}}{{if .Live.Entry.Import}}{{.Live.Entry.Import}}
+{{end}}{{else if .Realtime}}{{if .PluginModules}}from livekit.plugins import {{join .PluginModules ", "}}
+{{end}}{{if .Realtime.Service.Entry.Import}}{{.Realtime.Service.Entry.Import}}
+{{end}}{{else}}from livekit.plugins import {{join .PluginModules ", "}}
+{{end}}{{if .Slng.ClientBaseURL}}from openai import AsyncOpenAI
+{{end}}{{if .NeedsOpenAIReasoning}}from openai import types as openai_types
+{{end}}{{if .Realtime}}{{range .Realtime.Imports}}{{.}}
+{{end}}{{end}}{{if .PydanticImports}}from pydantic import {{.PydanticImports}}
+{{end}}
+from utils import dev_metrics
+{{if .Knowledge.Knowledge}}from utils import knowledge
+{{end}}{{range .LocalTools}}import tools.{{.Name}}
+{{end}}from utils.dev_metrics import dev_llm_node{{if .NeedsDevSay}}, dev_say{{end}}, install_dev_metrics
+{{if .Tracing}}{{if eq .TracingProvider "coval"}}from utils.tracing import setup_coval
+{{else}}from utils.tracing import setup_langfuse
+{{end}}{{end}}
+{{- end -}}

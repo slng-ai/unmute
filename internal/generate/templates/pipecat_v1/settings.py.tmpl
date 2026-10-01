@@ -1,0 +1,60 @@
+"""Every fixed value this agent runs with, in one place.
+
+Compiled from the package: names, limits, timeouts, and the environment
+variables each kind of session needs. Nothing here reads a secret.
+"""
+
+MAIN_NAME = {{pyq .MainName}}
+{{if .HasTransferAnnouncements}}# The longest a handoff waits for its spoken cue to finish before it moves on.
+HANDOFF_CUE_TIMEOUT_SECS = 30.0
+{{end}}{{if .NeedsTerminal}}# The longest a handoff or a finish waits for a running terminal tool to settle.
+TERMINAL_SETTLE_TIMEOUT_SECS = 30.0
+{{end}}{{if .UsesHTTPX}}# The longest a webhook tool waits for its endpoint before the call fails.
+WEBHOOK_TIMEOUT_SECS = 30.0
+{{end}}{{if .CloudWebsocket}}# Twilio Media Streams is 8 kHz mono in both directions.
+PHONE_SAMPLE_RATE_HZ = 8000
+{{end}}{{if .Slng.RouterClass}}# The router client's connection limits, restated from the base service's own.
+ROUTER_KEEPALIVE_CONNECTIONS = 100
+ROUTER_MAX_CONNECTIONS = 1000
+{{end}}
+{{if .CloudWebsocket}}# What every session needs, whatever channel it arrives on. What a *phone call*
+# adds is CALL_REQUIRED_ENV below, checked separately, so this package still runs
+# in the browser with nothing but model keys (V10/B3).
+{{else}}# Provider credentials only. The telephony route's environment (Redis, carrier
+# keys, the public URL) is required by telephony.py, not here, so a telephony
+# package still runs in the browser with nothing but model keys (V10/B3).
+{{end}}REQUIRED_ENV = [
+{{range .DevEnv}}    {{pyq .}},
+{{end}}]
+{{if .Interrupt}}{{if .Interrupt.IgnorePhrase}}IGNORE_PHRASES = [{{range $i, $p := .Interrupt.IgnorePhrase}}{{if $i}}, {{end}}{{pyq $p}}{{end}}]
+{{end}}{{end}}
+
+def require_env() -> None:
+    """Fail at startup, naming every required environment variable that is unset.
+
+    Raises:
+        RuntimeError: When at least one name in REQUIRED_ENV has no value.
+    """
+    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+{{if .CloudWebsocket}}
+
+# What a phone call adds to REQUIRED_ENV above, checked only on a phone call: a
+# browser or console session on this package reads none of these and must not be
+# asked for them. The check runs before the caller hears anything, so a missing
+# value can never first show up as a failed transfer on a call somebody is
+# paying for.
+CALL_REQUIRED_ENV = [
+{{range .CloudWebsocket.CallEnv}}    {{pyq .}},
+{{end}}]
+{{end}}{{if .DailyCarrier}}
+
+# What a phone call adds to REQUIRED_ENV above, checked only on a phone call: a
+# browser or console session on this package reads none of these and must not be
+# asked for them. The check runs before the call is answered, so a missing value
+# can never first show up as a failed transfer on a call somebody is paying for.
+CALL_REQUIRED_ENV = [
+{{range .DailyCarrier.CallEnv}}    {{pyq .}},
+{{end}}]
+{{end}}

@@ -40,7 +40,7 @@ func prefetchEmitted(t *testing.T, provider ir.Provider, file string) string {
 // prompt the agent renders already sees the values. One line out of place and the
 // values arrive after the greeting has already asked for them.
 func TestPrefetchRunsAtTheSeamOnLiveKit(t *testing.T) {
-	py := prefetchEmitted(t, ir.ProviderLiveKit, "agent.py")
+	py := prefetchEmitted(t, ir.ProviderLiveKit, agentSource)
 
 	if got := strings.Count(py, "async def _prefetch("); got != 1 {
 		t.Fatalf("_prefetch is defined %d times, want exactly 1", got)
@@ -60,7 +60,7 @@ func TestPrefetchRunsAtTheSeamOnLiveKit(t *testing.T) {
 }
 
 func TestPrefetchRunsAtTheSeamOnPipecat(t *testing.T) {
-	py := prefetchEmitted(t, ir.ProviderPipecat, "bot.py")
+	py := prefetchEmitted(t, ir.ProviderPipecat, agentSource)
 
 	if got := strings.Count(py, "async def _prefetch("); got != 1 {
 		t.Fatalf("_prefetch is defined %d times, want exactly 1", got)
@@ -84,8 +84,8 @@ func TestPrefetchEmitsNothingForAPackageThatDeclaresNone(t *testing.T) {
 		provider ir.Provider
 		file     string
 	}{
-		{ir.ProviderLiveKit, "agent.py"},
-		{ir.ProviderPipecat, "bot.py"},
+		{ir.ProviderLiveKit, agentSource},
+		{ir.ProviderPipecat, agentSource},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			agent := salonAgent(t)
@@ -116,7 +116,7 @@ func TestPrefetchEmitsNothingForAPackageThatDeclaresNone(t *testing.T) {
 // log that says "prefetch skipped" with three entries in the block is a log that
 // sends you to the wrong one.
 func TestPrefetchLogsEveryOutcomeByName(t *testing.T) {
-	py := prefetchEmitted(t, ir.ProviderLiveKit, "agent.py")
+	py := prefetchEmitted(t, ir.ProviderLiveKit, agentSource)
 	for _, want := range []string{
 		// resolved, one per source kind. Every variable the entry assigned is
 		// named without placing its value in logs.
@@ -149,8 +149,8 @@ func TestPrefetchLogsCarryNoLibrarySpecificPlaceholder(t *testing.T) {
 		provider ir.Provider
 		file     string
 	}{
-		{ir.ProviderLiveKit, "agent.py"},
-		{ir.ProviderPipecat, "bot.py"},
+		{ir.ProviderLiveKit, agentSource},
+		{ir.ProviderPipecat, agentSource},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			block := prefetchBlockOf(t, prefetchEmitted(t, tc.provider, tc.file))
@@ -172,7 +172,7 @@ func TestPrefetchLogsCarryNoLibrarySpecificPlaceholder(t *testing.T) {
 // call that greets on time with the values at their defaults, which is exactly
 // what a route supplying no caller ID already does.
 func TestPrefetchNeitherBlocksNorRaises(t *testing.T) {
-	py := prefetchEmitted(t, ir.ProviderLiveKit, "agent.py")
+	py := prefetchEmitted(t, ir.ProviderLiveKit, agentSource)
 	if !strings.Contains(py, "_PREFETCH_BUDGET_S = 2.0") {
 		t.Error("the budget is not emitted as a named constant")
 	}
@@ -203,8 +203,8 @@ func TestPrefetchRunsEntriesInAuthoredOrder(t *testing.T) {
 		provider ir.Provider
 		file     string
 	}{
-		{ir.ProviderLiveKit, "agent.py"},
-		{ir.ProviderPipecat, "bot.py"},
+		{ir.ProviderLiveKit, agentSource},
+		{ir.ProviderPipecat, agentSource},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			block := prefetchBlockOf(t, prefetchEmitted(t, tc.provider, tc.file))
@@ -226,7 +226,7 @@ func TestPrefetchToolReachesNoModelButDoesReachTheArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	py := artifactFile(t, artifact, "agent.py")
+	py := artifactFile(t, artifact, agentSource)
 	// No @function_tool method, so it is in no agent's tool list.
 	if strings.Contains(py, "async def lookup_customer(self, ctx: RunContext") {
 		t.Error("the pre-fetched tool is emitted as a model-callable method, so the model can spend a turn calling it")
@@ -246,7 +246,7 @@ func TestPrefetchToolReachesNoModelButDoesReachTheArtifact(t *testing.T) {
 // at the seam, and the mid-call path is untouched: two call sites for one tool
 // is fine, two pre-fetches of it is not.
 func TestPrefetchRunsOncePerCall(t *testing.T) {
-	block := prefetchBlockOf(t, prefetchEmitted(t, ir.ProviderLiveKit, "agent.py"))
+	block := prefetchBlockOf(t, prefetchEmitted(t, ir.ProviderLiveKit, agentSource))
 	if got := strings.Count(block, `os.environ["LOOKUP_CUSTOMER_URL"]`); got != 1 {
 		t.Errorf("the block issues the lookup request %d times, want 1", got)
 	}
@@ -256,7 +256,7 @@ func TestPrefetchRunsOncePerCall(t *testing.T) {
 // refusal. What it must not be is unbounded: a value that quietly outgrows what
 // the router accepts takes the prompt caching with it.
 func TestPrefetchBoundsARouterValueAndSaysSo(t *testing.T) {
-	py := prefetchEmitted(t, ir.ProviderLiveKit, "agent.py")
+	py := prefetchEmitted(t, ir.ProviderLiveKit, agentSource)
 	if !strings.Contains(py, "_PREFETCH_VALUE_MAX = 512") {
 		t.Error("the bound is not emitted as a named constant")
 	}
@@ -299,7 +299,7 @@ func TestPrefetchedValueMeetsTheGateOnlyOnceConfirmed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	py := artifactFile(t, artifact, "agent.py")
+	py := artifactFile(t, artifact, agentSource)
 	if !strings.Contains(py, `if _state_lookup(userdata, name)[1] in (None, "")`) {
 		t.Error("_refusal no longer reads a filled variable as satisfied")
 	}
@@ -331,8 +331,8 @@ func TestPrefetchSeedFillsOnlyWhatTheCarrierDidNot(t *testing.T) {
 		provider ir.Provider
 		file     string
 	}{
-		{ir.ProviderLiveKit, "agent.py"},
-		{ir.ProviderPipecat, "bot.py"},
+		{ir.ProviderLiveKit, agentSource},
+		{ir.ProviderPipecat, agentSource},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			py := prefetchEmitted(t, tc.provider, tc.file)
@@ -393,8 +393,8 @@ func TestPrefetchResolvesAllThreeSourcesOnBothTargets(t *testing.T) {
 		provider ir.Provider
 		file     string
 	}{
-		{ir.ProviderLiveKit, "agent.py"},
-		{ir.ProviderPipecat, "bot.py"},
+		{ir.ProviderLiveKit, agentSource},
+		{ir.ProviderPipecat, agentSource},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			block := prefetchBlockOf(t, prefetchEmitted(t, tc.provider, tc.file))
@@ -428,8 +428,8 @@ func TestPrefetchClockReadsOncePerEntry(t *testing.T) {
 		provider ir.Provider
 		file     string
 	}{
-		{ir.ProviderLiveKit, "agent.py"},
-		{ir.ProviderPipecat, "bot.py"},
+		{ir.ProviderLiveKit, agentSource},
+		{ir.ProviderPipecat, agentSource},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			block := prefetchBlockOf(t, prefetchEmitted(t, tc.provider, tc.file))
@@ -482,7 +482,7 @@ func TestPrefetchEmitsEveryClockField(t *testing.T) {
 // body is all there is, and the bot lifts it under the flat names a `source:`
 // reads.
 func TestDailyCarrierLiftsTheCallsFactsIntoTheContext(t *testing.T) {
-	bot := artifactFile(t, dailyCarrierArtifact(t, "twilio", true), "bot.py")
+	bot := artifactFile(t, dailyCarrierArtifact(t, "twilio", true), agentSource)
 	for _, want := range []string{
 		`call_context["call_id"] = carrier_call.get("call_sid") or ""`,
 		`call_context["direction"] = carrier_call.get("direction") or "inbound"`,
@@ -510,7 +510,7 @@ func TestPipecatHydratesASystemSourceVariable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bot := artifactFile(t, artifact, "bot.py")
+	bot := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		`_value = (call_context or {}).get("from_number")`,
 		`state.caller_fact = _value`,
@@ -536,8 +536,8 @@ func TestPrefetchFillsTwoVariablesFromOneCall(t *testing.T) {
 		provider ir.Provider
 		file     string
 	}{
-		{ir.ProviderLiveKit, "agent.py"},
-		{ir.ProviderPipecat, "bot.py"},
+		{ir.ProviderLiveKit, agentSource},
+		{ir.ProviderPipecat, agentSource},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			agent := loadExample(t, "salon-concierge-v3")
@@ -578,13 +578,13 @@ func TestPrefetchFillsTwoVariablesFromOneCall(t *testing.T) {
 // first was handled, so the other two reached a prompt and the agent read
 // "anonymous" back to the caller as their own phone number.
 func TestPrefetchTreatsAWithheldNumberAsAbsent(t *testing.T) {
-	block := prefetchBlockOf(t, prefetchEmitted(t, ir.ProviderLiveKit, "agent.py"))
+	block := prefetchBlockOf(t, prefetchEmitted(t, ir.ProviderLiveKit, agentSource))
 	// The number goes through the shape check before the skip arm sees it, so all
 	// three shapes reach `if not _value` as the empty string.
 	if !strings.Contains(block, `_value = _prefetch_number("from_number", _value)`) {
 		t.Error("the caller's number is written straight into the skip check, so only an empty one skips")
 	}
-	py := prefetchEmitted(t, ir.ProviderLiveKit, "agent.py")
+	py := prefetchEmitted(t, ir.ProviderLiveKit, agentSource)
 	for _, want := range []string{
 		// The shape, which is the rule: a plus and 8 to 15 ASCII digits. This is
 		// what catches "anonymous", "restricted" and "" alike.

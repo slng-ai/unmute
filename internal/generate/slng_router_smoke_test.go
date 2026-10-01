@@ -25,7 +25,7 @@ for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 os.environ["REDIS_URL"] = "redis://127.0.0.1:6379/0"
 
-import bot  # noqa: E402
+bot = _project("bot")
 
 # --- the vertex credential, three accepted shapes and one refusal -------------
 key = {"type": "service_account", "project_id": "smoke", "private_key_id": "abc"}
@@ -226,7 +226,7 @@ func scopedRouterScript(module, state string) string {
 from types import SimpleNamespace
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
-import ` + module + ` as generated
+generated = _project("` + module + `")
 state = generated.` + state + `
 state.last_appointment = {"scheduled_date":"2026-09-11", "scheduled_time":"PRIVATE_SIBLING", "appointment_type":"PRIVATE_SERVICE"}
 state.caller_reason = ["PRIVATE_OTHER_TASK"]
@@ -295,7 +295,7 @@ func historyEntryScript(module, state string) string {
 from types import SimpleNamespace
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name,"smoke-placeholder")
-import ` + module + ` as generated
+generated = _project("` + module + `")
 state=generated.` + state + `
 state.count=7
 messages=[{"role":"system","content":"PRIVATE_OLD_INSTRUCTIONS"},

@@ -76,9 +76,9 @@ func TestSlngSpeechGatewayKeepsDeployment(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			file, key, deploy := "bot.py", "base_url", "pcc-deploy.toml"
+			file, key, deploy := agentSource, "base_url", "pcc-deploy.toml"
 			if provider == ir.ProviderLiveKit {
-				file, key, deploy = "agent.py", "slng_base_url", "README.md"
+				file, key, deploy = agentSource, "slng_base_url", "README.md"
 			}
 			src := artifactFile(t, after, file)
 			for _, part := range []string{"in", "au"} {
@@ -128,8 +128,8 @@ func TestSlngSpeechGatewayUsesTargetOverride(t *testing.T) {
 		file     string
 		want     string
 	}{
-		{ir.ProviderLiveKit, "agent.py", `slng_base_url="jp.api.slng.ai"`},
-		{ir.ProviderPipecat, "bot.py", `base_url="in.api.slng.ai"`},
+		{ir.ProviderLiveKit, agentSource, `slng_base_url="jp.api.slng.ai"`},
+		{ir.ProviderPipecat, agentSource, `base_url="in.api.slng.ai"`},
 	} {
 		artifact, err := Generate(agent, targetByProvider(t, agent, tc.provider), target.Default())
 		if err != nil {

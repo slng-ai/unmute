@@ -57,7 +57,7 @@ func TestResponsesOnlyParamsReachLiveKitAndNoRequestBody(t *testing.T) {
 		if err != nil {
 			t.Fatalf("generate: %v", err)
 		}
-		agentPy := artifactFile(t, artifact, "agent.py")
+		agentPy := artifactFile(t, artifact, agentSource)
 		for _, want := range []string{
 			"openai.responses.LLM(",
 			`reasoning=openai_types.Reasoning(effort="none")`,
@@ -76,7 +76,7 @@ func TestResponsesOnlyParamsReachLiveKitAndNoRequestBody(t *testing.T) {
 		if err != nil {
 			t.Fatalf("generate: %v", err)
 		}
-		botPy := artifactFile(t, artifact, "bot.py")
+		botPy := artifactFile(t, artifact, agentSource)
 		// Named per param rather than as one search for "extra={", because the
 		// module carries several and the point is which keys are in them.
 		for _, name := range ir.ResponsesOnlyParams {

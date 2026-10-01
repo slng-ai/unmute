@@ -99,15 +99,10 @@ assert dumped["delivers_on"] == "2026-09-02", dumped
 unknown = mirrored.handler(mirrored.Input(order_number="nope")).model_dump()
 assert unknown["status"] == "unknown", unknown
 
-# And the emitted agent module names the same two symbols this file just used.
-# Both drivers write the call, so whichever one built this directory has to have
-# written it the same way.
-agent_source = ""
-for candidate in ("agent.py", "bot.py"):
-    if Path(candidate).exists():
-        agent_source = Path(candidate).read_text()
-        break
-assert agent_source, "neither agent.py nor bot.py was emitted"
+# And the emitted agents module names the same two symbols this file just used.
+# Both drivers write the call there, so whichever one built this directory has
+# to have written it the same way.
+agent_source = Path("agents.py").read_text()
 assert re.search(r"tools\.check_order\.handler\(", agent_source), "the emitted call does not go through handler()"
 assert re.search(r"tools\.check_order\.Input\(", agent_source), "the emitted call does not build Input()"
 

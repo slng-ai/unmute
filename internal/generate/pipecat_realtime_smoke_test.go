@@ -143,7 +143,7 @@ async def exercise_realtime():
                 # (llm.py:693-694), so a greeting or a nudge queued that way is
                 # silently dropped. Read before the call is driven, so the
                 # reason is this line and not a later timeout.
-                assert "LLMMessagesAppendFrame" not in open("bot.py").read(), "the emitted bot queues the append frame this library never implemented"
+                assert "LLMMessagesAppendFrame" not in _project_source(), "the emitted bot queues the append frame this library never implemented"
 
                 # 2. The handshake. The service sends nothing on connect; it
                 # waits for session.created, answers with session.update, and

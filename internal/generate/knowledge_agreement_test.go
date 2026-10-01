@@ -24,7 +24,7 @@ func TestKnowledgeContractIsTheSameOnBothTargets(t *testing.T) {
 		if err != nil {
 			t.Fatalf("generate %s: %v", provider, err)
 		}
-		modules[provider] = artifactFile(t, artifact, "knowledge.py")
+		modules[provider] = artifactFile(t, artifact, "utils/knowledge.py")
 	}
 	if modules[ir.ProviderLiveKit] != modules[ir.ProviderPipecat] {
 		t.Error("the two targets emit different knowledge.py: they render one shared template, so any difference is a bug in how one of them passes its data")
@@ -36,9 +36,9 @@ func TestKnowledgeContractIsTheSameOnBothTargets(t *testing.T) {
 		if err != nil {
 			t.Fatalf("generate %s: %v", provider, err)
 		}
-		entry := "agent.py"
+		entry := agentSource
 		if provider == ir.ProviderPipecat {
-			entry = "bot.py"
+			entry = agentSource
 		}
 		body := artifactFile(t, artifact, entry)
 		for _, want := range []string{
@@ -93,9 +93,16 @@ func TestPipecatCopiesTheKnowledgeFiles(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	dockerfile := artifactFile(t, artifact, "Dockerfile")
-	for _, want := range []string{"COPY knowledge.py ./", "COPY knowledge/ ./knowledge/"} {
-		if !strings.Contains(dockerfile, want) {
-			t.Errorf("Dockerfile must contain %q:\n%s", want, dockerfile)
+	var documents string
+	for _, file := range artifact.Files {
+		if strings.HasPrefix(file.Path, "knowledge/") {
+			documents = file.Path
+			break
+		}
+	}
+	for _, path := range []string{"utils/knowledge.py", documents} {
+		if !dockerCopies(dockerfile, path) {
+			t.Errorf("Dockerfile never copies %s:\n%s", path, dockerfile)
 		}
 	}
 	// Instructions only. The template carries a comment explaining why `COPY . .`
@@ -124,7 +131,7 @@ func TestPipecatIndexesAtModuleImport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	bot := artifactFile(t, artifact, "bot.py")
+	bot := artifactFile(t, artifact, agentSource)
 	if strings.Count(bot, "knowledge.build_indexes()") != 1 {
 		t.Errorf("build_indexes() must be called exactly once:\n%s", bot)
 	}

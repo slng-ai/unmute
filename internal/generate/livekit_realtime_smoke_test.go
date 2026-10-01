@@ -64,7 +64,7 @@ func runLiveKitRealtimeSmokeScript(t *testing.T, script string) []byte {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(script), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(withKnowledgeStub(script)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,7 +93,7 @@ for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
 import aiohttp
-import agent
+agent = _project("agent")
 from livekit.agents import AgentSession, inference, io
 from livekit.plugins.openai.realtime import RealtimeModel, realtime_model
 from openai.types.realtime import realtime_audio_input_turn_detection as openai_realtime

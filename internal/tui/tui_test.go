@@ -813,11 +813,11 @@ func TestV41LiveKitInitWebhookCompilesOnAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, file := range artifact.Files {
-		if file.Path == "agent.py" && strings.Contains(string(file.Content), "@function_tool") && strings.Contains(string(file.Content), "async def lookup_customer(") {
+		if file.Path == "agents.py" && strings.Contains(string(file.Content), "@function_tool") && strings.Contains(string(file.Content), "async def lookup_customer(") {
 			return
 		}
 	}
-	t.Fatal("generated agent.py omitted the entry agent's @function_tool method")
+	t.Fatal("generated agents.py omitted the entry agent's @function_tool method")
 }
 
 func TestV42LiveKitInitMCPCompilesOnAgent(t *testing.T) {
@@ -851,11 +851,11 @@ func TestV42LiveKitInitMCPCompilesOnAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, file := range artifact.Files {
-		if file.Path == "agent.py" && strings.Contains(string(file.Content), `mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"]`) {
+		if file.Path == "utils/mcp.py" && strings.Contains(string(file.Content), `mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"]`) {
 			return
 		}
 	}
-	t.Fatal("generated agent.py omitted the MCP server mount")
+	t.Fatal("generated utils/mcp.py omitted the MCP server mount")
 }
 
 func TestV18AgentMenuShowsAndEditsSavedAgent(t *testing.T) {

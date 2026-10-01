@@ -45,8 +45,8 @@ func TestGreetingDefaultIsModelWrittenOnEveryDriver(t *testing.T) {
 		absent := safeCoreWithGreeting(t, nil)
 		explicit := safeCoreWithGreeting(t, &ir.Greeting{SpeaksFirst: ir.SpeaksFirstAgent})
 
-		absentBot := generatedFile(t, absent, ir.ProviderPipecat, "bot.py")
-		explicitBot := generatedFile(t, explicit, ir.ProviderPipecat, "bot.py")
+		absentBot := generatedFile(t, absent, ir.ProviderPipecat, agentSource)
+		explicitBot := generatedFile(t, explicit, ir.ProviderPipecat, agentSource)
 		if absentBot != explicitBot {
 			t.Error("bot.py for an absent greeting block differs from an explicit model-written greeting")
 		}
@@ -55,7 +55,7 @@ func TestGreetingDefaultIsModelWrittenOnEveryDriver(t *testing.T) {
 	t.Run("both drivers use the same opening instruction", func(t *testing.T) {
 		agent := safeCoreWithGreeting(t, nil)
 
-		bot := generatedFile(t, agent, ir.ProviderPipecat, "bot.py")
+		bot := generatedFile(t, agent, ir.ProviderPipecat, agentSource)
 		for _, want := range []string{`"content": ` + `"` + instruction + `"`, "run_llm=True"} {
 			if !strings.Contains(bot, want) {
 				t.Errorf("pipecat bot.py missing %q", want)
@@ -65,7 +65,7 @@ func TestGreetingDefaultIsModelWrittenOnEveryDriver(t *testing.T) {
 			t.Error("pipecat bot.py speaks a fixed line for an absent greeting block")
 		}
 
-		py := generatedFile(t, agent, ir.ProviderLiveKit, "agent.py")
+		py := generatedFile(t, agent, ir.ProviderLiveKit, agentSource)
 		// An agent with handoffs also names the tools its opening turn may use, so
 		// this matches the instruction itself rather than the whole call.
 		if want := `generate_reply(instructions="` + instruction + `"`; !strings.Contains(py, want) {

@@ -156,7 +156,13 @@ async def run(args: argparse.Namespace) -> None:
     os.environ["UNMUTE_CALL_FACTS"] = json.dumps({"from_number": args.from_number})
     seed_unused_env(package, build)
 
-    import agent as generated  # noqa: PLC0415 - after sys.path and cwd are set
+    # The entry module first: importing it loads the package's .env and runs
+    # the startup check, the way `start agent.py` does. The agents, the call
+    # state and the model constructor each live in their own module beside it.
+    import agent  # noqa: F401, PLC0415 - after sys.path and cwd are set
+    import agents as generated  # noqa: PLC0415
+    import call  # noqa: PLC0415
+    import session as state  # noqa: PLC0415
     from livekit.agents import AgentSession  # noqa: PLC0415
 
     entry = getattr(generated, "ENTRY_AGENT_CLASS", None)
@@ -169,8 +175,8 @@ async def run(args: argparse.Namespace) -> None:
             # those are C-level types inspect.signature refuses outright: a
             # package declaring an EmailStr imports email_validator, whose
             # EmailNotValidError raised ValueError here and killed the run before
-            # the first turn. The entry agent is defined in the generated module,
-            # so anything from elsewhere is not it.
+            # the first turn. The entry agent is defined in the generated agents
+            # module, so anything from elsewhere is not it.
             if getattr(cls, "__module__", None) != generated.__name__:
                 return False
             try:
@@ -186,10 +192,10 @@ async def run(args: argparse.Namespace) -> None:
             api_key=os.environ["OPENAI_API_KEY"], model=args.model, reasoning_effort="none"
         )
     else:
-        llm = compiled_llm(build / "agent.py", vars(generated))
-    async with AgentSession(userdata=generated.Userdata(), llm=llm) as session:
+        llm = compiled_llm(build / "call.py", vars(call))
+    async with AgentSession(userdata=state.Userdata(), llm=llm) as session:
         # A package that declares no `prefetch:` emits no _prefetch at all.
-        prefetch = getattr(generated, "_prefetch", None)
+        prefetch = getattr(state, "_prefetch", None)
         if prefetch is not None:
             await prefetch(session.userdata, None)
             print("prefetch:", state_of(session.userdata))

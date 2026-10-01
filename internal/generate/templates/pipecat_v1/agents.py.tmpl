@@ -1,0 +1,1161 @@
+"""The agents, their tools, and the task steps they run as flows."""
+
+{{if .NeedsFunctionCalls}}
+def _direct_tool(
+    fn: Callable[..., Any] | None = None,
+    *,
+    cancel_on_interruption: bool = True,
+    timeout_secs: float | None = None,
+{{if $.HasToolAnnouncements}}    announce: str | None = None,
+{{end}}) -> Any:
+    """Keep every direct function call terminal, even on malformed input.
+
+    Args:
+        fn: The handler, when used as a bare `@_direct_tool`.
+        cancel_on_interruption: Whether the caller speaking cancels the call.
+        timeout_secs: How long the framework waits for the handler.
+{{if $.HasToolAnnouncements}}        announce: A line spoken as the tool starts, or None for silence.
+{{end}}
+    Returns:
+        The decorated handler, or a decorator when called with options.
+    """
+
+    def decorate(handler: Callable[..., Any]) -> Any:
+        """Wrap one handler so a bad or failing call still resolves."""
+        signature = inspect.signature(handler)
+        declared = set(signature.parameters) - {"self", "params"}
+
+        @functools.wraps(handler)
+        async def guarded(*args: Any, **kwargs: Any) -> Any:
+            """Run the handler, resolving the call itself on bad input or failure."""
+            params = kwargs.get("params")
+            if params is None:
+                params_index = 1 if "self" in signature.parameters else 0
+                params = args[params_index]
+
+            unexpected = sorted(set(kwargs) - declared - {"params"})
+            if unexpected:
+                allowed = ", ".join(sorted(declared)) or "none"
+                await params.result_callback({
+                    "error": (
+                        f"Unexpected arguments for {params.function_name}: "
+                        f"{', '.join(unexpected)}. Allowed arguments: {allowed}. "
+                        "Retry with only allowed arguments."
+                    )
+                })
+                return
+
+{{if $.HasToolAnnouncements}}            if announce:
+                # Cover the wait: TTSSpeakFrame is a DataFrame, so it is queued
+                # and speech starts while the handler body runs. Nothing waits
+                # for playout here, which is the point of the line. Queued after
+                # the argument check, so a rejected call stays silent, and an
+                # interruption discards it in line with cancel_on_interruption.
+                await params.llm.push_frame(TTSSpeakFrame(announce))
+
+{{end}}            resolved = False
+            original_result_callback = params.result_callback
+
+            async def resolve(result: Any, **callback_kwargs: Any) -> Any:
+                """Record that the call was resolved, then hand the result on."""
+                nonlocal resolved
+                resolved = True
+                return await original_result_callback(result, **callback_kwargs)
+
+            params.result_callback = resolve
+            try:
+                return await handler(*args, **kwargs)
+            except Exception:
+                logger.exception("tool failed before completing: {}", params.function_name)
+                if not resolved:
+                    await original_result_callback({
+                        "error": (
+                            f"{params.function_name} failed before completing. "
+                            "Do not claim success; retry only with corrected input."
+                        )
+                    })
+                    return
+                raise
+            finally:
+                params.result_callback = original_result_callback
+
+        return tool(
+            cancel_on_interruption=cancel_on_interruption,
+            timeout_secs=timeout_secs,
+        )(guarded)
+
+    if fn is not None:
+        return decorate(fn)
+    return decorate
+{{end}}
+{{if .NeedsAnnounceChoice}}
+# --- announcements ---------------------------------------------------------
+
+# A line a package writes as `announce:` is spoken by this code, not written by
+# the model, so one sentence is the same sentence every time it fires. A live
+# call on 2026-09-16 entered the booking flow twice inside a minute and played
+# "Sure, let me get that sorted for you." both times. An author writing several
+# alternatives gets one of them per firing, and never the one that site used
+# last.
+_ANNOUNCE_LAST: dict[str, str] = {}
+
+
+def _announce(key: str, lines: list[str]) -> str:
+    """Pick one of these lines, never the one this key used last.
+
+    Args:
+        key: The announcement site, which remembers its own last line.
+        lines: The alternatives the author wrote.
+
+    Returns:
+        The line to speak.
+    """
+    # ponytail: process wide, not per call. Two concurrent callers can only
+    # affect each other's variety, which is the whole thing this is for.
+    choices = [line for line in lines if line != _ANNOUNCE_LAST.get(key)] or lines
+    pick = random.choice(choices)
+    _ANNOUNCE_LAST[key] = pick
+    return pick
+{{end}}
+{{if .HasTransferAnnouncements}}
+class _HandoffWorker({{if and .Tracing .NeedsFunctionCalls}}TracedLLMWorker{{else}}LLMWorker{{end}}):
+    """Finish one exact source-side cue before activating the next worker."""
+
+    async def _announce_handoff(self, announcement: str) -> None:
+        """Speak the cue and wait until it has finished playing.
+
+        Args:
+            announcement: The exact line to say before the handoff.
+
+        Raises:
+            TimeoutError: When the cue does not finish within HANDOFF_CUE_TIMEOUT_SECS.
+        """
+        self._handoff_started = False
+        self._handoff_finished = asyncio.Event()
+        await PipelineWorker.queue_frame(self, TTSSpeakFrame(announcement))
+        try:
+            await asyncio.wait_for(
+                self._handoff_finished.wait(), timeout=HANDOFF_CUE_TIMEOUT_SECS
+            )
+        finally:
+            self._handoff_finished = None
+
+    async def queue_frame(self, frame: Any, *args: Any, **kwargs: Any) -> None:
+        """Note when the cue starts and stops playing, then queue the frame as usual.
+
+        Args:
+            frame: The frame to queue.
+            *args: Passed to the base worker.
+            **kwargs: Passed to the base worker.
+        """
+        finished = getattr(self, "_handoff_finished", None)
+        if finished:
+            if isinstance(frame, BotStartedSpeakingFrame):
+                self._handoff_started = True
+            elif self._handoff_started and isinstance(frame, BotStoppedSpeakingFrame):
+                finished.set()
+        await super().queue_frame(frame, *args, **kwargs)
+
+    async def process_deferred_tool_frames(self, frames: list[Any]) -> list[Any]:
+        """Drop deferred tool frames while this worker is not the active one.
+
+        Args:
+            frames: The frames held back while a tool ran.
+
+        Returns:
+            The frames to release, empty while inactive.
+        """
+        if not self.active:
+            return []
+        return await super().process_deferred_tool_frames(frames)
+{{end}}
+{{range .Agents}}
+{{if .Live}}
+def build_{{.Name}}_live() -> Any:
+    """Build the live service for this agent."""
+    # One service where the transcriber, the model and the synthesizer sat. Its
+    # instructions, model and voice are fixed once the session starts, and its
+    # tools and reasoning run on the backend named in the delegation.
+    return {{template "svc" .LLM.Call}}
+{{else if .Realtime}}
+def build_{{.Name}}_realtime() -> Any:
+    """Build the realtime service for this agent."""
+    # One service over one websocket session, where the transcriber, the model
+    # and{{if $.HalfCascade}}, until a synthesizer was bound in front of it,{{end}} the synthesizer sat. The model id rides the socket URL as a
+    # query parameter rather than a session field, which is why it is a setting
+    # here and not a session property.
+    return {{template "svc" .LLM.Call}}
+{{if $.HalfCascade}}
+
+def build_{{.Name}}_tts() -> TTSService:
+    """Build the voice that speaks what the realtime model writes."""
+    # The half cascade: the model above writes text and this speaks it.
+    return {{template "svc" .TTS.Call}}
+{{end}}{{else}}
+def build_{{.Name}}_llm(
+    state: {{if $.Variables}}State | None{{else}}None{{end}} = None{{if $.Slng.Any}},
+    *,
+    slng_session_id: str,{{end}}
+) -> LLMService[Any]:
+    """Build the language model for this agent.
+
+    Args:
+        state: The call state, read by the router for its template variables.
+{{if $.Slng.Any}}        slng_session_id: This call's SLNG router session id.
+{{end}}
+    Returns:
+        The configured LLM service.
+    """
+    return {{template "svc" .LLM.Call}}
+
+
+def build_{{.Name}}_tts() -> TTSService:
+    """Build the voice for this agent.
+
+    Returns:
+        The configured TTS service.
+    """
+    return {{template "svc" .TTS.Call}}
+{{end}}{{if $.Inline}}{{range .Tools}}
+
+@_direct_tool{{.Decorator}}
+async def {{.MethodName}}({{toolDefNoqa .Args}}params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}) -> None:
+    {{toolDoc 4 .Description .Args}}
+{{if .Builtin}}{{if .Instructions}}    await params.llm.push_frame(
+        LLMMessagesAppendFrame(
+            [{"role": "developer", "content": {{pyq .Instructions}}}],
+            run_llm=False,
+        )
+    )
+{{end}}    await params.result_callback({"ended": True})
+{{else if .KnowledgeBase}}    await params.result_callback(
+        await knowledge.look_up({{pyq .KnowledgeBase}}, query)
+    )
+{{else if .Local}}    result = tools.{{.Name}}.{{.Name}}({{.CallKwargs}})
+    if inspect.isawaitable(result):
+        result = await result
+    await params.result_callback(result)
+{{else if .HostedCode}}    result = tools.{{.Name}}.{{hostedEntry}}(tools.{{.Name}}.{{hostedInput}}({{.CallKwargs}}))
+    if inspect.isawaitable(result):
+        result = await result
+    await params.result_callback(result.model_dump() if hasattr(result, "model_dump") else result)
+{{else}}    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            {{.URLExpr}},
+{{if .Auth}}            headers={{.Auth.Expr}},
+{{end}}            json={{.JSONBody}},
+            timeout=WEBHOOK_TIMEOUT_SECS,
+        )
+        response.raise_for_status()
+        await params.result_callback(response.json())
+{{end}}{{if .EndsCall}}    await params.pipeline_worker.end()
+{{end}}{{end}}{{else}}
+
+class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.Tracing (or $.NeedsFunctionCalls $.NeedsMCP)}}TracedLLMWorker{{else}}LLMWorker{{end}}):
+    """Agent: {{.Name}}."""
+
+    def __init__(
+        self,
+        state: {{if $.Variables}}State | None{{else}}None{{end}} = None,
+        context: LLMContext | None = None,
+        call_context: dict[str, Any] | None = None,
+        dev_metrics: DevReporter | None = None,
+{{if $.Slng.Any}}        *,
+        slng_session_id: str,
+{{end}}    ) -> None:
+        """Build this agent's model and voice and join the call's shared context.
+
+        Args:
+            state: The call's typed variables, shared by every agent.
+            context: The LLM context every agent on the call shares.
+            call_context: The call's own facts and transport handles.
+            dev_metrics: The dev-page reporter, or None outside `unmute dev`.
+{{if $.Slng.Any}}            slng_session_id: This call's SLNG router session id.
+{{end}}        """
+{{if $.Variables}}        # Always supplied when the package declares variables; None only in a test.
+        self.state: State = cast(State, state)
+{{end}}        if context is not None:
+            self.context = context
+{{if $.HasColdTransfer}}        self.call_context = call_context if call_context is not None else {}
+{{end}}{{if and $.Slng.Any .SlngHeaders}}        # Kept on self because a task's headers are swapped in from a method
+        # body, where the constructor's parameter is out of scope, and a whole
+        # header dict has to carry this along with the scope.
+        self._slng_session_id = slng_session_id
+{{end}}
+        llm = build_{{.Name}}_llm({{if $.Variables}}state{{end}}{{if $.Slng.Any}}{{if $.Variables}}, {{end}}slng_session_id=slng_session_id{{end}})
+        tts = build_{{.Name}}_tts()
+        self._dev = dev_metrics
+        if self._dev:
+            self._dev.observe_llm(llm)
+            self._dev.observe_tts(tts)
+        super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, tts]), bridged=()){{if $.NeedsTerminal}}
+        # Every tool the model called in one response, recorded before any of
+        # their handlers run. A step that ends on its own tool has to know
+        # whether a handoff was called beside it: this framework runs both
+        # handlers and whichever finishes first would otherwise close the step
+        # under the other one.
+        self._response_calls: tuple[str, ...] = ()
+
+        @llm.event_handler("on_function_calls_started")
+        async def _record_calls(service: Any, function_calls: list[Any]) -> None:
+            """Remember the tools the model called in this response."""
+            self._response_calls = tuple(call.function_name for call in function_calls)
+{{end}}
+{{if .MCPSources}}        # MCP tool sources. The clients are built here and connected in
+        # start_mcp() before this worker is ever activated, because the server
+        # names its own tools and build_tools() has to be able to list them.
+        self._mcp_clients = [
+{{range .MCPSources}}            {{template "mcp_client" .}},
+{{end}}        ]
+        self._mcp_tools: list[Any] = []
+{{end}}
+    async def queue_frame(self, frame: Any, *args: Any, **kwargs: Any) -> None:
+        """Stamp the frame for the dev page, then queue it as usual.
+
+        Args:
+            frame: The frame to queue.
+            *args: Passed to the base worker.
+            **kwargs: Passed to the base worker.
+        """
+        if self._dev:
+            self._dev.stamp(frame)
+        await super().queue_frame(frame, *args, **kwargs)
+
+    async def on_activated(self, args: dict[str, Any] | None) -> None:
+        """Set this agent's prompt and scope, then ask for its first reply when told to.
+
+        Args:
+            args: The activation arguments the previous agent or the entry passed.
+        """
+        token = self._dev.enter_activation(args) if self._dev else None
+        try:
+            await self.queue_frame(LLMUpdateSettingsFrame(
+                delta=LLMSettings(system_instruction={{.RuntimePromptExpr}}{{if .SlngHeaders}},
+                    extra={"extra_headers": {{.SlngHeaders}}}{{end}}),
+            ))
+            await super().on_activated(args)
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
+            # A handoff already shaped the shared context; request the reply
+            # without adding a synthetic message or waiting for the caller.
+            if args and args.get("run_llm") and not args.get("messages"):
+                await self.queue_frame(LLMRunFrame())
+        finally:
+            if self._dev:
+                self._dev.exit_activation(token)
+
+{{if .MCPSources}}    async def start_mcp(self) -> None:
+        """Connect every source and register its tools on this agent's LLM."""
+        self._mcp_tools = await _register_mcp_tools(
+            self._mcp_clients,
+            self.llm,
+            {tool.__name__ for tool in super().build_tools()}{{if .FlowFunctionNames}} | {
+{{range .FlowFunctionNames}}                {{pyq .}},
+{{end}}            }{{end}},
+{{if $.Tracing}}            self._track_tool_call,
+{{end}}        )
+
+    async def close_mcp(self) -> None:
+        """Close every MCP client this agent opened."""
+        await _close_mcp(client.close() for client in self._mcp_clients)
+
+    def build_tools(self) -> list[Any]:
+        """List the framework's tools plus the ones the MCP servers exposed."""
+        return super().build_tools() + self._mcp_tools
+{{end}}{{if $.NeedsStateBind}}
+    def _bind_state(
+        self, handler: Callable[..., Awaitable[Any]]
+    ) -> Callable[[Any, FlowManager], Awaitable[Any]]:
+        """Give a module-level flows handler this worker's call state.
+
+        A task tool can then read injected variables the same way an agent tool does.
+
+        Args:
+            handler: The module-level flows handler.
+
+        Returns:
+            A handler with the call state already bound.
+        """
+
+        async def _bound(args: Any, flow_manager: FlowManager) -> Any:
+            """Call the handler with this worker's state."""
+            return await handler(args, flow_manager, state=self.state)
+
+        return _bound
+{{end}}
+{{range .Transfers}}
+    @_direct_tool(cancel_on_interruption=False)
+    async def {{.MethodName}}(self, params: FunctionCallParams) -> None:
+        {{handoffDoc 8 .When}}
+{{if .Announce}}        await self._announce_handoff({{pyq .Announce}})
+{{end}}{{if .CtxExpr}}        # context.history on this handoff. One LLMContext is shared for the whole
+        # call, so the receiver is given the shaped list rather than a copy.
+        self.context.set_messages({{.CtxExpr}})
+{{end}}        await self.activate_worker(
+            {{pyq .To}},
+            args=LLMWorkerActivationArgs(
+                metadata=self._dev.activation_metadata() if self._dev else None,
+                messages=[],
+                run_llm=True,
+            ),
+            deactivate_self=True,
+            result_callback=params.result_callback,
+        )
+{{end}}{{range .Tools}}
+    @_direct_tool{{.Decorator}}
+    async def {{.MethodName}}({{toolDefNoqa .Args}}self, params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}) -> None:
+        {{toolDoc 8 .Description .Args}}
+{{if .ColdDestination}}        logger.info("human transfer fired: {{.MethodName}} (cold)")
+        transfer_result = self.call_context.get("_transfer_result")
+        if transfer_result is not None:
+            # Asked twice. Replay the first answer rather than dial again.
+            await params.result_callback(transfer_result)
+            return
+{{if $.CloudWebsocket}}        phone_call = self.call_context.get("_phone_call")
+        if not phone_call or not phone_call.get("call_id"):
+            # No phone call, so nothing to hand over: the browser and console
+            # transports have no call for your carrier to redirect. Saying so beats
+            # raising, and beats telling the model the caller was transferred.
+            self.call_context["_transfer_result"] = {"failed": "this session is not a phone call, so it cannot be transferred"}
+            await params.result_callback(self.call_context["_transfer_result"])
+            return
+{{else}}        transport = self.call_context.get("_transport")
+        if not isinstance(transport, {{$.DailyParams.Transport}}) or not self.call_context.get("_daily_sip_session"):
+            # No phone call, so nothing to hand over: the browser and console
+            # sessions have no existing SIP leg. Refuse before announcing a
+            # transfer that cannot start.
+            self.call_context["_transfer_result"] = {"failed": "this session is not a phone call, so it cannot be transferred"}
+            await params.result_callback(self.call_context["_transfer_result"])
+            return
+{{end}}        # Claimed before any transfer work awaits: a request arriving while
+        # the first one is in flight must not slip past the guard.
+        self.call_context["_transfer_result"] = {"in_progress": "A transfer is already under way; do not start another."}
+{{if $.CloudWebsocket}}
+        # The announcement is the first verb of the document below, spoken by your
+        # carrier rather than by this agent. Applying the update replaces the call's
+        # document, which tears this media stream down, so a line the agent started
+        # speaking would be cut off by its own transfer.
+        try:
+            await _update_carrier_call(
+                phone_call["call_id"],
+                _transfer_twiml({{.ColdDestination}}, {{.RingTimeoutSecs}}),
+            )
+        except Exception as exc:  # noqa: BLE001 - any failure leaves the call untouched
+            # The request failed, so the call is untouched and the caller is still
+            # here listening. Tell them, and never report a transfer that did not
+            # happen.
+            logger.warning("cold transfer failed: {}", exc)
+{{if .HangupOnUnavailable}}            self.call_context["_transfer_result"] = {"failed": "The transfer could not be completed; the call is ending."}
+            failure_error = None
+            try:
+                await params.llm.push_frame(
+                    LLMMessagesAppendFrame(
+                        [{"role": "developer", "content": "Tell the caller nobody can take the call right now, apologize, and say goodbye."}],
+                        run_llm=False,
+                    )
+                )
+                await params.result_callback(self.call_context["_transfer_result"])
+            except BaseException as exc:  # noqa: BLE001 - held, then re-raised once the call has ended
+                failure_error = exc
+            try:
+                await params.pipeline_worker.end()
+            except BaseException:
+                if failure_error is None:
+                    raise
+                logger.exception("failed to end call after transfer failure")
+            if failure_error is not None:
+                raise failure_error  # noqa: B904 - the transfer error is logged above
+{{else}}            self.call_context["_transfer_result"] = {"failed": f"The transfer could not be completed ({exc}). Tell the caller and keep helping them."}
+            await params.llm.push_frame(
+                LLMMessagesAppendFrame(
+                    [{"role": "developer", "content": "Tell the caller the transfer did not go through and that you will keep helping them."}],
+                    run_llm=True,
+                )
+            )
+            await params.result_callback(self.call_context["_transfer_result"])
+{{end}}            return
+        # The stream ends as your carrier applies the document. Recorded first so a
+        # request that arrives in that window replays this rather than re-firing.
+        self.call_context["_transfer_result"] = {"transfer_started": True}
+        await params.result_callback(self.call_context["_transfer_result"])
+{{else}}        # Daily SIP transfers via REFER, which keeps the bot on the call
+        # until the transfer completes, so the bot speaks the announcement
+        # itself (the official daily-pstn-cold-transfer pattern).
+        try:
+            await params.llm.push_frame(
+                LLMMessagesAppendFrame(
+                    [{"role": "developer", "content": "Tell the caller you are transferring them to a colleague now and to please hold, then wait."}],
+                    run_llm=True,
+                )
+            )
+        except BaseException:
+            # The carrier primitive has not started, so this claim is safe to
+            # release and a later model turn may retry.
+            self.call_context.pop("_transfer_result", None)
+            raise
+        # sip_call_transfer, not sip_refer. REFER would take Daily out of the media path and stop its
+        # billing, but it needs the originating SIP system to honour REFER, which
+        # neither platform documents for a carrier interconnect leg. So Daily
+        # stays anchored after a completed transfer and both legs keep billing
+        # until the call ends; the README states that cost.
+        try:
+            error = await transport.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
+        except Exception as exc:  # noqa: BLE001 - the transport may raise or return a failure; both are handled below
+            error = exc
+        if error is not None:
+            # The transport can return or raise a failure (T5). Either way the
+            # claimed per-call result becomes terminal before on_unavailable is
+            # applied, so another tool call replays it instead of dialling again.
+            logger.warning("cold transfer failed: {}", error)
+{{if .HangupOnUnavailable}}            self.call_context["_transfer_result"] = {"failed": "The transfer could not be completed; the call is ending."}
+            failure_error = None
+            try:
+                await params.llm.push_frame(
+                    LLMMessagesAppendFrame(
+                        [{"role": "developer", "content": "Tell the caller nobody can take the call right now, apologize, and say goodbye."}],
+                        run_llm=False,
+                    )
+                )
+                await params.result_callback(self.call_context["_transfer_result"])
+            except BaseException as exc:  # noqa: BLE001 - held, then re-raised once the call has ended
+                failure_error = exc
+            try:
+                await params.pipeline_worker.end()
+            except BaseException:
+                if failure_error is None:
+                    raise
+                logger.exception("failed to end call after transfer failure")
+            if failure_error is not None:
+                raise failure_error
+{{else}}            self.call_context["_transfer_result"] = {"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."}
+            await params.result_callback(self.call_context["_transfer_result"])
+{{end}}            return
+        self.call_context["_transfer_result"] = {"transferred": True}
+        await params.result_callback(self.call_context["_transfer_result"])
+{{end}}{{else if .Builtin}}{{if .Instructions}}        await params.llm.push_frame(
+            LLMMessagesAppendFrame(
+                [{"role": "developer", "content": {{pyq .Instructions}}}],
+                run_llm=False,
+            )
+        )
+{{end}}        await params.result_callback({"ended": True})
+{{else if .KnowledgeBase}}        await params.result_callback(
+            await knowledge.look_up({{pyq .KnowledgeBase}}, query)
+        )
+{{else if .Local}}{{if .NeedsState}}        state = self.state
+{{end}}{{if .Needed}}        refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
+        if refusal:
+            await params.result_callback({"refused": refusal})
+            return
+{{end}}        result = tools.{{.Name}}.{{.Name}}({{.CallKwargs}})
+        if inspect.isawaitable(result):
+            result = await result
+        await params.result_callback(result)
+{{else if .HostedCode}}{{if .NeedsState}}        state = self.state
+{{end}}{{if .Needed}}        refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
+        if refusal:
+            await params.result_callback({"refused": refusal})
+            return
+{{end}}        result = tools.{{.Name}}.{{hostedEntry}}(tools.{{.Name}}.{{hostedInput}}({{.CallKwargs}}))
+        if inspect.isawaitable(result):
+            result = await result
+        await params.result_callback(result.model_dump() if hasattr(result, "model_dump") else result)
+{{else}}{{if .NeedsState}}        state = self.state
+{{end}}{{if .Needed}}        refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
+        if refusal:
+            await params.result_callback({"refused": refusal})
+            return
+{{end}}        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                {{.URLExpr}},
+{{if .Auth}}                headers={{.Auth.Expr}},
+{{end}}                json={{.JSONBody}},
+                timeout=WEBHOOK_TIMEOUT_SECS,
+            )
+            response.raise_for_status()
+            await params.result_callback(response.json())
+{{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.pipeline_worker.end()
+{{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{$agentSlngHeaders := .SlngHeaders}}{{range $d := .Delegates}}
+    @_direct_tool
+    async def {{$d.MethodName}}(self, params: FunctionCallParams) -> None:
+        {{handoffDoc 8 $d.When}}
+        # Already ran, and nobody has spoken since. Then this is not a second
+        # request, it is the model reading its own completed result as though it
+        # were one. On a live call on 2026-09-16 (trace 917975e9, LiveKit, same
+        # package) a booking saved, the flow re-entered on the caller's own
+        # "3 o'clock" still sitting above the result, and the last thing the
+        # caller heard was an agent saying it was off to check the diary.
+        #
+        # Refused here rather than asked for in the prompt, which this package
+        # did twice and which failed twice. Before the announcement below, so a
+        # refused call speaks nothing at all.
+        if _caller_turns(self.context.get_messages()) == getattr(
+            self, "_ran_at_{{$d.MethodName}}", None
+        ):
+            await params.result_callback({
+                "refused": "This already ran and finished, and the caller has "
+                "not spoken since, so its result is the answer to what they "
+                "asked. Reply to them from the values in your prompt. Run it "
+                "again only once they have asked for something new."
+            })
+            return
+{{if $d.Announce}}        # Cover the entry: two model requests pass between the caller finishing and
+        # the step's first word, and this puts speech in them. TTSSpeakFrame is a
+        # DataFrame, so it is queued and speech starts while the flow is built.
+        # Queued at the very start of the method, before anything else runs.
+        await self.queue_frame(TTSSpeakFrame({{$d.Announce}}))
+{{end}}        self._{{$d.MethodName}}_visit = object()
+        self._{{$d.MethodName}}_results = {}
+{{if $d.CarriesTurn}}        # Per invocation: the tool that ended a step and what it returned, an
+        # event a sibling handoff waits on, and the caller turn the step
+        # consumed on its way out.
+        self._{{$d.MethodName}}_terminal = None
+        self._{{$d.MethodName}}_pending = False
+        self._{{$d.MethodName}}_settled = asyncio.Event()
+        self._{{$d.MethodName}}_carried_turn = None
+{{end}}{{if $d.RuntimeChain}}        # The steps this invocation will run, decided once as the flow starts.
+{{if $d.HasSkips}}        # A step whose confirmation already holds is not entered at all.
+        self._{{$d.MethodName}}_plan = [
+            name
+            for name, confirmed in (
+{{range $d.StepTasks}}                ({{pyq .Name}}, {{if .SkipWhenConfirmed}}{{pyq .SkipWhenConfirmed}}{{else}}""{{end}}),
+{{end}}            )
+            if not (confirmed and _is_confirmed(self.state, confirmed))
+        ]
+{{else}}        self._{{$d.MethodName}}_plan = [{{range $i, $t := $d.StepTasks}}{{if $i}}, {{end}}{{pyq $t.Name}}{{end}}]
+{{end}}
+        self._{{$d.MethodName}}_active_step = self._{{$d.MethodName}}_plan[0]
+{{else}}        self._{{$d.MethodName}}_active_step = {{pyq (index $d.StepTasks 0).Name}}
+{{end}}        flow = FlowManager(
+            llm=self.llm,
+            context_aggregator=LLMContextAggregatorPair(self.context),
+            worker=self,
+        )
+        # Resolve this tool call so it never dangles (V3/B1), but with
+        # run_llm=False: the flow's first node (respond_immediately) is the sole
+        # responder, so the owner never runs a second completion and the caller
+        # hears the task's opening line once, not twice (V7/B4).
+        await params.result_callback(
+            {"status": "running the {{if $d.Task}}{{$d.Task}} task{{else}}{{$d.Group}} flow{{end}}"},
+            properties=FunctionCallResultProperties(run_llm=False),
+        )
+        # V2/B2: drain the resolved owner call before snapshotting. Otherwise
+        # restoration erases that call and the unchanged request delegates again.
+        await self.flush_pipeline()
+        self._{{$d.MethodName}}_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
+{{if $d.CarriesTurn}}        # How many caller turns the owner has seen, so a step that ends on its
+        # tool can tell whether the turn it consumed is one the owner never saw.
+        self._{{$d.MethodName}}_snapshot_turns = _caller_turns(self.context.get_messages())
+{{end}}{{if (index $d.StepTasks 0).SlngHeaders}}        # The step's own cache scope, queued before the node is entered so it is
+        # ahead of the frame that triggers the step's first completion. That
+        # first request is the one that collided: it asks with the task's prompt,
+        # so it has to ask under the task's scope, not this agent's.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(extra={"extra_headers": {{(index $d.StepTasks 0).SlngHeaders}}}),
+        ))
+{{end}}{{if (index $d.StepTasks 0).CtxExpr}}        # context.history on this task. Shaped after the snapshot above, so the
+        # finish path restores the owner's own context whatever this step saw.
+        self.context.set_messages({{(index $d.StepTasks 0).CtxExpr}})
+{{end}}{{if $d.RuntimeChain}}        await flow.initialize(await self._{{$d.MethodName}}_node(self._{{$d.MethodName}}_active_step))
+{{else}}        await flow.initialize(await self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
+{{end}}{{if $d.RuntimeChain}}
+    async def _{{$d.MethodName}}_node(self, name: str) -> NodeConfig:
+        """Build one step's node by name, because the chain is decided at run time.
+
+        Args:
+            name: The step to enter.
+
+        Returns:
+            The step's flow node.
+        """
+        return await {
+{{range $d.StepTasks}}            {{pyq .Name}}: self._{{$d.MethodName}}_node_{{.Name}},
+{{end}}        }[name]()
+
+    def _{{$d.MethodName}}_next(self, name: str) -> str | None:
+        """Find the step after this one in this invocation's plan.
+
+        Args:
+            name: The step that just finished.
+
+        Returns:
+            The next step's name, or None when this was the last.
+        """
+        plan = self._{{$d.MethodName}}_plan
+        position = plan.index(name) + 1
+        return plan[position] if position < len(plan) else None
+{{end}}{{if $d.CarriesTurn}}
+    def _{{$d.MethodName}}_settle(self) -> None:
+        """Mark the running mutation over, one way or another."""
+        self._{{$d.MethodName}}_pending = False
+        self._{{$d.MethodName}}_settled.set()
+{{end}}{{range $t := $d.StepTasks}}
+    async def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
+        """Build the flow node for the {{$t.Name}} step.
+
+        Returns:
+            The node that runs this step's prompt and tools.
+        """
+{{if $d.CarriesTurn}}        # This step's own ending, whatever the step before it did. Held on the
+        # flow rather than the step, so the tool that ended the previous step
+        # closed this one's mutations too: a verified caller was told their
+        # first booking had already succeeded.
+        self._{{$d.MethodName}}_terminal = None
+        self._{{$d.MethodName}}_pending = False
+        self._{{$d.MethodName}}_settled.clear()
+        self._{{$d.MethodName}}_carried_turn = None
+{{end}}{{if $t.Withdraws}}        # Entered, so whatever it confirms is being decided again. Withdrawn
+        # before role_message renders, so this step never reads a confirmation
+        # it is about to replace.
+        _withdraw_confirmation(self.state, {{pyq $t.Name}})
+{{end}}{{if $t.Reset}}        self.context.set_messages([])
+{{else if $t.CtxExpr}}        self.context.set_messages({{$t.CtxExpr}})
+{{end}}{{if and $t.AnnounceChosen $t.SpeaksItsOwnLine}}        # Read once. Alternatives pick a line per call, so the seeded turn and
+        # the spoken one have to come from the same read.
+        _open = {{$t.Announce}}
+{{end}}{{if $t.SpeaksItsOwnLine}}        # The step's own line, queued rather than handed to the framework as a
+        # `tts_say` pre-action, and that is not a style choice. A pre-action
+        # holds the node until the ActionFinishedFrame behind it reaches the
+        # worker sink, and a frame this worker queues does not move until the
+        # tool call that is building this flow returns. The first node of a
+        # flow is built inside that call, so the two wait on each other: on a
+        # live Pipecat call on 2026-09-16 a task group was entered, said
+        # nothing, asked the model nothing, and held the caller for eleven
+        # seconds. Queued, nothing waits, and the line is spoken in the same
+        # place it would have been.
+        #
+        # append_to_context=False because the seeded assistant turn below is
+        # how the line enters the context. Appending here as well would put it
+        # in twice.
+        await self.queue_frame(TTSSpeakFrame({{$t.OpenExpr}}, append_to_context=False))
+{{end}}        return NodeConfig(
+            name={{pyq $t.Name}},
+            role_message={{$t.PromptExpr}},
+{{if eq $t.Opening "listen"}}            # opening: listen. The line is seeded as this step's own first turn and
+            # spoken by the frame above, and no completion is run: the caller
+            # answers a question that cost no model request. Seeded rather than
+            # left to the spoken frame's own context write, because a step with
+            # history: reset replaces the message list as the node is built.
+            task_messages=[{{if $t.Announce}}{"role": "assistant", "content": {{$t.OpenExpr}}}{{else}}{"role": "developer", "content": "Wait for the caller."}{{end}}],
+            respond_immediately=False,
+{{else}}            task_messages=[{{if and $t.Announce $t.SpeakOpening}}{"role": "assistant", "content": {{$t.OpenExpr}}}, {{end}}{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}],
+{{if and $t.Announce $t.SpeakOpening}}            # The seeded turn above is the line the frame spoke, and it is what
+            # stops the model opening by acknowledging a sentence it would
+            # otherwise not be able to see: the frame carries no context write
+            # of its own, and a live call on 2026-09-16 answered its own
+            # announcement with "Got it.".
+            #
+            # The line goes first and the instruction last. The Gemini adapter
+            # sends a developer message after the first as a user turn, so the
+            # other order ended the request on the model's own sentence: on a
+            # call on 2026-09-24 two step openings came back empty and the
+            # caller sat through 15 and 10 seconds of silence, and a booking
+            # step answered "Begin this step." by asking again for the service
+            # and day the caller had already given.
+{{end}}{{end}}            functions=[
+{{range $t.Tools}}                FlowsFunctionSchema(
+                    name={{pyq .Name}},
+                    description={{pyq .Description}},
+                    properties={{.InputProps}},
+                    required={{.InputRequired}},
+                    handler={{if .Terminal}}_flow_visit(self, {{pyq $d.MethodName}}, {{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .Name}}, self._{{$d.MethodName}}_terminal_{{$t.Name}}_{{.Name}}){{else}}self._{{$d.MethodName}}_terminal_{{$t.Name}}_{{.Name}}{{end}}){{else}}{{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .Name}}, {{if .NeedsState}}self._bind_state(_flow_tool_{{.Name}}){{else}}_flow_tool_{{.Name}}{{end}}){{else}}{{if .NeedsState}}self._bind_state(_flow_tool_{{.Name}}){{else}}_flow_tool_{{.Name}}{{end}}{{end}}{{end}},
+                ),
+{{end}}{{range $t.Transfers}}                FlowsFunctionSchema(
+                    name={{pyq .MethodName}},
+                    description={{pyq .When}},
+                    properties={},
+                    required=[],
+                    handler=_flow_visit(self, {{pyq $d.MethodName}}, {{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .MethodName}}, self._{{$d.MethodName}}_transfer_{{$t.Name}}_{{.MethodName}}){{else}}self._{{$d.MethodName}}_transfer_{{$t.Name}}_{{.MethodName}}{{end}}),
+                ),
+{{end}}                FlowsFunctionSchema(
+                    name={{pyq $t.FinishName}},
+                    description="Record the result of this step and finish.",
+                    properties={{$t.ResultProps}},
+                    required={{$t.ResultRequired}},
+                    handler=_flow_visit(self, {{pyq $d.MethodName}}, {{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq $t.FinishName}}, self._{{$d.MethodName}}_finish_{{$t.Name}}){{else}}self._{{$d.MethodName}}_finish_{{$t.Name}}{{end}}),
+                ),
+            ],
+{{if or $d.Isolated $t.Reset}}            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
+{{end}}        )
+
+{{range $x := $t.Transfers}}    async def _{{$d.MethodName}}_transfer_{{$t.Name}}_{{$x.MethodName}}(
+        self, args: Any, flow_manager: FlowManager
+    ) -> tuple[dict[str, Any], Any]:
+        """Hand the caller to {{$x.To}} from inside the {{$t.Name}} step.
+
+        Args:
+            args: The arguments the model supplied, none for a handoff.
+            flow_manager: The flow this step runs in.
+
+        Returns:
+            The result the model sees, and whether a reply is generated.
+        """
+        if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+            return {"status": "already handled"}, NO_RESPONSE
+{{if $t.TerminalTools}}        if self._{{$d.MethodName}}_pending or not {{$t.TerminalTools}}.isdisjoint(self._response_calls):
+            # A tool that ends this step is running, or was called in the same
+            # response and has not started yet. The caller asked for two things
+            # at once, and the step's own work has to be committed before the
+            # caller is moved.
+            try:
+                await asyncio.wait_for(
+                    self._{{$d.MethodName}}_settled.wait(), timeout=TERMINAL_SETTLE_TIMEOUT_SECS
+                )
+            except TimeoutError:
+                self._{{$d.MethodName}}_settle()
+            if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+                # The flow moved on while this handoff waited.
+                return {"status": "already handled"}, NO_RESPONSE
+            if {{pyq $t.Name}} not in self._{{$d.MethodName}}_results:
+                logger.info("handoff held: the step's own action did not complete")
+                return {"status": "not transferred: the action did not complete"}, None
+{{end}}        self._{{$d.MethodName}}_active_step = None
+        flow_messages = None
+        flow_tools = None
+        try:
+            flow_messages = copy.deepcopy(self.context.get_messages())
+            flow_tools = self.context.tools
+{{if $x.Announce}}            await self._announce_handoff({{pyq $x.Announce}})
+{{end}}            _, tools = self._{{$d.MethodName}}_snapshot
+            self.context.set_messages({{$x.CtxExpr}})
+            self.context.set_tools(tools)
+{{if $agentSlngHeaders}}            # This worker is about to be deactivated with the step's cache scope
+            # still on its service. Put the owner's back before handing over, so
+            # a later re-entry cannot answer as a task that already ended.
+            await self.queue_frame(LLMUpdateSettingsFrame(
+                delta=LLMSettings(extra={"extra_headers": {{$agentSlngHeaders}}}),
+            ))
+{{end}}            await self.activate_worker(
+                {{pyq $x.To}},
+                args=LLMWorkerActivationArgs(
+                    metadata=self._dev.activation_metadata() if self._dev else None,
+                    messages=[],
+                    run_llm=True,
+                ),
+                deactivate_self=True,
+            )
+{{if $t.SlngHeaders}}        except BaseException as error:{{else}}        except BaseException:{{end}}
+            self._{{$d.MethodName}}_active_step = {{pyq $t.Name}}
+            if flow_messages is not None:
+                self.context.set_messages(flow_messages)
+            if flow_tools is not None:
+                self.context.set_tools(flow_tools)
+{{if $t.SlngHeaders}}            # The owner's scope was already queued above, so a handover that
+            # failed leaves this step asking under it. Put the step's back with
+            # the rest of its state. Wrapped the same way the finish handler's
+            # rollback is, so a failure to roll back cannot replace the error
+            # that caused it.
+            try:
+                await self.queue_frame(LLMUpdateSettingsFrame(
+                    delta=LLMSettings(extra={"extra_headers": {{$t.SlngHeaders}}}),
+                ))
+            except BaseException as rollback_error:
+                raise error from rollback_error
+{{end}}            raise
+        return {"transferred": True}, NO_RESPONSE
+
+{{end}}{{range $t.Terminals}}    async def _{{$d.MethodName}}_terminal_{{$t.Name}}_{{.Tool}}(
+        self, args: Any, flow_manager: FlowManager
+    ) -> tuple[dict[str, Any], Any]:
+        """Run {{.Tool}} and end this step when it says it did the work.
+
+        The result never reaches the model on a success: the tool has already
+        made the decision the model would have been asked to confirm. Anything
+        else goes back as an ordinary result and the step stays open.
+
+        Args:
+            args: The arguments the model supplied.
+            flow_manager: The flow this step runs in.
+
+        Returns:
+            The result the model sees, and whether a reply is generated.
+        """
+        if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+            return {"status": "already handled"}, NO_RESPONSE
+        if self._{{$d.MethodName}}_terminal is not None:
+            logger.info({{pyq (printf "terminal tool refused: %s cannot run again in this step" .Tool)}})
+            return {"refused": {{pyq (printf "%s already succeeded in this step. Call finish to record it; a new action is a new request from the caller." .Tool)}}}, None
+        # In flight from here until settled, whichever response called it: a
+        # handoff or a finish arriving while it runs waits for it rather than
+        # moving the caller past an action nobody recorded.
+        _visit = self._{{$d.MethodName}}_visit
+        self._{{$d.MethodName}}_pending = True
+        self._{{$d.MethodName}}_settled.clear()
+        try:
+            result = await _flow_tool_{{.Tool}}(args, flow_manager{{if .NeedsState}}, state=self.state{{end}})
+        except BaseException:
+            self._{{$d.MethodName}}_settle()
+            raise
+        if self._{{$d.MethodName}}_visit is not _visit or self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+            # The flow moved while the tool ran. Nothing here may write state
+            # a later step now owns, so the result goes back as it is.
+            self._{{$d.MethodName}}_settle()
+            return result, None
+        if not _terminal_success(result, {{.Success}}):
+            # A failed action has nothing to save, and it still settles: a
+            # handoff waiting beside it stops waiting and leaves the caller here.
+            self._{{$d.MethodName}}_settle()
+            return result, None
+        self._{{$d.MethodName}}_terminal = ({{pyq .Tool}}, result)
+        _messages = self.context.get_messages()
+        if _caller_turns(_messages) > {{if $t.Reset}}0{{else}}self._{{$d.MethodName}}_snapshot_turns{{end}}:
+            # The turn this call answered arrived after the owner's snapshot, so
+            # the owner never saw it. Counted rather than matched on its text,
+            # because a caller who says the same word twice has said it twice.
+            self._{{$d.MethodName}}_carried_turn = _newest_caller_message(_messages)
+        try:
+            _values = _save_result({{pyq $t.Name}}, self.state, result)
+        except _StateRefused as refused:
+            # The action happened and the save did not. The step stays open so
+            # the model can repair it, and its mutations stay closed so the
+            # repair cannot run the action a second time.
+            self._{{$d.MethodName}}_settle()
+            logger.warning({{pyq (printf "terminal %s: not recorded: " .Tool)}} + refused.message)
+            return {
+                **result,
+                "refused": "Not recorded: "
+                + refused.message
+                + ". Call finish with the values this tool returned; recover a missing one with a read tool of this step, or finish with unserved_request saying the action happened and its details could not be saved.",
+            }, None
+        self._{{$d.MethodName}}_settle()
+        logger.info({{pyq (printf "step %s ended on %s" $t.Name .Tool)}})
+{{if .Transfers}}        if not {{.Transfers}}.isdisjoint(self._response_calls):
+            # A handoff was called in the same response. It owns the ending: the
+            # save is committed, and advancing here would race its transition.
+            # Recorded first, because the handoff reads this to know the step's
+            # own work actually landed.
+            self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = _values
+            return _task_status(_values), NO_RESPONSE
+{{end}}        # Saved once, above. The advance is the finish handler's own tail,
+        # shared rather than copied, and it saves nothing itself: a second save
+        # wrote a second entry onto every list an assign appends to.
+        return await self._{{$d.MethodName}}_advance_{{$t.Name}}(_values)
+
+{{end}}    async def _{{$d.MethodName}}_finish_{{$t.Name}}(
+        self, args: Any, flow_manager: FlowManager
+    ) -> tuple[dict[str, Any], Any]:
+        """Record this step's result and move the flow on.
+
+        Args:
+            args: The result fields the model supplied.
+            flow_manager: The flow this step runs in.
+
+        Returns:
+            The result the model sees, and the next node or None.
+        """
+        if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+            return {"status": "already handled"}, NO_RESPONSE
+{{if $t.Terminals}}        if self._{{$d.MethodName}}_pending:
+            # A tool that ends this step is still running, and its result
+            # decides the step. Wait for it rather than ending the step under it
+            # and leaving what it did unrecorded.
+            try:
+                await asyncio.wait_for(
+                    self._{{$d.MethodName}}_settled.wait(), timeout=TERMINAL_SETTLE_TIMEOUT_SECS
+                )
+            except TimeoutError:
+                self._{{$d.MethodName}}_settle()
+            if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+                return {"status": "already handled"}, NO_RESPONSE
+        args = dict(args)
+        if self._{{$d.MethodName}}_terminal is not None:
+            # Repairing a save the tool already made. The tool's own values win
+            # where they validate: the model cannot manufacture a reference, and
+            # a repair that retyped one would record an action nobody took.
+            args = _merge_retained({{pyq $t.Name}}, args, self._{{$d.MethodName}}_terminal[1])
+{{end}}{{if $t.Typed}}        # Validated before anything is recorded: a value that does not fit its
+        # declared type never enters the state, the previous contents stand, and
+        # the message goes back to the model so it can correct itself on the next
+        # turn instead of the step recording something wrong. This framework
+        # validates no tool argument itself, so without this the two targets
+        # would behave differently on the same package.
+        try:
+            _values = _save_result({{pyq $t.Name}}, self.state, dict(args))
+        except _StateRefused as refused:
+            logger.warning("finish {}: {}", {{pyq $t.Name}}, refused.message)
+            return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
+{{if $t.Terminals}}        return await self._{{$d.MethodName}}_advance_{{$t.Name}}(_values)
+
+    async def _{{$d.MethodName}}_advance_{{$t.Name}}(
+        self, _values: dict[str, Any]
+    ) -> tuple[dict[str, Any], Any]:
+        """Move the flow on with this step's saved values: the next step, the owner, or the end.
+
+        Args:
+            _values: The values this step saved.
+
+        Returns:
+            The result the model sees, and the next node or None.
+        """
+{{end}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = _values
+{{else}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
+{{end}}{{if $d.RuntimeChain}}        _next = self._{{$d.MethodName}}_next({{pyq $t.Name}})
+        if self._{{$d.MethodName}}_results[{{pyq $t.Name}}].get("unserved_request"):
+            # The step could not serve what the caller asked. Running the next
+            # one would answer a question nobody asked, so the flow stops here
+            # and the owner is handed the unserved status.
+            logger.info({{pyq (printf "group stopped: %s ended unserved" $t.Name)}})
+            _next = None
+        self._{{$d.MethodName}}_active_step = _next
+        if _next is not None:
+{{if $d.StepScopes}}            # The next step is a different prompt site, so it asks under a
+            # different cache scope. Queued before the node is handed back.
+            _scope = {{$d.StepScopes}}.get(_next)
+            if _scope is not None:
+                await self.queue_frame(LLMUpdateSettingsFrame(
+                    delta=LLMSettings(extra={"extra_headers": _scope}),
+                ))
+{{end}}            return _task_status(self._{{$d.MethodName}}_results[{{pyq $t.Name}}]), await self._{{$d.MethodName}}_node(_next)
+{{else}}        self._{{$d.MethodName}}_active_step = {{if $t.NextName}}{{pyq $t.NextName}}{{else}}None{{end}}
+{{end}}{{if and $t.NextName (not $d.RuntimeChain)}}{{if $t.SlngNextHeaders}}        # The next step is a different prompt site, so it asks under a different
+        # cache scope. Queued before the node is handed back, for the same reason
+        # the first step's was.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(extra={"extra_headers": {{$t.SlngNextHeaders}}}),
+        ))
+{{end}}        return _task_status(self._{{$d.MethodName}}_results[{{pyq $t.Name}}]), await self._{{$d.MethodName}}_node_{{$t.NextName}}()
+{{else}}{{if and $d.HasTransfers (ne $d.Then "end")}}        flow_messages = None
+        flow_tools = None
+        completion_started = False
+        try:
+            flow_messages = copy.deepcopy(self.context.get_messages())
+            flow_tools = self.context.tools
+            completion_started = True
+            return await self._{{$d.MethodName}}_complete_{{$t.Name}}()
+        except BaseException as error:
+            # The save already committed. Keep its terminal claim; a retry cannot save it twice.
+            try:
+                if flow_messages is not None:
+                    self.context.set_messages(flow_messages)
+                if flow_tools is not None:
+                    self.context.set_tools(flow_tools)
+                if completion_started:
+                    await self.queue_frame(LLMUpdateSettingsFrame(
+                        delta=LLMSettings(system_instruction={{$t.PromptExpr}}{{if $t.SlngHeaders}},
+                            # Completion had already put the owner's scope back,
+                            # so rolling back into the step has to put the step's
+                            # scope back with its prompt.
+                            extra={"extra_headers": {{$t.SlngHeaders}}}{{end}}),
+                    ))
+                    await self.flush_pipeline()
+            except BaseException as rollback_error:
+                raise error from rollback_error
+            raise
+
+    async def _{{$d.MethodName}}_complete_{{$t.Name}}(self) -> tuple[dict[str, Any], Any]:
+        """Hand control back to the owner, or end the call, once the last step is done.
+
+        Returns:
+            The result the model sees, and the end node or None.
+        """
+{{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{end}}{{if eq $d.Then "end"}}{{if $agentSlngHeaders}}        # The terminal node's goodbye is spoken by this agent, not by the step,
+        # so the owner's cache scope goes back first.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(extra={"extra_headers": {{$agentSlngHeaders}}}),
+        ))
+{{end}}        # then: end — hand to a terminal node whose end_conversation
+        # post-action ends the call after the goodbye drains (V4/B2).
+        return {"status": "ok"}, self._{{$d.MethodName}}_end_node()
+{{else}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
+        # tools); only a completed or unserved status crosses back.
+        messages, tools = self._{{$d.MethodName}}_snapshot
+        _settle_task_call(messages, {{pyq $d.MethodName}}, _group_status(self._{{$d.MethodName}}_results))
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(system_instruction={{$agentPromptExpr}}{{if $agentSlngHeaders}},
+                # The owner's cache scope goes back with its prompt. A leaked
+                # task scope is the same defect pointing the other way.
+                extra={"extra_headers": {{$agentSlngHeaders}}}{{end}}),
+        ))
+        await self.flush_pipeline()
+{{if eq $d.Then "transfer"}}        self.context.set_messages(messages)
+        self.context.set_tools(tools)
+        await self.activate_worker(
+            {{pyq $d.ThenTarget}},
+            args=LLMWorkerActivationArgs(
+                metadata=self._dev.activation_metadata() if self._dev else None,
+                messages=[{"role": "developer", "content": json.dumps(_group_status(self._{{$d.MethodName}}_results))}],
+                run_llm=True,
+            ),
+            deactivate_self=True,
+        )
+{{else}}        self.context.set_messages([
+            *messages,
+{{if $d.CarriesTurn}}            *_carried_messages(self._{{$d.MethodName}}_carried_turn),
+{{end}}            {
+                "role": "developer",
+                "content": json.dumps(_group_status(self._{{$d.MethodName}}_results)),
+            },
+        ])
+        self.context.set_tools(tools)
+        # Counted after the restore, so a turn a step consumed and carried back
+        # is included: that turn is the one the owner is about to read, and it
+        # is exactly the turn that must not be mistaken for a new request.
+        self._ran_at_{{$d.MethodName}} = _caller_turns(self.context.get_messages())
+{{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{end}}        return {"status": "ok"}, None
+{{end}}{{end}}{{end}}{{if eq $d.Then "end"}}
+    def _{{$d.MethodName}}_end_node(self) -> NodeConfig:
+        """Build the closing node that says goodbye and ends the call."""
+        # Terminal node: speak a brief closing line, then end_conversation ends
+        # the call once its TTS drains (Flows built-in action; V4/B2).
+        return NodeConfig(
+            name="end",
+            task_messages=[{"role": "developer", "content": "Thank the caller and say goodbye."}],
+            functions=[],
+            post_actions=[{"type": "end_conversation"}],
+        )
+{{end}}{{end}}
+{{end}}{{end}}{{if and (not .Inline) .HasFlows}}
+def _flow_visit(
+    worker: Any, delegate: str, handler: Callable[..., Awaitable[Any]]
+) -> Callable[[Any, FlowManager], Awaitable[Any]]:
+    """Wrap a step handler so it does nothing once its flow has been left.
+
+    Args:
+        worker: The worker that owns the flow.
+        delegate: The delegate tool that started this flow.
+        handler: The step's handler.
+
+    Returns:
+        The guarded handler.
+    """
+    visit = getattr(worker, "_" + delegate + "_visit", None)
+
+    async def invoke(args: Any, flow_manager: FlowManager) -> Any:
+        """Run the handler only while this visit is still the current one."""
+        if getattr(worker, "_" + delegate + "_visit", None) is not visit:
+            return {"status": "already handled"}, NO_RESPONSE
+        return await handler(args, flow_manager)
+    return invoke
+
+{{end}}{{if .FlowTools}}
+# --- task tools (flows handlers) ----------------------------------------------
+# Tools available inside task steps; stable module-level handlers so a
+# re-registered function name always resolves to the same callable.
+{{range .FlowTools}}
+
+async def _flow_tool_{{.Name}}(args: Any, flow_manager: FlowManager{{if .NeedsState}}, state: Any = None{{end}}) -> Any:
+    {{flowToolDoc 4 .Description .NeedsState}}
+{{if .Needed}}    refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
+    if refusal:
+        return {"refused": refusal}
+{{end}}{{if .Announce}}    # Cover the wait, same contract as _direct_tool: TTSSpeakFrame is a
+    # DataFrame, so it is queued and speech starts while the handler body runs.
+    # A flows handler holds a FlowManager rather than FunctionCallParams, and
+    # FlowManager.worker is the documented seam for queueing a frame from inside
+    # a handler (pipecat.flows.manager, pipecat-ai 1.9.0). Queued after the
+    # refusal check, so a refused call stays silent.
+    await flow_manager.worker.queue_frame(TTSSpeakFrame({{.Announce}}))
+{{end}}{{if .KnowledgeBase}}    return await knowledge.look_up({{pyq .KnowledgeBase}}, dict(args)["query"])
+{{else if .Local}}    result = tools.{{.Name}}.{{.Name}}(**dict(args){{range .Inject}}, {{.Key}}={{.Expr}}{{end}})
+    if inspect.isawaitable(result):
+        result = await result
+    return result
+{{else if .HostedCode}}    result = tools.{{.Name}}.{{hostedEntry}}(tools.{{.Name}}.{{hostedInput}}(**dict(args){{range .Inject}}, {{.Key}}={{.Expr}}{{end}}))
+    if inspect.isawaitable(result):
+        result = await result
+    return result.model_dump() if hasattr(result, "model_dump") else result
+{{else}}    async with httpx.AsyncClient() as client:
+        response = await client.post({{.URLExpr}}, {{if .Auth}}headers={{.Auth.Expr}}, {{end}}json={**dict(args){{range .Inject}}, {{pyq .Key}}: {{.Expr}}{{end}}}, timeout=WEBHOOK_TIMEOUT_SECS)
+        response.raise_for_status()
+        return response.json()
+{{end}}{{end}}
+{{end}}

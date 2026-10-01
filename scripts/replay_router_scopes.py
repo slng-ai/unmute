@@ -39,7 +39,6 @@ reads it back from another.
 """
 
 import argparse
-import ast
 import json
 import os
 import pathlib
@@ -59,9 +58,6 @@ SSL_CONTEXT = (
     if pathlib.Path(_CA).exists()
     else ssl.create_default_context()
 )
-
-# The module each driver writes its prompts and its router config into.
-AGENT_MODULE = {"livekit": "agent.py", "pipecat": "bot.py"}
 
 # Upstream provider -> the environment variable holding its key. Mirrors the
 # credential rows in internal/target/slng_router.go; extend both together.
@@ -99,29 +95,16 @@ def router_binding(compiled):
     sys.exit("this target has no SLNG Context Router think binding to replay")
 
 
-def prompts(module):
-    """Every module-level string constant in the emitted driver module.
+def prompt_for(site, build):
+    """The agent's prompt, read from the file the emitted project reads it from.
 
-    The prompts are read rather than retyped so this script asks with the same
-    words the agent asks with. A paraphrase would change the cache key and prove
-    nothing.
+    Read rather than retyped so this script asks with the same words the agent
+    asks with. A paraphrase would change the cache key and prove nothing.
     """
-    found = {}
-    for node in ast.parse(module.read_text()).body:
-        if not isinstance(node, ast.Assign):
-            continue
-        target = node.targets[0]
-        if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant):
-            if isinstance(node.value.value, str):
-                found[target.id] = node.value.value
-    return found
-
-
-def prompt_for(site, literals):
-    key = site.upper() + "_PROMPT"
-    if key not in literals:
-        sys.exit(f"no {key} in the emitted module; is {site!r} an agent of this package?")
-    return literals[key]
+    path = build / "prompts" / f"{site}.md"
+    if not path.exists():
+        sys.exit(f"no {path}; is {site!r} an agent of this package?")
+    return path.read_text(encoding="utf-8")
 
 
 def slng_config(binding):
@@ -267,14 +250,14 @@ PHONE_TAIL = [
 ]
 
 
-def arm(name, scope_of, *, url, slng_key, binding, config, literals, first, second):
+def arm(name, scope_of, *, url, slng_key, binding, config, build, first, second):
     """The writer answers twice, then the reader asks the same exchange.
 
     Twice, so the arm carries its own proof the cache took an entry at all. A
     clean result with no hit anywhere proves nothing in either direction.
     """
     record = {"arm": name, "scopes": scope_of, "turns": []}
-    first_prompt, second_prompt = prompt_for(first, literals), prompt_for(second, literals)
+    first_prompt, second_prompt = prompt_for(first, build), prompt_for(second, build)
     # Both arms send the same values, so the scope remains the only difference.
     variables = placeholder_values(first_prompt, second_prompt)
     record["template_variables"] = variables
@@ -343,7 +326,7 @@ def value_arm(name, values, *, url, slng_key, binding, config, system, scope,
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("package", help="package directory, e.g. examples/salon-concierge")
-    parser.add_argument("--target", default="livekit", choices=sorted(AGENT_MODULE))
+    parser.add_argument("--target", default="livekit", choices=["livekit", "pipecat"])
     parser.add_argument("--first", required=True, help="the agent that answers first")
     parser.add_argument("--second", required=True, help="the agent that asks after it")
     parser.add_argument("--family", default=None, help="tag for this run's scope ids")
@@ -373,12 +356,7 @@ def main():
     args = parser.parse_args()
 
     build = pathlib.Path(args.package) / "build" / args.target
-    module = build / AGENT_MODULE[args.target]
-    if not module.exists():
-        sys.exit(f"no {module}: run `unmute compile {args.package}` first")
-
     binding = router_binding(report(build))
-    literals = prompts(module)
     url, config = base_url(binding), slng_config(binding)
     slng_key = env("SLNG_API_KEY")
     family = args.family or uuid.uuid4().hex[:8]
@@ -398,12 +376,12 @@ def main():
             arm(
                 "shared", {site: shared for site in sites},
                 url=url, slng_key=slng_key, binding=binding, config=config,
-                literals=literals, first=args.first, second=args.second,
+                build=build, first=args.first, second=args.second,
             ),
             arm(
                 "scoped", {site: f"{scoped}:{site}" for site in sites},
                 url=url, slng_key=slng_key, binding=binding, config=config,
-                literals=literals, first=args.first, second=args.second,
+                build=build, first=args.first, second=args.second,
             ),
         ],
     }
@@ -415,7 +393,7 @@ def main():
         out["value_arm"] = value_arm(
             "values", values,
             url=url, slng_key=slng_key, binding=binding, config=config,
-            system=prompt_for(args.first, literals) + VALUE_PROMPT_SUFFIX,
+            system=prompt_for(args.first, build) + VALUE_PROMPT_SUFFIX,
             scope=f"replay-values-{family}",
         )
 
@@ -426,7 +404,7 @@ def main():
         out["phone_arm"] = value_arm(
             f"phones-{args.phone_echo}", phones,
             url=url, slng_key=slng_key, binding=binding, config=config,
-            system=prompt_for(args.first, literals) + (
+            system=prompt_for(args.first, build) + (
                 PHONE_PROMPT_SUFFIX if args.phone_echo == "strict"
                 else PHONE_PROMPT_SUFFIX_LOOSE
             ),

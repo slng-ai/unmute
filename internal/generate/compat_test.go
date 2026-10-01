@@ -142,6 +142,16 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // parses, and the parameter carries its description. LiveKit reads the same
 // text as before, measured on salon-concierge and pharmacy-refills.
 //
+// And again on 2026-09-30, for the file layout. The one entry file per code
+// target became a small project of modules: the entry (bot.py, agent.py)
+// beside settings.py, session.py, agents.py and call.py, the helpers under
+// utils/, and each prompt as its own Markdown file under prompts/, read into
+// the same constant it used to be written as. Each module's imports are
+// computed from what it uses (pylink.go). The code moved and did not change:
+// every prompt file is byte-identical to the literal it replaced, measured on
+// customer-intake and salon-concierge on both targets, and the text harnesses
+// ran both examples through to the end on both targets.
+//
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {

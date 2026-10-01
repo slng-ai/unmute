@@ -1,0 +1,148 @@
+"""The call's state: its typed variables, how they are read, and what is known first."""
+
+{{if .TypedState}}
+{{.TypedState.Source}}
+{{end}}{{if .Variables}}
+@dataclass
+class State:
+    """Typed call variables (SCHEMA 4.4), shared across agents."""
+{{if .NeedsPrefetchUnconfirmed}}    _unconfirmed: set[str] = field(default_factory=lambda: set(_STATE_CONFIRM))
+{{end}}
+{{range .Variables}}    {{.Name}}: {{.PyType}} = {{.Default}}{{if .LiteralDefault}}  # ty: ignore[invalid-assignment]{{end}}{{if .Description}}  # {{.Description}}{{end}}
+{{end}}
+{{if .CallStartVars}}
+def _dispatched_call_start(call_context: dict[str, Any] | None) -> dict[str, Any]:
+    """Read the input variables that arrived with the dispatch.
+
+    They come in the call context on a telephony route, or in UNMUTE_CALL_START
+    for a local `unmute dev --var` session.
+
+    Args:
+        call_context: The call's context, or None when there is none.
+
+    Returns:
+        The dispatched values, the dispatch winning over the environment.
+
+    Raises:
+        RuntimeError: When UNMUTE_CALL_START is not a JSON object.
+    """
+    values = dict((call_context or {}).get("call_start", {}))
+    raw = os.getenv("UNMUTE_CALL_START")
+    if raw:
+        try:
+            supplied = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("UNMUTE_CALL_START must be valid JSON") from exc
+        if not isinstance(supplied, dict):
+            raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
+        # The dispatch wins: env is the local stand-in for it.
+        values |= {name: value for name, value in supplied.items() if name not in values}
+    return values
+
+{{end}}
+def build_state(call_context: dict[str, Any] | None = None) -> State:
+    """Build the call's typed variables from the dispatch and the call's own facts.
+
+    Args:
+        call_context: The call's context, or None when there is none.
+
+    Returns:
+        The state every agent on the call shares.
+{{if .RequiredCallStart}}
+    Raises:
+        RuntimeError: When a required input variable was not dispatched.
+{{end}}    """
+    state = State()
+{{if .CallStartVars}}    call_start = _dispatched_call_start(call_context)
+{{range .CallStartVars}}    if {{pyq .Name}} in call_start:
+        state.{{.Name}} = call_start[{{pyq .Name}}]
+{{end}}{{if .RequiredCallStart}}    missing = [
+        name for name in ({{range .RequiredCallStart}}{{pyq .}}, {{end}}) if name not in call_start
+    ]
+{{end}}{{end}}{{if .SystemSourceVars}}    # A variable declaring `source: <call fact>` reads the fact the route lifted
+    # into call_context above. Shaped like the call_start loop, and separate from
+    # it for the reason the two doors are separate: the dispatch payload and the
+    # carrier's own facts are different things arriving from different places.
+    #
+    # This exists because the route table grants a fact to two readers, not one:
+    # `variables: source:` and `prefetch: source:` both resolve through it, so a
+    # grant made for the pre-fetch alone would let a variable compile green here
+    # and hold an empty string on every live call.
+{{range .SystemSourceVars}}    _value = (call_context or {}).get({{pyq .Source}})
+    if _value:
+        state.{{.Name}} = _value
+{{end}}{{end}}{{if .RequiredCallStart}}    if missing:
+        raise RuntimeError(f"Missing call context fields: {', '.join(missing)}")
+{{end}}    return state
+{{end}}{{if .NeedsRender}}
+_TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
+
+
+def _render(text: str, state: Any, *, quote_values: bool = False, site: str = "") -> str:
+    """Substitute each variable token from the call state (SCHEMA 4.4 templates).
+
+    Only substituted values are URL-encoded, never the surrounding literal.
+
+    Args:
+        text: The template, with variable tokens in double braces.
+        state: The call state, or None to leave the text as written.
+        quote_values: Whether to URL-encode each substituted value.
+        site: The prompt site, which picks the variables a path may read.
+
+    Returns:
+        The text with every token replaced.
+    """
+    if state is None:
+        return text
+
+    def _one(match: re.Match[str]) -> str:
+        """Render one token."""
+{{- if .TypedState}}
+        # Through _state_lookup, which walks a path emitted as one flat name, and
+        # _state_text, so a declared value renders as compact JSON and an empty
+        # one as words. Anything not declared structured comes back exactly as
+        # str() gave it.
+        value = _state_text(*_prompt_value(state, match.group(1), site))
+{{- else}}
+        value = getattr(state, match.group(1), None)
+        value = "" if value is None else str(value)
+{{- end}}
+        return quote(value, safe="") if quote_values else value
+
+    return _TEMPLATE.sub(_one, text)
+{{end}}{{if .NeedsRefusal}}
+
+def _refusal(tool: str, state: Any, needed: list[tuple[str, str]]) -> str:
+    """Refuse a call whose injected variables are still unset (V4).
+
+    The model is told what to do about each one, and no half-formed request is
+    ever sent.
+
+    Args:
+        tool: The tool being called.
+        state: The call state the variables are read from.
+        needed: Each required variable name with the hint that says how to set it.
+
+    Returns:
+        The refusal text, or an empty string when every variable is set.
+    """
+    unset = [
+        (name, hint)
+        for name, hint in needed
+        if _state_lookup(state, name)[1] in (None, "")
+{{- if .NeedsPrefetchUnconfirmed}}
+        # A value the caller has not agreed to is present and not usable. Without
+        # this, a pre-fetched number would reach somebody else's record: the
+        # request would go out against a proposal rather than a fact.
+        or _state_lookup(state, name)[0] in getattr(state, "_unconfirmed", ())
+{{- end}}
+    ]
+    if not unset:
+        return ""
+    names = ", ".join(name for name, _ in unset)
+    hints = " ".join(f"{name}: {hint}" for name, hint in unset if hint)
+    return f"cannot call {tool} yet: {names} not set. {hints}".strip()
+{{end}}{{if .NeedsPrefetch}}
+
+{{.Prefetch}}
+{{end}}

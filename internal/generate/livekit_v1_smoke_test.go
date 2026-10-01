@@ -30,13 +30,13 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import agent as agent_module  # noqa: E402
+agent_module = _project("agent")
 
 from livekit.agents import Agent  # noqa: E402
 
 classes = sorted(
     (name for name, obj in vars(agent_module).items()
-     if inspect.isclass(obj) and issubclass(obj, Agent) and obj.__module__ == "agent"),
+     if inspect.isclass(obj) and issubclass(obj, Agent) and obj.__module__ == "agents"),
 )
 assert classes, "no Agent classes found in agent.py"
 
@@ -57,7 +57,7 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import agent  # noqa: F401, E402
+_project("agent")
 from livekit.plugins import slng  # noqa: E402
 
 stt = slng.STT(
@@ -106,9 +106,9 @@ for name in _report["required_env"]:
 # The project, not this script: the emitted pyproject's rules are for
 # generated code, and smoke_check.py is the harness.
 subprocess.run(["ruff", "check", "--extend-exclude", "smoke_check.py", "."], check=True)
-subprocess.run(["ty", "check", "agent.py"], check=True)
+subprocess.run(["ty", "check", "--exclude", "smoke_check.py", "."], check=True)
 
-import agent  # noqa: E402
+agent = _project("agent")
 from livekit.agents import (  # noqa: E402
     DEFAULT_API_CONNECT_OPTIONS,
     AgentSession,
@@ -523,9 +523,9 @@ for name in _report["required_env"]:
 # The project, not this script: the emitted pyproject's rules are for
 # generated code, and smoke_check.py is the harness.
 subprocess.run(["ruff", "check", "--extend-exclude", "smoke_check.py", "."], check=True)
-subprocess.run(["ty", "check", "agent.py"], check=True)
+subprocess.run(["ty", "check", "--exclude", "smoke_check.py", "."], check=True)
 
-import agent  # noqa: E402
+agent = _project("agent")
 from livekit.agents import (  # noqa: E402
     DEFAULT_API_CONNECT_OPTIONS,
     Agent,
@@ -1023,8 +1023,8 @@ import asyncio
 import json
 import time
 
-import agent
-import tracing
+agent = _project("agent")
+from utils import tracing
 from livekit import rtc
 from livekit.agents import (
     Agent,
@@ -1702,7 +1702,7 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import agent  # noqa: E402
+agent = _project("agent")
 from livekit.agents import DEFAULT_API_CONNECT_OPTIONS, AgentSession, llm  # noqa: E402
 
 
@@ -1856,7 +1856,7 @@ func TestSmokeLiveKitHarnessRecoversAGroupStepHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := withKnowledgeStub(livekitHarnessGroupHandoffSmokeScript)
-	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(script), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(withKnowledgeStub(script)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1927,7 +1927,7 @@ import text_run_livekit as harness  # noqa: E402
 sys.path.insert(0, BUILD)
 os.chdir(BUILD)
 
-import agent as generated  # noqa: E402
+generated = _project("agent")
 from livekit.agents import DEFAULT_API_CONNECT_OPTIONS, llm  # noqa: E402
 from livekit.plugins import openai  # noqa: E402
 

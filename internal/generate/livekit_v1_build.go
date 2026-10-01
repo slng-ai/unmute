@@ -469,11 +469,15 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.PrefetchRunbook, _ = PrefetchRunbook(agent, tgt)
 	}
 	// Prompt constants, ordered agents-then-tasks for a stable file.
+	var prompts []pyPrompt
 	for _, a := range data.Agents {
-		data.Prompts = append(data.Prompts, livekitPrompt{Const: a.PromptConst, Body: agent.Agents[a.Name].Instructions})
+		prompts = append(prompts, pyPrompt{Const: a.PromptConst, File: a.Name, Text: agent.Agents[a.Name].Instructions})
 	}
 	for _, t := range data.Tasks {
-		data.Prompts = append(data.Prompts, livekitPrompt{Const: t.PromptConst, Body: livekitTaskPrompt(agent.Tasks[t.Name], t.Result)})
+		prompts = append(prompts, pyPrompt{Const: t.PromptConst, File: "tasks/" + t.Name, Text: livekitTaskPrompt(agent.Tasks[t.Name], t.Result)})
+	}
+	if data.Prompts, err = uniquePrompts(prompts); err != nil {
+		return livekitData{}, err
 	}
 	entryInstructions := agent.Agents[agent.EntryAgent].Instructions
 	if _, router := slngRouterBinding(agent, tgt, agent.Agents[agent.EntryAgent].Model); ir.HasTemplate(entryInstructions) && !router {

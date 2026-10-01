@@ -81,7 +81,7 @@ _SUBMIT_ENDPOINT = _BASE + "/v1/conversations:submit"
 os.environ["COVAL_API_KEY"] = "smoke-key-not-a-real-secret"
 os.environ.pop("COVAL_SIMULATION_ID", None)
 
-import tracing
+from utils import tracing
 
 tracing.COVAL_TRACES_ENDPOINT = _ENDPOINT
 tracing.COVAL_CONVERSATIONS_ENDPOINT = _SUBMIT_ENDPOINT

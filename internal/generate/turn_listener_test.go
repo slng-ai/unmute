@@ -15,7 +15,7 @@ import (
 // pair is imported or built. Every name here is one the smoke test drives.
 func TestListenDeciderEmitsTheTranscribersTurnService(t *testing.T) {
 	artifact := generateFor(t, "turn_listener", ir.ProviderPipecat)
-	bot := artifactFile(t, artifact, "bot.py")
+	bot := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		"from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService",
 		"from pipecat.turns.user_turn_strategies import EagerUserTurnStrategies",
@@ -104,7 +104,7 @@ func TestListenDeciderWithoutEagerPassesNoStrategies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bot := artifactFile(t, artifact, "bot.py")
+	bot := artifactFile(t, artifact, agentSource)
 	for _, absent := range []string{"user_turn_strategies=", "enable_eager_end_of_turn", "EagerUserTurnStrategies"} {
 		if strings.Contains(bot, absent) {
 			t.Errorf("bot.py carries %q with eager off", absent)
@@ -123,7 +123,7 @@ func TestListenDeciderWithoutEagerPassesNoStrategies(t *testing.T) {
 // keeps its bot.py byte for byte (the compat digests hold the whole artifact;
 // this names the two things a local package must not gain).
 func TestLocalDeciderEmitsWhatItAlwaysDid(t *testing.T) {
-	bot := artifactFile(t, generateFor(t, "simple-prompt", ir.ProviderPipecat), "bot.py")
+	bot := artifactFile(t, generateFor(t, "simple-prompt", ir.ProviderPipecat), agentSource)
 	for _, absent := range []string{"enable_eager_end_of_turn", "EagerUserTurnStrategies", "DeepgramFluxSTTService"} {
 		if strings.Contains(bot, absent) {
 			t.Errorf("a local-decider package gained %q", absent)
@@ -143,7 +143,7 @@ func TestLocalDeciderEmitsWhatItAlwaysDid(t *testing.T) {
 // at all, which reads as a working package whose turns never change hands.
 func TestGradiumDecidesTheTurnThroughItsOwnClass(t *testing.T) {
 	artifact := generateFor(t, "turn_listener_gradium", ir.ProviderPipecat)
-	bot := artifactFile(t, artifact, "bot.py")
+	bot := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		"from pipecat.services.gradium.stt import GradiumSTTService",
 		"return GradiumSTTService(",
@@ -204,8 +204,8 @@ func TestGradiumDecidesTheTurnThroughItsOwnClass(t *testing.T) {
 // without the local half, a package that binds this vendor and says nothing
 // about turns changes who ends the caller's turn on a version bump.
 func TestSpeechmaticsTurnModeFollowsTheBinding(t *testing.T) {
-	local := artifactFile(t, generateFor(t, "speechmatics_local", ir.ProviderPipecat), "bot.py")
-	listen := artifactFile(t, generateFor(t, "speechmatics_listen", ir.ProviderPipecat), "bot.py")
+	local := artifactFile(t, generateFor(t, "speechmatics_local", ir.ProviderPipecat), agentSource)
+	listen := artifactFile(t, generateFor(t, "speechmatics_listen", ir.ProviderPipecat), agentSource)
 
 	// Same class both ways: this vendor is switched by a setting, not a swap.
 	for name, bot := range map[string]string{"local": local, "listen": listen} {
@@ -248,7 +248,7 @@ func TestSpeechmaticsTurnModeFollowsTheBinding(t *testing.T) {
 // this bump, and a lookup keyed too loosely would start writing a turn keyword
 // into services that have none.
 func TestAVendorWithNoSwitchEmitsNothingOfOurs(t *testing.T) {
-	bot := artifactFile(t, generateFor(t, "simple-prompt", ir.ProviderPipecat), "bot.py")
+	bot := artifactFile(t, generateFor(t, "simple-prompt", ir.ProviderPipecat), agentSource)
 	for _, absent := range []string{"enable_turn_detection", "turn_detection_mode"} {
 		if strings.Contains(bot, absent) {
 			t.Errorf("a package binding a vendor with no turn-decider row gained %q", absent)

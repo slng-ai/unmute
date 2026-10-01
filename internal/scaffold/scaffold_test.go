@@ -171,9 +171,9 @@ func TestScaffoldAgreesWithItsOwnBuild(t *testing.T) {
 				if err := json.Unmarshal(files["compile-report.json"], &report); err != nil {
 					t.Fatal(err)
 				}
-				startupEnv := regexp.MustCompile(`(?s)REQUIRED_ENV = \[.*?\]`).Find(files["agent.py"])
+				startupEnv := regexp.MustCompile(`(?s)REQUIRED_ENV = \[.*?\]`).Find(files["settings.py"])
 				if startupEnv == nil {
-					t.Fatal("agent.py has no REQUIRED_ENV startup check")
+					t.Fatal("settings.py has no REQUIRED_ENV startup check")
 				}
 				for _, platform := range []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL"} {
 					if !slices.Contains(report.RequiredEnv, platform) {

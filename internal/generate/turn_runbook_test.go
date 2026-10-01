@@ -142,7 +142,7 @@ func TestBothTargetsReportTheEndpointingWaitUnderOneKey(t *testing.T) {
 		{ir.ProviderPipecat, "user_turn_secs"},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
-			metrics := generatedFile(t, loadTurnFixture(t, "", ir.PaceBalanced), tc.provider, "dev_metrics.py")
+			metrics := generatedFile(t, loadTurnFixture(t, "", ir.PaceBalanced), tc.provider, "utils/dev_metrics.py")
 			if !strings.Contains(metrics, `"turn_detection"`) {
 				t.Errorf("emitted dev_metrics.py does not report a \"turn_detection\" key, so the endpointing wait is bundled with the rest of the turn")
 			}

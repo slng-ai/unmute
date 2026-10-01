@@ -42,7 +42,7 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("target %q does not generate: %v", name, err)
 			}
-			if name == "livekit" && !strings.Contains(artifactFile(t, artifact, "agent.py"), `model="gemini-3.1-flash-lite"`) {
+			if name == "livekit" && !strings.Contains(artifactFile(t, artifact, agentSource), `model="gemini-3.1-flash-lite"`) {
 				t.Error("salon-concierge must reason on gemini-3.1-flash-lite")
 			}
 		})
@@ -1153,7 +1153,7 @@ func assertAnswersTwilioRoute(t *testing.T, name string, files []File) {
 	for _, file := range files {
 		contents[file.Path] = string(file.Content)
 	}
-	if !strings.Contains(contents["bot.py"], `"twilio": lambda: FastAPIWebsocketParams(`) {
+	if !strings.Contains(contents["call.py"], `"twilio": lambda: FastAPIWebsocketParams(`) {
 		t.Errorf("target %q: bot.py has no \"twilio\" entry in transport_params, so `bot.py -t twilio` cannot take a simulated call", name)
 	}
 	if !regexp.MustCompile(`pipecat-ai\[[^\]]*\bwebsocket\b`).MatchString(contents["pyproject.toml"]) {
@@ -1653,9 +1653,9 @@ func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s: %v", provider, err)
 				}
-				entry := "bot.py"
+				entry := agentSource
 				if provider == ir.ProviderLiveKit {
-					entry = "agent.py"
+					entry = agentSource
 				}
 				source := artifactFile(t, artifact, entry)
 				start := strings.Index(source, "REQUIRED_ENV = [")
@@ -1806,8 +1806,8 @@ func TestRouterScopeSurfacesDoNotContradictTheCompiler(t *testing.T) {
 		// module-level comment, and leaving it out of this list is how that one
 		// survived the first pass of the rewrite: a reader in the code sees it
 		// long before they open a runbook.
-		filepath.Join("internal", "generate", "templates", "livekit_v1", "agent.py.tmpl"),
-		filepath.Join("internal", "generate", "templates", "pipecat_v1", "bot.py.tmpl"),
+		filepath.Join("internal", "generate", "templates", "livekit_v1", "utils_router.py.tmpl"),
+		filepath.Join("internal", "generate", "templates", "pipecat_v1", "utils_router.py.tmpl"),
 		filepath.Join("examples", "salon-concierge", "README.md"),
 		filepath.Join("docs-site", "optimization", "context-router.mdx"),
 		filepath.Join("internal", "skill", "assets", "references", "models.md"),

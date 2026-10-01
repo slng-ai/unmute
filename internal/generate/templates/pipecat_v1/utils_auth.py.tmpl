@@ -1,0 +1,28 @@
+"""The headers a tool or an MCP server authenticates with, read at call time."""
+
+{{if .AuthKinds.Any}}# One helper per auth scheme a tool actually declares; the token is read from the
+# environment at call time and never appears in the package.
+{{if .AuthKinds.Bearer}}
+def _bearer(env: str) -> dict[str, str]:
+    """Build the `auth: bearer` Authorization header from the tool's token_env.
+
+    Args:
+        env: The environment variable holding the token, read at call time.
+
+    Returns:
+        The header to send with the request.
+    """
+    return {"Authorization": "Bearer " + os.environ[env]}
+{{end}}{{if .AuthKinds.APIKey}}
+def _api_key(header: str, env: str) -> dict[str, str]:
+    """Build the `auth: api_key` header, the token verbatim in its own header.
+
+    Args:
+        header: The header name.
+        env: The environment variable holding the token, read at call time.
+
+    Returns:
+        The header to send with the request.
+    """
+    return {header: os.environ[env]}
+{{end}}{{end}}

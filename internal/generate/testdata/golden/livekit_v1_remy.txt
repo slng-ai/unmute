@@ -123,7 +123,7 @@ The event feed reconnects separately from audio. Retained events can replay;
 a gap stays marked until the next call. Switching Conversation and Logs keeps
 the same microphone connection.
 
-The generated `dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
+The generated `utils/dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
 as `unmute dev` does. Its identified v2 snapshots use `UNMUTE_METRIC ` framing.
 Raw values use seconds. To inspect measurements:
 
@@ -427,59 +427,81 @@ Change the package and recompile.
 === agent.py ===
 """LiveKit voice agent, compiled by Unmute from this package's agent.yaml."""
 
-import asyncio
+from __future__ import annotations
+
+import os
+
+from dotenv import load_dotenv
+from livekit.agents import AgentServer, JobContext
+
+from call import prewarm, run_call
+from settings import LOCAL_INIT_TIMEOUT_SECS
+
+load_dotenv()
+server = AgentServer()
+server.setup_fnc = prewarm
+if os.getenv("UNMUTE_LOCAL_RUN") == "1":
+    # One browser call needs one warm spare, not one index build per CPU.
+    server.update_options(num_idle_processes=1, initialize_process_timeout=LOCAL_INIT_TIMEOUT_SECS)
+
+
+@server.rtc_session(agent_name="remy-fixture-livekit")
+async def entrypoint(ctx: JobContext) -> None:
+    """Run one call LiveKit dispatched to this worker.
+
+    Args:
+        ctx: The job LiveKit dispatched for this call.
+    """
+    await run_call(ctx)
+
+
+# No __main__ block: this module is started through livekit-agents' supported
+# CLI, `python -m livekit.agents start agent.py`, which imports it and finds the
+# `server` above. The older per-script entry point goes through a CLI upstream
+# has deprecated and will remove.
+=== agents.py ===
+"""The agents and the task steps they delegate to, with their tools."""
+
+from __future__ import annotations
+
 import json
-import logging
 import os
 import random
 from collections.abc import AsyncIterable
-from dataclasses import dataclass
 from typing import Annotated
 
 import httpx
-from dotenv import load_dotenv
 from livekit import rtc
 from livekit.agents import (
     NOT_GIVEN,
     Agent,
-    AgentServer,
-    AgentSession,
     AgentTask,
-    APIConnectOptions,
     ChatContext,
     FlushSentinel,
-    JobContext,
-    JobProcess,
     ModelSettings,
     NotGivenOr,
     RunContext,
-    TurnHandlingOptions,
-    UserStateChangedEvent,
     function_tool,
-    inference,
     llm,
-    metrics,
 )
 from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup
 from livekit.agents.llm import ChatChunk, Tool
-from livekit.agents.voice import MetricsCollectedEvent
+from livekit.plugins import slng
+from pydantic import Field
 
-# Not re-exported from livekit.agents or livekit.agents.voice, so it comes from
-# the module that defines it. Checked against 1.6.10 and 1.8.x.
-from livekit.agents.voice.agent_session import SessionConnectOptions
-from livekit.plugins import openai, silero, slng
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
-
-import dev_metrics
-from dev_metrics import dev_llm_node, dev_say, install_dev_metrics
-from tracing import setup_langfuse
-
-logger = logging.getLogger("remy-fixture")
-logger.setLevel(logging.INFO)
-
-load_dotenv()
-
-
+from prompts import (
+    CONFIRM_BOOKING_PROMPT,
+    EVENTS_PROMPT,
+    FIND_SLOT_PROMPT,
+    GREETER_PROMPT,
+    QUALIFY_EVENT_PROMPT,
+    RESERVATIONS_PROMPT,
+)
+from session import _group_status, _save_result, _StateRefused, _task_status
+from settings import _TASK_MAX_ATTEMPTS, logger
+from utils import dev_metrics
+from utils.context import _caller_turns
+from utils.dev_metrics import dev_llm_node, dev_say
 
 # --- announcements ---------------------------------------------------------
 
@@ -509,9 +531,1176 @@ def _announce(key: str, lines: list[str]) -> str:
     _ANNOUNCE_LAST[key] = pick
     return pick
 
-# --- prompts ---------------------------------------------------------------
+class _GroupStop(Exception):
+    """Internal signal that a group step ended unserved, so the group stops.
 
-EVENTS_PROMPT = """# Private events
+    Raised from the completion callback, which the framework runs inside its own
+    try: the group completes with this exception and it comes back out of
+    `await group`, with the results the group had reached.
+    """
+
+    def __init__(self, results: dict) -> None:
+        """Carry the results the group reached.
+
+        Args:
+            results: Each finished step's result, by step id.
+        """
+        super().__init__()
+        self.results = results
+
+
+async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent, flow: dict) -> None:
+    """Fill LiveKit's empty task tool output before the next shared task.
+
+    `flow` is the delegate's own record of the run: the results it has reached,
+    and any caller turn a step consumed. The group's own results are not
+    readable from here, and a group that stops early has to hand back what it
+    did do.
+
+    Args:
+        group: The running group.
+        event: The step that just completed.
+        flow: The delegate's record of the run.
+
+    Raises:
+        RuntimeError: The completed step left no usable finish output.
+    """
+    flow["results"][event.task_id] = event.result
+    flow["carried"].append(getattr(event.agent_task, "_carried_turn", None))
+    finish_call_id = getattr(event.agent_task, "_finish_call_id", None)
+    if finish_call_id is None:
+        raise RuntimeError("completed task has no successful finish call")
+    task_output = next(
+        (
+            item
+            for item in reversed(event.agent_task.chat_ctx.items)
+            if isinstance(item, llm.FunctionCallOutput)
+            and item.name == "finish"
+            and not item.is_error
+            and item.call_id == finish_call_id
+        ),
+        None,
+    )
+    if task_output is None:
+        raise RuntimeError("completed task has no matching successful finish output")
+
+    shared_ctx = group.chat_ctx.copy()
+    shared_output = shared_ctx.get_by_id(task_output.id)
+    if shared_output is None:
+        raise RuntimeError("completed task finish output is absent from its group")
+    if not isinstance(shared_output, llm.FunctionCallOutput):
+        raise RuntimeError("completed task finish output has an invalid type")
+    if (
+        shared_output.name != task_output.name
+        or shared_output.call_id != task_output.call_id
+        or shared_output.is_error
+    ):
+        raise RuntimeError("completed task finish output changed identity")
+
+    shared_ctx.remove(shared_output)
+    shared_ctx.insert(
+        shared_output.model_copy(
+            update={
+                "output": json.dumps(
+                    _task_status(event.result),
+                    sort_keys=True,
+                )
+            }
+        )
+    )
+
+    await group.update_chat_ctx(
+        shared_ctx,
+        exclude_invalid_function_calls=False,
+    )
+    if isinstance(event.result, dict) and event.result.get("unserved_request"):
+        # The step could not serve what the caller asked. Running the next one
+        # would answer a question nobody asked, so the group stops here and the
+        # owner is handed the unserved status with the results so far.
+        logger.info("group stopped: " + event.task_id + " ended unserved")
+        raise _GroupStop(dict(flow["results"]))
+
+
+# --- agents ----------------------------------------------------------------
+
+class Events(Agent):
+    """The events agent, compiled from its entry in agent.yaml."""
+
+    def tts_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[rtc.AudioFrame]:
+        """Synthesize speech through the dev feed's wrapper.
+
+        Args:
+            text: The text to speak.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The synthesized audio frames.
+        """
+        return dev_metrics.dev_tts_node(self, text, model_settings)
+
+    def llm_node(
+        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+        """Ask the model, through the dev feed's wrapper.
+
+        Args:
+            chat_ctx: The conversation to send.
+            tools: The tools the model may call.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The model's chunks.
+        """
+        return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
+
+    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+        """Build the agent.
+
+        Args:
+            chat_ctx: The conversation a handoff carries in.
+        """
+        super().__init__(
+            instructions=EVENTS_PROMPT,
+            chat_ctx=chat_ctx,
+            tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-orion-en", model="slng/deepgram/aura:2-en"),
+        )
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
+
+    async def on_enter(self) -> None:
+        """Open this agent's turn as it takes over the call."""
+        # This agent took over via handoff; let its own instructions drive the
+        # opening (the prompt already says not to re-greet).
+        # This opening turn withholds the agent's own handoffs (B3: an agent that can
+        # hand the call back before it has said anything ping-pongs). The framework's
+        # on-enter tool flag would hide them for the rest of the call instead, because
+        # its filter follows the context of everything this reply starts: a live call
+        # offered one specialist nothing but its delegate for ten turns while the
+        # caller asked for another one (B: salon handoffs, 2026-08-20).
+        self.session.generate_reply(tools=[t.id for t in self.tools if t.id != "back_to_greeter"])
+
+    @function_tool
+    async def back_to_greeter(self, ctx: RunContext) -> Agent:
+        """Caller wants something else, or to start over."""
+        return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
+
+    @function_tool
+    async def do_event(self, ctx: RunContext) -> dict:
+        """The caller is ready to plan their event; run the events flow. When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. A completed status means the step finished. Read any saved values through your own prompt references. An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."""
+        # Already ran, and nobody has spoken since. Then this is not a second
+        # request, it is the model reading its own completed result as though it
+        # were one, and running the whole thing again is the worst possible
+        # answer: on a live call on 2026-09-16 (trace 917975e9) a booking saved,
+        # the flow re-entered on the caller's own "3 o'clock" still sitting
+        # above the result, read the diary twice more, and the last thing the
+        # caller heard was an agent saying it was off to check the diary.
+        #
+        # Refused here rather than asked for in the prompt, which this package
+        # did twice and which failed twice. The announcement is below this, so a
+        # refused call speaks nothing at all.
+        if _caller_turns(self.chat_ctx) == getattr(self, "_ran_at_do_event", None):
+            return {
+                "refused": "This already ran and finished, and the caller has "
+                "not spoken since, so its result is the answer to what they "
+                "asked. Reply to them from the values in your prompt. Run it "
+                "again only once they have asked for something new."
+            }
+        owner_ctx = self.chat_ctx.copy()
+        # What the group reached, recorded as it goes: a group that stops early
+        # still owes the owner the steps it did run.
+        _flow = {"results": {}, "carried": []}
+        try:
+            group = TaskGroup(
+                summarize_chat_ctx=False,
+                on_task_completed=lambda event: _share_task_result(group, event, _flow),
+            )
+            await group.update_chat_ctx(owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True), exclude_invalid_function_calls=False)
+            group.add(lambda: QualifyEvent(), id="qualify_event", description="qualify event")
+            group.add(lambda: ConfirmBooking(), id="confirm_booking", description="confirm booking")
+            result = await group
+            task_results = result.task_results
+        except _GroupStop as stop:
+            task_results = stop.results
+        finally:
+            await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+            # Counted after the restore, so a turn a step consumed and carried
+            # back is included: that turn is the one the owner is about to read,
+            # and it is exactly the turn that must not be mistaken for a new
+            # request. Set in the finally so a step that raised still blocks an
+            # immediate retry the caller did not ask for.
+            self._ran_at_do_event = _caller_turns(self.chat_ctx)
+        dev_metrics.dev_task_returned(ctx, *task_results.values())
+        return _group_status(task_results)
+
+
+class Greeter(Agent):
+    """The greeter agent, compiled from its entry in agent.yaml."""
+
+    def tts_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[rtc.AudioFrame]:
+        """Synthesize speech through the dev feed's wrapper.
+
+        Args:
+            text: The text to speak.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The synthesized audio frames.
+        """
+        return dev_metrics.dev_tts_node(self, text, model_settings)
+
+    def llm_node(
+        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+        """Ask the model, through the dev feed's wrapper.
+
+        Args:
+            chat_ctx: The conversation to send.
+            tools: The tools the model may call.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The model's chunks.
+        """
+        return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
+
+    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, initial: bool = False) -> None:
+        """Build the agent.
+
+        Args:
+            chat_ctx: The conversation a handoff carries in.
+            initial: True for the call's first agent, which greets the caller.
+        """
+        self._initial = initial
+        super().__init__(
+            instructions=GREETER_PROMPT,
+            chat_ctx=chat_ctx,
+        )
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
+
+    async def on_enter(self) -> None:
+        """Open this agent's turn as it takes over the call."""
+        if not self._initial:
+        # This opening turn withholds the agent's own handoffs (B3: an agent that can
+        # hand the call back before it has said anything ping-pongs). The framework's
+        # on-enter tool flag would hide them for the rest of the call instead, because
+        # its filter follows the context of everything this reply starts: a live call
+        # offered one specialist nothing but its delegate for ten turns while the
+        # caller asked for another one (B: salon handoffs, 2026-08-20).
+            self.session.generate_reply(tools=[t.id for t in self.tools if t.id not in {"to_reservations", "to_events"}])
+            return
+        await dev_say(self.session, "Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?")
+
+    @function_tool
+    async def to_reservations(self, ctx: RunContext) -> Agent:
+        """Caller wants to book a table for a normal dine-in visit."""
+        return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
+
+    @function_tool
+    async def to_events(self, ctx: RunContext) -> Agent:
+        """Caller wants to plan a private event, party, or large group booking."""
+        return Events(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
+
+
+class Reservations(Agent):
+    """The reservations agent, compiled from its entry in agent.yaml."""
+
+    def tts_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[rtc.AudioFrame]:
+        """Synthesize speech through the dev feed's wrapper.
+
+        Args:
+            text: The text to speak.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The synthesized audio frames.
+        """
+        return dev_metrics.dev_tts_node(self, text, model_settings)
+
+    def llm_node(
+        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+        """Ask the model, through the dev feed's wrapper.
+
+        Args:
+            chat_ctx: The conversation to send.
+            tools: The tools the model may call.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The model's chunks.
+        """
+        return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
+
+    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+        """Build the agent.
+
+        Args:
+            chat_ctx: The conversation a handoff carries in.
+        """
+        super().__init__(
+            instructions=RESERVATIONS_PROMPT,
+            chat_ctx=chat_ctx,
+            tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-orion-en", model="slng/deepgram/aura:2-en"),
+        )
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
+
+    async def on_enter(self) -> None:
+        """Open this agent's turn as it takes over the call."""
+        # This agent took over via handoff; let its own instructions drive the
+        # opening (the prompt already says not to re-greet).
+        # This opening turn withholds the agent's own handoffs (B3: an agent that can
+        # hand the call back before it has said anything ping-pongs). The framework's
+        # on-enter tool flag would hide them for the rest of the call instead, because
+        # its filter follows the context of everything this reply starts: a live call
+        # offered one specialist nothing but its delegate for ten turns while the
+        # caller asked for another one (B: salon handoffs, 2026-08-20).
+        self.session.generate_reply(tools=[t.id for t in self.tools if t.id != "back_to_greeter"])
+
+    @function_tool
+    async def back_to_greeter(self, ctx: RunContext) -> Agent:
+        """Caller wants something else, or to start over."""
+        return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
+
+    @function_tool
+    async def do_reserve(self, ctx: RunContext) -> dict:
+        """The caller is ready to book a table; run the reservation flow. When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. A completed status means the step finished. Read any saved values through your own prompt references. An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."""
+        # Already ran, and nobody has spoken since. Then this is not a second
+        # request, it is the model reading its own completed result as though it
+        # were one, and running the whole thing again is the worst possible
+        # answer: on a live call on 2026-09-16 (trace 917975e9) a booking saved,
+        # the flow re-entered on the caller's own "3 o'clock" still sitting
+        # above the result, read the diary twice more, and the last thing the
+        # caller heard was an agent saying it was off to check the diary.
+        #
+        # Refused here rather than asked for in the prompt, which this package
+        # did twice and which failed twice. The announcement is below this, so a
+        # refused call speaks nothing at all.
+        if _caller_turns(self.chat_ctx) == getattr(self, "_ran_at_do_reserve", None):
+            return {
+                "refused": "This already ran and finished, and the caller has "
+                "not spoken since, so its result is the answer to what they "
+                "asked. Reply to them from the values in your prompt. Run it "
+                "again only once they have asked for something new."
+            }
+        owner_ctx = self.chat_ctx.copy()
+        # What the group reached, recorded as it goes: a group that stops early
+        # still owes the owner the steps it did run.
+        _flow = {"results": {}, "carried": []}
+        try:
+            group = TaskGroup(
+                summarize_chat_ctx=False,
+                on_task_completed=lambda event: _share_task_result(group, event, _flow),
+            )
+            await group.update_chat_ctx(owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True), exclude_invalid_function_calls=False)
+            group.add(lambda: FindSlot(speak_opening=True), id="find_slot", description="find slot")
+            group.add(lambda: ConfirmBooking(), id="confirm_booking", description="confirm booking")
+            result = await group
+            task_results = result.task_results
+        except _GroupStop as stop:
+            task_results = stop.results
+        finally:
+            await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
+            # Counted after the restore, so a turn a step consumed and carried
+            # back is included: that turn is the one the owner is about to read,
+            # and it is exactly the turn that must not be mistaken for a new
+            # request. Set in the finally so a step that raised still blocks an
+            # immediate retry the caller did not ask for.
+            self._ran_at_do_reserve = _caller_turns(self.chat_ctx)
+        dev_metrics.dev_task_returned(ctx, *task_results.values())
+        return _group_status(task_results)
+
+
+# --- tasks -----------------------------------------------------------------
+
+
+def _task_result(values: dict, unserved_request: str) -> dict:
+    """Add the unserved request to a step's result, if it named one.
+
+    A step that could not serve a request names it on the way out, so the agent
+    that owns the step reads it off the result and takes it from there.
+
+    Args:
+        values: The values the step recorded.
+        unserved_request: What the step could not serve, or an empty string.
+
+    Returns:
+        The values, with the unserved request added when there is one.
+    """
+    if not unserved_request:
+        return values
+    return {**values, "unserved_request": unserved_request}
+
+
+class _RetryEmptyTaskResponseMixin:
+    """Retry a task's model request when it comes back empty."""
+
+    _response_tool_call_ids: set[str]
+
+    def tts_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[rtc.AudioFrame]:
+        """Synthesize speech through the dev feed's wrapper.
+
+        Args:
+            text: The text to speak.
+            model_settings: The framework's per-turn model settings.
+
+        Returns:
+            The synthesized audio frames.
+        """
+        return dev_metrics.dev_tts_node(self, text, model_settings)
+
+    async def update_chat_ctx(
+        self, chat_ctx: ChatContext, *, exclude_invalid_function_calls: bool = False
+    ) -> None:
+        """Replace the task's context, keeping tool records the task cannot run.
+
+        Args:
+            chat_ctx: The context to install.
+            exclude_invalid_function_calls: Drop calls whose tool is gone.
+        """
+        # History policy owns old tool records, including tools this task cannot run.
+        assert isinstance(self, Agent)
+        await Agent.update_chat_ctx(self, chat_ctx, exclude_invalid_function_calls=exclude_invalid_function_calls)
+
+    async def update_tools(self, tools: list[Tool | llm.Toolset]) -> None:
+        """Replace the task's tools without losing its context.
+
+        Args:
+            tools: The tools the task may call from now on.
+        """
+        assert isinstance(self, Agent)
+        history = self.chat_ctx.copy()
+        await Agent.update_tools(self, tools)
+        await self.update_chat_ctx(history, exclude_invalid_function_calls=False)
+
+    async def llm_node(
+        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
+    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
+        """Ask the model, retrying up to twice when it answers with nothing.
+
+        Args:
+            chat_ctx: The conversation to send.
+            tools: The tools the model may call.
+            model_settings: The framework's per-turn model settings.
+
+        Yields:
+            The model's chunks, or a short apology when every attempt was empty.
+        """
+        # Every generated user of this mixin is an AgentTask; narrow that
+        # invariant here so the emitted project type-checks without a new base.
+        assert isinstance(self, Agent)
+        # ponytail: keyed on the SDK's own marker rather than the placeholder
+        # wording, and the emitted-code test is what catches it changing.
+        #
+        # The delegate that started this task is still running, so the framework
+        # injects that call plus a placeholder output reading "The tool call is
+        # still in progress." into the context (voice/generation.py,
+        # _inject_running_tool_calls). For the agent that made the call that is
+        # right: it stops the model re-issuing a call already in flight. A task
+        # is a different agent with a different prompt, and its opening turn
+        # reads an unfinished tool call it never made: it then answers with
+        # nothing, or apologises for a failure that did not happen, which the
+        # caller hears as the agent breaking. Reproduced on 3 of 3 scripted
+        # salon calls (B: task opened silent after delegate, 2026-08-21).
+        running_placeholders = {
+            item.call_id
+            for item in chat_ctx.items
+            if isinstance(item, llm.FunctionCall)
+            and item.extra.get("__lk_running_placeholder__")
+        }
+        if running_placeholders:
+            chat_ctx = chat_ctx.copy()
+            chat_ctx.items = [
+                item
+                for item in chat_ctx.items
+                if getattr(item, "call_id", None) not in running_placeholders
+            ]
+        completed_tool_call_ids = {
+            item.call_id
+            for item in chat_ctx.items
+            if isinstance(item, llm.FunctionCallOutput)
+            and item.call_id in self._response_tool_call_ids
+        }
+        post_tool = bool(completed_tool_call_ids)
+        finish_tool = llm.ToolContext(tools).get_function_tool("finish")
+        if finish_tool is None:
+            raise RuntimeError("task retry has no finish tool")
+        finish_only = False
+        request_tools: list[llm.Tool] = tools
+        request_chat_ctx = chat_ctx
+        for attempt in range(_TASK_MAX_ATTEMPTS):
+            has_response = False
+            async for chunk in dev_llm_node(
+                self, Agent.default.llm_node, request_chat_ctx, request_tools, model_settings
+            ):
+                if isinstance(chunk, str):
+                    has_response = has_response or bool(chunk.strip())
+                elif isinstance(chunk, llm.ChatChunk) and chunk.delta is not None:
+                    delta = chunk.delta
+                    tool_calls = delta.tool_calls or []
+                    if finish_only and tool_calls:
+                        allowed = [call for call in tool_calls if call.name == "finish"]
+                        if len(allowed) != len(tool_calls):
+                            logger.warning(
+                                "task post-tool reply tried another non-finish tool; "
+                                "ignoring it"
+                            )
+                            chunk = chunk.model_copy(
+                                update={
+                                    "delta": delta.model_copy(
+                                        update={"tool_calls": allowed}
+                                    )
+                                }
+                            )
+                            delta = chunk.delta
+                            if delta is None:
+                                raise RuntimeError("task retry lost its response delta")
+                            tool_calls = allowed
+                    self._response_tool_call_ids.update(
+                        call.call_id for call in tool_calls
+                    )
+                    has_response = has_response or bool(
+                        tool_calls or (delta.content or "").strip()
+                    )
+                yield chunk
+            if has_response:
+                self._response_tool_call_ids.difference_update(
+                    completed_tool_call_ids
+                )
+                return
+            if attempt < _TASK_MAX_ATTEMPTS - 1:
+                logger.warning(
+                    "task response was empty; retrying %d/%d", attempt + 1, _TASK_MAX_ATTEMPTS - 1
+                )
+
+                if attempt == 0 and post_tool:
+                    finish_only = True
+                    request_tools = [finish_tool]
+
+                # Copy the original each time. Responses API reuses a previous
+                # response when the context is unchanged, so each retry needs
+                # a distinct instruction as well as a fresh context object.
+                request_chat_ctx = chat_ctx.copy()
+                instructions_index = request_chat_ctx.index_by_id(
+                    "lk.agent_task.instructions"
+                )
+                if instructions_index is None:
+                    raise RuntimeError("task retry has no instruction message")
+                instructions = request_chat_ctx.items[instructions_index]
+                if not isinstance(instructions, llm.ChatMessage):
+                    raise RuntimeError("task retry instruction has an invalid type")
+                instruction_text = instructions.raw_text_content
+                if not instruction_text:
+                    raise RuntimeError("task retry instruction is empty")
+                if finish_only:
+                    recovery = (
+                        "The response after the tool result was empty. Use the tool "
+                        "result already in context. Do not repeat that operation or "
+                        "call another operation. Produce the task's next valid "
+                        "response now, using what the caller has already told you "
+                        "rather than asking again; call finish only if the task is "
+                        "complete."
+                        if attempt == 0
+                        else "The finish retry was also empty. This is the second "
+                        "retry. Use the existing tool result without repeating any "
+                        "operation. Produce the task's next valid response now; call "
+                        "finish only if the task is complete."
+                    )
+                else:
+                    # "Do not ask again" is the load-bearing half.
+                    #
+                    # Without it a retry points the model at the task instructions
+                    # and it restarts the script: observed on a live call, the
+                    # caller answered "tomorrow if possible", the response came
+                    # back empty, and the retry asked "what day would you like?"
+                    # again. The caller's turn is in the copied context the whole
+                    # time; the instruction just has to say to use it.
+                    recovery = (
+                        "The previous response was empty. Follow the current task "
+                        "instructions and produce its next valid response now. The "
+                        "caller's turns are already in context: use what they have "
+                        "already told you, and never ask again for something they "
+                        "have answered."
+                        if attempt == 0
+                        else "The prior retry was also empty. This is the second "
+                        "retry. Follow the current task instructions and produce "
+                        "its next non-empty valid response now, using what the "
+                        "caller has already said rather than asking again."
+                    )
+                request_chat_ctx.items[instructions_index] = instructions.model_copy(
+                    update={
+                        "content": [instruction_text + "\n\n" + recovery]
+                    }
+                )
+
+        logger.warning("task response stayed empty after two retries")
+        if finish_only:
+            yield (
+                "I couldn't finish after the last tool result. Please ask me to "
+                "check the current state before trying again."
+            )
+        else:
+            yield "Sorry, I couldn't complete that. Please try again."
+
+
+class ConfirmBooking(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
+    """The confirm_booking step, compiled from its entry in agent.yaml."""
+
+    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+        """Build the step.
+
+        Args:
+            chat_ctx: The conversation the step starts from.
+        """
+        super().__init__(instructions=CONFIRM_BOOKING_PROMPT, chat_ctx=chat_ctx)
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
+        self._response_tool_call_ids: set[str] = set()
+        # The call id of the ending that committed. A group reads it to fill its
+        # own tool output, and a handoff called beside a terminal tool reads it
+        # to know whether the step's work actually landed.
+        self._finish_call_id: str | None = None
+
+    async def on_enter(self) -> None:
+        """Open this step's turn as it is entered."""
+        await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
+        # The task's own instructions describe this step; let them drive the opening.
+        self.session.generate_reply()
+
+    @function_tool
+    async def send_confirmation(self, ctx: RunContext, name: Annotated[str, Field(description="The name the booking is under")], phone: Annotated[str, Field(description="Caller phone number in E.164 form")], summary: Annotated[str, Field(description="One-line summary of the booking to include")]) -> dict:
+        """Send the caller a confirmation text for their booking. Call only after the caller has agreed to receive it."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                os.environ["SEND_CONFIRMATION_URL"],
+                json={"name": name, "phone": phone, "summary": summary},
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    @function_tool
+    async def finish(self, ctx: RunContext, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> str | None:
+        """Save this step's values and finish, or return unserved without saving."""
+        if self.done():
+            return
+        try:
+            _values = _save_result("confirm_booking", ctx.userdata, {"unserved_request": unserved_request})
+        except _StateRefused as refused:
+            logger.warning("finish %s: %s", "confirm_booking", refused.message)
+            return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+        dev_metrics.dev_task_finished(ctx, _values)
+        self.complete(_values)
+        self._finish_call_id = ctx.function_call.call_id
+
+class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
+    """The find_slot step, compiled from its entry in agent.yaml."""
+
+    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, speak_opening: bool = False) -> None:
+        """Build the step.
+
+        Args:
+            chat_ctx: The conversation the step starts from.
+            speak_opening: Say the step's announcement as it is entered.
+        """
+        super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx)
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
+        # A group step speaks its own `announce:` as it is entered. A delegate
+        # says it at the seam instead, before this class is even built, so the
+        # caller of a standalone entry leaves this False and nothing says it
+        # twice.
+        self._speak_opening = speak_opening
+        self._response_tool_call_ids: set[str] = set()
+        # The call id of the ending that committed. A group reads it to fill its
+        # own tool output, and a handoff called beside a terminal tool reads it
+        # to know whether the step's work actually landed.
+        self._finish_call_id: str | None = None
+
+    async def on_enter(self) -> None:
+        """Open this step's turn as it is entered."""
+        await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
+        # Said here, not at the seam, so it lands in this step's own context and
+        # the model can see the sentence it just spoke. Not awaited: the opening
+        # request runs while it plays.
+        if self._speak_opening:
+            dev_say(self.session, _announce("task:find_slot", ["Let me see what is open.", "One moment, let me look at the book."]))
+        # The task's own instructions describe this step; let them drive the opening.
+        self.session.generate_reply()
+
+    @function_tool
+    async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date, e.g. 2026-08-14")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:
+        """Find open table times for a date and party size. Returns the available time slots."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                os.environ["CHECK_AVAILABILITY_URL"],
+                json={"date": date, "party_size": party_size},
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    @function_tool
+    async def finish(self, ctx: RunContext, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> str | None:
+        """Save this step's values and finish, or return unserved without saving."""
+        if self.done():
+            return
+        try:
+            _values = _save_result("find_slot", ctx.userdata, {"unserved_request": unserved_request})
+        except _StateRefused as refused:
+            logger.warning("finish %s: %s", "find_slot", refused.message)
+            return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+        dev_metrics.dev_task_finished(ctx, _values)
+        self.complete(_values)
+        self._finish_call_id = ctx.function_call.call_id
+
+class QualifyEvent(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
+    """The qualify_event step, compiled from its entry in agent.yaml."""
+
+    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+        """Build the step.
+
+        Args:
+            chat_ctx: The conversation the step starts from.
+        """
+        super().__init__(instructions=QUALIFY_EVENT_PROMPT, chat_ctx=chat_ctx)
+        if isinstance(chat_ctx, llm.ChatContext):
+            self._chat_ctx = chat_ctx.copy()
+        self._response_tool_call_ids: set[str] = set()
+        # The call id of the ending that committed. A group reads it to fill its
+        # own tool output, and a handoff called beside a terminal tool reads it
+        # to know whether the step's work actually landed.
+        self._finish_call_id: str | None = None
+
+    async def on_enter(self) -> None:
+        """Open this step's turn as it is entered."""
+        await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
+        # The task's own instructions describe this step; let them drive the opening.
+        self.session.generate_reply()
+
+    @function_tool
+    async def finish(self, ctx: RunContext, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> str | None:
+        """Save this step's values and finish, or return unserved without saving."""
+        if self.done():
+            return
+        try:
+            _values = _save_result("qualify_event", ctx.userdata, {"unserved_request": unserved_request})
+        except _StateRefused as refused:
+            logger.warning("finish %s: %s", "qualify_event", refused.message)
+            return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
+        dev_metrics.dev_task_finished(ctx, _values)
+        self.complete(_values)
+        self._finish_call_id = ctx.function_call.call_id
+=== call.py ===
+"""One call: warming the worker, building the session, and wiring the call."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+
+from livekit.agents import (
+    AgentSession,
+    APIConnectOptions,
+    JobContext,
+    JobProcess,
+    TurnHandlingOptions,
+    UserStateChangedEvent,
+    inference,
+    metrics,
+)
+from livekit.agents.voice import MetricsCollectedEvent
+from livekit.agents.voice.agent_session import SessionConnectOptions
+from livekit.plugins import openai, silero, slng
+
+from agents import Greeter
+from session import (
+    Userdata,
+    _dispatched_call_start,
+    _hydrate_call_start,
+    _livekit_job_metadata,
+)
+from settings import require_env
+from utils.dev_metrics import install_dev_metrics
+from utils.tracing import setup_langfuse
+
+# The loop keeps only a weak reference to a task, so a timer nobody holds can be
+# collected before it fires. Each one is held here until it finishes.
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+
+
+def prewarm(proc: JobProcess) -> None:
+    """Load what every call needs once, before the worker accepts a job.
+
+    Args:
+        proc: The worker process being warmed.
+    """
+    # The FLOOR: how long silence has to last before the runtime treats the
+    # caller as finished. From pace: balanced.
+    #
+    # Always explicit. Leaving it off inherited Silero's own 0.55s, which is
+    # slower than the turn detector wants and was never anybody's choice. Hard
+    # floor is 0.25s; the turn detector raises at session start below it.
+    #
+    # Lowering this alone does not shorten a turn. The ceiling is in the session's
+    # turn_handling endpointing below, and that is where a 2.5s turn came from.
+    proc.userdata["vad"] = silero.VAD.load(min_silence_duration=0.3)
+
+
+
+async def run_call(ctx: JobContext) -> None:
+    """Run one call: build the session, start the entry agent and wire the call.
+
+    Args:
+        ctx: The job LiveKit dispatched for this call.
+    """
+    require_env()
+    session = AgentSession[Userdata](
+        userdata=Userdata(),
+        # One retry, not the framework's three. A failed completion is retried
+        # four times by default with 0.1 + 2.0 + 2.0 seconds of sleep between the
+        # attempts, on top of four round trips to the provider: a live call on
+        # 2026-09-16 (trace 917975e9) spent 18.5 seconds in two of those and the
+        # caller asked whether anybody was still there.
+        #
+        # A caller cannot wait that out, and a retry loop tuned for a batch job
+        # is the wrong default for a conversation. One retry still covers a
+        # transient fault and costs 0.1s, because the first retry is nearly
+        # immediate; anything worse is better surfaced than slept through.
+        #
+        # ponytail: fixed, not authorable. No package would want a different
+        # number, and the one that does can say so when it turns up.
+        conn_options=SessionConnectOptions(
+            llm_conn_options=APIConnectOptions(max_retry=1),
+        ),
+        stt=slng.STT(api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3-en"),
+        llm=openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o-mini", temperature=0.4),
+        tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-thalia-en", model="slng/deepgram/aura:2-en"),
+        turn_handling=TurnHandlingOptions(
+            turn_detection=inference.TurnDetector(version="v1-mini"),
+            # The CEILING, and the shortest wait the runtime will consider.
+            # pace: balanced. Without this the streaming defaults apply and
+            # max_delay is 2.5s, which no package could reach.
+            endpointing={"mode": "dynamic", "min_delay": 0.3, "max_delay": 1.6},
+            interruption={"enabled": True},
+            preemptive_generation={"enabled": True},
+        ),
+        vad=ctx.proc.userdata["vad"],
+        user_away_timeout=15,
+    )
+
+
+    setup_langfuse(
+        ctx,
+        session,
+        metadata={
+            "langfuse.session.id": ctx.room.name,
+            "langfuse.trace.name": "greeter" + "-" + "remy-fixture-livekit",
+        },
+    )
+
+
+    # Inert unless the dev loop set UNMUTE_DEV_METRICS. Reads session events, so
+    # it never touches the tracer provider an opt-in trace export would own.
+    install_dev_metrics(session, call_id=ctx.room.name)
+
+    @session.on("metrics_collected")
+    def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
+        metrics.log_metrics(ev.metrics)
+
+    async def _end_if_still_away() -> None:
+        await asyncio.sleep(30)  # inactivity.end_after
+        if session.user_state == "away":
+            session.shutdown()
+
+    @session.on("user_state_changed")
+    def _on_user_state_changed(ev: UserStateChangedEvent) -> None:
+        if ev.new_state != "away":
+            return
+        session.generate_reply(
+            instructions="The caller went quiet. Briefly check whether they are still there."
+        )
+        _timer = asyncio.create_task(_end_if_still_away())
+        _BACKGROUND_TASKS.add(_timer)
+        _timer.add_done_callback(_BACKGROUND_TASKS.discard)
+
+    # Input variables land before the session starts, so the greeting and the
+    # prompts already see them (I.dispatch).
+    _hydrate_call_start(session.userdata, _dispatched_call_start(_livekit_job_metadata(ctx.job.metadata)))
+    await session.start(agent=Greeter(initial=True), room=ctx.room)
+    await ctx.connect()
+
+    async def _max_duration() -> None:
+        await asyncio.sleep(1200)
+        session.shutdown()  # conversation.max_duration
+
+    _timer = asyncio.create_task(_max_duration())
+    _BACKGROUND_TASKS.add(_timer)
+    _timer.add_done_callback(_BACKGROUND_TASKS.discard)
+=== compile-report.json ===
+{
+  "target": "livekit",
+  "provider": "livekit",
+  "version": "1.8.1",
+  "supported": {
+    "floor": "1.8.1",
+    "ceiling": "1.8.1",
+    "verified": "2026-09-13"
+  },
+  "entry_agent": "Greeter",
+  "agents": [
+    "events",
+    "greeter",
+    "reservations"
+  ],
+  "tasks": [
+    "confirm_booking",
+    "find_slot",
+    "qualify_event"
+  ],
+  "generated_files": [
+    ".dockerignore",
+    ".env.example",
+    "Dockerfile",
+    "README.md",
+    "agent.py",
+    "agents.py",
+    "call.py",
+    "compile-report.json",
+    "compose.dev.yaml",
+    "prompts/__init__.py",
+    "prompts/events.md",
+    "prompts/greeter.md",
+    "prompts/reservations.md",
+    "prompts/tasks/confirm_booking.md",
+    "prompts/tasks/find_slot.md",
+    "prompts/tasks/qualify_event.md",
+    "pyproject.toml",
+    "session.py",
+    "settings.py",
+    "utils/__init__.py",
+    "utils/context.py",
+    "utils/dev_metrics.py",
+    "utils/tracing.py"
+  ],
+  "required_env": [
+    "CHECK_AVAILABILITY_URL",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "LIVEKIT_API_KEY",
+    "LIVEKIT_API_SECRET",
+    "LIVEKIT_URL",
+    "OPENAI_API_KEY",
+    "SEND_CONFIRMATION_URL",
+    "SLNG_API_KEY"
+  ],
+  "bindings": [
+    {
+      "target": "livekit",
+      "role": "listen",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/nova:3-en",
+        "placement": "api"
+      }
+    },
+    {
+      "target": "livekit",
+      "role": "turn",
+      "binding": {
+        "provider": "livekit",
+        "model": "turn-detector-mini",
+        "placement": "api"
+      }
+    },
+    {
+      "target": "livekit",
+      "role": "speak",
+      "profile": "desk",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/aura:2-en",
+        "voice": "aura-2-orion-en",
+        "placement": "api"
+      }
+    },
+    {
+      "target": "livekit",
+      "role": "speak",
+      "profile": "host",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/aura:2-en",
+        "voice": "aura-2-thalia-en",
+        "placement": "api"
+      }
+    },
+    {
+      "target": "livekit",
+      "role": "reason",
+      "profile": "reasoning",
+      "binding": {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "placement": "api",
+        "params": {
+          "temperature": 0.4
+        }
+      }
+    }
+  ],
+  "sizing": [
+    {
+      "target": "livekit",
+      "metric": "workers",
+      "value": "40",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    },
+    {
+      "target": "livekit",
+      "metric": "gpus",
+      "value": "0",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    },
+    {
+      "target": "livekit",
+      "metric": "provider_concurrency_quota.realtime_audio",
+      "value": "20",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    },
+    {
+      "target": "livekit",
+      "metric": "provider_session_time_quota.realtime_audio",
+      "value": "1h20m0s",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    }
+  ],
+  "variables": [
+    {
+      "name": "caller_phone",
+      "type": "string",
+      "has_default": false
+    }
+  ],
+  "notes": [
+    "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.8.1, verified 2026-07-15)",
+    "reason: openai via openai.LLM (livekit-agents[openai], verified 2026-07-18)",
+    "speak: slng via slng.TTS (livekit-plugins-slng\u003e=1.8.1, verified 2026-07-15)",
+    "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory",
+    "turn pace balanced (silence 0.3s from the pace, closes at 1.6s)"
+  ]
+}
+=== compose.dev.yaml ===
+# Generated local-development topology. Not a production deployment model.
+# `unmute dev` builds and runs this: the same worker image production deploys,
+# talking to a single-node dev livekit-server over WebRTC in the browser. The
+# devkey/secret pair is the LiveKit --dev placeholder, never for production.
+services:
+  livekit_server:
+    image: livekit/livekit-server:v1.13.4
+    # Single-node dev server needs no external store (Redis only turns on
+    # distributed mode). Browser WebRTC through Docker Desktop needs three
+    # published ports: 7880 (signal/WS), 7881 (ICE/TCP fallback) and one UDP
+    # mux port 7882; the default 50000-60000 range is impractical to publish.
+    # --node-ip advertises a host-reachable ICE candidate instead of the
+    # container's internal IP. Verified against LiveKit self-hosting docs,
+    # config-sample.yaml and the server CLI on 2026-07-22.
+    command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1", "--rtc.tcp_port", "${LIVEKIT_TCP_HOST_PORT:-7881}", "--udp-port", "${LIVEKIT_UDP_HOST_PORT:-7882}"]
+    ports:
+      - "${LIVEKIT_HOST_PORT:-7880}:7880"
+      - "${LIVEKIT_TCP_HOST_PORT:-7881}:${LIVEKIT_TCP_HOST_PORT:-7881}"
+      - "${LIVEKIT_UDP_HOST_PORT:-7882}:${LIVEKIT_UDP_HOST_PORT:-7882}/udp"
+    # The `unmute dev` process that started this stack. The next run stops a
+    # stack whose process is gone; a stack started by hand has no pid and is
+    # left alone.
+    labels:
+      - "unmute.dev.pid=${UNMUTE_DEV_PID:-}"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  application:
+    build:
+      context: .
+    # The worker runs through livekit-agents' supported module CLI. The older
+    # per-script run modes are deprecated upstream and print a warning on every
+    # run; the colored format is for a human watching `unmute dev`.
+    command: ["python", "-m", "livekit.agents", "start", "agent.py", "--log-format", "colored"]
+    environment:
+      - LIVEKIT_URL=ws://livekit_server:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=secret
+      - CHECK_AVAILABILITY_URL
+      - LANGFUSE_BASE_URL
+      - LANGFUSE_PUBLIC_KEY
+      - LANGFUSE_SECRET_KEY
+      - OPENAI_API_KEY
+      - SEND_CONFIRMATION_URL
+      - SLNG_API_KEY
+      # optional: set by `unmute dev`; absent otherwise
+      - UNMUTE_CALL_START
+      # optional: set by `unmute dev`; absent otherwise
+      - UNMUTE_DEV_METRICS
+      # optional: set by `unmute dev`; absent otherwise
+      - UNMUTE_LOCAL_RUN
+    labels:
+      - "unmute.dev.pid=${UNMUTE_DEV_PID:-}"
+    depends_on:
+      livekit_server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('livekit_server', 7880), timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+=== prompts/__init__.py ===
+"""The system prompts, one Markdown file each beside this module.
+
+Each file is read once, at import. A prompt's placeholders are filled from the
+call's state where it is used, never here.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+_HERE = Path(__file__).parent
+
+
+def load(name: str) -> str:
+    """Read one prompt exactly as the package wrote it.
+
+    Args:
+        name: The prompt's file name, without the `.md` suffix.
+
+    Returns:
+        The prompt text.
+    """
+    return (_HERE / f"{name}.md").read_text(encoding="utf-8")
+
+
+EVENTS_PROMPT = load("events")
+GREETER_PROMPT = load("greeter")
+RESERVATIONS_PROMPT = load("reservations")
+CONFIRM_BOOKING_PROMPT = load("tasks/confirm_booking")
+FIND_SLOT_PROMPT = load("tasks/find_slot")
+QUALIFY_EVENT_PROMPT = load("tasks/qualify_event")
+=== prompts/events.md ===
+# Private events
 
 You are Remy, now helping the caller plan a private event. Use what they have already said. Keep every turn to one or two short sentences.
 
@@ -520,9 +1709,8 @@ You are Remy, now helping the caller plan a private event. Use what they have al
 - If the caller actually wants a normal table, or wants to start over, use `back_to_greeter`.
 
 Do not greet again or re-introduce yourself.
-"""
-
-GREETER_PROMPT = """# Remy, the greeter
+=== prompts/greeter.md ===
+# Remy, the greeter
 
 You are Remy, the phone concierge for Fern and Oak, a small restaurant group. This is a voice call, so keep every turn to one or two short sentences and ask one thing at a time.
 
@@ -533,9 +1721,8 @@ Your only job is to greet the caller and send them to the right place.
 - If it is unclear, ask one short question: "Is this for a table, or a private event?"
 
 Do not take dates, names, or numbers yourself. Hand off as soon as the intent is clear, in one natural line, without telling the caller they are being transferred. They stay with Remy for the whole call.
-"""
-
-RESERVATIONS_PROMPT = """# Reservations
+=== prompts/reservations.md ===
+# Reservations
 
 You are Remy, now helping the caller book a table. Use what they have already said. Keep every turn to one or two short sentences.
 
@@ -544,9 +1731,8 @@ You are Remy, now helping the caller book a table. Use what they have already sa
 - If the caller actually wants a private event, or wants to start over, use `back_to_greeter`.
 
 Do not greet again or re-introduce yourself.
-"""
-
-CONFIRM_BOOKING_PROMPT = """# Confirm and send
+=== prompts/tasks/confirm_booking.md ===
+# Confirm and send
 
 You are handling only the confirmation for this caller. Work one question per turn.
 
@@ -560,9 +1746,9 @@ If the caller declines, send nothing and finish. Do not promise anything beyond 
 
 When this step is complete, call `finish`.
 
-`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there."""
-
-FIND_SLOT_PROMPT = """# Find a table
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.
+=== prompts/tasks/find_slot.md ===
+# Find a table
 
 You are handling only the table search for this caller. Work one question per turn.
 
@@ -576,9 +1762,9 @@ Never promise a table that check_availability did not return. If nothing is open
 
 When this step is complete, call `finish`.
 
-`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there."""
-
-QUALIFY_EVENT_PROMPT = """# Qualify a private event
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.
+=== prompts/tasks/qualify_event.md ===
+# Qualify a private event
 
 You are handling only the event details for this caller. Work one question per turn.
 
@@ -591,43 +1777,51 @@ When you have all three, record them and finish. Do not quote prices, menus, or 
 
 When this step is complete, call `finish`.
 
-`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there."""
-
-# --- required environment ----------------------------------------------------
-# Everything this agent needs to run: the model providers' keys, the connection
-# to the orchestrator, every address and token a tool or MCP source names, and
-# anything else the package declared. Derived from what the compiler knows it
-# requires rather than from the author's `secrets:` block, so a package that
-# declares nothing still refuses to start without them. A missing one fails the
-# session before the agent answers, rather than at the first tool call.
-#
-# The phone route's own credentials are deliberately absent: one file serves
-# every channel, and demanding carrier credentials would refuse a browser
-# session on a phone package. They are listed in .env.example and the runbook.
-REQUIRED_ENV = [
-    "CHECK_AVAILABILITY_URL",
-    "LANGFUSE_BASE_URL",
-    "LANGFUSE_PUBLIC_KEY",
-    "LANGFUSE_SECRET_KEY",
-    "LIVEKIT_API_KEY",
-    "LIVEKIT_API_SECRET",
-    "LIVEKIT_URL",
-    "OPENAI_API_KEY",
-    "SEND_CONFIRMATION_URL",
-    "SLNG_API_KEY",
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.
+=== pyproject.toml ===
+[project]
+name = "unmute-remy-fixture"
+version = "0.1.0"
+description = "Generated LiveKit Agents project (unmute livekit driver)"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx",
+    "langfuse>=4,<5",
+    "livekit-agents[openai]==1.8.1",
+    "livekit-plugins-silero>=1.8.1",
+    "livekit-plugins-slng>=1.8.1",
+    "opentelemetry-sdk>=1.33,<2",
+    "python-dotenv",
 ]
 
+[dependency-groups]
+dev = ["ruff==0.15.7", "ty"]
 
-def require_env() -> None:
-    """Refuse to start a session when a required variable is unset.
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "PERF", "FURB", "RUF", "BLE", "D", "ANN"]
+ignore = ["E501", "ANN401", "RUF001", "RUF002", "RUF003"]
 
-    Raises:
-        RuntimeError: Naming every unset variable in REQUIRED_ENV.
-    """
-    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
-    if missing:
-        raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
+[tool.ruff.lint.per-file-ignores]
+"tools/*" = ["D", "ANN"]
+"logic/*" = ["D", "ANN"]
+
+[tool.ty.environment]
+python-version = "3.11"
+=== session.py ===
+"""The call's state: its typed variables, how they are read, and what is known first."""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+
+from pydantic import BaseModel, TypeAdapter, ValidationError
+
+from settings import logger
 
 # --- declared state ----------------------------------------------------------
 # Generated from the `shapes:` and the typed `variables:` in agent.yaml. Both
@@ -1147,24 +2341,73 @@ def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
     if "caller_phone" in values:
         userdata.caller_phone = values["caller_phone"]
     return None
+=== settings.py ===
+"""Every fixed value this agent runs with, in one place.
+
+Compiled from the package: names, limits, timeouts, the environment variables
+each kind of session needs, and the logger every module writes to. Nothing here
+reads a secret.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+
+logger = logging.getLogger("remy-fixture")
+logger.setLevel(logging.INFO)
 
 
-class _GroupStop(Exception):
-    """Internal signal that a group step ended unserved, so the group stops.
+# --- required environment ----------------------------------------------------
+# Everything this agent needs to run: the model providers' keys, the connection
+# to the orchestrator, every address and token a tool or MCP source names, and
+# anything else the package declared. Derived from what the compiler knows it
+# requires rather than from the author's `secrets:` block, so a package that
+# declares nothing still refuses to start without them. A missing one fails the
+# session before the agent answers, rather than at the first tool call.
+#
+# The phone route's own credentials are deliberately absent: one file serves
+# every channel, and demanding carrier credentials would refuse a browser
+# session on a phone package. They are listed in .env.example and the runbook.
+REQUIRED_ENV = [
+    "CHECK_AVAILABILITY_URL",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "LIVEKIT_API_KEY",
+    "LIVEKIT_API_SECRET",
+    "LIVEKIT_URL",
+    "OPENAI_API_KEY",
+    "SEND_CONFIRMATION_URL",
+    "SLNG_API_KEY",
+]
 
-    Raised from the completion callback, which the framework runs inside its own
-    try: the group completes with this exception and it comes back out of
-    `await group`, with the results the group had reached.
+
+def require_env() -> None:
+    """Refuse to start a session when a required variable is unset.
+
+    Raises:
+        RuntimeError: Naming every unset variable in REQUIRED_ENV.
     """
+    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
 
-    def __init__(self, results: dict) -> None:
-        """Carry the results the group reached.
 
-        Args:
-            results: Each finished step's result, by step id.
-        """
-        super().__init__()
-        self.results = results
+# The first request plus two retries, when a task's model answers with nothing.
+_TASK_MAX_ATTEMPTS = 3
+
+
+# How long a warm process may take to start, knowledge indexing included.
+LOCAL_INIT_TIMEOUT_SECS = 60.0
+=== utils/__init__.py ===
+"""Helpers the agent's modules share."""
+=== utils/context.py ===
+"""Shape the conversation a step or an agent is handed."""
+
+from __future__ import annotations
+
+from livekit.agents import llm
 
 
 def _caller_turns(chat_ctx: llm.ChatContext) -> int:
@@ -1182,1099 +2425,7 @@ def _caller_turns(chat_ctx: llm.ChatContext) -> int:
         The number of caller messages.
     """
     return sum(1 for message in chat_ctx.messages() if message.role == "user")
-
-
-async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent, flow: dict) -> None:
-    """Fill LiveKit's empty task tool output before the next shared task.
-
-    `flow` is the delegate's own record of the run: the results it has reached,
-    and any caller turn a step consumed. The group's own results are not
-    readable from here, and a group that stops early has to hand back what it
-    did do.
-
-    Args:
-        group: The running group.
-        event: The step that just completed.
-        flow: The delegate's record of the run.
-
-    Raises:
-        RuntimeError: The completed step left no usable finish output.
-    """
-    flow["results"][event.task_id] = event.result
-    flow["carried"].append(getattr(event.agent_task, "_carried_turn", None))
-    finish_call_id = getattr(event.agent_task, "_finish_call_id", None)
-    if finish_call_id is None:
-        raise RuntimeError("completed task has no successful finish call")
-    task_output = next(
-        (
-            item
-            for item in reversed(event.agent_task.chat_ctx.items)
-            if isinstance(item, llm.FunctionCallOutput)
-            and item.name == "finish"
-            and not item.is_error
-            and item.call_id == finish_call_id
-        ),
-        None,
-    )
-    if task_output is None:
-        raise RuntimeError("completed task has no matching successful finish output")
-
-    shared_ctx = group.chat_ctx.copy()
-    shared_output = shared_ctx.get_by_id(task_output.id)
-    if shared_output is None:
-        raise RuntimeError("completed task finish output is absent from its group")
-    if not isinstance(shared_output, llm.FunctionCallOutput):
-        raise RuntimeError("completed task finish output has an invalid type")
-    if (
-        shared_output.name != task_output.name
-        or shared_output.call_id != task_output.call_id
-        or shared_output.is_error
-    ):
-        raise RuntimeError("completed task finish output changed identity")
-
-    shared_ctx.remove(shared_output)
-    shared_ctx.insert(
-        shared_output.model_copy(
-            update={
-                "output": json.dumps(
-                    _task_status(event.result),
-                    sort_keys=True,
-                )
-            }
-        )
-    )
-
-    await group.update_chat_ctx(
-        shared_ctx,
-        exclude_invalid_function_calls=False,
-    )
-    if isinstance(event.result, dict) and event.result.get("unserved_request"):
-        # The step could not serve what the caller asked. Running the next one
-        # would answer a question nobody asked, so the group stops here and the
-        # owner is handed the unserved status with the results so far.
-        logger.info("group stopped: " + event.task_id + " ended unserved")
-        raise _GroupStop(dict(flow["results"]))
-
-
-# --- agents ----------------------------------------------------------------
-
-class Events(Agent):
-    """The events agent, compiled from its entry in agent.yaml."""
-
-    def tts_node(
-        self, text: AsyncIterable[str], model_settings: ModelSettings
-    ) -> AsyncIterable[rtc.AudioFrame]:
-        """Synthesize speech through the dev feed's wrapper.
-
-        Args:
-            text: The text to speak.
-            model_settings: The framework's per-turn model settings.
-
-        Returns:
-            The synthesized audio frames.
-        """
-        return dev_metrics.dev_tts_node(self, text, model_settings)
-
-    def llm_node(
-        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
-    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
-        """Ask the model, through the dev feed's wrapper.
-
-        Args:
-            chat_ctx: The conversation to send.
-            tools: The tools the model may call.
-            model_settings: The framework's per-turn model settings.
-
-        Returns:
-            The model's chunks.
-        """
-        return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
-
-    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
-        """Build the agent.
-
-        Args:
-            chat_ctx: The conversation a handoff carries in.
-        """
-        super().__init__(
-            instructions=EVENTS_PROMPT,
-            chat_ctx=chat_ctx,
-            tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-orion-en", model="slng/deepgram/aura:2-en"),
-        )
-        if isinstance(chat_ctx, llm.ChatContext):
-            self._chat_ctx = chat_ctx.copy()
-
-    async def on_enter(self) -> None:
-        """Open this agent's turn as it takes over the call."""
-        # This agent took over via handoff; let its own instructions drive the
-        # opening (the prompt already says not to re-greet).
-        # This opening turn withholds the agent's own handoffs (B3: an agent that can
-        # hand the call back before it has said anything ping-pongs). The framework's
-        # on-enter tool flag would hide them for the rest of the call instead, because
-        # its filter follows the context of everything this reply starts: a live call
-        # offered one specialist nothing but its delegate for ten turns while the
-        # caller asked for another one (B: salon handoffs, 2026-08-20).
-        self.session.generate_reply(tools=[t.id for t in self.tools if t.id != "back_to_greeter"])
-
-    @function_tool
-    async def back_to_greeter(self, ctx: RunContext) -> Agent:
-        """Caller wants something else, or to start over."""
-        return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
-
-    @function_tool
-    async def do_event(self, ctx: RunContext) -> dict:
-        """The caller is ready to plan their event; run the events flow. When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. A completed status means the step finished. Read any saved values through your own prompt references. An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."""
-        # Already ran, and nobody has spoken since. Then this is not a second
-        # request, it is the model reading its own completed result as though it
-        # were one, and running the whole thing again is the worst possible
-        # answer: on a live call on 2026-09-16 (trace 917975e9) a booking saved,
-        # the flow re-entered on the caller's own "3 o'clock" still sitting
-        # above the result, read the diary twice more, and the last thing the
-        # caller heard was an agent saying it was off to check the diary.
-        #
-        # Refused here rather than asked for in the prompt, which this package
-        # did twice and which failed twice. The announcement is below this, so a
-        # refused call speaks nothing at all.
-        if _caller_turns(self.chat_ctx) == getattr(self, "_ran_at_do_event", None):
-            return {
-                "refused": "This already ran and finished, and the caller has "
-                "not spoken since, so its result is the answer to what they "
-                "asked. Reply to them from the values in your prompt. Run it "
-                "again only once they have asked for something new."
-            }
-        owner_ctx = self.chat_ctx.copy()
-        # What the group reached, recorded as it goes: a group that stops early
-        # still owes the owner the steps it did run.
-        _flow = {"results": {}, "carried": []}
-        try:
-            group = TaskGroup(
-                summarize_chat_ctx=False,
-                on_task_completed=lambda event: _share_task_result(group, event, _flow),
-            )
-            await group.update_chat_ctx(owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True), exclude_invalid_function_calls=False)
-            group.add(lambda: QualifyEvent(), id="qualify_event", description="qualify event")
-            group.add(lambda: ConfirmBooking(), id="confirm_booking", description="confirm booking")
-            result = await group
-            task_results = result.task_results
-        except _GroupStop as stop:
-            task_results = stop.results
-        finally:
-            await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
-            # Counted after the restore, so a turn a step consumed and carried
-            # back is included: that turn is the one the owner is about to read,
-            # and it is exactly the turn that must not be mistaken for a new
-            # request. Set in the finally so a step that raised still blocks an
-            # immediate retry the caller did not ask for.
-            self._ran_at_do_event = _caller_turns(self.chat_ctx)
-        dev_metrics.dev_task_returned(ctx, *task_results.values())
-        return _group_status(task_results)
-
-
-class Greeter(Agent):
-    """The greeter agent, compiled from its entry in agent.yaml."""
-
-    def tts_node(
-        self, text: AsyncIterable[str], model_settings: ModelSettings
-    ) -> AsyncIterable[rtc.AudioFrame]:
-        """Synthesize speech through the dev feed's wrapper.
-
-        Args:
-            text: The text to speak.
-            model_settings: The framework's per-turn model settings.
-
-        Returns:
-            The synthesized audio frames.
-        """
-        return dev_metrics.dev_tts_node(self, text, model_settings)
-
-    def llm_node(
-        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
-    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
-        """Ask the model, through the dev feed's wrapper.
-
-        Args:
-            chat_ctx: The conversation to send.
-            tools: The tools the model may call.
-            model_settings: The framework's per-turn model settings.
-
-        Returns:
-            The model's chunks.
-        """
-        return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
-
-    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, initial: bool = False) -> None:
-        """Build the agent.
-
-        Args:
-            chat_ctx: The conversation a handoff carries in.
-            initial: True for the call's first agent, which greets the caller.
-        """
-        self._initial = initial
-        super().__init__(
-            instructions=GREETER_PROMPT,
-            chat_ctx=chat_ctx,
-        )
-        if isinstance(chat_ctx, llm.ChatContext):
-            self._chat_ctx = chat_ctx.copy()
-
-    async def on_enter(self) -> None:
-        """Open this agent's turn as it takes over the call."""
-        if not self._initial:
-        # This opening turn withholds the agent's own handoffs (B3: an agent that can
-        # hand the call back before it has said anything ping-pongs). The framework's
-        # on-enter tool flag would hide them for the rest of the call instead, because
-        # its filter follows the context of everything this reply starts: a live call
-        # offered one specialist nothing but its delegate for ten turns while the
-        # caller asked for another one (B: salon handoffs, 2026-08-20).
-            self.session.generate_reply(tools=[t.id for t in self.tools if t.id not in {"to_reservations", "to_events"}])
-            return
-        await dev_say(self.session, "Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?")
-
-    @function_tool
-    async def to_reservations(self, ctx: RunContext) -> Agent:
-        """Caller wants to book a table for a normal dine-in visit."""
-        return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
-
-    @function_tool
-    async def to_events(self, ctx: RunContext) -> Agent:
-        """Caller wants to plan a private event, party, or large group booking."""
-        return Events(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
-
-
-class Reservations(Agent):
-    """The reservations agent, compiled from its entry in agent.yaml."""
-
-    def tts_node(
-        self, text: AsyncIterable[str], model_settings: ModelSettings
-    ) -> AsyncIterable[rtc.AudioFrame]:
-        """Synthesize speech through the dev feed's wrapper.
-
-        Args:
-            text: The text to speak.
-            model_settings: The framework's per-turn model settings.
-
-        Returns:
-            The synthesized audio frames.
-        """
-        return dev_metrics.dev_tts_node(self, text, model_settings)
-
-    def llm_node(
-        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
-    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
-        """Ask the model, through the dev feed's wrapper.
-
-        Args:
-            chat_ctx: The conversation to send.
-            tools: The tools the model may call.
-            model_settings: The framework's per-turn model settings.
-
-        Returns:
-            The model's chunks.
-        """
-        return dev_llm_node(self, Agent.default.llm_node, chat_ctx, tools, model_settings)
-
-    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
-        """Build the agent.
-
-        Args:
-            chat_ctx: The conversation a handoff carries in.
-        """
-        super().__init__(
-            instructions=RESERVATIONS_PROMPT,
-            chat_ctx=chat_ctx,
-            tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-orion-en", model="slng/deepgram/aura:2-en"),
-        )
-        if isinstance(chat_ctx, llm.ChatContext):
-            self._chat_ctx = chat_ctx.copy()
-
-    async def on_enter(self) -> None:
-        """Open this agent's turn as it takes over the call."""
-        # This agent took over via handoff; let its own instructions drive the
-        # opening (the prompt already says not to re-greet).
-        # This opening turn withholds the agent's own handoffs (B3: an agent that can
-        # hand the call back before it has said anything ping-pongs). The framework's
-        # on-enter tool flag would hide them for the rest of the call instead, because
-        # its filter follows the context of everything this reply starts: a live call
-        # offered one specialist nothing but its delegate for ten turns while the
-        # caller asked for another one (B: salon handoffs, 2026-08-20).
-        self.session.generate_reply(tools=[t.id for t in self.tools if t.id != "back_to_greeter"])
-
-    @function_tool
-    async def back_to_greeter(self, ctx: RunContext) -> Agent:
-        """Caller wants something else, or to start over."""
-        return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
-
-    @function_tool
-    async def do_reserve(self, ctx: RunContext) -> dict:
-        """The caller is ready to book a table; run the reservation flow. When this flow finishes it returns a status. Continue with the caller. Do not run this flow again for the same request. A completed status means the step finished. Read any saved values through your own prompt references. An unserved status means the step could not help. Ask the caller what they need, then use your tools or a handoff."""
-        # Already ran, and nobody has spoken since. Then this is not a second
-        # request, it is the model reading its own completed result as though it
-        # were one, and running the whole thing again is the worst possible
-        # answer: on a live call on 2026-09-16 (trace 917975e9) a booking saved,
-        # the flow re-entered on the caller's own "3 o'clock" still sitting
-        # above the result, read the diary twice more, and the last thing the
-        # caller heard was an agent saying it was off to check the diary.
-        #
-        # Refused here rather than asked for in the prompt, which this package
-        # did twice and which failed twice. The announcement is below this, so a
-        # refused call speaks nothing at all.
-        if _caller_turns(self.chat_ctx) == getattr(self, "_ran_at_do_reserve", None):
-            return {
-                "refused": "This already ran and finished, and the caller has "
-                "not spoken since, so its result is the answer to what they "
-                "asked. Reply to them from the values in your prompt. Run it "
-                "again only once they have asked for something new."
-            }
-        owner_ctx = self.chat_ctx.copy()
-        # What the group reached, recorded as it goes: a group that stops early
-        # still owes the owner the steps it did run.
-        _flow = {"results": {}, "carried": []}
-        try:
-            group = TaskGroup(
-                summarize_chat_ctx=False,
-                on_task_completed=lambda event: _share_task_result(group, event, _flow),
-            )
-            await group.update_chat_ctx(owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True), exclude_invalid_function_calls=False)
-            group.add(lambda: FindSlot(speak_opening=True), id="find_slot", description="find slot")
-            group.add(lambda: ConfirmBooking(), id="confirm_booking", description="confirm booking")
-            result = await group
-            task_results = result.task_results
-        except _GroupStop as stop:
-            task_results = stop.results
-        finally:
-            await self.update_chat_ctx(owner_ctx, exclude_invalid_function_calls=False)
-            # Counted after the restore, so a turn a step consumed and carried
-            # back is included: that turn is the one the owner is about to read,
-            # and it is exactly the turn that must not be mistaken for a new
-            # request. Set in the finally so a step that raised still blocks an
-            # immediate retry the caller did not ask for.
-            self._ran_at_do_reserve = _caller_turns(self.chat_ctx)
-        dev_metrics.dev_task_returned(ctx, *task_results.values())
-        return _group_status(task_results)
-
-
-# --- tasks -----------------------------------------------------------------
-# The first request plus two retries, when a task's model answers with nothing.
-_TASK_MAX_ATTEMPTS = 3
-
-
-def _task_result(values: dict, unserved_request: str) -> dict:
-    """Add the unserved request to a step's result, if it named one.
-
-    A step that could not serve a request names it on the way out, so the agent
-    that owns the step reads it off the result and takes it from there.
-
-    Args:
-        values: The values the step recorded.
-        unserved_request: What the step could not serve, or an empty string.
-
-    Returns:
-        The values, with the unserved request added when there is one.
-    """
-    if not unserved_request:
-        return values
-    return {**values, "unserved_request": unserved_request}
-
-
-class _RetryEmptyTaskResponseMixin:
-    """Retry a task's model request when it comes back empty."""
-
-    _response_tool_call_ids: set[str]
-
-    def tts_node(
-        self, text: AsyncIterable[str], model_settings: ModelSettings
-    ) -> AsyncIterable[rtc.AudioFrame]:
-        """Synthesize speech through the dev feed's wrapper.
-
-        Args:
-            text: The text to speak.
-            model_settings: The framework's per-turn model settings.
-
-        Returns:
-            The synthesized audio frames.
-        """
-        return dev_metrics.dev_tts_node(self, text, model_settings)
-
-    async def update_chat_ctx(
-        self, chat_ctx: ChatContext, *, exclude_invalid_function_calls: bool = False
-    ) -> None:
-        """Replace the task's context, keeping tool records the task cannot run.
-
-        Args:
-            chat_ctx: The context to install.
-            exclude_invalid_function_calls: Drop calls whose tool is gone.
-        """
-        # History policy owns old tool records, including tools this task cannot run.
-        assert isinstance(self, Agent)
-        await Agent.update_chat_ctx(self, chat_ctx, exclude_invalid_function_calls=exclude_invalid_function_calls)
-
-    async def update_tools(self, tools: list[Tool | llm.Toolset]) -> None:
-        """Replace the task's tools without losing its context.
-
-        Args:
-            tools: The tools the task may call from now on.
-        """
-        assert isinstance(self, Agent)
-        history = self.chat_ctx.copy()
-        await Agent.update_tools(self, tools)
-        await self.update_chat_ctx(history, exclude_invalid_function_calls=False)
-
-    async def llm_node(
-        self, chat_ctx: ChatContext, tools: list[Tool], model_settings: ModelSettings
-    ) -> AsyncIterable[ChatChunk | str | FlushSentinel]:
-        """Ask the model, retrying up to twice when it answers with nothing.
-
-        Args:
-            chat_ctx: The conversation to send.
-            tools: The tools the model may call.
-            model_settings: The framework's per-turn model settings.
-
-        Yields:
-            The model's chunks, or a short apology when every attempt was empty.
-        """
-        # Every generated user of this mixin is an AgentTask; narrow that
-        # invariant here so the emitted project type-checks without a new base.
-        assert isinstance(self, Agent)
-        # ponytail: keyed on the SDK's own marker rather than the placeholder
-        # wording, and the emitted-code test is what catches it changing.
-        #
-        # The delegate that started this task is still running, so the framework
-        # injects that call plus a placeholder output reading "The tool call is
-        # still in progress." into the context (voice/generation.py,
-        # _inject_running_tool_calls). For the agent that made the call that is
-        # right: it stops the model re-issuing a call already in flight. A task
-        # is a different agent with a different prompt, and its opening turn
-        # reads an unfinished tool call it never made: it then answers with
-        # nothing, or apologises for a failure that did not happen, which the
-        # caller hears as the agent breaking. Reproduced on 3 of 3 scripted
-        # salon calls (B: task opened silent after delegate, 2026-08-21).
-        running_placeholders = {
-            item.call_id
-            for item in chat_ctx.items
-            if isinstance(item, llm.FunctionCall)
-            and item.extra.get("__lk_running_placeholder__")
-        }
-        if running_placeholders:
-            chat_ctx = chat_ctx.copy()
-            chat_ctx.items = [
-                item
-                for item in chat_ctx.items
-                if getattr(item, "call_id", None) not in running_placeholders
-            ]
-        completed_tool_call_ids = {
-            item.call_id
-            for item in chat_ctx.items
-            if isinstance(item, llm.FunctionCallOutput)
-            and item.call_id in self._response_tool_call_ids
-        }
-        post_tool = bool(completed_tool_call_ids)
-        finish_tool = llm.ToolContext(tools).get_function_tool("finish")
-        if finish_tool is None:
-            raise RuntimeError("task retry has no finish tool")
-        finish_only = False
-        request_tools: list[llm.Tool] = tools
-        request_chat_ctx = chat_ctx
-        for attempt in range(_TASK_MAX_ATTEMPTS):
-            has_response = False
-            async for chunk in dev_llm_node(
-                self, Agent.default.llm_node, request_chat_ctx, request_tools, model_settings
-            ):
-                if isinstance(chunk, str):
-                    has_response = has_response or bool(chunk.strip())
-                elif isinstance(chunk, llm.ChatChunk) and chunk.delta is not None:
-                    delta = chunk.delta
-                    tool_calls = delta.tool_calls or []
-                    if finish_only and tool_calls:
-                        allowed = [call for call in tool_calls if call.name == "finish"]
-                        if len(allowed) != len(tool_calls):
-                            logger.warning(
-                                "task post-tool reply tried another non-finish tool; "
-                                "ignoring it"
-                            )
-                            chunk = chunk.model_copy(
-                                update={
-                                    "delta": delta.model_copy(
-                                        update={"tool_calls": allowed}
-                                    )
-                                }
-                            )
-                            delta = chunk.delta
-                            if delta is None:
-                                raise RuntimeError("task retry lost its response delta")
-                            tool_calls = allowed
-                    self._response_tool_call_ids.update(
-                        call.call_id for call in tool_calls
-                    )
-                    has_response = has_response or bool(
-                        tool_calls or (delta.content or "").strip()
-                    )
-                yield chunk
-            if has_response:
-                self._response_tool_call_ids.difference_update(
-                    completed_tool_call_ids
-                )
-                return
-            if attempt < _TASK_MAX_ATTEMPTS - 1:
-                logger.warning(
-                    "task response was empty; retrying %d/%d", attempt + 1, _TASK_MAX_ATTEMPTS - 1
-                )
-
-                if attempt == 0 and post_tool:
-                    finish_only = True
-                    request_tools = [finish_tool]
-
-                # Copy the original each time. Responses API reuses a previous
-                # response when the context is unchanged, so each retry needs
-                # a distinct instruction as well as a fresh context object.
-                request_chat_ctx = chat_ctx.copy()
-                instructions_index = request_chat_ctx.index_by_id(
-                    "lk.agent_task.instructions"
-                )
-                if instructions_index is None:
-                    raise RuntimeError("task retry has no instruction message")
-                instructions = request_chat_ctx.items[instructions_index]
-                if not isinstance(instructions, llm.ChatMessage):
-                    raise RuntimeError("task retry instruction has an invalid type")
-                instruction_text = instructions.raw_text_content
-                if not instruction_text:
-                    raise RuntimeError("task retry instruction is empty")
-                if finish_only:
-                    recovery = (
-                        "The response after the tool result was empty. Use the tool "
-                        "result already in context. Do not repeat that operation or "
-                        "call another operation. Produce the task's next valid "
-                        "response now, using what the caller has already told you "
-                        "rather than asking again; call finish only if the task is "
-                        "complete."
-                        if attempt == 0
-                        else "The finish retry was also empty. This is the second "
-                        "retry. Use the existing tool result without repeating any "
-                        "operation. Produce the task's next valid response now; call "
-                        "finish only if the task is complete."
-                    )
-                else:
-                    # "Do not ask again" is the load-bearing half.
-                    #
-                    # Without it a retry points the model at the task instructions
-                    # and it restarts the script: observed on a live call, the
-                    # caller answered "tomorrow if possible", the response came
-                    # back empty, and the retry asked "what day would you like?"
-                    # again. The caller's turn is in the copied context the whole
-                    # time; the instruction just has to say to use it.
-                    recovery = (
-                        "The previous response was empty. Follow the current task "
-                        "instructions and produce its next valid response now. The "
-                        "caller's turns are already in context: use what they have "
-                        "already told you, and never ask again for something they "
-                        "have answered."
-                        if attempt == 0
-                        else "The prior retry was also empty. This is the second "
-                        "retry. Follow the current task instructions and produce "
-                        "its next non-empty valid response now, using what the "
-                        "caller has already said rather than asking again."
-                    )
-                request_chat_ctx.items[instructions_index] = instructions.model_copy(
-                    update={
-                        "content": [instruction_text + "\n\n" + recovery]
-                    }
-                )
-
-        logger.warning("task response stayed empty after two retries")
-        if finish_only:
-            yield (
-                "I couldn't finish after the last tool result. Please ask me to "
-                "check the current state before trying again."
-            )
-        else:
-            yield "Sorry, I couldn't complete that. Please try again."
-
-
-class ConfirmBooking(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
-    """The confirm_booking step, compiled from its entry in agent.yaml."""
-
-    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
-        """Build the step.
-
-        Args:
-            chat_ctx: The conversation the step starts from.
-        """
-        super().__init__(instructions=CONFIRM_BOOKING_PROMPT, chat_ctx=chat_ctx)
-        if isinstance(chat_ctx, llm.ChatContext):
-            self._chat_ctx = chat_ctx.copy()
-        self._response_tool_call_ids: set[str] = set()
-        # The call id of the ending that committed. A group reads it to fill its
-        # own tool output, and a handoff called beside a terminal tool reads it
-        # to know whether the step's work actually landed.
-        self._finish_call_id: str | None = None
-
-    async def on_enter(self) -> None:
-        """Open this step's turn as it is entered."""
-        await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
-        # The task's own instructions describe this step; let them drive the opening.
-        self.session.generate_reply()
-
-    @function_tool
-    async def send_confirmation(self, ctx: RunContext, name: Annotated[str, Field(description="The name the booking is under")], phone: Annotated[str, Field(description="Caller phone number in E.164 form")], summary: Annotated[str, Field(description="One-line summary of the booking to include")]) -> dict:
-        """Send the caller a confirmation text for their booking. Call only after the caller has agreed to receive it."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                os.environ["SEND_CONFIRMATION_URL"],
-                json={"name": name, "phone": phone, "summary": summary},
-            )
-            resp.raise_for_status()
-            return resp.json()
-
-    @function_tool
-    async def finish(self, ctx: RunContext, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> str | None:
-        """Save this step's values and finish, or return unserved without saving."""
-        if self.done():
-            return
-        try:
-            _values = _save_result("confirm_booking", ctx.userdata, {"unserved_request": unserved_request})
-        except _StateRefused as refused:
-            logger.warning("finish %s: %s", "confirm_booking", refused.message)
-            return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
-        dev_metrics.dev_task_finished(ctx, _values)
-        self.complete(_values)
-        self._finish_call_id = ctx.function_call.call_id
-
-class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
-    """The find_slot step, compiled from its entry in agent.yaml."""
-
-    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, speak_opening: bool = False) -> None:
-        """Build the step.
-
-        Args:
-            chat_ctx: The conversation the step starts from.
-            speak_opening: Say the step's announcement as it is entered.
-        """
-        super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx)
-        if isinstance(chat_ctx, llm.ChatContext):
-            self._chat_ctx = chat_ctx.copy()
-        # A group step speaks its own `announce:` as it is entered. A delegate
-        # says it at the seam instead, before this class is even built, so the
-        # caller of a standalone entry leaves this False and nothing says it
-        # twice.
-        self._speak_opening = speak_opening
-        self._response_tool_call_ids: set[str] = set()
-        # The call id of the ending that committed. A group reads it to fill its
-        # own tool output, and a handoff called beside a terminal tool reads it
-        # to know whether the step's work actually landed.
-        self._finish_call_id: str | None = None
-
-    async def on_enter(self) -> None:
-        """Open this step's turn as it is entered."""
-        await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
-        # Said here, not at the seam, so it lands in this step's own context and
-        # the model can see the sentence it just spoke. Not awaited: the opening
-        # request runs while it plays.
-        if self._speak_opening:
-            dev_say(self.session, _announce("task:find_slot", ["Let me see what is open.", "One moment, let me look at the book."]))
-        # The task's own instructions describe this step; let them drive the opening.
-        self.session.generate_reply()
-
-    @function_tool
-    async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date, e.g. 2026-08-14")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:
-        """Find open table times for a date and party size. Returns the available time slots."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                os.environ["CHECK_AVAILABILITY_URL"],
-                json={"date": date, "party_size": party_size},
-            )
-            resp.raise_for_status()
-            return resp.json()
-
-    @function_tool
-    async def finish(self, ctx: RunContext, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> str | None:
-        """Save this step's values and finish, or return unserved without saving."""
-        if self.done():
-            return
-        try:
-            _values = _save_result("find_slot", ctx.userdata, {"unserved_request": unserved_request})
-        except _StateRefused as refused:
-            logger.warning("finish %s: %s", "find_slot", refused.message)
-            return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
-        dev_metrics.dev_task_finished(ctx, _values)
-        self.complete(_values)
-        self._finish_call_id = ctx.function_call.call_id
-
-class QualifyEvent(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
-    """The qualify_event step, compiled from its entry in agent.yaml."""
-
-    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
-        """Build the step.
-
-        Args:
-            chat_ctx: The conversation the step starts from.
-        """
-        super().__init__(instructions=QUALIFY_EVENT_PROMPT, chat_ctx=chat_ctx)
-        if isinstance(chat_ctx, llm.ChatContext):
-            self._chat_ctx = chat_ctx.copy()
-        self._response_tool_call_ids: set[str] = set()
-        # The call id of the ending that committed. A group reads it to fill its
-        # own tool output, and a handoff called beside a terminal tool reads it
-        # to know whether the step's work actually landed.
-        self._finish_call_id: str | None = None
-
-    async def on_enter(self) -> None:
-        """Open this step's turn as it is entered."""
-        await self.update_chat_ctx(self.chat_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))
-        # The task's own instructions describe this step; let them drive the opening.
-        self.session.generate_reply()
-
-    @function_tool
-    async def finish(self, ctx: RunContext, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> str | None:
-        """Save this step's values and finish, or return unserved without saving."""
-        if self.done():
-            return
-        try:
-            _values = _save_result("qualify_event", ctx.userdata, {"unserved_request": unserved_request})
-        except _StateRefused as refused:
-            logger.warning("finish %s: %s", "qualify_event", refused.message)
-            return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
-        dev_metrics.dev_task_finished(ctx, _values)
-        self.complete(_values)
-        self._finish_call_id = ctx.function_call.call_id
-
-
-# --- session ---------------------------------------------------------------
-# The loop keeps only a weak reference to a task, so a timer nobody holds can be
-# collected before it fires. Each one is held here until it finishes.
-_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
-
-
-def prewarm(proc: JobProcess) -> None:
-    """Load what every call needs once, before the worker accepts a job.
-
-    Args:
-        proc: The worker process being warmed.
-    """
-    # The FLOOR: how long silence has to last before the runtime treats the
-    # caller as finished. From pace: balanced.
-    #
-    # Always explicit. Leaving it off inherited Silero's own 0.55s, which is
-    # slower than the turn detector wants and was never anybody's choice. Hard
-    # floor is 0.25s; the turn detector raises at session start below it.
-    #
-    # Lowering this alone does not shorten a turn. The ceiling is in the session's
-    # turn_handling endpointing below, and that is where a 2.5s turn came from.
-    proc.userdata["vad"] = silero.VAD.load(min_silence_duration=0.3)
-server = AgentServer()
-# How long a warm process may take to start, knowledge indexing included.
-LOCAL_INIT_TIMEOUT_SECS = 60.0
-server.setup_fnc = prewarm
-if os.getenv("UNMUTE_LOCAL_RUN") == "1":
-    # One browser call needs one warm spare, not one index build per CPU.
-    server.update_options(num_idle_processes=1, initialize_process_timeout=LOCAL_INIT_TIMEOUT_SECS)
-
-
-@server.rtc_session(agent_name="remy-fixture-livekit")
-async def entrypoint(ctx: JobContext) -> None:
-    """Run one call: build the session, start the entry agent and wire the call.
-
-    Args:
-        ctx: The job LiveKit dispatched for this call.
-    """
-    require_env()
-    session = AgentSession[Userdata](
-        userdata=Userdata(),
-        # One retry, not the framework's three. A failed completion is retried
-        # four times by default with 0.1 + 2.0 + 2.0 seconds of sleep between the
-        # attempts, on top of four round trips to the provider: a live call on
-        # 2026-09-16 (trace 917975e9) spent 18.5 seconds in two of those and the
-        # caller asked whether anybody was still there.
-        #
-        # A caller cannot wait that out, and a retry loop tuned for a batch job
-        # is the wrong default for a conversation. One retry still covers a
-        # transient fault and costs 0.1s, because the first retry is nearly
-        # immediate; anything worse is better surfaced than slept through.
-        #
-        # ponytail: fixed, not authorable. No package would want a different
-        # number, and the one that does can say so when it turns up.
-        conn_options=SessionConnectOptions(
-            llm_conn_options=APIConnectOptions(max_retry=1),
-        ),
-        stt=slng.STT(api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3-en"),
-        llm=openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o-mini", temperature=0.4),
-        tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-thalia-en", model="slng/deepgram/aura:2-en"),
-        turn_handling=TurnHandlingOptions(
-            turn_detection=inference.TurnDetector(version="v1-mini"),
-            # The CEILING, and the shortest wait the runtime will consider.
-            # pace: balanced. Without this the streaming defaults apply and
-            # max_delay is 2.5s, which no package could reach.
-            endpointing={"mode": "dynamic", "min_delay": 0.3, "max_delay": 1.6},
-            interruption={"enabled": True},
-            preemptive_generation={"enabled": True},
-        ),
-        vad=ctx.proc.userdata["vad"],
-        user_away_timeout=15,
-    )
-
-
-    setup_langfuse(
-        ctx,
-        session,
-        metadata={
-            "langfuse.session.id": ctx.room.name,
-            "langfuse.trace.name": "greeter" + "-" + "remy-fixture-livekit",
-        },
-    )
-
-
-    # Inert unless the dev loop set UNMUTE_DEV_METRICS. Reads session events, so
-    # it never touches the tracer provider an opt-in trace export would own.
-    install_dev_metrics(session, call_id=ctx.room.name)
-
-    @session.on("metrics_collected")
-    def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
-        metrics.log_metrics(ev.metrics)
-
-    async def _end_if_still_away() -> None:
-        await asyncio.sleep(30)  # inactivity.end_after
-        if session.user_state == "away":
-            session.shutdown()
-
-    @session.on("user_state_changed")
-    def _on_user_state_changed(ev: UserStateChangedEvent) -> None:
-        if ev.new_state != "away":
-            return
-        session.generate_reply(
-            instructions="The caller went quiet. Briefly check whether they are still there."
-        )
-        _timer = asyncio.create_task(_end_if_still_away())
-        _BACKGROUND_TASKS.add(_timer)
-        _timer.add_done_callback(_BACKGROUND_TASKS.discard)
-
-    # Input variables land before the session starts, so the greeting and the
-    # prompts already see them (I.dispatch).
-    _hydrate_call_start(session.userdata, _dispatched_call_start(_livekit_job_metadata(ctx.job.metadata)))
-    await session.start(agent=Greeter(initial=True), room=ctx.room)
-    await ctx.connect()
-
-    async def _max_duration() -> None:
-        await asyncio.sleep(1200)
-        session.shutdown()  # conversation.max_duration
-
-    _timer = asyncio.create_task(_max_duration())
-    _BACKGROUND_TASKS.add(_timer)
-    _timer.add_done_callback(_BACKGROUND_TASKS.discard)
-
-
-# No __main__ block: this module is started through livekit-agents' supported
-# CLI, `python -m livekit.agents start agent.py`, which imports it and finds the
-# `server` above. The older per-script entry point goes through a CLI upstream
-# has deprecated and will remove.
-=== compile-report.json ===
-{
-  "target": "livekit",
-  "provider": "livekit",
-  "version": "1.8.1",
-  "supported": {
-    "floor": "1.8.1",
-    "ceiling": "1.8.1",
-    "verified": "2026-09-13"
-  },
-  "entry_agent": "Greeter",
-  "agents": [
-    "events",
-    "greeter",
-    "reservations"
-  ],
-  "tasks": [
-    "confirm_booking",
-    "find_slot",
-    "qualify_event"
-  ],
-  "generated_files": [
-    ".dockerignore",
-    ".env.example",
-    "Dockerfile",
-    "README.md",
-    "agent.py",
-    "compile-report.json",
-    "compose.dev.yaml",
-    "dev_metrics.py",
-    "pyproject.toml",
-    "tracing.py"
-  ],
-  "required_env": [
-    "CHECK_AVAILABILITY_URL",
-    "LANGFUSE_BASE_URL",
-    "LANGFUSE_PUBLIC_KEY",
-    "LANGFUSE_SECRET_KEY",
-    "LIVEKIT_API_KEY",
-    "LIVEKIT_API_SECRET",
-    "LIVEKIT_URL",
-    "OPENAI_API_KEY",
-    "SEND_CONFIRMATION_URL",
-    "SLNG_API_KEY"
-  ],
-  "bindings": [
-    {
-      "target": "livekit",
-      "role": "listen",
-      "binding": {
-        "provider": "slng",
-        "model": "slng/deepgram/nova:3-en",
-        "placement": "api"
-      }
-    },
-    {
-      "target": "livekit",
-      "role": "turn",
-      "binding": {
-        "provider": "livekit",
-        "model": "turn-detector-mini",
-        "placement": "api"
-      }
-    },
-    {
-      "target": "livekit",
-      "role": "speak",
-      "profile": "desk",
-      "binding": {
-        "provider": "slng",
-        "model": "slng/deepgram/aura:2-en",
-        "voice": "aura-2-orion-en",
-        "placement": "api"
-      }
-    },
-    {
-      "target": "livekit",
-      "role": "speak",
-      "profile": "host",
-      "binding": {
-        "provider": "slng",
-        "model": "slng/deepgram/aura:2-en",
-        "voice": "aura-2-thalia-en",
-        "placement": "api"
-      }
-    },
-    {
-      "target": "livekit",
-      "role": "reason",
-      "profile": "reasoning",
-      "binding": {
-        "provider": "openai",
-        "model": "gpt-4o-mini",
-        "placement": "api",
-        "params": {
-          "temperature": 0.4
-        }
-      }
-    }
-  ],
-  "sizing": [
-    {
-      "target": "livekit",
-      "metric": "workers",
-      "value": "40",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
-    },
-    {
-      "target": "livekit",
-      "metric": "gpus",
-      "value": "0",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
-    },
-    {
-      "target": "livekit",
-      "metric": "provider_concurrency_quota.realtime_audio",
-      "value": "20",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
-    },
-    {
-      "target": "livekit",
-      "metric": "provider_session_time_quota.realtime_audio",
-      "value": "1h20m0s",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
-    }
-  ],
-  "variables": [
-    {
-      "name": "caller_phone",
-      "type": "string",
-      "has_default": false
-    }
-  ],
-  "notes": [
-    "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.8.1, verified 2026-07-15)",
-    "reason: openai via openai.LLM (livekit-agents[openai], verified 2026-07-18)",
-    "speak: slng via slng.TTS (livekit-plugins-slng\u003e=1.8.1, verified 2026-07-15)",
-    "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory",
-    "turn pace balanced (silence 0.3s from the pace, closes at 1.6s)"
-  ]
-}
-=== compose.dev.yaml ===
-# Generated local-development topology. Not a production deployment model.
-# `unmute dev` builds and runs this: the same worker image production deploys,
-# talking to a single-node dev livekit-server over WebRTC in the browser. The
-# devkey/secret pair is the LiveKit --dev placeholder, never for production.
-services:
-  livekit_server:
-    image: livekit/livekit-server:v1.13.4
-    # Single-node dev server needs no external store (Redis only turns on
-    # distributed mode). Browser WebRTC through Docker Desktop needs three
-    # published ports: 7880 (signal/WS), 7881 (ICE/TCP fallback) and one UDP
-    # mux port 7882; the default 50000-60000 range is impractical to publish.
-    # --node-ip advertises a host-reachable ICE candidate instead of the
-    # container's internal IP. Verified against LiveKit self-hosting docs,
-    # config-sample.yaml and the server CLI on 2026-07-22.
-    command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1", "--rtc.tcp_port", "${LIVEKIT_TCP_HOST_PORT:-7881}", "--udp-port", "${LIVEKIT_UDP_HOST_PORT:-7882}"]
-    ports:
-      - "${LIVEKIT_HOST_PORT:-7880}:7880"
-      - "${LIVEKIT_TCP_HOST_PORT:-7881}:${LIVEKIT_TCP_HOST_PORT:-7881}"
-      - "${LIVEKIT_UDP_HOST_PORT:-7882}:${LIVEKIT_UDP_HOST_PORT:-7882}/udp"
-    # The `unmute dev` process that started this stack. The next run stops a
-    # stack whose process is gone; a stack started by hand has no pid and is
-    # left alone.
-    labels:
-      - "unmute.dev.pid=${UNMUTE_DEV_PID:-}"
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-
-  application:
-    build:
-      context: .
-    # The worker runs through livekit-agents' supported module CLI. The older
-    # per-script run modes are deprecated upstream and print a warning on every
-    # run; the colored format is for a human watching `unmute dev`.
-    command: ["python", "-m", "livekit.agents", "start", "agent.py", "--log-format", "colored"]
-    environment:
-      - LIVEKIT_URL=ws://livekit_server:7880
-      - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=secret
-      - CHECK_AVAILABILITY_URL
-      - LANGFUSE_BASE_URL
-      - LANGFUSE_PUBLIC_KEY
-      - LANGFUSE_SECRET_KEY
-      - OPENAI_API_KEY
-      - SEND_CONFIRMATION_URL
-      - SLNG_API_KEY
-      # optional: set by `unmute dev`; absent otherwise
-      - UNMUTE_CALL_START
-      # optional: set by `unmute dev`; absent otherwise
-      - UNMUTE_DEV_METRICS
-      # optional: set by `unmute dev`; absent otherwise
-      - UNMUTE_LOCAL_RUN
-    labels:
-      - "unmute.dev.pid=${UNMUTE_DEV_PID:-}"
-    depends_on:
-      livekit_server:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('livekit_server', 7880), timeout=2)"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-=== dev_metrics.py ===
+=== utils/dev_metrics.py ===
 """Identified conversation updates for the local dev loop; no trace exporter.
 
 Each flushed line replaces one entity. Observation is inert unless the dev
@@ -3370,39 +3521,7 @@ def dev_say(session: AgentSession, text: str, **kwargs: Any) -> SpeechHandle:
         response_id = reporter.speech(handle)
         reporter.text(f"{response_id}-text", response_id, response_id, "assistant", text, "final", "generated")
     return handle
-=== pyproject.toml ===
-[project]
-name = "unmute-remy-fixture"
-version = "0.1.0"
-description = "Generated LiveKit Agents project (unmute livekit driver)"
-requires-python = ">=3.11"
-dependencies = [
-    "httpx",
-    "langfuse>=4,<5",
-    "livekit-agents[openai]==1.8.1",
-    "livekit-plugins-silero>=1.8.1",
-    "livekit-plugins-slng>=1.8.1",
-    "opentelemetry-sdk>=1.33,<2",
-    "python-dotenv",
-]
-
-[dependency-groups]
-dev = ["ruff==0.15.7", "ty"]
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "PERF", "FURB", "RUF", "BLE", "D", "ANN"]
-ignore = ["E501", "ANN401", "RUF001", "RUF002", "RUF003"]
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
-
-[tool.ruff.lint.per-file-ignores]
-"tools/*" = ["D", "ANN"]
-"logic/*" = ["D", "ANN"]
-
-[tool.ty.environment]
-python-version = "3.11"
-=== tracing.py ===
+=== utils/tracing.py ===
 """Generated Langfuse tracing for remy-fixture."""
 
 from __future__ import annotations

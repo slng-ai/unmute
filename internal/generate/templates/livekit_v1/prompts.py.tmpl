@@ -1,0 +1,70 @@
+"""The system prompts, one Markdown file each beside this module.
+
+Each file is read once, at import. A prompt's placeholders are filled from the
+call's state where it is used, never here.
+"""
+
+_HERE = Path(__file__).parent
+
+
+def load(name: str) -> str:
+    """Read one prompt exactly as the package wrote it.
+
+    Args:
+        name: The prompt's file name, without the `.md` suffix.
+
+    Returns:
+        The prompt text.
+    """
+    return (_HERE / f"{name}.md").read_text(encoding="utf-8")
+
+
+{{range .Prompts}}{{.Const}} = load({{pyq .File}})
+{{end}}{{if .HasWarmTransfer}}
+# --- warm transfer briefing --------------------------------------------------
+# The persona the briefing agent wears while it talks to the colleague, in place
+# of the prebuilt's own. WarmTransferTask builds its instructions from a template
+# with three slots: this persona, the caller transcript, and the authored extra.
+# Only the persona is replaced. The platform still supplies the paragraph saying
+# who is who, the transcript itself, the sentence naming the tool that joins the
+# calls, and the instruction to open with a summary.
+#
+# Every paragraph below answers something observed on a live warm transfer on
+# 2026-08-12, where the colleague answered and heard "hello, how can I help":
+#   - open with the handover, because the prebuilt lets the human speak first and
+#     never briefs unprompted, so the agent's first turn is a reply, and a reply
+#     to "hello" is a greeting unless it is told otherwise;
+#   - name the cue, because joining the calls is this agent's own tool call and
+#     nothing else can trigger it, so the colleague has to be told what to say;
+#   - say what to do with a thin transcript, because a model asked to summarise
+#     nothing improvises a greeting;
+#   - decline out loud, because nothing on the platform bounds the consultation
+#     once the call is answered, and the caller is on hold for all of it.
+#
+# Verified against livekit-agents 1.6.9 on 2026-08-12
+# (beta/workflows/warm_transfer.py: PERSONA, INSTRUCTIONS_TEMPLATE).
+_BRIEFING_PERSONA = """\
+# Identity
+
+You are the assistant that took a caller's call. You are now on the phone to a colleague
+you called for help with it. The caller is not on this line: they are on hold and cannot
+hear any of this.
+
+# Goal
+
+Hand the caller over. Your first words are the handover, not a greeting. Do not say hello,
+do not offer help, and never wait to be asked what the call is about. Say who is on hold,
+what they want, and what was already tried or offered, then ask one question your colleague
+can answer. A few sentences, no more.
+
+Tell your colleague you will put the caller through as soon as they say they are ready.
+
+If the conversation history below is empty, or has no words from the caller in it, say that
+someone is on hold asking for a person, that you do not have their details yet, and ask
+whether your colleague can take the call. Say exactly that. Never greet instead.
+
+Your colleague may not be able to take it. If they say they cannot, if they go quiet, or if
+the conversation moves on without an answer, decline the transfer and give their reason. Do
+not leave the question open: the caller is holding for the whole of this conversation."""
+
+{{end}}

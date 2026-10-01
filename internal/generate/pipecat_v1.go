@@ -140,7 +140,9 @@ type pipecatTask struct {
 	// this step, empty when the step always runs.
 	SkipWhenConfirmed string
 	Prompt            string
-	PromptExpr        string // the node's role_message: the quoted prompt, or a render call when it names a variable
+	PromptConst       string // the prompts/ constant holding Prompt
+	PromptFile        string // Prompt's file under prompts/, without .md
+	PromptExpr        string // the node's role_message: PromptConst, or a render call when it names a variable
 	// Terminals are the tools this step ends on, one emitted wrapper each.
 	Terminals []pipecatTerminal
 	// TerminalTools is the same set as a Python literal, read by a handoff of
@@ -514,7 +516,10 @@ type pipecatData struct {
 	// takes. Names are unique per organisation and a deploy updates the agent
 	// matching this one, so it is the package name joined to the target instance
 	// rather than either half alone.
-	AgentName        string
+	AgentName string
+	// Prompts is every system prompt, each written to prompts/<File>.md and
+	// read into a constant of prompts/__init__.py.
+	Prompts          []pyPrompt
 	Version          string
 	DeploymentRegion string
 	// WarmInstances is `[scaling] min_agents` in the manifest: instances the
@@ -918,15 +923,53 @@ func checkPipecatVersion(version string) error {
 	return targetcap.CheckVersion(targetcap.Pipecat, version)
 }
 
+// pipecatModules are the agent's own Python modules, each rendered from its
+// template and given its imports by linkPython. A module whose template renders
+// nothing past its docstring is not emitted.
+var pipecatModules = []struct{ tmpl, path string }{
+	{"settings.py", "settings.py"},
+	{"prompts.py", "prompts/__init__.py"},
+	{"utils_google.py", "utils/google.py"},
+	{"utils_auth.py", "utils/auth.py"},
+	{"utils_context.py", "utils/context.py"},
+	{"utils_mcp.py", "utils/mcp.py"},
+	{"utils_telephony.py", "utils/telephony.py"},
+	{"session.py", "session.py"},
+	{"utils_router.py", "utils/router.py"},
+	{"agents.py", "agents.py"},
+	{"call.py", "call.py"},
+	{"bot.py", "bot.py"},
+}
+
+// pipecatPrompts lists every system prompt: each agent's, then each step's.
+// Two prompts under one constant would leave one of them unreachable, so that is
+// refused here rather than found on a call.
+func pipecatPrompts(agents []pipecatAgent) ([]pyPrompt, error) {
+	var prompts []pyPrompt
+	for _, agent := range agents {
+		prompts = append(prompts, pyPrompt{Const: agent.PromptConst, File: agent.Name, Text: agent.Prompt})
+		for _, delegate := range agent.Delegates {
+			for _, step := range delegate.StepTasks {
+				prompts = append(prompts, pyPrompt{Const: step.PromptConst, File: step.PromptFile, Text: step.Prompt})
+			}
+		}
+	}
+	return uniquePrompts(prompts)
+}
+
 func renderPipecatFiles(data pipecatData) ([]File, error) {
+	files, err := renderPythonModules(pipecatV1Templates, "templates/pipecat_v1/", pipecatFuncs(), data, pipecatModules)
+	if err != nil {
+		return nil, fmt.Errorf("pipecat modules: %w", err)
+	}
+	files = append(files, writePromptFiles(data.Prompts)...)
 	// tmpl → output path (decoupled so .env.example can't be a dotfile template,
 	// which Go's embed would skip).
 	outputs := []struct{ tmpl, path string }{
-		{"bot.py", "bot.py"},
 		// Always emitted, inert unless the dev loop sets devmetrics.Env. Emitting
 		// it only for `dev` would make build/<target>/ depend on which command
 		// last ran, so the dev loop would stop testing the file that ships.
-		{"dev_metrics.py", "dev_metrics.py"},
+		{"dev_metrics.py", "utils/dev_metrics.py"},
 		{"pyproject.toml", "pyproject.toml"},
 		{"Dockerfile", "Dockerfile"},
 		{"compose.dev.yaml", "compose.dev.yaml"},
@@ -937,7 +980,7 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		// One provider per file: the two attribute models share nothing, so
 		// branching inside one template would make both harder to read. Both
 		// land on tracing.py so bot.py's import site does not care which.
-		outputs = append(outputs, struct{ tmpl, path string }{tracingTemplate(data.TracingProvider), "tracing.py"})
+		outputs = append(outputs, struct{ tmpl, path string }{tracingTemplate(data.TracingProvider), "utils/tracing.py"})
 	}
 	// Every surviving Pipecat route deploys to Pipecat Cloud, so the deployment
 	// manifest is unconditional. It used to be the default arm of a switch whose
@@ -949,7 +992,6 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 	if data.DailyCarrier != nil {
 		outputs = append(outputs, struct{ tmpl, path string }{"telephony_helper.py", "telephony_helper.py"})
 	}
-	var files []File
 	for _, o := range outputs {
 		content, err := renderPipecatV1(o.tmpl, data)
 		if err != nil {
@@ -965,7 +1007,7 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, File{Path: "knowledge.py", Content: content})
+		files = append(files, File{Path: "utils/knowledge.py", Content: content})
 	}
 	// Same set as the LiveKit driver's: secrets never reach the image, and a local
 	// `uv run` in this directory leaves a virtualenv behind that would otherwise
@@ -987,7 +1029,23 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
 	}
-	tmpl, err := template.New(name).Funcs(template.FuncMap{
+	tmpl, err := template.New(name).Funcs(pipecatFuncs()).Parse(string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
+	}
+	if strings.HasSuffix(name, ".py") {
+		return wrapLongImports(buf.Bytes()), nil
+	}
+	return buf.Bytes(), nil
+}
+
+// pipecatFuncs are the functions every Pipecat template can call.
+func pipecatFuncs() template.FuncMap {
+	return template.FuncMap{
 		"pyq":          pyQuote,
 		"resultAccess": resultAccess,
 		"pytriple":     pyTriple,
@@ -1004,21 +1062,7 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 		// platform guarantees.
 		"hostedEntry": func() string { return hostedEntryPoint },
 		"hostedInput": func() string { return hostedInputModel },
-	}).Parse(string(raw))
-	if err != nil {
-		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
 	}
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
-	}
-	if name == "bot.py" {
-		return sortBotImports(buf.Bytes()), nil
-	}
-	if strings.HasSuffix(name, ".py") {
-		return wrapLongImports(buf.Bytes()), nil
-	}
-	return buf.Bytes(), nil
 }
 
 // docParam is one entry of a generated docstring's Args section.
@@ -1208,15 +1252,15 @@ var (
 		"asyncio": true, "base64": true, "collections": true, "contextlib": true, "copy": true,
 		"dataclasses": true, "datetime": true, "functools": true, "hashlib": true,
 		"hmac": true, "inspect": true, "json": true, "logging": true, "math": true,
-		"os": true, "random": true, "re": true, "sys": true, "time": true,
+		"os": true, "pathlib": true, "random": true, "re": true, "sys": true, "time": true,
 		"typing": true, "urllib": true, "uuid": true, "zoneinfo": true,
 	}
 	// firstPartyModules are the sibling modules and packages a package emits
 	// beside bot.py, which ruff files apart from third-party imports.
 	firstPartyModules = map[string]bool{
-		"dev_metrics": true, "knowledge": true, "logic": true, "prompts": true,
-		"session": true, "telephony_helper": true, "tools": true, "tracing": true,
-		"utils": true,
+		"agents": true, "call": true, "dev_metrics": true, "knowledge": true,
+		"logic": true, "prompts": true, "session": true, "settings": true,
+		"telephony_helper": true, "tools": true, "tracing": true, "utils": true,
 	}
 )
 
@@ -1225,112 +1269,6 @@ var (
 type pyImport struct {
 	module string
 	names  []string // nil for a plain `import module`
-}
-
-// sortBotImports rewrites the module's leading import block the way ruff's
-// isort rule (I001) writes it: standard library, third party, then first party,
-// plain `import` statements ahead of `from` ones, members ordered constants,
-// classes, then everything else. The template switches many imports on and off,
-// and a set of vendor imports arrives from the provider catalogue, so no fixed
-// line order in the template is sorted for every package. Anything that is not
-// an import ends the block and is left exactly as written.
-func sortBotImports(src []byte) []byte {
-	const marker = "from __future__ import annotations\n\n"
-	text := string(src)
-	at := strings.Index(text, marker)
-	if at < 0 {
-		return src
-	}
-	head, rest := text[:at+len(marker)], text[at+len(marker):]
-	lines := strings.Split(rest, "\n")
-	var imports []pyImport
-	end := 0
-scan:
-	for end < len(lines) {
-		line := lines[end]
-		switch {
-		case strings.TrimSpace(line) == "":
-			end++
-		case strings.HasPrefix(line, "import "):
-			imports = append(imports, pyImport{module: strings.TrimPrefix(line, "import ")})
-			end++
-		case strings.HasPrefix(line, "from "):
-			statement := line
-			end++
-			for strings.Contains(statement, "(") && !strings.Contains(statement, ")") && end < len(lines) {
-				statement += " " + strings.TrimSpace(lines[end])
-				end++
-			}
-			module, names, _ := strings.Cut(strings.TrimPrefix(statement, "from "), " import ")
-			names = strings.NewReplacer("(", "", ")", "").Replace(names)
-			var members []string
-			for _, name := range strings.Split(names, ",") {
-				if name = strings.TrimSpace(name); name != "" {
-					members = append(members, name)
-				}
-			}
-			imports = append(imports, pyImport{module: module, names: members})
-		default:
-			break scan
-		}
-	}
-	if len(imports) == 0 {
-		return src
-	}
-	// Blank lines that separate the block from the code below are kept as they
-	// were; the ones between imports are rewritten.
-	blank := 0
-	for i := end - 1; i >= 0 && strings.TrimSpace(lines[i]) == ""; i-- {
-		blank++
-	}
-	var sections [3][]pyImport
-	merged := map[string]int{}
-	for _, statement := range imports {
-		section := 1
-		top, _, _ := strings.Cut(statement.module, ".")
-		if stdlibModules[top] {
-			section = 0
-		} else if firstPartyModules[top] {
-			section = 2
-		}
-		key := fmt.Sprintf("%d %t %s", section, statement.names == nil, statement.module)
-		if index, seen := merged[key]; seen {
-			existing := &sections[section][index]
-			for _, name := range statement.names {
-				if !slices.Contains(existing.names, name) {
-					existing.names = append(existing.names, name)
-				}
-			}
-			continue
-		}
-		merged[key] = len(sections[section])
-		sections[section] = append(sections[section], statement)
-	}
-	var out strings.Builder
-	out.WriteString(head)
-	first := true
-	for _, section := range sections {
-		if len(section) == 0 {
-			continue
-		}
-		if !first {
-			out.WriteString("\n")
-		}
-		first = false
-		sort.SliceStable(section, func(i, j int) bool {
-			a, b := section[i], section[j]
-			if (a.names == nil) != (b.names == nil) {
-				return a.names == nil
-			}
-			return strings.ToLower(a.module) < strings.ToLower(b.module)
-		})
-		for _, statement := range section {
-			out.WriteString(statement.render())
-		}
-	}
-	out.WriteString(strings.Repeat("\n", blank))
-	out.WriteString(strings.Join(lines[end:], "\n"))
-	return []byte(out.String())
 }
 
 // render writes the statement as isort does: one line when it fits, otherwise

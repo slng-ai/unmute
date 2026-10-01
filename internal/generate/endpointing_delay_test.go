@@ -82,8 +82,8 @@ func TestEndpointingDelayReachesTheFloorOnBothDrivers(t *testing.T) {
 		file     string
 		want     string
 	}{
-		{ir.ProviderLiveKit, "agent.py", "silero.VAD.load(min_silence_duration=1.5)"},
-		{ir.ProviderPipecat, "bot.py", "vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=1.5)),"},
+		{ir.ProviderLiveKit, agentSource, "silero.VAD.load(min_silence_duration=1.5)"},
+		{ir.ProviderPipecat, agentSource, "vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=1.5)),"},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			got := generatedFile(t, loadTurnFixture(t, "1500ms", ""), tc.provider, tc.file)
@@ -106,13 +106,13 @@ func TestAuthoredDelayWinsTheFloorAndThePaceStillMovesTheCeiling(t *testing.T) {
 		wantCeiling string
 	}{
 		{
-			provider: ir.ProviderLiveKit, file: "agent.py",
+			provider: ir.ProviderLiveKit, file: agentSource,
 			// 1.5s authored, snappy's floor is 0.25: the authored value survives.
 			wantFloor:   "silero.VAD.load(min_silence_duration=1.5)",
 			wantCeiling: `"max_delay": 1.2`,
 		},
 		{
-			provider: ir.ProviderPipecat, file: "bot.py",
+			provider: ir.ProviderPipecat, file: agentSource,
 			wantFloor:   "VADParams(stop_secs=1.5)",
 			wantCeiling: "SmartTurnParams(stop_secs=1.2)",
 		},
@@ -163,7 +163,7 @@ func TestPaceReachesTheCeilingOnBothDrivers(t *testing.T) {
 		},
 	} {
 		t.Run(tc.description, func(t *testing.T) {
-			agentPy := generatedFile(t, loadTurnFixture(t, "", tc.pace), ir.ProviderLiveKit, "agent.py")
+			agentPy := generatedFile(t, loadTurnFixture(t, "", tc.pace), ir.ProviderLiveKit, agentSource)
 			for _, want := range tc.livekit {
 				if !strings.Contains(agentPy, want) {
 					t.Errorf("emitted agent.py does not carry %s for pace %s", want, tc.pace)
@@ -172,7 +172,7 @@ func TestPaceReachesTheCeilingOnBothDrivers(t *testing.T) {
 			if tc.notLiveKit != "" && strings.Contains(agentPy, `"max_delay": `+tc.notLiveKit) {
 				t.Errorf("emitted agent.py still carries max_delay %s for pace %s", tc.notLiveKit, tc.pace)
 			}
-			botPy := generatedFile(t, loadTurnFixture(t, "", tc.pace), ir.ProviderPipecat, "bot.py")
+			botPy := generatedFile(t, loadTurnFixture(t, "", tc.pace), ir.ProviderPipecat, agentSource)
 			if !strings.Contains(botPy, tc.pipecat) {
 				t.Errorf("emitted bot.py does not carry %s for pace %s", tc.pipecat, tc.pace)
 			}
@@ -186,7 +186,7 @@ func TestPaceReachesTheCeilingOnBothDrivers(t *testing.T) {
 // the balanced numbers rather than being absent and inheriting a slower default
 // nobody chose.
 func TestUnsetPaceEmitsTheBalancedRowRatherThanNoKey(t *testing.T) {
-	agentPy := generatedFile(t, loadTurnFixture(t, "", ""), ir.ProviderLiveKit, "agent.py")
+	agentPy := generatedFile(t, loadTurnFixture(t, "", ""), ir.ProviderLiveKit, agentSource)
 	for _, want := range []string{
 		`endpointing={"mode": "dynamic", "min_delay": 0.3, "max_delay": 1.6}`,
 		`silero.VAD.load(min_silence_duration=0.3)`,
@@ -201,7 +201,7 @@ func TestUnsetPaceEmitsTheBalancedRowRatherThanNoKey(t *testing.T) {
 		t.Error("emitted agent.py prewarms a bare silero.VAD.load(), which inherits Silero's 0.55s rather than the balanced floor")
 	}
 
-	botPy := generatedFile(t, loadTurnFixture(t, "", ""), ir.ProviderPipecat, "bot.py")
+	botPy := generatedFile(t, loadTurnFixture(t, "", ""), ir.ProviderPipecat, agentSource)
 	for _, want := range []string{
 		"VADParams(stop_secs=0.2)",
 		"SmartTurnParams(stop_secs=1.6)",
@@ -221,7 +221,7 @@ func TestUnsetPaceEmitsTheBalancedRowRatherThanNoKey(t *testing.T) {
 // reaches this target through the ceiling alone. research.md §5a.
 func TestPipecatFloorDoesNotMoveWithThePace(t *testing.T) {
 	for _, pace := range []ir.Pace{ir.PaceSnappy, ir.PaceBalanced, ir.PacePatient} {
-		botPy := generatedFile(t, loadTurnFixture(t, "", pace), ir.ProviderPipecat, "bot.py")
+		botPy := generatedFile(t, loadTurnFixture(t, "", pace), ir.ProviderPipecat, agentSource)
 		if !strings.Contains(botPy, "VADParams(stop_secs=0.2)") {
 			t.Errorf("pace %s moved the Pipecat VAD window; it must stay at 0.2 for every pace (research.md §5a)", pace)
 		}
@@ -233,7 +233,7 @@ func TestPipecatFloorDoesNotMoveWithThePace(t *testing.T) {
 // the VAD's silence window and one is the analyzer's ceiling. If a future edit
 // crossed them, every other assertion here would still pass.
 func TestPipecatNamesTheTwoStopSecsFieldsSeparately(t *testing.T) {
-	botPy := generatedFile(t, loadTurnFixture(t, "400ms", ir.PaceBalanced), ir.ProviderPipecat, "bot.py")
+	botPy := generatedFile(t, loadTurnFixture(t, "400ms", ir.PaceBalanced), ir.ProviderPipecat, agentSource)
 	if !strings.Contains(botPy, "VADParams(stop_secs=0.4)") {
 		t.Error("the VAD's stop_secs did not take the authored duration")
 	}
@@ -250,7 +250,7 @@ func TestPipecatNamesTheTwoStopSecsFieldsSeparately(t *testing.T) {
 // sites, one per interruption branch, and a key added to one of them only would
 // pass every test above on whichever fixture happened to take that branch.
 func TestLiveKitEmitsEndpointingOnEveryBranch(t *testing.T) {
-	agentPy := generatedFile(t, loadTurnFixture(t, "", ir.PaceBalanced), ir.ProviderLiveKit, "agent.py")
+	agentPy := generatedFile(t, loadTurnFixture(t, "", ir.PaceBalanced), ir.ProviderLiveKit, agentSource)
 	handling := strings.Count(agentPy, "turn_handling=TurnHandlingOptions(")
 	endpointing := strings.Count(agentPy, "endpointing={")
 	if handling == 0 {
@@ -264,7 +264,7 @@ func TestLiveKitEmitsEndpointingOnEveryBranch(t *testing.T) {
 // TestPipecatEmitsTheAnalyzerOnEveryAggregator is the same guard for Pipecat,
 // which builds LLMUserAggregatorParams at two sites.
 func TestPipecatEmitsTheAnalyzerOnEveryAggregator(t *testing.T) {
-	botPy := generatedFile(t, loadTurnFixture(t, "", ir.PaceBalanced), ir.ProviderPipecat, "bot.py")
+	botPy := generatedFile(t, loadTurnFixture(t, "", ir.PaceBalanced), ir.ProviderPipecat, agentSource)
 	aggregators := strings.Count(botPy, "vad_analyzer=SileroVADAnalyzer(")
 	analyzers := strings.Count(botPy, "LocalSmartTurnAnalyzerV3(")
 	if aggregators == 0 {

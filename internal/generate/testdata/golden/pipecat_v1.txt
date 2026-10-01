@@ -66,21 +66,19 @@ RUN mkdir -p "$NLTK_DATA" && \
     done; \
     python -c "import nltk.data; nltk.data.find('tokenizers/punkt_tab')"
 
-# Named files, never `COPY . .`: /app is the base image's own directory, and
+# Named paths, never `COPY . .`: /app is the base image's own directory, and
 # copying over it replaces the server that answers /bot.
 #
-# tools/ is a directory rather than a file, and it is named the same way. bot.py
-# does `import tools.<name>` for every local tool, so leaving it out builds an
-# image that cannot import its own emitted code: the container starts, raises
-# ModuleNotFoundError, and the deployment never reaches ready. That shipped in
-# v0.1.0 through v0.1.2 and broke five of the eleven examples, `unmute dev`
-# included, because compose.dev.yaml runs this same image with no bind mount.
-COPY bot.py ./
-# dev_metrics.py is emitted unconditionally and imported at bot.py's module
-# scope, so this line is unconditional too. Leaving it out is the same failure
-# tools/ was: the container starts, raises ModuleNotFoundError before it ever
-# answers /bot, and the deployment never reaches ready.
-COPY dev_metrics.py ./
+# Every module and folder bot.py imports is named, because one left out builds an
+# image that cannot import its own code: the container starts, raises
+# ModuleNotFoundError before it ever answers /bot, and the deployment never
+# reaches ready. That shipped in v0.1.0 through v0.1.2 for tools/ and broke five
+# of the eleven examples, `unmute dev` included, because compose.dev.yaml runs
+# this same image with no bind mount. `*.py` is the agent's own modules, which
+# differ by package, and utils/ holds the helpers they share.
+COPY *.py ./
+COPY prompts/ ./prompts/
+COPY utils/ ./utils/
 
 # No CMD: the base image imports bot.py and calls its bot() itself. A local
 # browser run overrides the command instead (see compose.dev.yaml).
@@ -168,7 +166,7 @@ The event feed reconnects separately from audio. Retained events can replay;
 a gap stays marked until the next call. Switching Conversation and Logs keeps
 the same microphone connection.
 
-The generated `dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
+The generated `utils/dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
 as `unmute dev` does. Its identified v2 snapshots use `UNMUTE_METRIC ` framing.
 Raw values use seconds. To inspect measurements:
 
@@ -203,7 +201,7 @@ model receives one safe failure result. It must not claim success from either.
 ## Turn taking
 
 Two numbers decide how long a caller waits. **Both are spelled `stop_secs` in
-`bot.py` and they are different fields**, so grep finds two and only this tells
+`call.py` and they are different fields**, so grep finds two and only this tells
 you which is which.
 
 **The floor is 0.2s**, in `VADParams(stop_secs=0.2)`. The VAD waits that
@@ -455,117 +453,34 @@ choose one, and `pipecat cloud regions list` to see what is available.
 - `billing`
 - `intake`
 Entry agent: `intake`.
-=== bot.py ===
-"""Generated Pipecat agent for safe-core-fixture.
-
-Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
-graph are baked in from the package. Secret values are read from the environment
-and never written here. The agency model uses the Pipecat workers API: a main
-PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
-LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
-run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
-context, a FlowManager walks the steps as nodes, and control returns with only
-a completed or unserved status.
-"""
+=== agents.py ===
+"""The agents, their tools, and the task steps they run as flows."""
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import functools
 import inspect
-import json
 import os
-import sys
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any, cast
 
 import httpx
-from dotenv import load_dotenv
 from loguru import logger
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.bus import BusBridgeProcessor
-from pipecat.frames.frames import (
-    EndFrame,
-    LLMMessagesAppendFrame,
-    LLMRunFrame,
-    LLMUpdateSettingsFrame,
-    TTSSpeakFrame,
-)
+from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
-from pipecat.runner.types import RunnerArguments
-from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import LLMSettings
-from pipecat.services.stt_service import STTService
 from pipecat.services.tts_service import TTSService
-from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
-from pipecat.workers.runner import WorkerRunner
 from pipecat_slng import SlngTTSService
-from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from dev_metrics import DevReporter, install_dev_metrics
-
-load_dotenv()
-
-_LOGGING_CONFIGURED = False
-
-
-def _configure_logging() -> None:
-    """Send log output to stderr at UNMUTE_LOG_LEVEL, once per process."""
-    global _LOGGING_CONFIGURED
-    if _LOGGING_CONFIGURED:
-        return
-    logger.remove()
-    logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
-    _LOGGING_CONFIGURED = True
-
-
-MAIN_NAME = "main"
-# The longest a webhook tool waits for its endpoint before the call fails.
-WEBHOOK_TIMEOUT_SECS = 30.0
-# Tasks that end the call later. A task nobody references can be collected
-# while it sleeps, so each is held here until it finishes.
-_END_TASKS: set[asyncio.Task[None]] = set()
-# Provider credentials only. The telephony route's environment (Redis, carrier
-# keys, the public URL) is required by telephony.py, not here, so a telephony
-# package still runs in the browser with nothing but model keys (V10/B3).
-REQUIRED_ENV = [
-    "DEEPGRAM_API_KEY",
-    "GET_INVOICE_URL",
-    "LOOKUP_CUSTOMER_URL",
-    "OPENAI_API_KEY",
-    "SLNG_API_KEY",
-]
-IGNORE_PHRASES = ["okay", "right", "uh-huh"]
-
-
-def require_env() -> None:
-    """Fail at startup, naming every required environment variable that is unset.
-
-    Raises:
-        RuntimeError: When at least one name in REQUIRED_ENV has no value.
-    """
-    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
-    if missing:
-        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+from prompts import BILLING_PROMPT, INTAKE_PROMPT
+from session import State
+from settings import WEBHOOK_TIMEOUT_SECS
+from utils.dev_metrics import DevReporter
 
 
 def _direct_tool(
@@ -647,6 +562,305 @@ def _direct_tool(
 
 
 
+
+
+def build_billing_llm(
+    state: State | None = None
+) -> LLMService[Any]:
+    """Build the language model for this agent.
+
+    Args:
+        state: The call state, read by the router for its template variables.
+
+    Returns:
+        The configured LLM service.
+    """
+    return OpenAILLMService(
+        api_key=os.environ["OPENAI_API_KEY"],
+        settings=OpenAILLMService.Settings(
+            model="gpt-4o",
+            system_instruction=BILLING_PROMPT,
+        ),
+    )
+
+
+def build_billing_tts() -> TTSService:
+    """Build the voice for this agent.
+
+    Returns:
+        The configured TTS service.
+    """
+    return SlngTTSService(
+        api_key=os.environ["SLNG_API_KEY"],
+        voice="aura-2-orion-en",
+        model="slng/deepgram/aura:2-en",
+    )
+
+
+class BillingAgent(LLMWorker):
+    """Agent: billing."""
+
+    def __init__(
+        self,
+        state: State | None = None,
+        context: LLMContext | None = None,
+        call_context: dict[str, Any] | None = None,
+        dev_metrics: DevReporter | None = None,
+    ) -> None:
+        """Build this agent's model and voice and join the call's shared context.
+
+        Args:
+            state: The call's typed variables, shared by every agent.
+            context: The LLM context every agent on the call shares.
+            call_context: The call's own facts and transport handles.
+            dev_metrics: The dev-page reporter, or None outside `unmute dev`.
+        """
+        # Always supplied when the package declares variables; None only in a test.
+        self.state: State = cast(State, state)
+        if context is not None:
+            self.context = context
+
+        llm = build_billing_llm(state)
+        tts = build_billing_tts()
+        self._dev = dev_metrics
+        if self._dev:
+            self._dev.observe_llm(llm)
+            self._dev.observe_tts(tts)
+        super().__init__("billing", llm=llm, pipeline=Pipeline([llm, tts]), bridged=())
+
+    async def queue_frame(self, frame: Any, *args: Any, **kwargs: Any) -> None:
+        """Stamp the frame for the dev page, then queue it as usual.
+
+        Args:
+            frame: The frame to queue.
+            *args: Passed to the base worker.
+            **kwargs: Passed to the base worker.
+        """
+        if self._dev:
+            self._dev.stamp(frame)
+        await super().queue_frame(frame, *args, **kwargs)
+
+    async def on_activated(self, args: dict[str, Any] | None) -> None:
+        """Set this agent's prompt and scope, then ask for its first reply when told to.
+
+        Args:
+            args: The activation arguments the previous agent or the entry passed.
+        """
+        token = self._dev.enter_activation(args) if self._dev else None
+        try:
+            await self.queue_frame(LLMUpdateSettingsFrame(
+                delta=LLMSettings(system_instruction=BILLING_PROMPT),
+            ))
+            await super().on_activated(args)
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
+            # A handoff already shaped the shared context; request the reply
+            # without adding a synthetic message or waiting for the caller.
+            if args and args.get("run_llm") and not args.get("messages"):
+                await self.queue_frame(LLMRunFrame())
+        finally:
+            if self._dev:
+                self._dev.exit_activation(token)
+
+
+
+    @_direct_tool
+    async def get_invoice(self, params: FunctionCallParams, customer_id: str) -> None:
+        """Fetch the most recent invoice for a customer id. Returns the invoice total and status.
+
+        Args:
+            params (FunctionCallParams): The call handle; the result goes back through it.
+            customer_id (str): The customer id from lookup_customer
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                os.environ["GET_INVOICE_URL"],
+                json={"customer_id": customer_id},
+                timeout=WEBHOOK_TIMEOUT_SECS,
+            )
+            response.raise_for_status()
+            await params.result_callback(response.json())
+
+
+
+def build_intake_llm(
+    state: State | None = None
+) -> LLMService[Any]:
+    """Build the language model for this agent.
+
+    Args:
+        state: The call state, read by the router for its template variables.
+
+    Returns:
+        The configured LLM service.
+    """
+    return OpenAILLMService(
+        api_key=os.environ["OPENAI_API_KEY"],
+        settings=OpenAILLMService.Settings(
+            model="gpt-4o-mini",
+            system_instruction=INTAKE_PROMPT,
+            temperature=0.4,
+        ),
+    )
+
+
+def build_intake_tts() -> TTSService:
+    """Build the voice for this agent.
+
+    Returns:
+        The configured TTS service.
+    """
+    return SlngTTSService(
+        api_key=os.environ["SLNG_API_KEY"],
+        voice="aura-2-thalia-en",
+        model="slng/deepgram/aura:2-en",
+    )
+
+
+class IntakeAgent(LLMWorker):
+    """Agent: intake."""
+
+    def __init__(
+        self,
+        state: State | None = None,
+        context: LLMContext | None = None,
+        call_context: dict[str, Any] | None = None,
+        dev_metrics: DevReporter | None = None,
+    ) -> None:
+        """Build this agent's model and voice and join the call's shared context.
+
+        Args:
+            state: The call's typed variables, shared by every agent.
+            context: The LLM context every agent on the call shares.
+            call_context: The call's own facts and transport handles.
+            dev_metrics: The dev-page reporter, or None outside `unmute dev`.
+        """
+        # Always supplied when the package declares variables; None only in a test.
+        self.state: State = cast(State, state)
+        if context is not None:
+            self.context = context
+
+        llm = build_intake_llm(state)
+        tts = build_intake_tts()
+        self._dev = dev_metrics
+        if self._dev:
+            self._dev.observe_llm(llm)
+            self._dev.observe_tts(tts)
+        super().__init__("intake", llm=llm, pipeline=Pipeline([llm, tts]), bridged=())
+
+    async def queue_frame(self, frame: Any, *args: Any, **kwargs: Any) -> None:
+        """Stamp the frame for the dev page, then queue it as usual.
+
+        Args:
+            frame: The frame to queue.
+            *args: Passed to the base worker.
+            **kwargs: Passed to the base worker.
+        """
+        if self._dev:
+            self._dev.stamp(frame)
+        await super().queue_frame(frame, *args, **kwargs)
+
+    async def on_activated(self, args: dict[str, Any] | None) -> None:
+        """Set this agent's prompt and scope, then ask for its first reply when told to.
+
+        Args:
+            args: The activation arguments the previous agent or the entry passed.
+        """
+        token = self._dev.enter_activation(args) if self._dev else None
+        try:
+            await self.queue_frame(LLMUpdateSettingsFrame(
+                delta=LLMSettings(system_instruction=INTAKE_PROMPT),
+            ))
+            await super().on_activated(args)
+            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
+            # A handoff already shaped the shared context; request the reply
+            # without adding a synthetic message or waiting for the caller.
+            if args and args.get("run_llm") and not args.get("messages"):
+                await self.queue_frame(LLMRunFrame())
+        finally:
+            if self._dev:
+                self._dev.exit_activation(token)
+
+
+
+    @_direct_tool(cancel_on_interruption=False)
+    async def to_billing(self, params: FunctionCallParams) -> None:
+        """Caller asks about billing, an invoice, or a refund.
+
+        Args:
+            params (FunctionCallParams): The call handle; the result goes back through it.
+        """
+        # context.history on this handoff. One LLMContext is shared for the whole
+        # call, so the receiver is given the shaped list rather than a copy.
+        self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
+        await self.activate_worker(
+            "billing",
+            args=LLMWorkerActivationArgs(
+                metadata=self._dev.activation_metadata() if self._dev else None,
+                messages=[],
+                run_llm=True,
+            ),
+            deactivate_self=True,
+            result_callback=params.result_callback,
+        )
+
+    @_direct_tool
+    async def lookup_customer(self, params: FunctionCallParams, email: str = "", phone: str = "") -> None:
+        """Look up a customer record by phone number or email. Returns the customer id and name.
+
+        Args:
+            params (FunctionCallParams): The call handle; the result goes back through it.
+            email (str): Caller email address
+            phone (str): Caller phone number in E.164 form
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                os.environ["LOOKUP_CUSTOMER_URL"],
+                json={"email": email, "phone": phone},
+                timeout=WEBHOOK_TIMEOUT_SECS,
+            )
+            response.raise_for_status()
+            await params.result_callback(response.json())
+=== bot.py ===
+"""Generated Pipecat agent for safe-core-fixture.
+
+Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
+graph are baked in from the package. Secret values are read from the environment
+and never written here. The agency model uses the Pipecat workers API: a main
+PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
+LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
+run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
+context, a FlowManager walks the steps as nodes, and control returns with only
+a completed or unserved status.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+from dotenv import load_dotenv
+from loguru import logger
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+
+from call import _carrier_transport, run_bot, transport_params
+from settings import require_env
+
+load_dotenv()
+
+_LOGGING_CONFIGURED = False
+
+
+def _configure_logging() -> None:
+    """Send log output to stderr at UNMUTE_LOG_LEVEL, once per process."""
+    global _LOGGING_CONFIGURED
+    if _LOGGING_CONFIGURED:
+        return
+    logger.remove()
+    logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
+    _LOGGING_CONFIGURED = True
+
+
 # Checked at import, which is what makes the container refuse to start rather
 # than start and go quiet.
 #
@@ -663,11 +877,130 @@ def _direct_tool(
 require_env()
 
 
+async def bot(runner_args: RunnerArguments) -> None:
+    """Handle one session: build its transport, then run the agent on it.
+
+    This is the entry point the Pipecat runner and Pipecat Cloud call.
+
+    Args:
+        runner_args: The arguments the runner started this session with.
+    """
+    _configure_logging()
+
+    # A websocket session is a phone call on this route, and this package holds no
+    # carrier credentials, so it builds that transport itself (see
+    # _carrier_transport). Everything else, browser and console, is the framework's.
+    if getattr(runner_args, "websocket", None) is not None:
+        transport = await _carrier_transport(runner_args)
+    else:
+        transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()
+=== call.py ===
+"""One call: its transport, pipeline, event handlers and the end of it."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from collections.abc import Callable
+from typing import Any, cast
+
+from loguru import logger
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.bus import BusBridgeProcessor
+from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.stt_service import STTService
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.workers.llm import LLMWorkerActivationArgs
+from pipecat.workers.runner import WorkerRunner
+
+from agents import BillingAgent, IntakeAgent
+from session import build_state
+from settings import MAIN_NAME, require_env
+from utils.dev_metrics import DevReporter, install_dev_metrics
+
+# Tasks that end the call later. A task nobody references can be collected
+# while it sleeps, so each is held here until it finishes.
+_END_TASKS: set[asyncio.Task[None]] = set()
+
+
+async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
+    """End the call once `timeout_secs` have passed.
+
+    Args:
+        worker: The pipeline worker to send the end frame to.
+        timeout_secs: How long to wait first.
+    """
+    await asyncio.sleep(timeout_secs)
+    await worker.queue_frame(EndFrame())
+
+
+def _schedule_end_after(worker: PipelineWorker, timeout_secs: float) -> None:
+    """Schedule `_end_after` and hold its task until it finishes.
+
+    Args:
+        worker: The pipeline worker to send the end frame to.
+        timeout_secs: How long to wait first.
+    """
+    task = asyncio.create_task(_end_after(worker, timeout_secs))
+    _END_TASKS.add(task)
+    task.add_done_callback(_END_TASKS.discard)
+transport_params: dict[str, Callable[[], TransportParams]] = {
+    "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    # The runner assigns an inbound call's dial-in settings and Daily credentials
+    # onto whatever this returns, so on the Daily route it has to be the params
+    # class that declares them. The generic one rejects the assignment.
+    "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    # A simulated caller on the runner's Twilio route (`-t twilio`); see
+    # _carrier_transport.
+    "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
+
+}
+
+
+
+def build_stt() -> STTService:
+    """Build the transcriber.
+
+    Returns:
+        The configured STT service.
+    """
+    return DeepgramSTTService(
+        api_key=os.environ["DEEPGRAM_API_KEY"],
+        settings=DeepgramSTTService.Settings(
+            model="nova-3",
+        ),
+    )
+
+
 # --- a caller on a Twilio-shaped websocket ----------------------------------
 # `python bot.py -t twilio -x <public host>` serves a TwiML webhook and a Media
 # Streams websocket, the way Twilio would reach a phone route. This package has
 # no phone route, so nothing real dials it. It is here for a simulated caller,
 # such as a Coval run against this bot on your laptop.
+
 async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
     """Build the carrier's stream, with the call ended by closing the socket.
 
@@ -714,6 +1047,490 @@ async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
     )
     return FastAPIWebsocketTransport(websocket=websocket_args.websocket, params=params)
 
+async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev: DevReporter) -> None:
+    """Build the pipeline for one session and run it until the call ends.
+
+    Args:
+        transport: The transport the caller is connected on.
+        runner_args: The arguments the runner started this session with.
+        dev: The dev-page reporter that observes the session.
+    """
+    require_env()
+    call_context: dict[str, Any] = {}
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
+    # key, no network hop; the turn binding in targets.yaml is advisory.
+    context = LLMContext()
+    state = build_state(call_context)
+    agents = [BillingAgent(state=state, context=context, call_context=call_context, dev_metrics=dev), IntakeAgent(state=state, context=context, call_context=call_context, dev_metrics=dev)]
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            # The FLOOR: how long silence has to last before speech counts as
+            # stopped. Pipecat's own default, and it does not move with the pace.
+            #
+            # Widening this window makes some turns SLOWER, not more patient.
+            # pipecat-slng asks the bridge to finalise when VAD reports the caller
+            # stopped, and a final that already arrived finds no request
+            # outstanding, so the frame goes out unfinalized and Pipecat waits out
+            # a flat 1.0s safety net. Observed transcripts arrive from 0.27s.
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+            # The CEILING, on the end-of-turn analyzer. pace: balanced.
+            #
+            # Note the two fields both spelled stop_secs. The one above is the
+            # VAD's silence window; this one is how long the turn may run before
+            # closing regardless. They are different fields and different numbers.
+            #
+            # The analyzer is Pipecat's own default stop strategy. It is
+            # constructed explicitly here only so the ceiling is reachable: left
+            # implicit it runs at SmartTurnParams' own 3s.
+            user_turn_strategies=UserTurnStrategies(
+                # A minimum word count replaces the default start pair on purpose:
+                # gating turn start on words is the whole point, and leaving VAD
+                # start in place would open the turn before the words arrive.
+                start=[MinWordsUserTurnStartStrategy(min_words=2)],
+                stop=[
+                    TurnAnalyzerUserTurnStopStrategy(
+                        turn_analyzer=LocalSmartTurnAnalyzerV3(
+                            params=SmartTurnParams(stop_secs=1.6)
+                        )
+                    )
+                ],
+
+            ),
+            user_idle_timeout=15,
+        ),
+    )
+    bridge = BusBridgeProcessor(bus=runner.bus, worker_name=MAIN_NAME, name=f"{MAIN_NAME}::BusBridge")
+    dev.observe_aggregators(user_aggregator, assistant_aggregator)
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            dev.observe_stt(build_stt()),
+            user_aggregator,
+            bridge,
+            transport.output(),
+            assistant_aggregator,
+        ]
+    )
+    main = PipelineWorker(
+        pipeline,
+        name=MAIN_NAME,
+        # The worker builds its own latency observer only when tracing is enabled,
+        # and does not re-expose its events, so this one is always ours.
+        observers=dev.observers(),
+
+        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+    )
+
+
+    @user_aggregator.event_handler("on_user_turn_idle")
+    async def on_user_turn_idle(aggregator: Any) -> None:
+        """Nudge the caller when they have gone quiet."""
+        await aggregator.push_frame(
+            LLMMessagesAppendFrame(
+                [{"role": "developer", "content": "The caller has gone quiet. Politely check if they are still there."}],
+                run_llm=True,
+            )
+        )
+
+    # inactivity.end_after: the nudge above is the first half, and this is the
+    # second. Without it an idle call is nudged forever and never hung up, which
+    # on a phone line is a billed open call. The clock starts at the first idle
+    # turn and is cancelled by the caller speaking again.
+    _idle_end: asyncio.Task[None] | None = None
+
+    @user_aggregator.event_handler("on_user_turn_idle")
+    async def on_user_turn_idle_end(aggregator: Any) -> None:
+        """Start the clock that ends an idle call."""
+        nonlocal _idle_end
+        if _idle_end is None or _idle_end.done():
+            _idle_end = asyncio.create_task(
+                _end_after(main, 45 - 15)
+            )
+
+    @user_aggregator.event_handler("on_user_turn_started")
+    async def on_user_turn_started(aggregator: Any, strategy: Any) -> None:
+        """Stop the hangup clock when the caller speaks again."""
+        nonlocal _idle_end
+        if _idle_end is not None and not _idle_end.done():
+            _idle_end.cancel()
+            _idle_end = None
+
+    runner_ready = asyncio.Event()
+    pipeline_started = asyncio.Event()
+    worker_start_error: Exception | None = None
+    entry_started = False
+
+    async def activate_entry() -> None:
+        """Activate the entry agent once, when the client and the pipeline are ready."""
+        nonlocal entry_started
+        if entry_started or worker_start_error is not None:
+            return
+        entry_started = True
+        await main.activate_worker(
+            "intake",
+            args=LLMWorkerActivationArgs(run_llm=False),
+        )
+        await next(agent for agent in agents if agent.name == "intake").queue_frame(
+            TTSSpeakFrame("Hi, you have reached Acme Support. How can I help you today?")
+        )
+
+        _schedule_end_after(main, 1200)
+
+    @runner.event_handler("on_ready")
+    async def on_runner_ready(runner: WorkerRunner) -> None:
+        """Note that the runner can take workers."""
+        runner_ready.set()
+
+    @main.event_handler("on_pipeline_started")
+    async def on_pipeline_started(worker: PipelineWorker, frame: Any) -> None:
+        """Add the agent workers once the main pipeline has started."""
+        nonlocal worker_start_error
+        await runner_ready.wait()
+        try:
+            await runner.add_workers(*agents)
+        except Exception as error:  # noqa: BLE001 - logged with its traceback, then the runner is cancelled
+            worker_start_error = error
+            # Logged here, where it is still known. Cancelling the runner makes
+            # run() raise CancelledError, and that reaches the caller before the
+            # re-raise below ever runs, so this error is destroyed on its way
+            # out: measured 2026-08-21, a session died half a second in and
+            # reported nothing but a failed trace flush.
+            logger.exception("the agent workers failed to start")
+            pipeline_started.set()
+            await runner.cancel(reason="agent worker startup failed")
+            return
+        pipeline_started.set()
+
+    @main.rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi: Any) -> None:
+        """Activate the entry agent once the client and the pipeline are ready."""
+        # Wait for both client media readiness and main's StartFrame before
+        # activating tools or emitting the greeting (SPEC V2).
+        await pipeline_started.wait()
+        await activate_entry()
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport: BaseTransport, client: Any) -> None:
+        """Stop the runner when the caller leaves."""
+        await runner.cancel()
+
+    await runner.add_workers(main)
+
+    await runner.run()
+    if worker_start_error is not None:
+        raise worker_start_error
+
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
+    """Run one session, reporting to the dev page and naming any error that stops it.
+
+    Args:
+        transport: The transport the caller is connected on.
+        runner_args: The arguments the runner started this session with.
+    """
+    dev = install_dev_metrics(runner_args)
+    try:
+        await _run_bot(transport, runner_args, dev)
+    except Exception as error:
+        # The dev page is where the author is looking when a call dies, so it
+        # names what stopped it. The type only: an exception's message quotes
+        # whatever it was working on, and that belongs in the log rather than
+        # on a page that carries no prompts, arguments or results.
+        dev.finish(error=True, reason=f"The agent stopped on {type(error).__name__}.")
+        raise
+    finally:
+        dev.finish()
+=== compile-report.json ===
+{
+  "target": "pipecat",
+  "provider": "pipecat",
+  "version": "1.10.0",
+  "supported": {
+    "floor": "1.10.0",
+    "ceiling": "1.10.0",
+    "verified": "2026-09-12"
+  },
+  "entry_agent": "intake",
+  "agents": [
+    "billing",
+    "intake"
+  ],
+  "generated_files": [
+    ".dockerignore",
+    ".env.example",
+    "Dockerfile",
+    "README.md",
+    "agents.py",
+    "bot.py",
+    "call.py",
+    "compile-report.json",
+    "compose.dev.yaml",
+    "pcc-deploy.toml",
+    "prompts/__init__.py",
+    "prompts/billing.md",
+    "prompts/intake.md",
+    "pyproject.toml",
+    "session.py",
+    "settings.py",
+    "utils/__init__.py",
+    "utils/dev_metrics.py"
+  ],
+  "required_env": [
+    "DEEPGRAM_API_KEY",
+    "GET_INVOICE_URL",
+    "LOOKUP_CUSTOMER_URL",
+    "OPENAI_API_KEY",
+    "SLNG_API_KEY"
+  ],
+  "bindings": [
+    {
+      "target": "pipecat",
+      "role": "listen",
+      "binding": {
+        "provider": "deepgram",
+        "model": "nova-3",
+        "placement": "api"
+      }
+    },
+    {
+      "target": "pipecat",
+      "role": "turn",
+      "binding": {
+        "provider": "local",
+        "model": "silero",
+        "placement": "local",
+        "semantic_endpointing": "preferred"
+      }
+    },
+    {
+      "target": "pipecat",
+      "role": "speak",
+      "profile": "front_desk",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/aura:2-en",
+        "voice": "aura-2-thalia-en",
+        "placement": "api"
+      }
+    },
+    {
+      "target": "pipecat",
+      "role": "speak",
+      "profile": "specialist",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/aura:2-en",
+        "voice": "aura-2-orion-en",
+        "placement": "api"
+      }
+    },
+    {
+      "target": "pipecat",
+      "role": "reason",
+      "profile": "careful_reasoning",
+      "binding": {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "placement": "api"
+      }
+    },
+    {
+      "target": "pipecat",
+      "role": "reason",
+      "profile": "fast_reasoning",
+      "binding": {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "placement": "api",
+        "params": {
+          "temperature": 0.4
+        }
+      }
+    }
+  ],
+  "sizing": [
+    {
+      "target": "pipecat",
+      "metric": "workers",
+      "value": "60",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    },
+    {
+      "target": "pipecat",
+      "metric": "gpus",
+      "value": "0",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    },
+    {
+      "target": "pipecat",
+      "metric": "provider_concurrency_quota.realtime_audio",
+      "value": "40",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    },
+    {
+      "target": "pipecat",
+      "metric": "provider_session_time_quota.realtime_audio",
+      "value": "4h0m0s",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    }
+  ],
+  "variables": [
+    {
+      "name": "customer_id",
+      "type": "string",
+      "has_default": false
+    },
+    {
+      "name": "verified",
+      "type": "boolean",
+      "has_default": true
+    }
+  ],
+  "notes": [
+    "interruption ignore_phrases emitted as IGNORE_PHRASES; short phrases are also suppressed by the min-words turn-start strategy",
+    "listen: deepgram via DeepgramSTTService (pipecat-ai[deepgram], verified 2026-07-15)",
+    "reason: openai via OpenAILLMService (pipecat-ai[openai], verified 2026-07-15)",
+    "speak: slng via SlngTTSService (pipecat-slng\u003e=0.5.2, verified 2026-09-09)",
+    "turn role lowers to on-device VAD (Silero); its binding is advisory",
+    "turn pace balanced (silence 0.2s from the pace, closes at 1.6s)"
+  ]
+}
+=== compose.dev.yaml ===
+# Generated local-development topology. Not a production deployment model.
+# Optional containerized topology for validating the same image production
+# deploys. `unmute dev` runs Pipecat on the host so browser WebRTC can reach its
+# ICE candidates. No coordination store here; the web path does not use one.
+services:
+  application:
+    build:
+      context: .
+    command: ["python", "bot.py", "--host", "0.0.0.0", "--port", "7860"]
+    environment:
+      - DEEPGRAM_API_KEY
+      - GET_INVOICE_URL
+      - LOOKUP_CUSTOMER_URL
+      - OPENAI_API_KEY
+      - SLNG_API_KEY
+      # optional: passed through when set on the host; absent otherwise
+      - UNMUTE_CALL_START
+      # optional: passed through when set on the host; absent otherwise
+      - UNMUTE_DEV_METRICS
+      # optional: passed through when set on the host; absent otherwise
+      - UNMUTE_LOCAL_RUN
+      # optional: passed through when set on the host; absent otherwise
+      - UNMUTE_LOG_LEVEL
+    ports:
+      - "${UNMUTE_DEV_PORT:-7860}:7860"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 7860), timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+=== pcc-deploy.toml ===
+agent_name = "safe-core-fixture-pipecat"
+secret_set = "safe-core-fixture-pipecat-secrets"
+
+=== prompts/__init__.py ===
+"""The system prompts, one Markdown file each beside this module.
+
+Each file is read once, at import. A prompt's placeholders are filled from the
+call's state where it is used, never here.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+_HERE = Path(__file__).parent
+
+
+def load(name: str) -> str:
+    """Read one prompt exactly as the package wrote it.
+
+    Args:
+        name: The prompt's file name, without the `.md` suffix.
+
+    Returns:
+        The prompt text.
+    """
+    return (_HERE / f"{name}.md").read_text(encoding="utf-8")
+
+
+BILLING_PROMPT = load("billing")
+INTAKE_PROMPT = load("intake")
+=== prompts/billing.md ===
+# Billing agent (placeholder prompt)
+
+You are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+
+- The caller was handed to you because they have a billing question. The conversation so far is in your context.
+- Use `get_invoice` to look up the caller's invoices. It takes the customer id, which the earlier lookup already established.
+- Explain charges calmly and clearly, one item at a time.
+- If the caller is not satisfied, explain what a human support team would need to review.
+=== prompts/intake.md ===
+# Intake agent (placeholder prompt)
+
+You are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+
+- Greet the caller and find out what they need.
+- When they give a phone number or email, use `lookup_customer` to find their record.
+- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.
+- Never guess account details. If you cannot find the customer, say so and ask again.
+=== pyproject.toml ===
+[project]
+name = "safe-core-fixture"
+version = "0.1.0"
+description = "Generated Pipecat voice agent (compiled by unmute)."
+requires-python = ">=3.11"
+dependencies = [
+    "pipecat-ai[deepgram,openai,runner,silero,webrtc,websocket]==1.10.0",
+    "pipecat-slng>=0.5.2",
+    "python-dotenv>=1.0",
+
+    "httpx>=0.27",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["ruff==0.15.7", "ty"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "PERF", "FURB", "RUF", "BLE", "D", "ANN"]
+ignore = ["E501", "ANN401", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tools/*" = ["D", "ANN"]
+"logic/*" = ["D", "ANN"]
+
+[tool.ty.environment]
+python-version = "3.11"
+=== session.py ===
+"""The call's state: its typed variables, how they are read, and what is known first."""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from typing import Any
+
+from loguru import logger
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 # --- declared state ----------------------------------------------------------
 # Generated from the `shapes:` and the typed `variables:` in agent.yaml. Both
@@ -1195,751 +2012,46 @@ def build_state(call_context: dict[str, Any] | None = None) -> State:
     if "verified" in call_start:
         state.verified = call_start["verified"]
     return state
+=== settings.py ===
+"""Every fixed value this agent runs with, in one place.
 
-async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
-    """End the call once `timeout_secs` have passed.
-
-    Args:
-        worker: The pipeline worker to send the end frame to.
-        timeout_secs: How long to wait first.
-    """
-    await asyncio.sleep(timeout_secs)
-    await worker.queue_frame(EndFrame())
-
-
-def _schedule_end_after(worker: PipelineWorker, timeout_secs: float) -> None:
-    """Schedule `_end_after` and hold its task until it finishes.
-
-    Args:
-        worker: The pipeline worker to send the end frame to.
-        timeout_secs: How long to wait first.
-    """
-    task = asyncio.create_task(_end_after(worker, timeout_secs))
-    _END_TASKS.add(task)
-    task.add_done_callback(_END_TASKS.discard)
-
-# --- prompts ----------------------------------------------------------------
-# Agent system instructions as module constants: one copy each, referenced by
-# the LLM builder and any Flow restore (V2).
-BILLING_PROMPT = """# Billing agent (placeholder prompt)
-
-You are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
-
-- The caller was handed to you because they have a billing question. The conversation so far is in your context.
-- Use `get_invoice` to look up the caller's invoices. It takes the customer id, which the earlier lookup already established.
-- Explain charges calmly and clearly, one item at a time.
-- If the caller is not satisfied, explain what a human support team would need to review.
-"""
-INTAKE_PROMPT = """# Intake agent (placeholder prompt)
-
-You are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
-
-- Greet the caller and find out what they need.
-- When they give a phone number or email, use `lookup_customer` to find their record.
-- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.
-- Never guess account details. If you cannot find the customer, say so and ask again.
+Compiled from the package: names, limits, timeouts, and the environment
+variables each kind of session needs. Nothing here reads a secret.
 """
 
+from __future__ import annotations
 
-# --- agents -----------------------------------------------------------------
+import os
 
+MAIN_NAME = "main"
+# The longest a webhook tool waits for its endpoint before the call fails.
+WEBHOOK_TIMEOUT_SECS = 30.0
 
-
-def build_billing_llm(
-    state: State | None = None
-) -> LLMService[Any]:
-    """Build the language model for this agent.
-
-    Args:
-        state: The call state, read by the router for its template variables.
-
-    Returns:
-        The configured LLM service.
-    """
-    return OpenAILLMService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
-            model="gpt-4o",
-            system_instruction=BILLING_PROMPT,
-        ),
-    )
-
-
-def build_billing_tts() -> TTSService:
-    """Build the voice for this agent.
-
-    Returns:
-        The configured TTS service.
-    """
-    return SlngTTSService(
-        api_key=os.environ["SLNG_API_KEY"],
-        voice="aura-2-orion-en",
-        model="slng/deepgram/aura:2-en",
-    )
-
-
-class BillingAgent(LLMWorker):
-    """Agent: billing."""
-
-    def __init__(
-        self,
-        state: State | None = None,
-        context: LLMContext | None = None,
-        call_context: dict[str, Any] | None = None,
-        dev_metrics: DevReporter | None = None,
-    ) -> None:
-        """Build this agent's model and voice and join the call's shared context.
-
-        Args:
-            state: The call's typed variables, shared by every agent.
-            context: The LLM context every agent on the call shares.
-            call_context: The call's own facts and transport handles.
-            dev_metrics: The dev-page reporter, or None outside `unmute dev`.
-        """
-        # Always supplied when the package declares variables; None only in a test.
-        self.state: State = cast(State, state)
-        if context is not None:
-            self.context = context
-
-        llm = build_billing_llm(state)
-        tts = build_billing_tts()
-        self._dev = dev_metrics
-        if self._dev:
-            self._dev.observe_llm(llm)
-            self._dev.observe_tts(tts)
-        super().__init__("billing", llm=llm, pipeline=Pipeline([llm, tts]), bridged=())
-
-    async def queue_frame(self, frame: Any, *args: Any, **kwargs: Any) -> None:
-        """Stamp the frame for the dev page, then queue it as usual.
-
-        Args:
-            frame: The frame to queue.
-            *args: Passed to the base worker.
-            **kwargs: Passed to the base worker.
-        """
-        if self._dev:
-            self._dev.stamp(frame)
-        await super().queue_frame(frame, *args, **kwargs)
-
-    async def on_activated(self, args: dict[str, Any] | None) -> None:
-        """Set this agent's prompt and scope, then ask for its first reply when told to.
-
-        Args:
-            args: The activation arguments the previous agent or the entry passed.
-        """
-        token = self._dev.enter_activation(args) if self._dev else None
-        try:
-            await self.queue_frame(LLMUpdateSettingsFrame(
-                delta=LLMSettings(system_instruction=BILLING_PROMPT),
-            ))
-            await super().on_activated(args)
-            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
-            # A handoff already shaped the shared context; request the reply
-            # without adding a synthetic message or waiting for the caller.
-            if args and args.get("run_llm") and not args.get("messages"):
-                await self.queue_frame(LLMRunFrame())
-        finally:
-            if self._dev:
-                self._dev.exit_activation(token)
-
-
-
-    @_direct_tool
-    async def get_invoice(self, params: FunctionCallParams, customer_id: str) -> None:
-        """Fetch the most recent invoice for a customer id. Returns the invoice total and status.
-
-        Args:
-            params (FunctionCallParams): The call handle; the result goes back through it.
-            customer_id (str): The customer id from lookup_customer
-        """
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                os.environ["GET_INVOICE_URL"],
-                json={"customer_id": customer_id},
-                timeout=WEBHOOK_TIMEOUT_SECS,
-            )
-            response.raise_for_status()
-            await params.result_callback(response.json())
-
-
-
-def build_intake_llm(
-    state: State | None = None
-) -> LLMService[Any]:
-    """Build the language model for this agent.
-
-    Args:
-        state: The call state, read by the router for its template variables.
-
-    Returns:
-        The configured LLM service.
-    """
-    return OpenAILLMService(
-        api_key=os.environ["OPENAI_API_KEY"],
-        settings=OpenAILLMService.Settings(
-            model="gpt-4o-mini",
-            system_instruction=INTAKE_PROMPT,
-            temperature=0.4,
-        ),
-    )
-
-
-def build_intake_tts() -> TTSService:
-    """Build the voice for this agent.
-
-    Returns:
-        The configured TTS service.
-    """
-    return SlngTTSService(
-        api_key=os.environ["SLNG_API_KEY"],
-        voice="aura-2-thalia-en",
-        model="slng/deepgram/aura:2-en",
-    )
-
-
-class IntakeAgent(LLMWorker):
-    """Agent: intake."""
-
-    def __init__(
-        self,
-        state: State | None = None,
-        context: LLMContext | None = None,
-        call_context: dict[str, Any] | None = None,
-        dev_metrics: DevReporter | None = None,
-    ) -> None:
-        """Build this agent's model and voice and join the call's shared context.
-
-        Args:
-            state: The call's typed variables, shared by every agent.
-            context: The LLM context every agent on the call shares.
-            call_context: The call's own facts and transport handles.
-            dev_metrics: The dev-page reporter, or None outside `unmute dev`.
-        """
-        # Always supplied when the package declares variables; None only in a test.
-        self.state: State = cast(State, state)
-        if context is not None:
-            self.context = context
-
-        llm = build_intake_llm(state)
-        tts = build_intake_tts()
-        self._dev = dev_metrics
-        if self._dev:
-            self._dev.observe_llm(llm)
-            self._dev.observe_tts(tts)
-        super().__init__("intake", llm=llm, pipeline=Pipeline([llm, tts]), bridged=())
-
-    async def queue_frame(self, frame: Any, *args: Any, **kwargs: Any) -> None:
-        """Stamp the frame for the dev page, then queue it as usual.
-
-        Args:
-            frame: The frame to queue.
-            *args: Passed to the base worker.
-            **kwargs: Passed to the base worker.
-        """
-        if self._dev:
-            self._dev.stamp(frame)
-        await super().queue_frame(frame, *args, **kwargs)
-
-    async def on_activated(self, args: dict[str, Any] | None) -> None:
-        """Set this agent's prompt and scope, then ask for its first reply when told to.
-
-        Args:
-            args: The activation arguments the previous agent or the entry passed.
-        """
-        token = self._dev.enter_activation(args) if self._dev else None
-        try:
-            await self.queue_frame(LLMUpdateSettingsFrame(
-                delta=LLMSettings(system_instruction=INTAKE_PROMPT),
-            ))
-            await super().on_activated(args)
-            # Pipecat 1.8 and 1.9 only run on activation when messages are nonempty.
-            # A handoff already shaped the shared context; request the reply
-            # without adding a synthetic message or waiting for the caller.
-            if args and args.get("run_llm") and not args.get("messages"):
-                await self.queue_frame(LLMRunFrame())
-        finally:
-            if self._dev:
-                self._dev.exit_activation(token)
-
-
-
-    @_direct_tool(cancel_on_interruption=False)
-    async def to_billing(self, params: FunctionCallParams) -> None:
-        """Caller asks about billing, an invoice, or a refund.
-
-        Args:
-            params (FunctionCallParams): The call handle; the result goes back through it.
-        """
-        # context.history on this handoff. One LLMContext is shared for the whole
-        # call, so the receiver is given the shaped list rather than a copy.
-        self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
-        await self.activate_worker(
-            "billing",
-            args=LLMWorkerActivationArgs(
-                metadata=self._dev.activation_metadata() if self._dev else None,
-                messages=[],
-                run_llm=True,
-            ),
-            deactivate_self=True,
-            result_callback=params.result_callback,
-        )
-
-    @_direct_tool
-    async def lookup_customer(self, params: FunctionCallParams, email: str = "", phone: str = "") -> None:
-        """Look up a customer record by phone number or email. Returns the customer id and name.
-
-        Args:
-            params (FunctionCallParams): The call handle; the result goes back through it.
-            email (str): Caller email address
-            phone (str): Caller phone number in E.164 form
-        """
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                os.environ["LOOKUP_CUSTOMER_URL"],
-                json={"email": email, "phone": phone},
-                timeout=WEBHOOK_TIMEOUT_SECS,
-            )
-            response.raise_for_status()
-            await params.result_callback(response.json())
-
-
-# --- transport & run --------------------------------------------------------
-transport_params: dict[str, Callable[[], TransportParams]] = {
-    "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
-    # The runner assigns an inbound call's dial-in settings and Daily credentials
-    # onto whatever this returns, so on the Daily route it has to be the params
-    # class that declares them. The generic one rejects the assignment.
-    "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
-    # A simulated caller on the runner's Twilio route (`-t twilio`); see
-    # _carrier_transport.
-    "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
-
-}
-
-
-
-def build_stt() -> STTService:
-    """Build the transcriber.
-
-    Returns:
-        The configured STT service.
-    """
-    return DeepgramSTTService(
-        api_key=os.environ["DEEPGRAM_API_KEY"],
-        settings=DeepgramSTTService.Settings(
-            model="nova-3",
-        ),
-    )
-
-
-async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev: DevReporter) -> None:
-    """Build the pipeline for one session and run it until the call ends.
-
-    Args:
-        transport: The transport the caller is connected on.
-        runner_args: The arguments the runner started this session with.
-        dev: The dev-page reporter that observes the session.
-    """
-    require_env()
-    call_context: dict[str, Any] = {}
-
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
-
-    # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
-    # key, no network hop; the turn binding in targets.yaml is advisory.
-    context = LLMContext()
-    state = build_state(call_context)
-    agents = [BillingAgent(state=state, context=context, call_context=call_context, dev_metrics=dev), IntakeAgent(state=state, context=context, call_context=call_context, dev_metrics=dev)]
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(
-            # The FLOOR: how long silence has to last before speech counts as
-            # stopped. Pipecat's own default, and it does not move with the pace.
-            #
-            # Widening this window makes some turns SLOWER, not more patient.
-            # pipecat-slng asks the bridge to finalise when VAD reports the caller
-            # stopped, and a final that already arrived finds no request
-            # outstanding, so the frame goes out unfinalized and Pipecat waits out
-            # a flat 1.0s safety net. Observed transcripts arrive from 0.27s.
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-            # The CEILING, on the end-of-turn analyzer. pace: balanced.
-            #
-            # Note the two fields both spelled stop_secs. The one above is the
-            # VAD's silence window; this one is how long the turn may run before
-            # closing regardless. They are different fields and different numbers.
-            #
-            # The analyzer is Pipecat's own default stop strategy. It is
-            # constructed explicitly here only so the ceiling is reachable: left
-            # implicit it runs at SmartTurnParams' own 3s.
-            user_turn_strategies=UserTurnStrategies(
-                # A minimum word count replaces the default start pair on purpose:
-                # gating turn start on words is the whole point, and leaving VAD
-                # start in place would open the turn before the words arrive.
-                start=[MinWordsUserTurnStartStrategy(min_words=2)],
-                stop=[
-                    TurnAnalyzerUserTurnStopStrategy(
-                        turn_analyzer=LocalSmartTurnAnalyzerV3(
-                            params=SmartTurnParams(stop_secs=1.6)
-                        )
-                    )
-                ],
-
-            ),
-            user_idle_timeout=15,
-        ),
-    )
-    bridge = BusBridgeProcessor(bus=runner.bus, worker_name=MAIN_NAME, name=f"{MAIN_NAME}::BusBridge")
-    dev.observe_aggregators(user_aggregator, assistant_aggregator)
-    pipeline = Pipeline(
-        [
-            transport.input(),
-            dev.observe_stt(build_stt()),
-            user_aggregator,
-            bridge,
-            transport.output(),
-            assistant_aggregator,
-        ]
-    )
-    main = PipelineWorker(
-        pipeline,
-        name=MAIN_NAME,
-        # The worker builds its own latency observer only when tracing is enabled,
-        # and does not re-expose its events, so this one is always ours.
-        observers=dev.observers(),
-
-        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
-    )
-
-
-    @user_aggregator.event_handler("on_user_turn_idle")
-    async def on_user_turn_idle(aggregator: Any) -> None:
-        """Nudge the caller when they have gone quiet."""
-        await aggregator.push_frame(
-            LLMMessagesAppendFrame(
-                [{"role": "developer", "content": "The caller has gone quiet. Politely check if they are still there."}],
-                run_llm=True,
-            )
-        )
-
-    # inactivity.end_after: the nudge above is the first half, and this is the
-    # second. Without it an idle call is nudged forever and never hung up, which
-    # on a phone line is a billed open call. The clock starts at the first idle
-    # turn and is cancelled by the caller speaking again.
-    _idle_end: asyncio.Task[None] | None = None
-
-    @user_aggregator.event_handler("on_user_turn_idle")
-    async def on_user_turn_idle_end(aggregator: Any) -> None:
-        """Start the clock that ends an idle call."""
-        nonlocal _idle_end
-        if _idle_end is None or _idle_end.done():
-            _idle_end = asyncio.create_task(
-                _end_after(main, 45 - 15)
-            )
-
-    @user_aggregator.event_handler("on_user_turn_started")
-    async def on_user_turn_started(aggregator: Any, strategy: Any) -> None:
-        """Stop the hangup clock when the caller speaks again."""
-        nonlocal _idle_end
-        if _idle_end is not None and not _idle_end.done():
-            _idle_end.cancel()
-            _idle_end = None
-
-    runner_ready = asyncio.Event()
-    pipeline_started = asyncio.Event()
-    worker_start_error: Exception | None = None
-    entry_started = False
-
-    async def activate_entry() -> None:
-        """Activate the entry agent once, when the client and the pipeline are ready."""
-        nonlocal entry_started
-        if entry_started or worker_start_error is not None:
-            return
-        entry_started = True
-        await main.activate_worker(
-            "intake",
-            args=LLMWorkerActivationArgs(run_llm=False),
-        )
-        await next(agent for agent in agents if agent.name == "intake").queue_frame(
-            TTSSpeakFrame("Hi, you have reached Acme Support. How can I help you today?")
-        )
-
-        _schedule_end_after(main, 1200)
-
-    @runner.event_handler("on_ready")
-    async def on_runner_ready(runner: WorkerRunner) -> None:
-        """Note that the runner can take workers."""
-        runner_ready.set()
-
-    @main.event_handler("on_pipeline_started")
-    async def on_pipeline_started(worker: PipelineWorker, frame: Any) -> None:
-        """Add the agent workers once the main pipeline has started."""
-        nonlocal worker_start_error
-        await runner_ready.wait()
-        try:
-            await runner.add_workers(*agents)
-        except Exception as error:  # noqa: BLE001 - logged with its traceback, then the runner is cancelled
-            worker_start_error = error
-            # Logged here, where it is still known. Cancelling the runner makes
-            # run() raise CancelledError, and that reaches the caller before the
-            # re-raise below ever runs, so this error is destroyed on its way
-            # out: measured 2026-08-21, a session died half a second in and
-            # reported nothing but a failed trace flush.
-            logger.exception("the agent workers failed to start")
-            pipeline_started.set()
-            await runner.cancel(reason="agent worker startup failed")
-            return
-        pipeline_started.set()
-
-    @main.rtvi.event_handler("on_client_ready")
-    async def on_client_ready(rtvi: Any) -> None:
-        """Activate the entry agent once the client and the pipeline are ready."""
-        # Wait for both client media readiness and main's StartFrame before
-        # activating tools or emitting the greeting (SPEC V2).
-        await pipeline_started.wait()
-        await activate_entry()
-
-    @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport: BaseTransport, client: Any) -> None:
-        """Stop the runner when the caller leaves."""
-        await runner.cancel()
-
-    await runner.add_workers(main)
-
-    await runner.run()
-    if worker_start_error is not None:
-        raise worker_start_error
-
-
-
-async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
-    """Run one session, reporting to the dev page and naming any error that stops it.
-
-    Args:
-        transport: The transport the caller is connected on.
-        runner_args: The arguments the runner started this session with.
-    """
-    dev = install_dev_metrics(runner_args)
-    try:
-        await _run_bot(transport, runner_args, dev)
-    except Exception as error:
-        # The dev page is where the author is looking when a call dies, so it
-        # names what stopped it. The type only: an exception's message quotes
-        # whatever it was working on, and that belongs in the log rather than
-        # on a page that carries no prompts, arguments or results.
-        dev.finish(error=True, reason=f"The agent stopped on {type(error).__name__}.")
-        raise
-    finally:
-        dev.finish()
-
-
-async def bot(runner_args: RunnerArguments) -> None:
-    """Handle one session: build its transport, then run the agent on it.
-
-    This is the entry point the Pipecat runner and Pipecat Cloud call.
-
-    Args:
-        runner_args: The arguments the runner started this session with.
-    """
-    _configure_logging()
-
-    # A websocket session is a phone call on this route, and this package holds no
-    # carrier credentials, so it builds that transport itself (see
-    # _carrier_transport). Everything else, browser and console, is the framework's.
-    if getattr(runner_args, "websocket", None) is not None:
-        transport = await _carrier_transport(runner_args)
-    else:
-        transport = await create_transport(runner_args, transport_params)
-    await run_bot(transport, runner_args)
-
-
-if __name__ == "__main__":
-    from pipecat.runner.run import main
-
-    main()
-=== compile-report.json ===
-{
-  "target": "pipecat",
-  "provider": "pipecat",
-  "version": "1.10.0",
-  "supported": {
-    "floor": "1.10.0",
-    "ceiling": "1.10.0",
-    "verified": "2026-09-12"
-  },
-  "entry_agent": "intake",
-  "agents": [
-    "billing",
-    "intake"
-  ],
-  "generated_files": [
-    ".dockerignore",
-    ".env.example",
-    "Dockerfile",
-    "README.md",
-    "bot.py",
-    "compile-report.json",
-    "compose.dev.yaml",
-    "dev_metrics.py",
-    "pcc-deploy.toml",
-    "pyproject.toml"
-  ],
-  "required_env": [
+# Provider credentials only. The telephony route's environment (Redis, carrier
+# keys, the public URL) is required by telephony.py, not here, so a telephony
+# package still runs in the browser with nothing but model keys (V10/B3).
+REQUIRED_ENV = [
     "DEEPGRAM_API_KEY",
     "GET_INVOICE_URL",
     "LOOKUP_CUSTOMER_URL",
     "OPENAI_API_KEY",
-    "SLNG_API_KEY"
-  ],
-  "bindings": [
-    {
-      "target": "pipecat",
-      "role": "listen",
-      "binding": {
-        "provider": "deepgram",
-        "model": "nova-3",
-        "placement": "api"
-      }
-    },
-    {
-      "target": "pipecat",
-      "role": "turn",
-      "binding": {
-        "provider": "local",
-        "model": "silero",
-        "placement": "local",
-        "semantic_endpointing": "preferred"
-      }
-    },
-    {
-      "target": "pipecat",
-      "role": "speak",
-      "profile": "front_desk",
-      "binding": {
-        "provider": "slng",
-        "model": "slng/deepgram/aura:2-en",
-        "voice": "aura-2-thalia-en",
-        "placement": "api"
-      }
-    },
-    {
-      "target": "pipecat",
-      "role": "speak",
-      "profile": "specialist",
-      "binding": {
-        "provider": "slng",
-        "model": "slng/deepgram/aura:2-en",
-        "voice": "aura-2-orion-en",
-        "placement": "api"
-      }
-    },
-    {
-      "target": "pipecat",
-      "role": "reason",
-      "profile": "careful_reasoning",
-      "binding": {
-        "provider": "openai",
-        "model": "gpt-4o",
-        "placement": "api"
-      }
-    },
-    {
-      "target": "pipecat",
-      "role": "reason",
-      "profile": "fast_reasoning",
-      "binding": {
-        "provider": "openai",
-        "model": "gpt-4o-mini",
-        "placement": "api",
-        "params": {
-          "temperature": 0.4
-        }
-      }
-    }
-  ],
-  "sizing": [
-    {
-      "target": "pipecat",
-      "metric": "workers",
-      "value": "60",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
-    },
-    {
-      "target": "pipecat",
-      "metric": "gpus",
-      "value": "0",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
-    },
-    {
-      "target": "pipecat",
-      "metric": "provider_concurrency_quota.realtime_audio",
-      "value": "40",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
-    },
-    {
-      "target": "pipecat",
-      "metric": "provider_session_time_quota.realtime_audio",
-      "value": "4h0m0s",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
-    }
-  ],
-  "variables": [
-    {
-      "name": "customer_id",
-      "type": "string",
-      "has_default": false
-    },
-    {
-      "name": "verified",
-      "type": "boolean",
-      "has_default": true
-    }
-  ],
-  "notes": [
-    "interruption ignore_phrases emitted as IGNORE_PHRASES; short phrases are also suppressed by the min-words turn-start strategy",
-    "listen: deepgram via DeepgramSTTService (pipecat-ai[deepgram], verified 2026-07-15)",
-    "reason: openai via OpenAILLMService (pipecat-ai[openai], verified 2026-07-15)",
-    "speak: slng via SlngTTSService (pipecat-slng\u003e=0.5.2, verified 2026-09-09)",
-    "turn role lowers to on-device VAD (Silero); its binding is advisory",
-    "turn pace balanced (silence 0.2s from the pace, closes at 1.6s)"
-  ]
-}
-=== compose.dev.yaml ===
-# Generated local-development topology. Not a production deployment model.
-# Optional containerized topology for validating the same image production
-# deploys. `unmute dev` runs Pipecat on the host so browser WebRTC can reach its
-# ICE candidates. No coordination store here; the web path does not use one.
-services:
-  application:
-    build:
-      context: .
-    command: ["python", "bot.py", "--host", "0.0.0.0", "--port", "7860"]
-    environment:
-      - DEEPGRAM_API_KEY
-      - GET_INVOICE_URL
-      - LOOKUP_CUSTOMER_URL
-      - OPENAI_API_KEY
-      - SLNG_API_KEY
-      # optional: passed through when set on the host; absent otherwise
-      - UNMUTE_CALL_START
-      # optional: passed through when set on the host; absent otherwise
-      - UNMUTE_DEV_METRICS
-      # optional: passed through when set on the host; absent otherwise
-      - UNMUTE_LOCAL_RUN
-      # optional: passed through when set on the host; absent otherwise
-      - UNMUTE_LOG_LEVEL
-    ports:
-      - "${UNMUTE_DEV_PORT:-7860}:7860"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 7860), timeout=2)"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-      start_period: 10s
-=== dev_metrics.py ===
+    "SLNG_API_KEY",
+]
+IGNORE_PHRASES = ["okay", "right", "uh-huh"]
+
+
+def require_env() -> None:
+    """Fail at startup, naming every required environment variable that is unset.
+
+    Raises:
+        RuntimeError: When at least one name in REQUIRED_ENV has no value.
+    """
+    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+=== utils/__init__.py ===
+"""Helpers the agent's modules share."""
+=== utils/dev_metrics.py ===
 """Call-scoped, immediate dev events. Inert outside the local dev loop."""
 
 from __future__ import annotations
@@ -2970,40 +3082,3 @@ def install_dev_metrics(runner_args: RunnerArguments) -> DevReporter:
         A reporter that is inert unless the dev loop enabled it.
     """
     return DevReporter(runner_args)
-=== pcc-deploy.toml ===
-agent_name = "safe-core-fixture-pipecat"
-secret_set = "safe-core-fixture-pipecat-secrets"
-
-=== pyproject.toml ===
-[project]
-name = "safe-core-fixture"
-version = "0.1.0"
-description = "Generated Pipecat voice agent (compiled by unmute)."
-requires-python = ">=3.11"
-dependencies = [
-    "pipecat-ai[deepgram,openai,runner,silero,webrtc,websocket]==1.10.0",
-    "pipecat-slng>=0.5.2",
-    "python-dotenv>=1.0",
-
-    "httpx>=0.27",
-]
-
-[tool.uv]
-package = false
-
-[dependency-groups]
-dev = ["ruff==0.15.7", "ty"]
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "PERF", "FURB", "RUF", "BLE", "D", "ANN"]
-ignore = ["E501", "ANN401", "RUF001", "RUF002", "RUF003"]
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
-
-[tool.ruff.lint.per-file-ignores]
-"tools/*" = ["D", "ANN"]
-"logic/*" = ["D", "ANN"]
-
-[tool.ty.environment]
-python-version = "3.11"

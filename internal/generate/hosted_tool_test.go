@@ -53,6 +53,11 @@ func emitHosted(t *testing.T, fixture string, provider ir.Provider) map[string]s
 	for _, file := range artifact.Files {
 		files[file.Path] = string(file.Content)
 	}
+	// A code target's agent source as well, under agentSource; the SLNG target
+	// emits no Python module.
+	for _, path := range agentModulePaths() {
+		files[agentSource] += files[path]
+	}
 	return files
 }
 
@@ -117,8 +122,8 @@ func TestHostedToolLowersOnBothCodeTargets(t *testing.T) {
 		provider ir.Provider
 		module   string
 	}{
-		{ir.ProviderLiveKit, "agent.py"},
-		{ir.ProviderPipecat, "bot.py"},
+		{ir.ProviderLiveKit, agentSource},
+		{ir.ProviderPipecat, agentSource},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			files := emitHosted(t, hostedCodeFixture, tc.provider)
@@ -212,8 +217,8 @@ func TestHostedRequestToolCarriesNoSecretValue(t *testing.T) {
 		provider ir.Provider
 		module   string
 	}{
-		{ir.ProviderLiveKit, "agent.py"},
-		{ir.ProviderPipecat, "bot.py"},
+		{ir.ProviderLiveKit, agentSource},
+		{ir.ProviderPipecat, agentSource},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			files := emitHosted(t, hostedCodeFixture, tc.provider)

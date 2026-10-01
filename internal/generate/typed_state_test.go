@@ -79,9 +79,9 @@ func emitted(t *testing.T, agent *ir.Agent, provider ir.Provider) string {
 		t.Fatalf("generate %s: %v", provider, err)
 	}
 	if provider == ir.ProviderLiveKit {
-		return artifactFile(t, artifact, "agent.py")
+		return artifactFile(t, artifact, agentSource)
 	}
-	return artifactFile(t, artifact, "bot.py")
+	return artifactFile(t, artifact, agentSource)
 }
 
 // TestTypedStateEmitsNothingForAPackageThatDeclaresNone is FR-015, and it is
@@ -441,7 +441,7 @@ func TestDottedAssignWalksIntoAShapedResultAtEmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate livekit: %v", err)
 	}
-	if got := artifactFile(t, livekit, "agent.py"); !strings.Contains(got, want) || !strings.Contains(got, `for part in path.split("."):`) {
+	if got := artifactFile(t, livekit, agentSource); !strings.Contains(got, want) || !strings.Contains(got, `for part in path.split("."):`) {
 		t.Errorf("livekit does not walk the dotted assign path:\n%s", got)
 	}
 
@@ -449,7 +449,7 @@ func TestDottedAssignWalksIntoAShapedResultAtEmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate pipecat: %v", err)
 	}
-	if got := artifactFile(t, pipecat, "bot.py"); !strings.Contains(got, want) || !strings.Contains(got, `for part in path.split("."):`) {
+	if got := artifactFile(t, pipecat, agentSource); !strings.Contains(got, want) || !strings.Contains(got, `for part in path.split("."):`) {
 		t.Errorf("pipecat does not walk the dotted assign path:\n%s", got)
 	}
 }
@@ -825,9 +825,9 @@ func TestEmailValidatorImportMatchesItsUseAndItsDependency(t *testing.T) {
 				if err != nil {
 					t.Fatalf("generate: %v", err)
 				}
-				name := "bot.py"
+				name := agentSource
 				if provider == ir.ProviderLiveKit {
-					name = "agent.py"
+					name = agentSource
 				}
 				source := artifactFile(t, artifact, name)
 				pyproject := artifactFile(t, artifact, "pyproject.toml")

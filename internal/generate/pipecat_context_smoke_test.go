@@ -23,12 +23,12 @@ from types import SimpleNamespace
 
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 
-module = ast.parse(open("bot.py").read())
+module = ast.parse(open("utils/context.py").read())
 for node in module.body:
     if isinstance(node, ast.FunctionDef) and node.name in (
         "_caller_turns", "_newest_caller_message", "_speech_only", "_settle_task_call",
     ):
-        exec(compile(ast.Module(body=[node], type_ignores=[]), "bot.py", "exec"))
+        exec(compile(ast.Module(body=[node], type_ignores=[]), "utils/context.py", "exec"))
 
 
 def check():

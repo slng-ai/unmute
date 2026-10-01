@@ -29,7 +29,7 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import agent
+agent = _project("agent")
 from livekit.agents import DEFAULT_API_CONNECT_OPTIONS, AgentSession, io, llm, tts
 from livekit.agents.llm.tool_context import get_function_info, is_function_tool
 

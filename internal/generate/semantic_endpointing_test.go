@@ -45,7 +45,7 @@ func semanticFixture(t *testing.T, value ir.SemanticEndpointing) *ir.Agent {
 // "no turn model" differently, which is the whole reason one authored word maps
 // per target rather than being forwarded.
 func TestSemanticEndpointingOffRemovesTheModelOnBothTargets(t *testing.T) {
-	agentPy := generatedFile(t, semanticFixture(t, ir.SemanticEndpointingOff), ir.ProviderLiveKit, "agent.py")
+	agentPy := generatedFile(t, semanticFixture(t, ir.SemanticEndpointingOff), ir.ProviderLiveKit, agentSource)
 	if !strings.Contains(agentPy, `turn_detection="vad"`) {
 		t.Error("off did not reach LiveKit: expected turn_detection=\"vad\"")
 	}
@@ -57,7 +57,7 @@ func TestSemanticEndpointingOffRemovesTheModelOnBothTargets(t *testing.T) {
 		t.Error("off cost LiveKit its ceiling; the endpointing dict does not depend on the detector")
 	}
 
-	botPy := generatedFile(t, semanticFixture(t, ir.SemanticEndpointingOff), ir.ProviderPipecat, "bot.py")
+	botPy := generatedFile(t, semanticFixture(t, ir.SemanticEndpointingOff), ir.ProviderPipecat, agentSource)
 	if !strings.Contains(botPy, "SpeechTimeoutUserTurnStopStrategy()") {
 		t.Error("off did not reach Pipecat: expected the speech-timeout stop strategy")
 	}
@@ -84,14 +84,14 @@ func TestSemanticEndpointingPreferredAndRequiredKeepTheModel(t *testing.T) {
 			name = "unset"
 		}
 		t.Run(name, func(t *testing.T) {
-			agentPy := generatedFile(t, semanticFixture(t, value), ir.ProviderLiveKit, "agent.py")
+			agentPy := generatedFile(t, semanticFixture(t, value), ir.ProviderLiveKit, agentSource)
 			if !strings.Contains(agentPy, "inference.TurnDetector(") {
 				t.Error("LiveKit lost its turn detector")
 			}
 			if strings.Contains(agentPy, `turn_detection="vad"`) {
 				t.Error("LiveKit fell back to VAD-only turn detection")
 			}
-			botPy := generatedFile(t, semanticFixture(t, value), ir.ProviderPipecat, "bot.py")
+			botPy := generatedFile(t, semanticFixture(t, value), ir.ProviderPipecat, agentSource)
 			if !strings.Contains(botPy, "LocalSmartTurnAnalyzerV3") {
 				t.Error("Pipecat lost its end-of-turn analyzer")
 			}
@@ -125,7 +125,7 @@ func TestPipecatEmitsNoSpeechTimeoutUnlessAsked(t *testing.T) {
 	enabled := true
 	agent.Conversation.Interruption = &ir.Interruption{Enabled: &enabled, MinimumWords: 3}
 
-	botPy := generatedFile(t, agent, ir.ProviderPipecat, "bot.py")
+	botPy := generatedFile(t, agent, ir.ProviderPipecat, agentSource)
 	if !strings.Contains(botPy, "MinWordsUserTurnStartStrategy(min_words=3)") {
 		t.Fatal("the fixture did not reach the minimum-words branch, so this test proves nothing")
 	}

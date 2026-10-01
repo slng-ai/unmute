@@ -34,8 +34,8 @@ func TestDelegateAnnounceComesAtTheStartOfTheDelegate(t *testing.T) {
 		say      string
 		starts   string // marks the step's own work, which must come after say
 	}{
-		{ir.ProviderLiveKit, "agent.py", `dev_say(self.session, "One moment while I check.")`, "owner_ctx = self.chat_ctx.copy()"},
-		{ir.ProviderPipecat, "bot.py", `TTSSpeakFrame("One moment while I check.")`, "self._verify_caller_results = {}"},
+		{ir.ProviderLiveKit, agentSource, `dev_say(self.session, "One moment while I check.")`, "owner_ctx = self.chat_ctx.copy()"},
+		{ir.ProviderPipecat, agentSource, `TTSSpeakFrame("One moment while I check.")`, "self._verify_caller_results = {}"},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			agent := announcingAgent(t)
@@ -65,8 +65,8 @@ func TestDelegateWithoutAnnounceEmitsNothing(t *testing.T) {
 		provider ir.Provider
 		file     string
 	}{
-		{ir.ProviderLiveKit, "agent.py"},
-		{ir.ProviderPipecat, "bot.py"},
+		{ir.ProviderLiveKit, agentSource},
+		{ir.ProviderPipecat, agentSource},
 	} {
 		t.Run(string(tc.provider), func(t *testing.T) {
 			agent := prefetchFixture(t)

@@ -9,7 +9,7 @@ import (
 // as the group starts, which is what the key says: a confirmation that lapses
 // mid-flow is the next invocation's question.
 func TestAGroupSkipsAConfirmedStep(t *testing.T) {
-	livekit := terminalModule(t, "livekit", "agent.py")
+	livekit := terminalModule(t, "livekit", agentSource)
 	for _, want := range []string{
 		// The shared group decides per step as it is built.
 		`if _is_confirmed(ctx.userdata, "customer_phone"):`,
@@ -24,7 +24,7 @@ func TestAGroupSkipsAConfirmedStep(t *testing.T) {
 			t.Errorf("livekit agent.py missing %q", want)
 		}
 	}
-	pipecat := terminalModule(t, "pipecat", "bot.py")
+	pipecat := terminalModule(t, "pipecat", agentSource)
 	for _, want := range []string{
 		"self._do_book_plan = [",
 		`("verify", "customer_phone"),`,
@@ -41,7 +41,7 @@ func TestAGroupSkipsAConfirmedStep(t *testing.T) {
 // entered, standalone entry included, so a skip is never decided on a
 // confirmation the same step is about to replace.
 func TestAWithdrawingTaskUnconfirmsOnEntry(t *testing.T) {
-	livekit := terminalModule(t, "livekit", "agent.py")
+	livekit := terminalModule(t, "livekit", agentSource)
 	if !strings.Contains(livekit, `_withdraw_confirmation(self.session.userdata, "verify")`) {
 		t.Error("livekit agent.py does not withdraw on entering the skippable step")
 	}
@@ -52,7 +52,7 @@ func TestAWithdrawingTaskUnconfirmsOnEntry(t *testing.T) {
 	if withdrawAt < 0 || (promptAt >= 0 && promptAt < withdrawAt) {
 		t.Errorf("withdrawal must come before the prompt: withdraw=%d prompt=%d", withdrawAt, promptAt)
 	}
-	pipecat := terminalModule(t, "pipecat", "bot.py")
+	pipecat := terminalModule(t, "pipecat", agentSource)
 	if !strings.Contains(pipecat, `_withdraw_confirmation(self.state, "verify")`) {
 		t.Error("pipecat bot.py does not withdraw on entering the skippable step")
 	}
@@ -85,7 +85,7 @@ func TestWithdrawalClearsDerivedValuesToo(t *testing.T) {
 // A step that ends unserved stops the group: running the next one would answer
 // a question nobody asked, and the owner is handed the unserved status.
 func TestAGroupStopsOnUnserved(t *testing.T) {
-	livekit := terminalModule(t, "livekit", "agent.py")
+	livekit := terminalModule(t, "livekit", agentSource)
 	for _, want := range []string{
 		"class _GroupStop(Exception):",
 		`if isinstance(event.result, dict) and event.result.get("unserved_request"):`,
@@ -97,7 +97,7 @@ func TestAGroupStopsOnUnserved(t *testing.T) {
 			t.Errorf("livekit agent.py missing %q", want)
 		}
 	}
-	pipecat := terminalModule(t, "pipecat", "bot.py")
+	pipecat := terminalModule(t, "pipecat", agentSource)
 	for _, want := range []string{
 		`if self._do_book_results["verify"].get("unserved_request"):`,
 		`logger.info("group stopped: verify ended unserved")`,
@@ -112,7 +112,7 @@ func TestAGroupStopsOnUnserved(t *testing.T) {
 // A handoff called beside a tool that ends the step waits for that tool to
 // settle, and moves the caller only once the step's own work is recorded.
 func TestAHandoffWaitsForATerminalCallToSettle(t *testing.T) {
-	livekit := terminalModule(t, "livekit", "agent.py")
+	livekit := terminalModule(t, "livekit", agentSource)
 	for _, want := range []string{
 		// Waits on a mutation in flight from any response, or one called
 		// beside it in this response and not started yet.
@@ -132,7 +132,7 @@ func TestAHandoffWaitsForATerminalCallToSettle(t *testing.T) {
 	if waitAt < 0 || claimAt < waitAt {
 		t.Errorf("the handoff must wait before it claims: wait=%d claim=%d", waitAt, claimAt)
 	}
-	pipecat := terminalModule(t, "pipecat", "bot.py")
+	pipecat := terminalModule(t, "pipecat", agentSource)
 	for _, want := range []string{
 		`if self._do_book_pending or not {"book_it", "cancel_it"}.isdisjoint(self._response_calls):`,
 		"self._do_book_settled.wait(), timeout=TERMINAL_SETTLE_TIMEOUT_SECS",

@@ -8,7 +8,7 @@ import (
 // opening: listen speaks one fixed line and waits. No request is made to open
 // the step, which is the third of the three this feature removes.
 func TestListeningOpeningMakesNoRequest(t *testing.T) {
-	livekit := terminalModule(t, "livekit", "agent.py")
+	livekit := terminalModule(t, "livekit", agentSource)
 	enter := livekitOnEnter(t, livekit, "class TakeNote(")
 	if !strings.Contains(enter, `self.session.say("What would you like me to pass on?")`) {
 		t.Errorf("the listening step does not speak its line:\n%s", enter)
@@ -16,7 +16,7 @@ func TestListeningOpeningMakesNoRequest(t *testing.T) {
 	if strings.Contains(enter, "generate_reply") {
 		t.Errorf("the listening step still opens with a model request:\n%s", enter)
 	}
-	pipecat := terminalModule(t, "pipecat", "bot.py")
+	pipecat := terminalModule(t, "pipecat", agentSource)
 	node := blockAfter(t, pipecat, "def _take_note_node_take_note(self)")
 	for _, want := range []string{
 		`{"role": "assistant", "content": "What would you like me to pass on?"}`,
@@ -41,7 +41,7 @@ func TestListeningOpeningMakesNoRequest(t *testing.T) {
 // the spoken frame carried would be wiped: it is seeded in task_messages,
 // which the reset carries, and the frame only speaks it.
 func TestListeningOpeningSurvivesAReset(t *testing.T) {
-	pipecat := terminalModule(t, "pipecat", "bot.py")
+	pipecat := terminalModule(t, "pipecat", agentSource)
 	node := blockAfter(t, pipecat, "def _take_note_node_take_note(self)")
 	seedAt := strings.Index(node, `{"role": "assistant", "content": "What would you like me to pass on?"}`)
 	spokenAt := strings.Index(node, "append_to_context=False")
@@ -51,7 +51,7 @@ func TestListeningOpeningSurvivesAReset(t *testing.T) {
 	if !strings.Contains(node, "ContextStrategy.RESET") {
 		t.Errorf("the fixture's listening step declares history: reset and the node does not reset:\n%s", node)
 	}
-	livekit := terminalModule(t, "livekit", "agent.py")
+	livekit := terminalModule(t, "livekit", agentSource)
 	enter := livekitOnEnter(t, livekit, "class TakeNote(")
 	resetAt := strings.Index(enter, "await self.update_chat_ctx(llm.ChatContext())")
 	sayAt := strings.Index(enter, "self.session.say(")
@@ -63,7 +63,7 @@ func TestListeningOpeningSurvivesAReset(t *testing.T) {
 // The default is what every package had before this key existed, so a step that
 // writes nothing opens exactly as it did.
 func TestOpeningGenerateIsByteIdenticalToToday(t *testing.T) {
-	livekit := terminalModule(t, "livekit", "agent.py")
+	livekit := terminalModule(t, "livekit", agentSource)
 	for _, class := range []string{"class Verify(", "class Book("} {
 		body := livekitOnEnter(t, livekit, class)
 		if !strings.Contains(body, "self.session.generate_reply(") {
@@ -73,7 +73,7 @@ func TestOpeningGenerateIsByteIdenticalToToday(t *testing.T) {
 			t.Errorf("%s carries the listening comment and should not", class)
 		}
 	}
-	pipecat := terminalModule(t, "pipecat", "bot.py")
+	pipecat := terminalModule(t, "pipecat", agentSource)
 	node := blockAfter(t, pipecat, "def _do_book_node_verify(self)")
 	if !strings.Contains(node, `task_messages=[{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}]`) {
 		t.Errorf("a generating step no longer seeds the developer turn it always seeded:\n%s", node)

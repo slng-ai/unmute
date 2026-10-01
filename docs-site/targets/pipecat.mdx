@@ -17,15 +17,21 @@ unmute compile my-agent --target pipecat
 
 ```text
 my-agent/build/pipecat/
-├── bot.py                # the agent
+├── bot.py                # the entry point
+├── call.py               # one session: pipeline, turn detection, events
+├── agents.py             # the agents, their tools and task steps
+├── session.py            # saved values and prefetch
+├── settings.py           # every fixed value: names, timeouts, required variables
+├── prompts/              # one Markdown file per agent, tasks in prompts/tasks/
+├── utils/                # helpers, only the ones this package needs
+│   ├── dev_metrics.py    # per-turn latency for `unmute dev`, inert elsewhere
+│   ├── tracing.py        # present when the package sets tracing
+│   └── knowledge.py      # present when the package sets knowledge
 ├── tools/                # your local handlers, copied
 │   ├── __init__.py
 │   └── <name>.py         # one per local tool
-├── knowledge.py          # present when the package sets knowledge
 ├── knowledge/            # present when the package sets knowledge
 │   └── <name>/           # one directory per knowledge source, its documents copied in
-├── tracing.py            # present when the package sets tracing
-├── dev_metrics.py        # per-turn latency for `unmute dev`, inert elsewhere
 ├── pyproject.toml        # pinned dependencies
 ├── Dockerfile
 ├── .dockerignore
@@ -86,11 +92,19 @@ instance name, used by `--target` and the `build/<name>/` output folder.
   A non-negative count of instances to keep ready. A positive value becomes min_agents in the deploy manifest. Omitted or zero emits no minimum, so the platform can scale to zero.
 </ParamField>
 
-## bot.py
+## The modules
 
-One file holds the agent: the prompts as module constants, the model
-constructors, the tool wiring, and the pipeline. It imports Pipecat and your
-handlers, and nothing from Unmute.
+`bot.py` is the entry point. It loads `.env`, checks the required variables,
+and defines `bot()`, which Pipecat Cloud calls. `call.py` builds one session:
+the pipeline, turn detection, and the greeting. `agents.py` holds the agents,
+their tools, and the task steps. `session.py` holds saved values and prefetch.
+`settings.py` holds every fixed value.
+
+Each prompt is a Markdown file in `prompts/`, with task prompts in
+`prompts/tasks/`. The file holds the prompt text exactly. Placeholders are
+filled at run time.
+
+The project imports Pipecat and your handlers, and nothing from Unmute.
 
 The generated startup check names missing required environment variables.
 See the build's `.env.example` and [credentials reference](/reference/secrets).

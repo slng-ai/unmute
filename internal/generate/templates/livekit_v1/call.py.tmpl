@@ -1,0 +1,474 @@
+"""One call: warming the worker, building the session, and wiring the call."""
+
+{{- if or (and .InactivityNudgeSecs .InactivityEndSecs) .MaxDurationSecs}}
+# The loop keeps only a weak reference to a task, so a timer nobody holds can be
+# collected before it fires. Each one is held here until it finishes.
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+{{- end}}
+
+
+def prewarm(proc: JobProcess) -> None:
+    """Load what every call needs once, before the worker accepts a job.
+
+    Args:
+        proc: The worker process being warmed.
+    """
+{{- if not .LocalTurnTaking}}
+    # No voice activity detector. The model reports the caller's speech itself,
+    # and the framework only listens to it when no detector of ours is present:
+    # AgentActivity._on_input_speech_started sets the user state under
+    # `if self.vad is None or self.using_default_vad`. Loading one here would
+    # not error, it would quietly move "is the caller speaking" off the model.
+{{- if .Realtime}}
+    # A realtime package writing `turn_detection: local` takes the other branch
+    # and loads one, because that is what the framework requires before it will
+    # take the turn decision back (agent_activity.py:383-392).
+{{- end}}
+{{- if not .Knowledge.Knowledge}}
+    return
+{{- end}}
+{{- else}}
+    # The FLOOR: how long silence has to last before the runtime treats the
+    # caller as finished. {{if .Pace.FloorAuthored}}Authored as endpointing_delay.{{else}}From pace: {{.Pace.Name}}.{{end}}
+    #
+    # Always explicit. Leaving it off inherited Silero's own 0.55s, which is
+    # slower than the turn detector wants and was never anybody's choice. Hard
+    # floor is 0.25s; the turn detector raises at session start below it.
+    #
+    # Lowering this alone does not shorten a turn. The ceiling is in the session's
+    # turn_handling endpointing below, and that is where a 2.5s turn came from.
+    proc.userdata["vad"] = silero.VAD.load(min_silence_duration={{.Pace.Floor}})
+{{- end}}
+{{- if .Knowledge.Knowledge}}
+    # Read, split and embed every knowledge base here, not on the call path.
+    # LiveKit documents prewarm as the place for static data a job needs, and it
+    # runs once per worker process before any job is accepted, so a caller never
+    # waits for indexing and a failure stops the worker from reporting ready.
+    knowledge.build_indexes()
+{{- end}}
+
+
+
+async def run_call(ctx: JobContext) -> None:
+    """Run one call: build the session, start the entry agent and wire the call.
+
+    Args:
+        ctx: The job LiveKit dispatched for this call.
+    """
+{{- if .RequiredSecrets}}
+    require_env()
+{{- end}}
+{{- if .Slng.Any}}
+    # The call state is a local here as well as the session's user data, so the
+    # router's template variable snapshot can read it beside the llm kwarg.
+    #
+    # It also carries one SLNG Context Router session id per call, created here
+    # where the call begins, so one worker process serving several jobs keeps them
+    # apart. It rides the state object rather than a local of its own because
+    # every agent and task now builds its own header set at request time and has
+    # to be able to reach this from a method body. Not named session_id, because
+    # this file already writes a "session_id" into the telephony call context and
+    # that is a different thing.
+    slng_state = Userdata({{.Slng.SessionIDField}}=str(uuid.uuid4()))
+{{- if .Slng.ClientBaseURL}}
+    # This client is ours, so closing it is ours too: the plugin closes only a
+    # client it built itself. Without this a worker leaks one connection pool per
+    # call it serves.
+    slng_client = _slng_router_client()
+    slng_state.slng_client = slng_client
+
+    async def _close_slng_client() -> None:
+        await slng_client.close()
+
+    ctx.add_shutdown_callback(_close_slng_client)
+{{- end}}
+{{- end}}
+    session = AgentSession{{if .HasUserdata}}[Userdata]{{end}}(
+{{- if .HasUserdata}}
+        userdata={{if .Slng.Any}}slng_state{{else}}Userdata(){{end}},
+{{- end}}
+        # One retry, not the framework's three. A failed completion is retried
+        # four times by default with 0.1 + 2.0 + 2.0 seconds of sleep between the
+        # attempts, on top of four round trips to the provider: a live call on
+        # 2026-09-16 (trace 917975e9) spent 18.5 seconds in two of those and the
+        # caller asked whether anybody was still there.
+        #
+        # A caller cannot wait that out, and a retry loop tuned for a batch job
+        # is the wrong default for a conversation. One retry still covers a
+        # transient fault and costs 0.1s, because the first retry is nearly
+        # immediate; anything worse is better surfaced than slept through.
+        #
+        # ponytail: fixed, not authorable. No package would want a different
+        # number, and the one that does can say so when it turns up.
+        conn_options=SessionConnectOptions(
+            llm_conn_options=APIConnectOptions(max_retry=1),
+        ),
+{{- if .Live}}
+        # One model listens, thinks and speaks. It is an llm.DuplexModel, and
+        # AgentSession wraps one in DuplexRealtimeAdapter itself, so it is passed
+        # as llm= with nothing of ours around it.
+        #
+        # Four things a cascaded session is given are deliberately absent, and
+        # each would do damage rather than nothing:
+        #   stt= / tts=  the model hears and speaks itself; a synthesizer here
+        #                would give the call two voices
+        #   turn_handling  the model decides the turn; the adapter reports
+        #                  turn_detection=True and the package can set none of it
+        #   vad=         see prewarm above
+        llm={{template "svc" .Live.Call}},
+{{- if or .InactivityNudgeSecs .InactivityEndSecs}}
+        user_away_timeout={{if .InactivityNudgeSecs}}{{.InactivityNudgeSecs}}{{else}}{{.InactivityEndSecs}}{{end}},
+{{- end}}
+    )
+{{- else}}
+{{- if .Realtime}}
+        # One model hears the caller and answers. It is an llm.RealtimeModel, so
+        # it is passed as llm= with nothing of ours around it, and no transcriber
+        # and no reasoning model are built.
+{{- if .Realtime.TTS}}
+        # The half cascade: the model was asked for text only, and the
+        # synthesizer below speaks it. agent_activity.py:4180 routes a reply
+        # carrying no audio modality through tts_node.
+{{- else}}
+        # The model speaks in its own voice, so there is no synthesizer here. One
+        # would give the call two voices.
+{{- end}}
+        llm={{template "svc" .Realtime.Service.Call}},
+{{- if .Realtime.TTS}}
+        tts={{template "svc" .Realtime.TTS.Call}},
+{{- end}}
+{{- if not .LocalTurnTaking}}
+        # No turn_handling and no vad. The model decides the turn, and the
+        # framework hands that decision back only when a detector of ours is
+        # present and asked for (agent_activity.py:383-392), so passing either
+        # here would move the turn off the model without the package saying so.
+{{- end}}
+{{- else}}
+        stt={{template "sttexpr" .STT}},
+        llm={{template "llmexpr" .SessionLLM}},
+        tts={{template "svc" .SessionTTS.Call}},
+{{- end}}
+{{- if .LocalTurnTaking}}
+{{- if .Interruption}}
+        turn_handling=TurnHandlingOptions(
+{{- if .SemanticOff}}
+            # semantic_endpointing: off — end of turn comes from voice activity
+            # alone, with no turn model judging whether a thought finished. The
+            # endpointing window below still applies, so the ceiling is unchanged.
+            turn_detection="vad",
+{{- else}}
+            turn_detection=inference.TurnDetector({{if .TurnVersion}}version={{pyq .TurnVersion}}{{end}}),
+{{- end}}
+            # The CEILING, and the shortest wait the runtime will consider.
+            # pace: {{.Pace.Name}}. Without this the streaming defaults apply and
+            # max_delay is 2.5s, which no package could reach.
+            endpointing={"mode": {{pyq .Pace.Mode}}, "min_delay": {{.Pace.MinDelay}}, "max_delay": {{.Pace.Ceiling}}},
+            interruption={"enabled": {{if .Interruption.Enabled}}True{{else}}False{{end}}{{if .Interruption.MinWords}}, "min_words": {{.Interruption.MinWords}}{{end}}},
+            preemptive_generation={"enabled": True},
+        ),
+{{- else}}
+        turn_handling=TurnHandlingOptions(
+{{- if .SemanticOff}}
+            # semantic_endpointing: off — end of turn comes from voice activity
+            # alone, with no turn model judging whether a thought finished. The
+            # endpointing window below still applies, so the ceiling is unchanged.
+            turn_detection="vad",
+{{- else}}
+            turn_detection=inference.TurnDetector({{if .TurnVersion}}version={{pyq .TurnVersion}}{{end}}),
+{{- end}}
+            # The CEILING. pace: {{.Pace.Name}}. See the note on the other branch.
+            endpointing={"mode": {{pyq .Pace.Mode}}, "min_delay": {{.Pace.MinDelay}}, "max_delay": {{.Pace.Ceiling}}},
+            preemptive_generation={"enabled": True},
+        ),
+{{- end}}
+        vad=ctx.proc.userdata["vad"],
+{{- end}}
+{{- if or .InactivityNudgeSecs .InactivityEndSecs}}
+        user_away_timeout={{if .InactivityNudgeSecs}}{{.InactivityNudgeSecs}}{{else}}{{.InactivityEndSecs}}{{end}},
+{{- end}}
+    )
+{{- end}}
+
+{{if .Tracing}}{{if eq .TracingProvider "coval"}}
+    # The simulation ID arrives with the call, and on a SIP call it arrives after
+    # the job starts, so setup_coval watches for it rather than reading it once.
+    setup_coval(
+        ctx,
+        session,
+        metadata={
+            "session.id": ctx.room.name,
+            "agent.name": {{pyq .EntryAgent}} + "-" + {{pyq .AgentName}},
+        },
+    )
+
+{{else}}
+    setup_langfuse(
+        ctx,
+        session,
+        metadata={
+            "langfuse.session.id": ctx.room.name,
+            "langfuse.trace.name": {{pyq .EntryAgent}} + "-" + {{pyq .AgentName}},
+        },
+    )
+
+{{end}}{{end}}
+    # Inert unless the dev loop set UNMUTE_DEV_METRICS. Reads session events, so
+    # it never touches the tracer provider an opt-in trace export would own.
+    install_dev_metrics(session, call_id=ctx.room.name)
+
+    @session.on("metrics_collected")
+    def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
+        metrics.log_metrics(ev.metrics)
+
+{{- if or .InactivityNudgeSecs .InactivityEndSecs}}
+{{- if and .InactivityNudgeSecs .InactivityEndSecs}}
+
+    async def _end_if_still_away() -> None:
+        await asyncio.sleep({{.InactivityEndDeltaSecs}})  # inactivity.end_after
+        if session.user_state == "away":
+            session.shutdown()
+{{- end}}
+
+    @session.on("user_state_changed")
+    def _on_user_state_changed(ev: UserStateChangedEvent) -> None:
+        if ev.new_state != "away":
+            return
+{{- if .InactivityNudgeSecs}}
+        session.generate_reply(
+            instructions="The caller went quiet. Briefly check whether they are still there."
+        )
+{{- if .InactivityEndSecs}}
+        _timer = asyncio.create_task(_end_if_still_away())
+        _BACKGROUND_TASKS.add(_timer)
+        _timer.add_done_callback(_BACKGROUND_TASKS.discard)
+{{- end}}
+{{- else}}
+        session.shutdown()  # inactivity.end_after with no nudge
+{{- end}}
+{{- end}}
+{{if .Telephony}}
+{{- if eq .Telephony.Transport "connector"}}
+    await ctx.connect()
+{{- if .NeedsMCP}}
+    await _preflight_mcp()
+{{- end}}
+    # The Twilio bridge placed or answered the call, joined this room with the
+    # caller's audio, and dispatched this job. Direction (inbound or outbound)
+    # is already resolved by the bridge, so the agent just runs the session.
+    # Wait for the bridge participant so the caller audio track exists first.
+    await ctx.wait_for_participant()
+{{- if or .HasVars .CallRequiredEnv}}
+    metadata = _livekit_job_metadata(ctx.job.metadata)
+{{- if .CallRequiredEnv}}
+    if metadata.get("call_id") and metadata.get("stream_id"):
+        require_call_env()
+{{- end}}
+{{- end}}
+{{- if .HasVars}}
+    call_context = _livekit_call_context(ctx.room.name, metadata)
+    _hydrate_livekit_context(session.userdata, call_context)
+{{- if .CallStartVars}}
+    _hydrate_call_start(session.userdata, _dispatched_call_start(metadata))
+{{- end}}
+{{- if .NeedsPrefetch}}
+    await _prefetch(session.userdata, call_context)
+{{- end}}
+{{- end}}
+    await session.start(agent={{.EntryClass}}({{if not .SingleAgentMinimal}}initial=True{{end}}), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
+    await _livekit_entry_greeting(session)
+{{- else}}
+    metadata = _livekit_job_metadata(ctx.job.metadata)
+{{- if .CallStartVars}}
+    call_start = _dispatched_call_start(metadata)
+{{- end}}
+    outbound_job = "phone_number" in metadata
+{{- if .Outbound}}
+    phone_number = metadata.get("phone_number")
+{{- end}}
+{{- if .CallRequiredEnv}}
+    if outbound_job:
+        require_call_env()
+{{- end}}
+    await ctx.connect()
+{{- if .NeedsMCP}}
+    await _preflight_mcp()
+{{- end}}
+
+    if outbound_job:
+{{- if .Outbound}}
+        if (
+            not isinstance(phone_number, str)
+            or not phone_number.startswith("+")
+            or not phone_number[1:].isdigit()
+            or not PHONE_NUMBER_MIN_LEN <= len(phone_number) <= PHONE_NUMBER_MAX_LEN
+        ):
+            raise RuntimeError("phone_number must be an E.164 number")
+{{- if .HasVars}}
+        # Direction, dialled number, trunk number, and dispatched values are
+        # known before the session starts. on_enter renders its prompt here;
+        # call ID arrives with the SIP participant and is filled below.
+        call_context = _livekit_call_context(ctx.room.name, None, metadata)
+        _hydrate_livekit_context(session.userdata, call_context, require_all=False)
+{{- if .CallStartVars}}
+        _hydrate_call_start(session.userdata, call_start)
+{{- end}}
+{{- if .NeedsPrefetch}}
+        await _prefetch(session.userdata, call_context)
+{{- end}}
+{{- end}}
+        await session.start(agent={{.EntryClass}}({{if not .SingleAgentMinimal}}initial=True{{end}}), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
+        if not session.room_io:
+            raise RuntimeError("session room_io is unavailable")
+        session.room_io.set_participant("phone_user")
+        async with AMD(session, participant_identity="phone_user") as detector:
+            await ctx.api.sip.create_sip_participant(
+                api.CreateSIPParticipantRequest(
+                    room_name=ctx.room.name,
+                    trunk=_sip_trunk(),
+                    sip_number=_sip_number(),
+                    sip_call_to=phone_number,
+                    participant_identity="phone_user",
+                    wait_until_answered=True,
+                )
+            )
+            {{if or .HasVars .CallRequiredEnv}}participant = {{end}}await ctx.wait_for_participant(identity="phone_user")
+{{- if .HasVars}}
+            if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+                call_context = _livekit_call_context(ctx.room.name, participant, metadata)
+                _hydrate_livekit_context(session.userdata, call_context)
+{{- if .EntryPromptExpr}}
+                await session.current_agent.update_instructions({{.EntryPromptExpr}})
+{{- end}}
+{{- end}}
+            amd_result = await detector.execute()
+{{- else}}
+        raise RuntimeError("this LiveKit SIP route does not accept outbound jobs")
+{{- end}}
+    else:
+{{- if .Telephony.HasInbound}}
+        {{if or .HasVars .CallRequiredEnv}}participant = {{end}}await ctx.wait_for_participant()
+{{- else}}
+        raise RuntimeError("outbound LiveKit SIP job metadata requires phone_number")
+{{- end}}
+
+{{- if .CallRequiredEnv}}
+    if not outbound_job and participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+        require_call_env()
+{{- end}}
+{{- if .HasVars}}
+{{- if .NeedsPrefetch}}
+    # Bound whether or not a SIP participant arrived, so the pre-fetch below can
+    # read it either way: a web caller has no carrier facts and every entry that
+    # reads one skips, which is the documented behaviour and not an error.
+    call_context = None
+{{- end}}
+    if not outbound_job and participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+        call_context = _livekit_call_context(ctx.room.name, participant, metadata)
+        _hydrate_livekit_context(session.userdata, call_context)
+{{- if .CallStartVars}}
+    if not outbound_job:
+        _hydrate_call_start(session.userdata, call_start)
+{{- end}}
+{{- if .NeedsPrefetch}}
+    if not outbound_job:
+        await _prefetch(session.userdata, call_context)
+{{- end}}
+{{- end}}
+    if not outbound_job:
+        await session.start(agent={{.EntryClass}}({{if not .SingleAgentMinimal}}initial=True{{end}}), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
+{{- if .Outbound}}
+    else:
+        if amd_result.category == "machine-vm":
+{{- if .Outbound.LeaveMessage}}
+            handle = session.generate_reply(
+                instructions="You reached voicemail. Leave a brief message and say you will call back."
+            )
+            await handle.wait_for_playout()
+            ctx.shutdown("voicemail: left a message")  # on_voicemail: leave_message
+{{- else}}
+            ctx.shutdown("voicemail detected")  # on_voicemail: hangup
+{{- end}}
+            return
+        if amd_result.category == "machine-unavailable":
+            ctx.shutdown("mailbox unavailable")
+            return
+{{- end}}
+    await _livekit_entry_greeting(session)
+{{- end}}
+{{- else}}
+{{- if .CallStartVars}}
+    # Input variables land before the session starts, so the greeting and the
+    # prompts already see them (I.dispatch).
+    _hydrate_call_start(session.userdata, _dispatched_call_start(_livekit_job_metadata(ctx.job.metadata)))
+{{- end}}
+{{- if .NeedsPrefetch}}
+    # No telephony on this route, so there are no carrier facts: every entry
+    # reading one skips and its values keep their defaults. The clock still
+    # reads, and a seeded fact still arrives, which is what makes the whole path
+    # reproducible in the browser loop.
+    await _prefetch(session.userdata, None)
+{{- end}}
+{{- if .NeedsMCP}}
+    await ctx.connect()
+    await _preflight_mcp()
+{{- end}}
+    await session.start(agent={{.EntryClass}}({{if not .SingleAgentMinimal}}initial=True{{end}}), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
+{{- if not .NeedsMCP}}
+    await ctx.connect()
+{{- end}}
+{{- if .Outbound}}
+
+    # channels.telephony outbound: a job dispatched with {"phone_number": ...}
+    # metadata dials out; AMD classifies who answered (playout stays locked
+    # until the verdict, so the greeting waits for a human).
+    phone_number = None
+    if ctx.job.metadata:
+        phone_number = json.loads(ctx.job.metadata).get("phone_number")
+    if phone_number:
+        if not session.room_io:
+            raise RuntimeError("session room_io is unavailable")
+        session.room_io.set_participant("phone_user")
+        async with AMD(session, participant_identity="phone_user") as detector:
+            await ctx.api.sip.create_sip_participant(
+                api.CreateSIPParticipantRequest(
+                    room_name=ctx.room.name,
+                    trunk=_sip_trunk(),
+                    sip_number=_sip_number(),
+                    sip_call_to=phone_number,
+                    participant_identity="phone_user",
+                    wait_until_answered=True,
+                )
+            )
+            await ctx.wait_for_participant(identity="phone_user")
+            result = await detector.execute()
+        if result.category == "machine-vm":
+{{- if .Outbound.LeaveMessage}}
+            handle = session.generate_reply(
+                instructions="You reached voicemail. Leave a brief message and say you will call back."
+            )
+            await handle.wait_for_playout()
+            ctx.shutdown("voicemail: left a message")  # on_voicemail: leave_message
+{{- else}}
+            ctx.shutdown("voicemail detected")  # on_voicemail: hangup
+{{- end}}
+        elif result.category == "machine-unavailable":
+            ctx.shutdown("mailbox unavailable")
+{{- end}}
+{{- end}}
+{{- if .MaxDurationSecs}}
+
+    async def _max_duration() -> None:
+        await asyncio.sleep({{.MaxDurationSecs}})
+        session.shutdown()  # conversation.max_duration
+
+    _timer = asyncio.create_task(_max_duration())
+    _BACKGROUND_TASKS.add(_timer)
+    _timer.add_done_callback(_BACKGROUND_TASKS.discard)
+{{- end}}
+{{- if .ThinkingAudio}}
+
+    background_audio = BackgroundAudioPlayer(
+        thinking_sound=BuiltinAudioClip.KEYBOARD_TYPING,  # thinking_audio: subtle
+    )
+    await background_audio.start(room=ctx.room, agent_session=session)
+{{- end}}

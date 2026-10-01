@@ -1,108 +1,17 @@
-"""Generated Pipecat agent for safe-core-fixture.
+"""Every fixed value this agent runs with, in one place.
 
-Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
-graph are baked in from the package. Secret values are read from the environment
-and never written here. The agency model uses the Pipecat workers API: a main
-PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
-LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
-run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
-context, a FlowManager walks the steps as nodes, and control returns with only
-a completed or unserved status.
+Compiled from the package: names, limits, timeouts, and the environment
+variables each kind of session needs. Nothing here reads a secret.
 """
 
 from __future__ import annotations
 
-import asyncio
-import copy
-import functools
-import inspect
-import json
 import os
-import sys
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Any, Literal, cast
-
-import httpx
-from dotenv import load_dotenv
-from loguru import logger
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.bus import BusBridgeProcessor
-from pipecat.flows import (
-    NO_RESPONSE,
-    ContextStrategy,
-    ContextStrategyConfig,
-    FlowManager,
-    FlowsFunctionSchema,
-    NodeConfig,
-)
-from pipecat.frames.frames import (
-    EndFrame,
-    FunctionCallResultProperties,
-    LLMMessagesAppendFrame,
-    LLMRunFrame,
-    LLMUpdateSettingsFrame,
-    TTSSpeakFrame,
-)
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
-from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
-from pipecat.runner.types import RunnerArguments
-from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.llm_service import FunctionCallParams, LLMService
-from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.settings import LLMSettings
-from pipecat.services.stt_service import STTService
-from pipecat.services.tts_service import TTSService
-from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
-from pipecat.workers.llm import LLMWorkerActivationArgs, tool
-from pipecat.workers.runner import WorkerRunner
-from pipecat_slng import SlngTTSService
-from pydantic import BaseModel, TypeAdapter, ValidationError
-
-from dev_metrics import DevReporter, install_dev_metrics
-from tracing import (
-    TRACE_NAME,
-    TracedLLMWorker,
-    enable_agent_tracing,
-    flush_tracing,
-    setup_langfuse_tracing,
-    start_call,
-)
-
-load_dotenv()
-
-_LOGGING_CONFIGURED = False
-
-
-def _configure_logging() -> None:
-    """Send log output to stderr at UNMUTE_LOG_LEVEL, once per process."""
-    global _LOGGING_CONFIGURED
-    if _LOGGING_CONFIGURED:
-        return
-    logger.remove()
-    logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
-    _LOGGING_CONFIGURED = True
-
 
 MAIN_NAME = "main"
 # The longest a webhook tool waits for its endpoint before the call fails.
 WEBHOOK_TIMEOUT_SECS = 30.0
-# Tasks that end the call later. A task nobody references can be collected
-# while it sleeps, so each is held here until it finishes.
-_END_TASKS: set[asyncio.Task[None]] = set()
+
 # Provider credentials only. The telephony route's environment (Redis, carrier
 # keys, the public URL) is required by telephony.py, not here, so a telephony
 # package still runs in the browser with nothing but model keys (V10/B3).
@@ -128,154 +37,97 @@ def require_env() -> None:
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+"""The system prompts, one Markdown file each beside this module.
+
+Each file is read once, at import. A prompt's placeholders are filled from the
+call's state where it is used, never here.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+_HERE = Path(__file__).parent
 
 
-def _direct_tool(
-    fn: Callable[..., Any] | None = None,
-    *,
-    cancel_on_interruption: bool = True,
-    timeout_secs: float | None = None,
-) -> Any:
-    """Keep every direct function call terminal, even on malformed input.
-
-    Args:
-        fn: The handler, when used as a bare `@_direct_tool`.
-        cancel_on_interruption: Whether the caller speaking cancels the call.
-        timeout_secs: How long the framework waits for the handler.
-
-    Returns:
-        The decorated handler, or a decorator when called with options.
-    """
-
-    def decorate(handler: Callable[..., Any]) -> Any:
-        """Wrap one handler so a bad or failing call still resolves."""
-        signature = inspect.signature(handler)
-        declared = set(signature.parameters) - {"self", "params"}
-
-        @functools.wraps(handler)
-        async def guarded(*args: Any, **kwargs: Any) -> Any:
-            """Run the handler, resolving the call itself on bad input or failure."""
-            params = kwargs.get("params")
-            if params is None:
-                params_index = 1 if "self" in signature.parameters else 0
-                params = args[params_index]
-
-            unexpected = sorted(set(kwargs) - declared - {"params"})
-            if unexpected:
-                allowed = ", ".join(sorted(declared)) or "none"
-                await params.result_callback({
-                    "error": (
-                        f"Unexpected arguments for {params.function_name}: "
-                        f"{', '.join(unexpected)}. Allowed arguments: {allowed}. "
-                        "Retry with only allowed arguments."
-                    )
-                })
-                return
-
-            resolved = False
-            original_result_callback = params.result_callback
-
-            async def resolve(result: Any, **callback_kwargs: Any) -> Any:
-                """Record that the call was resolved, then hand the result on."""
-                nonlocal resolved
-                resolved = True
-                return await original_result_callback(result, **callback_kwargs)
-
-            params.result_callback = resolve
-            try:
-                return await handler(*args, **kwargs)
-            except Exception:
-                logger.exception("tool failed before completing: {}", params.function_name)
-                if not resolved:
-                    await original_result_callback({
-                        "error": (
-                            f"{params.function_name} failed before completing. "
-                            "Do not claim success; retry only with corrected input."
-                        )
-                    })
-                    return
-                raise
-            finally:
-                params.result_callback = original_result_callback
-
-        return tool(
-            cancel_on_interruption=cancel_on_interruption,
-            timeout_secs=timeout_secs,
-        )(guarded)
-
-    if fn is not None:
-        return decorate(fn)
-    return decorate
-
-
-
-# Checked at import, which is what makes the container refuse to start rather
-# than start and go quiet.
-#
-# It used to be checked only inside run_bot, once per session. The container
-# then reported healthy, the platform marked the deployment ready, the browser
-# got a valid answer to its offer — and the failure happened in a background
-# task where only the log saw it. A caller heard silence. That is the exact
-# trade Principle II calls the worst one available, and two documentation pages
-# already promised the opposite: "the container starts, checks the keys the
-# agent needs, and stops with the names it did not find" (Wave C, 2026-08-15).
-#
-# run_bot still calls it, because a session that somehow starts without them
-# should fail before the caller hears anything either.
-require_env()
-
-
-# --- a caller on a Twilio-shaped websocket ----------------------------------
-# `python bot.py -t twilio -x <public host>` serves a TwiML webhook and a Media
-# Streams websocket, the way Twilio would reach a phone route. This package has
-# no phone route, so nothing real dials it. It is here for a simulated caller,
-# such as a Coval run against this bot on your laptop.
-async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
-    """Build the carrier's stream, with the call ended by closing the socket.
-
-    Used by a package that holds no carrier credentials at all, which needs a
-    transport that never asks a carrier to hang a call up.
-
-    A package that receives calls and never places or redirects one holds no
-    carrier credentials. The framework's own telephony path cannot be used
-    for that: it always asks the serializer to hang the call up through the
-    carrier's REST API, and the serializer refuses to be built without credentials
-    for it (`auto_hang_up is enabled but missing required parameters`, verified
-    against pipecat-ai 1.5.0 on 2026-08-13). So the transport is built here, with
-    automatic hangup off.
-
-    Nothing is lost. Closing the stream ends the call, because the markup your
-    number points at has nothing after `<Connect>`. Declare a connection and this
-    function is not emitted at all: the framework's path is used, and the agent
-    ends calls through the carrier's own call control.
+def load(name: str) -> str:
+    """Read one prompt exactly as the package wrote it.
 
     Args:
-        runner_args: The runner's arguments for a websocket session.
+        name: The prompt's file name, without the `.md` suffix.
 
     Returns:
-        The Twilio Media Streams transport for this call.
+        The prompt text.
     """
-    from pipecat.runner.types import WebSocketRunnerArguments
-    from pipecat.runner.utils import parse_telephony_websocket
-    from pipecat.serializers.twilio import TwilioFrameSerializer
-    from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
+    return (_HERE / f"{name}.md").read_text(encoding="utf-8")
 
-    # Only a websocket session reaches this function; the base type has no socket.
-    websocket_args = cast(WebSocketRunnerArguments, runner_args)
-    transport_type, call_data = await parse_telephony_websocket(websocket_args.websocket)
-    # Set the same two attributes the framework's path sets, so _phone_session
-    # above reads the handshake the same way whichever path built the transport.
-    setattr(runner_args, "transport_type", transport_type)  # noqa: B010 - not declared on RunnerArguments
-    runner_args.call_data = call_data
-    params = cast(FastAPIWebsocketParams, transport_params[transport_type]())
-    params.add_wav_header = False
-    params.serializer = TwilioFrameSerializer(
-        stream_sid=call_data["stream_id"],
-        call_sid=call_data["call_id"],
-        params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
+
+BILLING_PROMPT = load("billing")
+INTAKE_PROMPT = load("intake")
+RUN_COLLECT_COLLECT_TASK_PROMPT = load("tasks/run_collect_collect")
+RUN_TRIAGE_COLLECT_TASK_PROMPT = load("tasks/run_triage_collect")
+"""Shape the conversation a step or an agent is handed."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+
+def _caller_turns(messages: list[Any]) -> int:
+    """Count the turns the caller has taken in this message list.
+
+    Read by every delegate, not just the ones that carry a turn: it is the one
+    signal that separates "they asked again" from "the model re-read its own
+    finished work", which is what the re-entry guard compares.
+
+    Args:
+        messages: The context's messages.
+
+    Returns:
+        The number of user messages.
+    """
+    return sum(1 for message in messages if isinstance(message, dict) and message.get("role") == "user")
+
+
+def _settle_task_call(messages: list[Any], name: str, status: Any) -> None:
+    """Replace this invocation's running reply before restoring the owner.
+
+    Args:
+        messages: The owner's messages, edited in place.
+        name: The delegate tool whose call is being settled.
+        status: The result to record in place of the running reply.
+    """
+    running = next(
+        (
+            call
+            for message in reversed(messages)
+            if isinstance(message, dict)
+            for call in message.get("tool_calls", [])
+            if call.get("function", {}).get("name") == name
+        ),
+        None,
     )
-    return FastAPIWebsocketTransport(websocket=websocket_args.websocket, params=params)
+    if running is None:
+        return
+    for reply in messages:
+        if (
+            isinstance(reply, dict)
+            and reply.get("role") == "tool"
+            and reply.get("tool_call_id") == running["id"]
+        ):
+            reply["content"] = json.dumps(status)
+"""The call's state: its typed variables, how they are read, and what is known first."""
 
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from typing import Any, Literal
+
+from loguru import logger
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 # --- declared state ----------------------------------------------------------
 # Generated from the `shapes:` and the typed `variables:` in agent.yaml. Both
@@ -764,53 +616,144 @@ def build_state(call_context: dict[str, Any] | None = None) -> State:
     if "verified" in call_start:
         state.verified = call_start["verified"]
     return state
+"""The agents, their tools, and the task steps they run as flows."""
 
-async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
-    """End the call once `timeout_secs` have passed.
+from __future__ import annotations
+
+import copy
+import functools
+import inspect
+import json
+import os
+from collections.abc import Awaitable, Callable
+from typing import Any, Literal, cast
+
+import httpx
+from loguru import logger
+from pipecat.flows import (
+    NO_RESPONSE,
+    ContextStrategy,
+    ContextStrategyConfig,
+    FlowManager,
+    FlowsFunctionSchema,
+    NodeConfig,
+)
+from pipecat.frames.frames import (
+    FunctionCallResultProperties,
+    LLMRunFrame,
+    LLMUpdateSettingsFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+)
+from pipecat.services.llm_service import FunctionCallParams, LLMService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import LLMSettings
+from pipecat.services.tts_service import TTSService
+from pipecat.workers.llm import LLMWorkerActivationArgs, tool
+from pipecat_slng import SlngTTSService
+from pydantic import TypeAdapter
+
+from prompts import (
+    BILLING_PROMPT,
+    INTAKE_PROMPT,
+    RUN_COLLECT_COLLECT_TASK_PROMPT,
+    RUN_TRIAGE_COLLECT_TASK_PROMPT,
+)
+from session import (
+    State,
+    _group_status,
+    _save_result,
+    _schema,
+    _StateRefused,
+    _task_status,
+)
+from settings import WEBHOOK_TIMEOUT_SECS
+from utils.context import _caller_turns, _settle_task_call
+from utils.dev_metrics import DevReporter
+from utils.tracing import TracedLLMWorker
+
+
+def _direct_tool(
+    fn: Callable[..., Any] | None = None,
+    *,
+    cancel_on_interruption: bool = True,
+    timeout_secs: float | None = None,
+) -> Any:
+    """Keep every direct function call terminal, even on malformed input.
 
     Args:
-        worker: The pipeline worker to send the end frame to.
-        timeout_secs: How long to wait first.
+        fn: The handler, when used as a bare `@_direct_tool`.
+        cancel_on_interruption: Whether the caller speaking cancels the call.
+        timeout_secs: How long the framework waits for the handler.
+
+    Returns:
+        The decorated handler, or a decorator when called with options.
     """
-    await asyncio.sleep(timeout_secs)
-    await worker.queue_frame(EndFrame())
+
+    def decorate(handler: Callable[..., Any]) -> Any:
+        """Wrap one handler so a bad or failing call still resolves."""
+        signature = inspect.signature(handler)
+        declared = set(signature.parameters) - {"self", "params"}
+
+        @functools.wraps(handler)
+        async def guarded(*args: Any, **kwargs: Any) -> Any:
+            """Run the handler, resolving the call itself on bad input or failure."""
+            params = kwargs.get("params")
+            if params is None:
+                params_index = 1 if "self" in signature.parameters else 0
+                params = args[params_index]
+
+            unexpected = sorted(set(kwargs) - declared - {"params"})
+            if unexpected:
+                allowed = ", ".join(sorted(declared)) or "none"
+                await params.result_callback({
+                    "error": (
+                        f"Unexpected arguments for {params.function_name}: "
+                        f"{', '.join(unexpected)}. Allowed arguments: {allowed}. "
+                        "Retry with only allowed arguments."
+                    )
+                })
+                return
+
+            resolved = False
+            original_result_callback = params.result_callback
+
+            async def resolve(result: Any, **callback_kwargs: Any) -> Any:
+                """Record that the call was resolved, then hand the result on."""
+                nonlocal resolved
+                resolved = True
+                return await original_result_callback(result, **callback_kwargs)
+
+            params.result_callback = resolve
+            try:
+                return await handler(*args, **kwargs)
+            except Exception:
+                logger.exception("tool failed before completing: {}", params.function_name)
+                if not resolved:
+                    await original_result_callback({
+                        "error": (
+                            f"{params.function_name} failed before completing. "
+                            "Do not claim success; retry only with corrected input."
+                        )
+                    })
+                    return
+                raise
+            finally:
+                params.result_callback = original_result_callback
+
+        return tool(
+            cancel_on_interruption=cancel_on_interruption,
+            timeout_secs=timeout_secs,
+        )(guarded)
+
+    if fn is not None:
+        return decorate(fn)
+    return decorate
 
 
-def _schedule_end_after(worker: PipelineWorker, timeout_secs: float) -> None:
-    """Schedule `_end_after` and hold its task until it finishes.
-
-    Args:
-        worker: The pipeline worker to send the end frame to.
-        timeout_secs: How long to wait first.
-    """
-    task = asyncio.create_task(_end_after(worker, timeout_secs))
-    _END_TASKS.add(task)
-    task.add_done_callback(_END_TASKS.discard)
-
-# --- prompts ----------------------------------------------------------------
-# Agent system instructions as module constants: one copy each, referenced by
-# the LLM builder and any Flow restore (V2).
-BILLING_PROMPT = """# Billing agent (placeholder prompt)
-
-You are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
-
-- The caller was handed to you because they have a billing question. The conversation so far is in your context.
-- Use `get_invoice` to look up the caller's invoices. It takes the customer id, which the earlier lookup already established.
-- Explain charges calmly and clearly, one item at a time.
-- If the caller is not satisfied, explain what a human support team would need to review.
-"""
-INTAKE_PROMPT = """# Intake agent (placeholder prompt)
-
-You are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
-
-- Greet the caller and find out what they need.
-- When they give a phone number or email, use `lookup_customer` to find their record.
-- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.
-- Never guess account details. If you cannot find the customer, say so and ask again.
-"""
-
-
-# --- agents -----------------------------------------------------------------
 
 
 
@@ -1132,7 +1075,7 @@ class IntakeAgent(TracedLLMWorker):
         self.context.set_messages(copy.deepcopy([m for m in self.context.get_messages() if not isinstance(m, dict) or m.get("role") in ("user", "assistant", "tool")]))
         return NodeConfig(
             name="collect",
-            role_message="Ask for the caller's email, look them up, and confirm their account tier.\n\nWhen this step is complete, call `finish_run_collect_collect` with: tier, verified_flag.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_collect_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.",
+            role_message=RUN_COLLECT_COLLECT_TASK_PROMPT,
             task_messages=[{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}],
             functions=[
                 FlowsFunctionSchema(
@@ -1291,7 +1234,7 @@ class IntakeAgent(TracedLLMWorker):
         self.context.set_messages([])
         return NodeConfig(
             name="collect",
-            role_message="Ask for the caller's email, look them up, and confirm their account tier.\n\nWhen this step is complete, call `finish_run_triage_collect` with: tier, verified_flag.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_triage_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.",
+            role_message=RUN_TRIAGE_COLLECT_TASK_PROMPT,
             task_messages=[{"role": "developer", "content": "Begin this step. Work from what the caller has already said."}],
             functions=[
                 FlowsFunctionSchema(
@@ -1371,51 +1314,6 @@ class IntakeAgent(TracedLLMWorker):
         return {"status": "ok"}, None
 
 
-def _caller_turns(messages: list[Any]) -> int:
-    """Count the turns the caller has taken in this message list.
-
-    Read by every delegate, not just the ones that carry a turn: it is the one
-    signal that separates "they asked again" from "the model re-read its own
-    finished work", which is what the re-entry guard compares.
-
-    Args:
-        messages: The context's messages.
-
-    Returns:
-        The number of user messages.
-    """
-    return sum(1 for message in messages if isinstance(message, dict) and message.get("role") == "user")
-
-
-def _settle_task_call(messages: list[Any], name: str, status: Any) -> None:
-    """Replace this invocation's running reply before restoring the owner.
-
-    Args:
-        messages: The owner's messages, edited in place.
-        name: The delegate tool whose call is being settled.
-        status: The result to record in place of the running reply.
-    """
-    running = next(
-        (
-            call
-            for message in reversed(messages)
-            if isinstance(message, dict)
-            for call in message.get("tool_calls", [])
-            if call.get("function", {}).get("name") == name
-        ),
-        None,
-    )
-    if running is None:
-        return
-    for reply in messages:
-        if (
-            isinstance(reply, dict)
-            and reply.get("role") == "tool"
-            and reply.get("tool_call_id") == running["id"]
-        ):
-            reply["content"] = json.dumps(status)
-
-
 def _flow_visit(
     worker: Any, delegate: str, handler: Callable[..., Awaitable[Any]]
 ) -> Callable[[Any, FlowManager], Awaitable[Any]]:
@@ -1455,9 +1353,79 @@ async def _flow_tool_lookup_customer(args: Any, flow_manager: FlowManager) -> An
         response = await client.post(os.environ["LOOKUP_CUSTOMER_URL"], json={**dict(args)}, timeout=WEBHOOK_TIMEOUT_SECS)
         response.raise_for_status()
         return response.json()
+"""One call: its transport, pipeline, event handlers and the end of it."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+from collections.abc import Callable
+from typing import Any, cast
+
+from loguru import logger
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.bus import BusBridgeProcessor
+from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.stt_service import STTService
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.workers.llm import LLMWorkerActivationArgs
+from pipecat.workers.runner import WorkerRunner
+
+from agents import BillingAgent, IntakeAgent
+from session import build_state
+from settings import MAIN_NAME, require_env
+from utils.dev_metrics import DevReporter, install_dev_metrics
+from utils.tracing import (
+    TRACE_NAME,
+    enable_agent_tracing,
+    flush_tracing,
+    setup_langfuse_tracing,
+    start_call,
+)
+
+# Tasks that end the call later. A task nobody references can be collected
+# while it sleeps, so each is held here until it finishes.
+_END_TASKS: set[asyncio.Task[None]] = set()
 
 
-# --- transport & run --------------------------------------------------------
+async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
+    """End the call once `timeout_secs` have passed.
+
+    Args:
+        worker: The pipeline worker to send the end frame to.
+        timeout_secs: How long to wait first.
+    """
+    await asyncio.sleep(timeout_secs)
+    await worker.queue_frame(EndFrame())
+
+
+def _schedule_end_after(worker: PipelineWorker, timeout_secs: float) -> None:
+    """Schedule `_end_after` and hold its task until it finishes.
+
+    Args:
+        worker: The pipeline worker to send the end frame to.
+        timeout_secs: How long to wait first.
+    """
+    task = asyncio.create_task(_end_after(worker, timeout_secs))
+    _END_TASKS.add(task)
+    task.add_done_callback(_END_TASKS.discard)
 transport_params: dict[str, Callable[[], TransportParams]] = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     # The runner assigns an inbound call's dial-in settings and Daily credentials
@@ -1485,6 +1453,58 @@ def build_stt() -> STTService:
         ),
     )
 
+
+# --- a caller on a Twilio-shaped websocket ----------------------------------
+# `python bot.py -t twilio -x <public host>` serves a TwiML webhook and a Media
+# Streams websocket, the way Twilio would reach a phone route. This package has
+# no phone route, so nothing real dials it. It is here for a simulated caller,
+# such as a Coval run against this bot on your laptop.
+
+async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
+    """Build the carrier's stream, with the call ended by closing the socket.
+
+    Used by a package that holds no carrier credentials at all, which needs a
+    transport that never asks a carrier to hang a call up.
+
+    A package that receives calls and never places or redirects one holds no
+    carrier credentials. The framework's own telephony path cannot be used
+    for that: it always asks the serializer to hang the call up through the
+    carrier's REST API, and the serializer refuses to be built without credentials
+    for it (`auto_hang_up is enabled but missing required parameters`, verified
+    against pipecat-ai 1.5.0 on 2026-08-13). So the transport is built here, with
+    automatic hangup off.
+
+    Nothing is lost. Closing the stream ends the call, because the markup your
+    number points at has nothing after `<Connect>`. Declare a connection and this
+    function is not emitted at all: the framework's path is used, and the agent
+    ends calls through the carrier's own call control.
+
+    Args:
+        runner_args: The runner's arguments for a websocket session.
+
+    Returns:
+        The Twilio Media Streams transport for this call.
+    """
+    from pipecat.runner.types import WebSocketRunnerArguments
+    from pipecat.runner.utils import parse_telephony_websocket
+    from pipecat.serializers.twilio import TwilioFrameSerializer
+    from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
+
+    # Only a websocket session reaches this function; the base type has no socket.
+    websocket_args = cast(WebSocketRunnerArguments, runner_args)
+    transport_type, call_data = await parse_telephony_websocket(websocket_args.websocket)
+    # Set the same two attributes the framework's path sets, so _phone_session
+    # above reads the handshake the same way whichever path built the transport.
+    setattr(runner_args, "transport_type", transport_type)  # noqa: B010 - not declared on RunnerArguments
+    runner_args.call_data = call_data
+    params = cast(FastAPIWebsocketParams, transport_params[transport_type]())
+    params.add_wav_header = False
+    params.serializer = TwilioFrameSerializer(
+        stream_sid=call_data["stream_id"],
+        call_sid=call_data["call_id"],
+        params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
+    )
+    return FastAPIWebsocketTransport(websocket=websocket_args.websocket, params=params)
 
 async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev: DevReporter) -> None:
     """Build the pipeline for one session and run it until the call ends.
@@ -1713,6 +1733,60 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         raise
     finally:
         dev.finish()
+"""Generated Pipecat agent for safe-core-fixture.
+
+Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
+graph are baked in from the package. Secret values are read from the environment
+and never written here. The agency model uses the Pipecat workers API: a main
+PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
+LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
+run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
+context, a FlowManager walks the steps as nodes, and control returns with only
+a completed or unserved status.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+from dotenv import load_dotenv
+from loguru import logger
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+
+from call import _carrier_transport, run_bot, transport_params
+from settings import require_env
+
+load_dotenv()
+
+_LOGGING_CONFIGURED = False
+
+
+def _configure_logging() -> None:
+    """Send log output to stderr at UNMUTE_LOG_LEVEL, once per process."""
+    global _LOGGING_CONFIGURED
+    if _LOGGING_CONFIGURED:
+        return
+    logger.remove()
+    logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
+    _LOGGING_CONFIGURED = True
+
+
+# Checked at import, which is what makes the container refuse to start rather
+# than start and go quiet.
+#
+# It used to be checked only inside run_bot, once per session. The container
+# then reported healthy, the platform marked the deployment ready, the browser
+# got a valid answer to its offer — and the failure happened in a background
+# task where only the log saw it. A caller heard silence. That is the exact
+# trade Principle II calls the worst one available, and two documentation pages
+# already promised the opposite: "the container starts, checks the keys the
+# agent needs, and stops with the names it did not find" (Wave C, 2026-08-15).
+#
+# run_bot still calls it, because a session that somehow starts without them
+# should fail before the caller hears anything either.
+require_env()
 
 
 async def bot(runner_args: RunnerArguments) -> None:
@@ -1739,3 +1813,31 @@ if __name__ == "__main__":
     from pipecat.runner.run import main
 
     main()
+# Billing agent (placeholder prompt)
+
+You are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+
+- The caller was handed to you because they have a billing question. The conversation so far is in your context.
+- Use `get_invoice` to look up the caller's invoices. It takes the customer id, which the earlier lookup already established.
+- Explain charges calmly and clearly, one item at a time.
+- If the caller is not satisfied, explain what a human support team would need to review.
+
+# Intake agent (placeholder prompt)
+
+You are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+
+- Greet the caller and find out what they need.
+- When they give a phone number or email, use `lookup_customer` to find their record.
+- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.
+- Never guess account details. If you cannot find the customer, say so and ask again.
+
+Ask for the caller's email, look them up, and confirm their account tier.
+
+When this step is complete, call `finish_run_collect_collect` with: tier, verified_flag.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_collect_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.
+Ask for the caller's email, look them up, and confirm their account tier.
+
+When this step is complete, call `finish_run_triage_collect` with: tier, verified_flag.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_triage_collect` with their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that status and takes the caller from there.

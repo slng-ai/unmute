@@ -111,7 +111,7 @@ func TestEmittedFinishCarriesTheUnservedRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	livekit := generatedFile(t, agent, ir.ProviderLiveKit, "agent.py")
+	livekit := generatedFile(t, agent, ir.ProviderLiveKit, agentSource)
 	finishes := 0
 	for _, line := range strings.Split(livekit, "\n") {
 		if !strings.Contains(line, "async def finish(") {
@@ -137,7 +137,7 @@ func TestEmittedFinishCarriesTheUnservedRequest(t *testing.T) {
 		t.Error("agent.py: no delegate tells its owner to read the handed-back request")
 	}
 
-	pipecat := generatedFile(t, agent, ir.ProviderPipecat, "bot.py")
+	pipecat := generatedFile(t, agent, ir.ProviderPipecat, agentSource)
 	nodes := strings.Count(pipecat, `name="finish_`)
 	if nodes == 0 {
 		t.Fatal("bot.py: no task finish emitted")

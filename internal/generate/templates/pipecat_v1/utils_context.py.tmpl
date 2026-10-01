@@ -1,0 +1,162 @@
+"""Shape the conversation a step or an agent is handed."""
+
+{{- if or .NeedsLastN .NeedsSpeechOnly}}
+# --- context shaping ---------------------------------------------------------
+{{end}}
+{{- if .NeedsSpeechOnly}}
+def _speech_only(messages: list[Any]) -> list[Any]:
+    """history: messages, what was said out loud and no tool record.
+
+    A tool record cannot be half-dropped. In LLMContext's standard message
+    dicts, a tool call is a `tool_calls` key on an assistant message while
+    only its reply carries role "tool". Filtering by role alone therefore keeps
+    every call and drops everything answering it, and the provider rejects that
+    request: "An assistant message with 'tool_calls' must be followed by tool
+    messages responding to each 'tool_call_id'". Measured on a live call, mid
+    step, on a package whose every unit test passed.
+
+    So the call goes with its reply. An assistant turn that both spoke and
+    called a tool keeps what it said, because that half is what this value is
+    for. LiveKit needs none of this: .messages() holds no function-call items,
+    so its filter drops both halves already.
+
+    Args:
+        messages: The context's messages, provider metadata included.
+
+    Returns:
+        The user and assistant turns with every tool record removed.
+    """
+    said = [
+        message
+        for message in messages
+        # Provider metadata (including Gemini thought signatures) is not speech.
+        if isinstance(message, dict) and message.get("role") in ("user", "assistant")
+    ]
+    spoken = [
+        {key: value for key, value in message.items() if key != "tool_calls"}
+        if message.get("tool_calls")
+        else message
+        for message in said
+    ]
+    return [
+        turn
+        for message, turn in zip(said, spoken, strict=True)
+        if not message.get("tool_calls") or turn.get("content")
+    ]
+{{end}}
+{{- if .NeedsLastN}}
+def _last_n(messages: list[Any], limit: int) -> list[Any]:
+    """history: last_n, the newest `limit` entries with no orphaned tool result.
+
+    LLMContext mixes standard dicts with provider metadata and has no truncate(),
+    so this is list work. The window is cut at the front, so
+    the tail is whole and the only orphan possible is a tool result whose
+    assistant call fell outside it. A tool message with no matching call is a
+    request the provider rejects, so it goes. An assistant message carrying
+    tool calls is safe at the front: its results follow it.
+
+    Args:
+        messages: The context's messages, provider metadata included.
+        limit: How many of the newest entries to keep.
+
+    Returns:
+        The window, without tool results that lost their call.
+    """
+    window = messages[-limit:] if limit > 0 else []
+    # The leading run ends at the first dict that is not a tool result.
+    first = next(
+        (i for i, m in enumerate(window) if isinstance(m, dict) and m.get("role") != "tool"),
+        len(window),
+    )
+    return [
+        message
+        for i, message in enumerate(window)
+        if i >= first or not (isinstance(message, dict) and message.get("role") == "tool")
+    ]
+{{end}}{{if and (not .Inline) .HasFlows}}
+def _caller_turns(messages: list[Any]) -> int:
+    """Count the turns the caller has taken in this message list.
+
+    Read by every delegate, not just the ones that carry a turn: it is the one
+    signal that separates "they asked again" from "the model re-read its own
+    finished work", which is what the re-entry guard compares.
+
+    Args:
+        messages: The context's messages.
+
+    Returns:
+        The number of user messages.
+    """
+    return sum(1 for message in messages if isinstance(message, dict) and message.get("role") == "user")
+
+
+{{if .NeedsTerminal}}def _newest_caller_message(messages: list[Any]) -> dict[str, Any] | None:
+    """Find the caller turn a terminal tool call answered.
+
+    Carried back to the owner when the step ends on its own tool, because the
+    owner never saw it: the step consumed the turn and the owner's snapshot was
+    taken before it arrived.
+
+    Args:
+        messages: The context's messages.
+
+    Returns:
+        A copy of the newest user message, or None when there is none.
+    """
+    return next(
+        (
+            dict(message)
+            for message in reversed(messages)
+            if isinstance(message, dict) and message.get("role") == "user"
+        ),
+        None,
+    )
+
+
+def _carried_messages(carried: dict[str, Any] | None) -> list[Any]:
+    """Wrap that turn as a list to splice in, empty when there is nothing to carry.
+
+    Whether there is one was decided where it was captured, by counting the
+    caller's turns against the owner's snapshot rather than matching text, so a
+    caller who repeated a word is not read as having said it once.
+
+    Args:
+        carried: The turn captured for the owner, or None.
+
+    Returns:
+        A one-item list, or an empty one.
+    """
+    if not carried:
+        return []
+    logger.info("carried the caller's turn back to the owner")
+    return [carried]
+
+
+{{end}}def _settle_task_call(messages: list[Any], name: str, status: Any) -> None:
+    """Replace this invocation's running reply before restoring the owner.
+
+    Args:
+        messages: The owner's messages, edited in place.
+        name: The delegate tool whose call is being settled.
+        status: The result to record in place of the running reply.
+    """
+    running = next(
+        (
+            call
+            for message in reversed(messages)
+            if isinstance(message, dict)
+            for call in message.get("tool_calls", [])
+            if call.get("function", {}).get("name") == name
+        ),
+        None,
+    )
+    if running is None:
+        return
+    for reply in messages:
+        if (
+            isinstance(reply, dict)
+            and reply.get("role") == "tool"
+            and reply.get("tool_call_id") == running["id"]
+        ):
+            reply["content"] = json.dumps(status)
+{{end}}

@@ -47,7 +47,7 @@ for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
 import aiohttp
-import agent
+agent = _project("agent")
 from livekit import rtc
 from livekit.agents import AgentSession, io
 from livekit.plugins.openai.realtime import gpt_live_model

@@ -69,9 +69,14 @@ build/slng/
 
 ```text Pipecat
 build/pipecat/
-├── bot.py              # the agent
+├── bot.py              # the entry point
+├── call.py             # one session
+├── agents.py           # agents, tools, task steps
+├── session.py          # saved values
+├── settings.py         # every fixed value
+├── prompts/            # one Markdown file per prompt
+├── utils/              # helpers, including per-turn timings for unmute dev
 ├── tools/              # your local handlers, copied
-├── dev_metrics.py      # per-turn timings, read by unmute dev
 ├── pyproject.toml      # pinned dependencies
 ├── Dockerfile
 ├── .dockerignore
@@ -84,9 +89,14 @@ build/pipecat/
 
 ```text LiveKit
 build/livekit/
-├── agent.py            # the agent
+├── agent.py            # the entry point
+├── call.py             # prewarm and one session
+├── agents.py           # agents, tools, task steps
+├── session.py          # saved values
+├── settings.py         # every fixed value
+├── prompts/            # one Markdown file per prompt
+├── utils/              # helpers, including per-turn timings for unmute dev
 ├── tools/              # your local handlers, copied
-├── dev_metrics.py      # per-turn timings, read by unmute dev
 ├── pyproject.toml      # pinned dependencies
 ├── Dockerfile
 ├── .dockerignore
