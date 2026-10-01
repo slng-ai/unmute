@@ -699,8 +699,8 @@ func parseTwiML(body []byte) (twimlNode, error) {
 	}
 }
 
-// expectedTwiML is the relay template with the two URLs app.py's
-// render_twiml() sets at startup.
+// expectedTwiML is the relay template with the two URLs the app's
+// relay_document() (handoff.py) sets at startup.
 func expectedTwiML(relay []byte, origin string) (twimlNode, error) {
 	root, err := parseTwiML(relay)
 	if err != nil {

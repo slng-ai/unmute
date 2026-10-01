@@ -1,0 +1,476 @@
+"""The model layer: one history per call, and one streamed response at a time."""
+{{- if .VertexHelper}}
+{{.VertexHelper}}
+{{- end}}
+
+@dataclass
+class ToolCall:
+    """One tool call the model asked for."""
+
+    id: str
+    name: str
+    arguments: Any  # {{if .OpenAI}}a JSON string{{else}}a dict{{end}}
+
+
+@dataclass
+class Reply:
+    """What one model response held: tool calls and the text it produced."""
+
+    calls: list[ToolCall]
+    generated: str  # every text fragment the model produced, spoken or not
+    raw: Any = None  # the provider's own parts, kept for the history
+
+
+@dataclass
+class Cycle:
+    """One speech cycle: the text between two last=true markers."""
+
+    generation: int
+    held: str | None = None  # the newest fragment, held so last=true can ride it
+    sent: list[str] = field(default_factory=list)  # fragments handed to the socket
+    done: bool = False
+    entry: Any = None  # the history entry holding this cycle's text
+
+    @property
+    def text(self) -> str:
+        """The text handed to the socket so far."""
+        return "".join(self.sent)
+
+
+class Speaker(Protocol):
+    """What a brain needs from the call it answers on."""
+
+    session_id: str
+
+    async def speak(self, cycle: Cycle, fragment: str) -> None:
+        """Queue one fragment of the reply for the caller.
+
+        Args:
+            cycle: The speech cycle the fragment belongs to.
+            fragment: The text to speak.
+        """
+
+{{if .OpenAI}}
+{{- with .Router}}
+def _slng_config() -> dict[str, Any]:
+    """The router's inline configuration: which model it calls, and where.
+
+    Read on every request, so a missing credential fails at startup through
+    build_app's check rather than here. No value is written into this file.
+
+    Returns:
+        The configuration sent in the request body.
+    """
+    return {{.Config}}
+
+
+async def _slng_log_provenance(response: Any) -> None:
+    """Say where this answer came from, once per think request.
+
+    The router states it only in response headers. httpx runs this hook before
+    the body is read, so it reads headers only, and it never raises: a raising
+    response hook would fail the request it only describes.
+
+    Args:
+        response: The httpx response, before its body is read.
+    """
+    try:
+        scope = response.request.headers.get({{pyq .AgentHeader}})
+        if not scope:
+            return
+        # Field order is the contract every router target writes.
+        fields = ["scope=" + scope]
+        fields.append("source=" + response.headers.get("x-slng-response-source", "unknown"))
+        if response.headers.get("x-slng-cache-layer"):
+            fields.append("layer=" + response.headers["x-slng-cache-layer"])
+        if response.headers.get("x-slng-model"):
+            fields.append("model=" + response.headers["x-slng-model"])
+        fields.append("request_id=" + response.headers.get("x-slng-request-id", "unknown"))
+        log.info("slng router: " + " ".join(fields))
+    except Exception:  # noqa: BLE001 - a log line must never end a call
+        log.debug("could not read the router's provenance headers", exc_info=True)
+
+
+{{end}}
+def make_client() -> AsyncOpenAI:
+    """Build the OpenAI client.
+
+    No SDK retries: a retry would spend the caller's silence. A failed
+    response takes the failure path instead.
+
+    Returns:
+        The async client every call shares.
+    """
+    return AsyncOpenAI(
+        api_key=os.environ[ENV_MODEL_KEY],
+        {{- if .Router}}
+        base_url=ROUTER_BASE_URL,
+        http_client=DefaultAsyncHttpxClient(event_hooks={"response": [_slng_log_provenance]}),
+        {{- end}}
+        max_retries=0,
+        timeout=MODEL_TIMEOUT,
+    )
+
+
+class Brain:
+    """Chat Completions history for one call.
+
+    https://developers.openai.com/api/reference/resources/chat
+    """
+
+    def __init__(self, client: Any) -> None:
+        """Start an empty history.
+
+        Args:
+            client: The model client.
+        """
+        self.client = client
+        self.history: list[dict[str, Any]] = []
+        self.tools = [{"type": "function", "function": tool.declaration} for tool in TOOLS.values()]
+
+    def user(self, text: str) -> None:
+        """Add something the caller said.
+
+        Args:
+            text: The caller's words.
+        """
+        self.history.append({"role": "user", "content": text})
+
+    def assistant_text(self, text: str) -> dict[str, Any]:
+        """Add something the agent said.
+
+        Args:
+            text: The agent's words.
+
+        Returns:
+            The history entry, so a later interrupt can edit it.
+        """
+        entry = {"role": "assistant", "content": text}
+        self.history.append(entry)
+        return entry
+
+    async def stream(self, call: Speaker, cycle: Cycle) -> Reply:
+        """Stream one model response, speaking its text as it arrives.
+
+        Args:
+            call: The call to speak on.
+            cycle: The speech cycle this response fills.
+
+        Returns:
+            The tool calls and the text the model produced.
+        """
+        request: dict[str, Any] = {
+            "model": MODEL,
+            "messages": [{"role": "system", "content": INSTRUCTIONS}, *self.history],
+            "stream": True,
+            **MODEL_PARAMS,
+        }
+        {{- with .Router}}
+        # The router reads its configuration from the body and the cache
+        # scope and the call's session from two headers, on every request.
+        request["extra_body"] = {{.Body}}
+        request["extra_headers"] = {{"{"}}{{pyq .AgentHeader}}: ROUTER_SCOPE, {{pyq .SessionHeader}}: call.session_id{{"}"}}
+        {{- end}}
+        if self.tools:
+            request["tools"] = self.tools
+        slots: dict[int, dict[str, str]] = {}
+        generated: list[str] = []
+        stream = await self.client.chat.completions.create(**request)
+        try:
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    generated.append(delta.content)
+                    await call.speak(cycle, delta.content)
+                for part in delta.tool_calls or []:
+                    slot = slots.setdefault(part.index, {"id": "", "name": "", "arguments": ""})
+                    slot["id"] = part.id or slot["id"]
+                    if part.function is not None:
+                        slot["name"] += part.function.name or ""
+                        slot["arguments"] += part.function.arguments or ""
+        finally:
+            await stream.close()
+        calls = [ToolCall(s["id"], s["name"], s["arguments"]) for _, s in sorted(slots.items())]
+        return Reply(calls=calls, generated="".join(generated))
+
+    def commit(self, cycle: Cycle, reply: Reply, results: list[tuple[ToolCall, Any]]) -> Any:
+        """Record the assistant turn and its tool results.
+
+        Args:
+            cycle: The cycle that was spoken.
+            reply: What the model produced.
+            results: Each tool call with its result.
+
+        Returns:
+            The assistant entry, or None when there was nothing to keep.
+        """
+        entry: dict[str, Any] = {"role": "assistant", "content": cycle.text or None}
+        if reply.calls:
+            entry["tool_calls"] = [
+                {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": valid_json(c.arguments)}}
+                for c in reply.calls
+            ]
+        elif not cycle.text:
+            return None
+        self.history.append(entry)
+        for tool_call, result in results:
+            self.history.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(result)})
+        return entry
+
+    def set_text(self, entry: Any, text: str) -> None:
+        """Cut an entry's text down to what the caller heard.
+
+        Args:
+            entry: A history entry from assistant_text or commit.
+            text: The text to keep; empty drops it.
+        """
+        if text:
+            entry["content"] = text
+        elif entry.get("tool_calls"):
+            entry["content"] = None
+        else:
+            remove_entry(self.history, entry)
+
+    def trim(self) -> None:
+        """Drop the oldest turns once the history is too long."""
+        trim_history(self.history, lambda e: e["role"] == "user")
+
+
+def valid_json(arguments: Any) -> str:
+    """Return tool arguments as JSON the model will accept back.
+
+    Replayed to the model as sent, unless it is not JSON at all: the tool
+    result already says the arguments were refused.
+
+    Args:
+        arguments: The arguments string the model sent.
+
+    Returns:
+        The arguments unchanged, or "{}" when they are not JSON.
+    """
+    try:
+        json.loads(arguments)
+    except (TypeError, ValueError):
+        return "{}"
+    return arguments
+{{else}}
+def make_client() -> Any:
+    """Build the Gemini client.
+
+    Returns:
+        The client every call shares.
+    """
+    key = os.environ[ENV_MODEL_KEY]
+{{- if .Vertex}}
+    return _google_vertex_client(key, VERTEX_LOCATION)
+{{- else}}
+    return genai.Client(api_key=key)
+{{- end}}
+
+
+class Brain:
+    """Native generateContent history for one call.
+
+    https://ai.google.dev/api/generate-content
+
+    Every part the model returns is kept as it came, thought signatures
+    included, because Gemini 3 refuses a tool follow-up whose function call
+    lost its signature. Only unsigned text parts are ever edited.
+    """
+
+    def __init__(self, client: Any) -> None:
+        """Start an empty history.
+
+        Args:
+            client: The model client.
+        """
+        self.client = client
+        self.history: list[Any] = []
+        declarations = [
+            types.FunctionDeclaration(
+                name=tool.declaration["name"],
+                description=tool.declaration["description"],
+                parameters_json_schema=tool.declaration["parameters"],
+            )
+            for tool in TOOLS.values()
+        ]
+        self.config = types.GenerateContentConfig(
+            system_instruction=INSTRUCTIONS,
+            tools=[types.Tool(function_declarations=declarations)] if declarations else None,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            **MODEL_PARAMS,
+        )
+
+    def user(self, text: str) -> None:
+        """Add something the caller said.
+
+        Args:
+            text: The caller's words.
+        """
+        self.history.append(types.Content(role="user", parts=[types.Part(text=text)]))
+
+    def assistant_text(self, text: str) -> Any:
+        """Add something the agent said.
+
+        Args:
+            text: The agent's words.
+
+        Returns:
+            The history entry, so a later interrupt can edit it.
+        """
+        entry = types.Content(role="model", parts=[types.Part(text=text)])
+        self.history.append(entry)
+        return entry
+
+    async def stream(self, call: Speaker, cycle: Cycle) -> Reply:
+        """Stream one model response, speaking its text as it arrives.
+
+        Args:
+            call: The call to speak on.
+            cycle: The speech cycle this response fills.
+
+        Returns:
+            The tool calls, the text and the raw parts the model produced.
+        """
+        parts: list[Any] = []
+        generated: list[str] = []
+        stream = await self.client.aio.models.generate_content_stream(
+            model=MODEL, contents=self.history, config=self.config
+        )
+        async for chunk in stream:
+            content = chunk.candidates[0].content if chunk.candidates else None
+            for part in (content.parts if content and content.parts else []):
+                parts.append(part)
+                if part.text and not part.thought:
+                    generated.append(part.text)
+                    await call.speak(cycle, part.text)
+        calls = [
+            ToolCall(p.function_call.id or "", p.function_call.name or "", p.function_call.args or {})
+            for p in parts
+            if p.function_call
+        ]
+        return Reply(calls=calls, generated="".join(generated), raw=merge_text_parts(parts))
+
+    def commit(self, cycle: Cycle, reply: Reply, results: list[tuple[ToolCall, Any]]) -> Any:
+        """Record the model turn and its tool results.
+
+        Args:
+            cycle: The cycle that was spoken.
+            reply: What the model produced.
+            results: Each tool call with its result.
+
+        Returns:
+            The model entry, or None when there was nothing to keep.
+        """
+        if not reply.raw and not cycle.text:
+            return None
+        seen: set[str] = set()
+        parts = []
+        for part in reply.raw or [types.Part(text=cycle.text)]:
+            call_id = part.function_call.id if part.function_call else None
+            if call_id:
+                if call_id in seen:
+                    continue  # a duplicated call id runs, and is kept, once
+                seen.add(call_id)
+            parts.append(part)
+        entry = types.Content(role="model", parts=parts)
+        self.history.append(entry)
+        if cycle.text != reply.generated:
+            self.set_text(entry, cycle.text)
+        if results:
+            self.history.append(
+                types.Content(
+                    role="tool",
+                    parts=[
+                        types.Part(
+                            function_response=types.FunctionResponse(
+                                # The id goes back only when the model sent one.
+                                id=tool_call.id or None,
+                                name=tool_call.name,
+                                response=result if isinstance(result, dict) else {"result": result},
+                            )
+                        )
+                        for tool_call, result in results
+                    ],
+                )
+            )
+        return entry
+
+    def set_text(self, entry: Any, text: str) -> None:
+        """Cut an entry's text down to what the caller heard.
+
+            Edits unsigned text parts only; text inside a signed part stays as
+            generated, because editing it could invalidate the signature.
+
+        Args:
+            entry: A history entry from assistant_text or commit.
+            text: The text to keep; empty drops it.
+        """
+        plain = [p for p in entry.parts if p.text is not None and not p.thought and not p.thought_signature]
+        if not plain:
+            return
+        plain[0].text = text
+        for part in plain[1:]:
+            entry.parts.remove(part)
+        if not text:
+            entry.parts.remove(plain[0])
+        if not entry.parts:
+            remove_entry(self.history, entry)
+
+    def trim(self) -> None:
+        """Drop the oldest turns once the history is too long."""
+        trim_history(
+            self.history,
+            lambda e: e.role == "user" and any(p.text for p in e.parts or []),
+        )
+
+
+def merge_text_parts(parts: list[Any]) -> list[Any]:
+    """Join neighbouring unsigned text parts; keep every other part as it came.
+
+    Args:
+        parts: The parts the model returned, in order.
+
+    Returns:
+        The parts with neighbouring plain text merged.
+    """
+    merged: list[Any] = []
+    for part in parts:
+        plain = part.text is not None and not part.thought and not part.thought_signature
+        if plain and merged:
+            last = merged[-1]
+            if last.text is not None and not last.thought and not last.thought_signature and not last.function_call:
+                merged[-1] = types.Part(text=last.text + part.text)
+                continue
+        merged.append(part)
+    return merged
+{{end}}
+
+def remove_entry(history: list[Any], entry: Any) -> None:
+    """Remove one entry by identity, since equal entries can repeat.
+
+    Args:
+        history: The history to edit in place.
+        entry: The entry to remove; nothing happens if it is not there.
+    """
+    index = next((i for i, item in enumerate(history) if item is entry), None)
+    if index is not None:
+        del history[index]
+
+
+def trim_history(history: list[Any], is_user_turn: Callable[[Any], bool]) -> None:
+    """Drop the oldest turns, cutting only where a caller turn starts.
+
+    A tool call is never separated from its result.
+
+    Args:
+        history: The history to edit in place.
+        is_user_turn: Says whether an entry starts a caller turn.
+    """
+    if len(history) <= MAX_HISTORY:
+        return
+    start = next((i for i in range(len(history) - MAX_HISTORY, len(history)) if is_user_turn(history[i])), None)
+    if start is not None:
+        del history[:start]

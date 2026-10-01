@@ -28,13 +28,14 @@ import argparse
 import asyncio
 import contextlib
 import copy
+import importlib
 import json
 import os
 import sys
 import threading
 import time
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 ACCOUNT = "AC" + "a" * 32
@@ -1131,6 +1132,31 @@ async def signature_replay(app: Any, history: list[Any]) -> None:
 # --- main ----------------------------------------------------------------------
 
 
+class Project(ModuleType):
+    """The app's modules, read and patched as one namespace.
+
+    The app is several modules that import names from each other, so a patch
+    has to reach every module holding the name, not only app.py.
+    """
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        for module in self.__dict__.get("_modules", ()):
+            if name in vars(module):
+                setattr(module, name, value)
+        super().__setattr__(name, value)
+
+
+def load_project(build: Path) -> Project:
+    """Import app.py, then every other module beside it, as one namespace."""
+    names = ["app", *sorted(p.stem for p in build.glob("*.py") if p.stem != "app"), "prompts"]
+    modules = [importlib.import_module(name) for name in names]
+    project = Project("app")
+    for module in reversed(modules):
+        project.__dict__.update(vars(module))
+    project.__dict__["_modules"] = modules
+    return project
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("build", help="a compiled twilio target directory, holding app.py")
@@ -1148,7 +1174,7 @@ def main() -> None:
     os.environ.update(
         {"TWILIO_ACCOUNT_SID": ACCOUNT, "TWILIO_AUTH_TOKEN": TOKEN, "TWILIO_PUBLIC_URL": ORIGIN}
     )
-    import app  # noqa: E402 - the build directory is only importable now
+    app = load_project(build)  # the build directory is only importable now
 
     os.environ.setdefault(app.ENV_MODEL_KEY, "fake-model-key")
     for name in app.UPSTREAM_ENV:

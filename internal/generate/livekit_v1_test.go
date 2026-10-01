@@ -712,10 +712,10 @@ func TestLiveKitV1UnknownVendorFailsWithMatrix(t *testing.T) {
 const agentSource = "<agent source>"
 
 // agentModulePaths are the files agentSource joins, in order. A target emits
-// one of the two lists, so the union reads either.
+// one of the lists, so the union reads any of them.
 func agentModulePaths() []string {
 	var paths []string
-	for _, m := range slices.Concat(livekitModules, pipecatModules) {
+	for _, m := range slices.Concat(livekitModules, pipecatModules, twilioModules) {
 		if !slices.Contains(paths, m.path) {
 			paths = append(paths, m.path)
 		}

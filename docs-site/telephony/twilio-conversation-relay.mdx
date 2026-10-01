@@ -73,7 +73,8 @@ until your host assigns a URL in step 4. Keep `.env` out of version control.
 | `TWILIO_PHONE_NUMBER_SID` | Voice number's SID | Deploy only |
 
 This runs on **your computer**. `unmute compile` writes the deployable project
-in `build/twilio/`: `app.py`, a Dockerfile, dependencies, tools, and a runbook.
+in `build/twilio/`: `app.py` and the modules beside it, a Dockerfile,
+dependencies, tools, and a runbook.
 It creates the FastAPI HTTP and WebSocket endpoints for you; you do not write
 another server. Compile again after changing the source agent.
 
@@ -240,7 +241,7 @@ no application. [Routing and rollback details](/targets/twilio#point-the-number-
 You can verify the webhook under **Phone Numbers → Manage → Active numbers →
 your number → Configure** in Twilio Console. The WebSocket URL belongs in the
 app's generated TwiML, not the number's webhook field. Both endpoints already
-exist in `app.py` and use the same host and port.
+exist in the generated app and use the same host and port.
 
 After edits: compile locally, publish the updated build to your host, wait for
 it to become healthy, then run `unmute deploy` again to verify the matching build.

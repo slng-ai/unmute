@@ -1,0 +1,148 @@
+"""The tools the model may call: their schemas, and how a handler runs."""
+
+_JSON_TYPES: dict[str, type] = {"string": str, "integer": int, "number": float, "boolean": bool}
+
+
+def one_of(values: list[Any]) -> Any:
+    """Build a validator that accepts only the listed values.
+
+    Args:
+        values: The values a schema property allows.
+
+    Returns:
+        A Pydantic validator to put in an Annotated type.
+    """
+
+    def check(value: Any) -> Any:
+        """Refuse a value that is not listed."""
+        if value not in values:
+            raise ValueError(f"must be one of {values}")
+        return value
+
+    return AfterValidator(check)
+
+
+def schema_model(
+    name: str, schema: dict[str, Any] | None, extra: Literal["allow", "forbid"]
+) -> type[BaseModel] | None:
+    """Lower a flat object schema of primitive fields to a Pydantic model.
+
+    unmute refuses any other schema at compile time, so nothing else reaches
+    here. Fields are aliased, so a property named like a BaseModel attribute
+    still works.
+
+    Args:
+        name: The model class name.
+        schema: The JSON Schema object, or None for no model.
+        extra: Whether keys the schema does not declare are allowed or refused.
+
+    Returns:
+        The model, or None when there is no schema.
+    """
+    if schema is None:
+        return None
+    required = set(schema.get("required", []))
+    fields: dict[str, Any] = {}
+    for index, (key, prop) in enumerate(schema.get("properties", {}).items()):
+        annotation: Any = _JSON_TYPES[prop["type"]]
+        if "enum" in prop:
+            annotation = Annotated[annotation, one_of(prop["enum"])]
+        if key in required:
+            fields[f"f{index}"] = (annotation, Field(alias=key))
+        else:
+            fields[f"f{index}"] = (annotation | None, Field(default=None, alias=key))
+    return create_model(name, __config__=ConfigDict(extra=extra), **fields)
+
+
+@dataclass
+class Tool:
+    """One tool the model may call."""
+
+    name: str
+    declaration: dict[str, Any]
+    args: type[BaseModel] | None
+    result: type[BaseModel] | None
+    run: Any  # the handler, or None for end_call
+    end_call: bool
+
+
+HANDLERS: dict[str, Any] = {
+{{- range .LocalTools}}
+    {{pyq .Name}}: tools.{{.Name}}.{{.Name}},
+{{- end}}
+}
+
+
+def load_tools() -> dict[str, Tool]:
+    """Build every declared tool, keyed by name.
+
+    Returns:
+        The tools the model can call.
+    """
+    loaded = {}
+    for spec in TOOL_SPECS:
+        parameters = spec["input"] or {"type": "object", "properties": {}}
+        output = spec["output"]
+        extra = "forbid" if output and output.get("additionalProperties") is False else "allow"
+        loaded[spec["name"]] = Tool(
+            name=spec["name"],
+            declaration={"name": spec["name"], "description": spec["description"], "parameters": parameters},
+            # Arguments never take an undeclared key, whatever the schema says.
+            args=schema_model(spec["name"] + "_args", parameters, "forbid"),
+            result=schema_model(spec["name"] + "_result", output, extra),
+            run=None if spec["end_call"] else HANDLERS[spec["name"]],
+            end_call=spec["end_call"],
+        )
+    return loaded
+
+
+TOOLS = load_tools()
+
+
+def settle(future: asyncio.Future, value: Any, error: BaseException | None) -> None:
+    """Finish a handler's future once, with its value or its error.
+
+    Args:
+        future: The future the turn waits on.
+        value: The handler's result.
+        error: What the handler raised, or None.
+    """
+    if future.done():
+        return
+    if error is not None:
+        future.set_exception(error)
+    else:
+        future.set_result(value)
+
+
+def start_handler(run: Any, kwargs: dict[str, Any]) -> asyncio.Future:
+    """Start a handler without tying it to the caller's turn.
+
+    An async handler runs as a task. A sync handler runs in a daemon thread,
+    so a hung one cannot block process exit or queue behind another call's.
+    Neither is ever cancelled: a thread cannot be stopped, and cancelling a
+    task mid-action could leave an action half done. Bound your own I/O.
+
+    Args:
+        run: The tool handler.
+        kwargs: The validated arguments.
+
+    Returns:
+        A future that settles with the handler's result or error.
+    """
+    if inspect.iscoroutinefunction(run):
+        return asyncio.ensure_future(run(**kwargs))
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+
+    def work() -> None:
+        """Run the handler and hand its outcome to the loop."""
+        try:
+            value, error = run(**kwargs), None
+        except BaseException as caught:  # noqa: BLE001 - handed to the loop as the outcome
+            value, error = None, caught
+        with contextlib.suppress(RuntimeError):  # the loop closed while the handler ran: the process is exiting
+            loop.call_soon_threadsafe(settle, future, value, error)
+
+    threading.Thread(target=work, name="tool", daemon=True).start()
+    return future

@@ -218,8 +218,14 @@ writes `build/<target>/`:
 
 | File | What it is |
 |---|---|
-| `app.py` | the whole app, on FastAPI and uvicorn: routes, WebSocket, model, tools |
-| `conversation-relay.xml.tmpl` | the TwiML `/voice` returns; `app.py` fills in your public origin at startup |
+| `app.py` | the entry point, on FastAPI and uvicorn: the routes, the WebSocket and the server |
+| `call.py` | one call: reading the socket, speaking, running tools, interrupts, call slots |
+| `brain.py` | the model: one history per call, and one streamed response at a time |
+| `handoff.py` | what the call does after its session, and the TwiML the app answers with |
+| `tool_runner.py` | the tools the model may call: their schemas, and how a handler runs |
+| `settings.py` | every compiled value and limit, in one place |
+| `prompts/instructions.md` | the agent's instructions, as you wrote them |
+| `conversation-relay.xml.tmpl` | the TwiML `/voice` returns; the app fills in your public origin at startup |
 | `tools/` | your local handlers, copied from the package |
 | `logic/` | your own agent logic, copied as written, when the target names `logic:` |
 | `pyproject.toml` | exact dependency pins for Python 3.12 |

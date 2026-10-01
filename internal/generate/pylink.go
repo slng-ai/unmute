@@ -45,8 +45,7 @@ func (m pyModule) moduleName() string {
 // renderPythonModules renders each module from its template, all of them one
 // template set so a `define` in any is usable from every other, and links
 // them. The universe is the `imports` template. A module with nothing past its
-// docstring is left out. utils/ always gets its __init__.py, because the dev
-// metrics module is emitted into it on every build.
+// docstring is left out.
 func renderPythonModules(fsys embed.FS, dir string, funcs template.FuncMap, data any, modules []struct{ tmpl, path string }) ([]File, error) {
 	names := []string{dir + "imports.py.tmpl"}
 	for _, m := range modules {
@@ -76,12 +75,12 @@ func renderPythonModules(fsys embed.FS, dir string, funcs template.FuncMap, data
 		}
 		rendered = append(rendered, pyModule{path: m.path, src: buf.String()})
 	}
-	files, err := linkPython(imports, rendered)
-	if err != nil {
-		return nil, err
-	}
-	return append(files, File{Path: "utils/__init__.py", Content: []byte(`"""Helpers the agent's modules share."""` + "\n")}), nil
+	return linkPython(imports, rendered)
 }
+
+// utilsPackage is utils/__init__.py. The code targets that emit utils/ always
+// add it, because their dev metrics module is emitted into it on every build.
+var utilsPackage = File{Path: "utils/__init__.py", Content: []byte(`"""Helpers the agent's modules share."""` + "\n")}
 
 // pyPrompt is one system prompt: the prompts/ constant that holds it and the
 // Markdown file under prompts/ it is read from, without the suffix.

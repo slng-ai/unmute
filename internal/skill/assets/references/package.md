@@ -731,7 +731,9 @@ prefetch, webhook, MCP, knowledge and hosted tools, tool announce and
 turn fields, tracing, realtime and live, fallbacks, custom endpoints,
 `version`, `pins`, `deployment_region` and `warm_instances`.
 
-`unmute compile` writes `build/<target>/app.py` (FastAPI on uvicorn),
+`unmute compile` writes `build/<target>/app.py` (the entry point, FastAPI on
+uvicorn) with `call.py`, `brain.py`, `handoff.py`, `tool_runner.py`,
+`settings.py` and `prompts/instructions.md` beside it,
 `conversation-relay.xml.tmpl`, `pyproject.toml`, `Dockerfile`,
 `.dockerignore`, `.env.example`, `README.md`, `compile-report.json` and
 `tools/`. It replaces the build folder, preserving only `.env`. Keep hosting

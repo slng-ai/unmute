@@ -1,0 +1,859 @@
+"""One ConversationRelay session, and the slots and parked histories calls share."""
+
+class Slots:
+    """Bounded call admission. One process, so a counter is the whole story."""
+
+    def __init__(self, limit: int) -> None:
+        """Start with every slot free.
+
+        Args:
+            limit: How many calls may be held at once.
+        """
+        self.limit = limit
+        self.taken = 0
+        self.orphaned = 0  # held by calls that ended while a handler still runs
+        self.draining = False
+        self.idle = asyncio.Event()
+        self.idle.set()
+
+    def has_room(self) -> bool:
+        """Say whether a call could be admitted now."""
+        return not self.draining and self.taken < self.limit
+
+    def take(self) -> bool:
+        """Take a slot.
+
+        Returns:
+            True if one was free.
+        """
+        if not self.has_room():
+            return False
+        self.taken += 1
+        self.idle.clear()
+        return True
+
+    def give_back(self) -> None:
+        """Return a slot, and note when none are held."""
+        self.taken -= 1
+        if self.taken == 0:
+            self.idle.set()
+
+
+
+class Parked:
+    """The history of each call whose session ended.
+
+    Kept for a step that may hand the caller back.
+
+    ponytail: in this process only, so the resumed session must reach the
+    same process. Several instances need sticky routing or a shared store.
+    """
+
+    def __init__(self) -> None:
+        """Start with nothing parked."""
+        self.brains: dict[str, tuple[float, Any]] = {}
+
+    def put(self, call_sid: str, brain: Any) -> None:
+        """Park a call's history, dropping the oldest when too many wait.
+
+        Args:
+            call_sid: The call's SID.
+            brain: The history to keep.
+        """
+        self.expire()
+        self.brains.pop(call_sid, None)
+        self.brains[call_sid] = (time.monotonic() + PARK_SECONDS, brain)
+        while len(self.brains) > MAX_SESSIONS * MAX_PARKED_PER_SLOT:
+            del self.brains[next(iter(self.brains))]  # the oldest goes first
+
+    def take(self, call_sid: str) -> Any:
+        """Take a call's parked history out.
+
+        Args:
+            call_sid: The call's SID.
+
+        Returns:
+            The history, or None if it expired or was never parked.
+        """
+        self.expire()
+        entry = self.brains.pop(call_sid, None)
+        return entry[1] if entry else None
+
+    def drop(self, call_sid: str) -> None:
+        """Forget a call's parked history.
+
+        Args:
+            call_sid: The call's SID.
+        """
+        self.brains.pop(call_sid, None)
+
+    def expire(self) -> None:
+        """Forget every history parked longer than PARK_SECONDS."""
+        now = time.monotonic()
+        for call_sid in [sid for sid, (until, _) in self.brains.items() if until < now]:
+            del self.brains[call_sid]
+
+
+
+class Call:
+    """One ConversationRelay session.
+
+    Two coroutines share it. The reader takes messages off the socket and
+    never waits on the model. The owner is the only writer of the history. A
+    generation number tags speech: an interrupt or a new caller turn bumps it,
+    and every send checks it under one lock, so a late fragment from the old
+    generation is dropped at the last moment it could still be stopped. Bytes
+    already sent cannot be recalled; ConversationRelay decides what it plays.
+    """
+
+    def __init__(
+        self, ws: WebSocket, setup: dict[str, Any], client: Any, slots: Slots, parked: Parked, brain: Any = None
+    ) -> None:
+        """Start a call from its setup message.
+
+        Args:
+            ws: The ConversationRelay WebSocket.
+            setup: The setup message.
+            client: The model client.
+            slots: The call admission counter.
+            parked: Histories of calls whose session ended.
+            brain: A parked history to carry on, or None for a new call.
+        """
+        self.ws = ws
+        self.call_sid = setup["callSid"]
+        self.session_id = setup["sessionId"]
+        self.setup = setup
+        # A parked brain is the call's history from before a step outside
+        # this session, which has now handed the caller back.
+        resumed = brain is not None
+        self.brain = brain if resumed else {{if .Logic}}LogicBrain{{else}}Brain{{end}}(client)
+        self.slots = slots
+        self.parked = parked
+        self.generation = 0
+        self.send_lock = asyncio.Lock()
+        self.pending: list[str] = []
+        self.interrupt: str | None = None
+        self.wake = asyncio.Event()
+        self.stream_task: asyncio.Task | None = None
+        self.cycle: Cycle | None = None
+        self.spoken: Cycle | None = None  # the last cycle that reached the socket
+        self.tool_future: asyncio.Future | None = None
+        self.failures = 0
+        self.relay_errors = 0
+        self.unexpected = 0
+        self.ending = False
+        self.end_reason = "end_call"  # the handoffData an ending sends
+        self.end_data: dict[str, Any] = {}
+        self.closed = False
+        self.closer: asyncio.Task | None = None  # closes the socket if Twilio does not
+        self.holding = False  # the slot outlives the call until a handler ends
+        self.released = False
+        if GREETING and not resumed:
+            greeting = Cycle(generation=0, sent=[GREETING], done=True)
+            greeting.entry = self.brain.assistant_text(GREETING)
+            self.spoken = greeting
+
+    def event(self, name: str, **fields: Any) -> None:
+        """Log one call event with its call and session IDs.
+
+        Args:
+            name: The event name.
+            **fields: Extra key=value pairs for the line.
+        """
+        details = " ".join(f"{key}={value}" for key, value in fields.items())
+        log.info("event=%s call=%s session=%s %s", name, self.call_sid, self.session_id, details)
+
+    # --- sending ---------------------------------------------------------------
+
+    async def send_token(self, cycle: Cycle, token: str, last: bool, force: bool = False) -> None:
+        """Send one text token, unless its generation is stale.
+
+        Args:
+            cycle: The cycle the token belongs to.
+            token: The text to speak.
+            last: Whether this token closes the utterance.
+            force: Send even when a newer generation has started.
+        """
+        async with self.send_lock:
+            if self.closed or (cycle.generation != self.generation and not force):
+                return
+            # Recorded before the await: once the send starts, the text may
+            # reach ConversationRelay even if this coroutine is cancelled.
+            cycle.sent.append(token)
+            self.spoken = cycle
+            try:
+                await self.ws.send_json({"type": "text", "token": token, "last": last})
+            except (WebSocketDisconnect, ConnectionError, RuntimeError):
+                # The peer is gone. Nothing more can be said on this call,
+                # and the reader is about to see the close.
+                self.closed = True
+
+    async def speak(self, cycle: Cycle, fragment: str) -> None:
+        """Queue a fragment, sending the one held before it.
+
+        Args:
+            cycle: The cycle being spoken.
+            fragment: The new text; empty is ignored.
+        """
+        if not fragment:
+            return
+        previous, cycle.held = cycle.held, fragment
+        if previous is not None:
+            await self.send_token(cycle, previous, last=False)
+
+    async def finish(self, cycle: Cycle) -> None:
+        """Send the held fragment with last=true, closing the cycle.
+
+        Args:
+            cycle: The cycle to close.
+        """
+        fragment, cycle.held = cycle.held, None
+        if fragment is not None:
+            await self.send_token(cycle, fragment, last=True)
+        cycle.done = True
+
+    async def say_fixed(self, text: str) -> None:
+        """Speak a fixed line as its own cycle.
+
+        Args:
+            text: The line to say.
+        """
+        cycle = Cycle(generation=self.generation)
+        self.cycle = cycle
+        await self.speak(cycle, text)
+        await self.finish(cycle)
+        if cycle.sent:
+            cycle.entry = self.brain.assistant_text(cycle.text)
+
+    def resume(self, greeting: str) -> None:
+        """Carry on a parked conversation.
+
+        ConversationRelay speaks the greeting itself, so it enters the history
+        as said, like the first one.
+
+        Args:
+            greeting: The line spoken as the caller comes back; may be empty.
+        """
+        self.event("resumed")
+        if greeting:
+            cycle = Cycle(generation=0, sent=[greeting], done=True)
+            cycle.entry = self.brain.assistant_text(greeting)
+            self.spoken = cycle
+
+    async def end(self, reason: str, **data: Any) -> None:
+        """Hand the call back to Twilio, which then requests /connect-action.
+
+        The history is parked first, so it is there before Twilio can ask
+        what comes next, in case that step hands the caller back.
+
+        Args:
+            reason: The handoffData reasonCode.
+            **data: Extra handoffData for next_twiml().
+        """
+        if self.closed:
+            return
+        self.event("end", reason=reason)
+        self.parked.put(self.call_sid, self.brain)
+        handoff = json.dumps({**data, "reasonCode": reason}, default=str)
+        async with self.send_lock:
+            self.closed = True
+            with contextlib.suppress(WebSocketDisconnect, ConnectionError, RuntimeError):
+                await self.ws.send_json({"type": "end", "handoffData": handoff})
+        # Twilio closes the socket once it has taken the end message. Closing
+        # it here first can reach Twilio before the end does, and the session
+        # then fails as 64105 "WebSocket ended" instead of ending. The reader
+        # keeps draining until Twilio closes; this closes only for a peer that
+        # never does.
+        self.closer = asyncio.ensure_future(self.close_after(END_GRACE))
+
+    async def close_after(self, seconds: float) -> None:
+        """Close the socket after a wait, for a peer that never closes it.
+
+        Args:
+            seconds: How long to wait.
+        """
+        await asyncio.sleep(seconds)
+        await close_quietly(self.ws)
+
+    # --- the reader --------------------------------------------------------------
+
+    async def read(self) -> None:
+        """Take messages off the socket until it closes, never waiting on the model."""
+        while True:
+            message = await receive(self.ws)
+            if message is None:
+                return
+            if self.closed:
+                # The call has ended on our side. Only Twilio's close is left.
+                continue
+            text = message.get("text")
+            if text is None:
+                self.event("protocol_error", detail="non_text_frame")
+                await close_quietly(self.ws, CLOSE_UNSUPPORTED_DATA)
+                return
+            try:
+                event = json.loads(text)
+            except ValueError:
+                event = None
+            if not isinstance(event, dict):
+                self.event("protocol_error", detail="malformed_json")
+                await close_quietly(self.ws, CLOSE_INVALID_PAYLOAD)
+                return
+            kind = event.get("type")
+            if kind == "prompt":
+                # Partial transcripts start nothing: only a final one is a turn.
+                text = event.get("voicePrompt")
+                if event.get("last") is not True or not isinstance(text, str) or not text.strip():
+                    continue
+                if len(self.pending) >= MAX_PENDING_PROMPTS:
+                    await self.end("prompt_overflow")
+                    continue
+                await self.on_prompt(text[:MAX_PROMPT_CHARS])
+            elif kind == "interrupt":
+                heard = event.get("utteranceUntilInterrupt")
+                self.on_interrupt(heard if isinstance(heard, str) else "")
+            elif kind == "error":
+                self.relay_errors += 1
+                self.event("relay_error", count=self.relay_errors)
+                if self.relay_errors >= MAX_RELAY_ERRORS:
+                    await self.end("relay_errors")
+            else:
+                # dtmf is disabled in the TwiML, a second setup is a protocol
+                # error, and anything else is not ours to act on.
+                self.unexpected += 1
+                self.event("unexpected_event", kind=str(kind)[:LOG_KIND_CHARS])
+                if kind == "setup" or self.unexpected >= MAX_UNEXPECTED:
+                    await self.end("protocol_error")
+
+    async def on_prompt(self, text: str) -> None:
+        """Queue a final caller prompt and stop what is being said.
+
+        Each final prompt is its own turn, kept as said: two identical
+        sentences are two things the caller said.
+
+        Args:
+            text: What the caller said.
+        """
+        self.pending.append(text)
+        cycle = self.cycle
+        self.generation += 1
+        self.cancel_stream()
+        if cycle is not None and not cycle.done and cycle.held is not None:
+            # Close ConversationRelay's open utterance before the next one.
+            fragment, cycle.held = cycle.held, None
+            await self.send_token(cycle, fragment, last=True, force=True)
+            cycle.done = True
+        self.wake.set()
+
+    def on_interrupt(self, heard: str) -> None:
+        """Stop what is being said and note how much the caller heard.
+
+        Args:
+            heard: The utterance up to the interruption; may be empty.
+        """
+        self.generation += 1
+        self.cancel_stream()
+        if self.cycle is not None:
+            self.cycle.held = None  # never sent, and now never will be
+        self.interrupt = heard
+        self.wake.set()
+
+    def cancel_stream(self) -> None:
+        """Cancel the model stream. A running tool is not touched."""
+        if self.stream_task is not None and not self.stream_task.done():
+            self.stream_task.cancel()
+
+    # --- the owner ---------------------------------------------------------------
+
+    async def run(self) -> None:
+        """Own the call: wait for work, then answer it, until the call closes."""
+        try:
+            while not self.closed:
+                await self.wake.wait()
+                self.wake.clear()
+                self.reconcile()
+                if self.pending:
+                    await self.respond()
+        except Exception as error:  # noqa: BLE001 - a dead owner would leave the caller in silence
+            self.event("owner_failed", error=type(error).__name__)
+            await self.end("internal_error")
+
+    def take_pending(self) -> None:
+        """Move the queued caller turns into the history."""
+        for text in self.pending:
+            self.brain.user(text)
+        self.pending.clear()
+        # A new caller turn closes the old cycle to reconciliation.
+        self.spoken = None
+        self.brain.trim()
+
+    def reconcile(self) -> None:
+        """Cut the interrupted cycle's history down to what the caller heard.
+
+        Only the last cycle that reached the socket is touched. If the heard
+        text is not a clear prefix of what was sent, the cycle's text is
+        dropped rather than guessed at. Earlier turns and tool results are
+        never edited.
+        """
+        cycle = self.spoken
+        if self.interrupt is None or cycle is None:
+            self.interrupt = None
+            return
+        if cycle.entry is None:
+            return  # its text is not in the history yet; the owner comes back
+        heard, self.interrupt = self.interrupt, None
+        self.spoken = None
+        kept = heard_prefix(cycle.text, heard)
+        if kept != cycle.text:
+            self.brain.set_text(cycle.entry, kept)
+            self.event("interrupted", kept_chars=len(kept), sent_chars=len(cycle.text))
+
+    async def respond(self) -> None:
+        """Answer the queued caller turns, running tool rounds until the model is done."""
+        self.take_pending()
+        rounds = 0
+        while not self.closed:
+            cycle = Cycle(generation=self.generation)
+            self.cycle = cycle
+            self.stream_task = asyncio.ensure_future(self.stream(cycle))
+            await asyncio.wait({self.stream_task})
+            task, self.stream_task = self.stream_task, None
+            if task.cancelled():
+                # An interrupt or a new caller turn. Keep what was really sent.
+                cycle.entry = self.brain.commit(cycle, Reply(calls=[], generated=cycle.text), [])
+                self.reconcile()
+                return
+            if task.exception() is not None:
+                await self.fail(cycle, type(task.exception()).__name__)
+                return
+            reply = task.result()
+            await self.finish(cycle)
+            if not reply.calls and not cycle.sent and not reply.generated:
+                if self.ending:  # nothing to say, and asked to end: not a failure
+                    await self.end(self.end_reason, **self.end_data)
+                    return
+                await self.fail(cycle, "empty_response")
+                return
+            self.failures = 0
+            if not reply.calls:
+                cycle.entry = self.brain.commit(cycle, reply, [])
+                self.reconcile()
+                if self.ending:
+                    await self.end(self.end_reason, **self.end_data)
+                return
+            rounds += 1
+            results = await self.run_tools(reply.calls)
+            # A duplicated call id ran once, so it is answered once and kept
+            # once: a call turn with an unanswered call is refused next turn.
+            reply.calls = [tool_call for tool_call, _ in results]
+            # The call turn and its results enter the history together, so the
+            # history is valid for the provider at every point.
+            cycle.entry = self.brain.commit(cycle, reply, results)
+            self.reconcile()
+            if self.ending:
+                await self.end(self.end_reason, **self.end_data)
+                return
+            if self.pending:
+                self.take_pending()
+            if rounds >= MAX_TOOL_ROUNDS:
+                self.event("tool_rounds_exhausted", rounds=rounds)
+                await self.say_fixed(FAILURE_LINE)
+                return
+            # The next round takes the current generation, so an interrupt
+            # during the tool does not silence the answer that uses its result.
+
+    async def stream(self, cycle: Cycle) -> Reply:
+        """Run one model response under the model timeout.
+
+        Args:
+            cycle: The speech cycle to fill.
+
+        Returns:
+            What the model produced.
+        """
+        async with asyncio.timeout(MODEL_TIMEOUT):
+            return await self.brain.stream(self, cycle)
+
+    async def fail(self, cycle: Cycle, reason: str) -> None:
+        """Handle a failed model response: apologise, or end after too many.
+
+        Args:
+            cycle: The cycle that failed.
+            reason: A short name for the failure, for the log.
+        """
+        self.failures += 1
+        self.event("model_failed", reason=reason, count=self.failures)
+        # Whatever was already said stays said.
+        if cycle.sent:
+            await self.finish(cycle)
+            cycle.entry = self.brain.assistant_text(cycle.text)
+        if self.failures >= MAX_FAILURES:
+            await self.end("model_failures")
+            return
+        await self.say_fixed(FAILURE_LINE)
+
+    # --- tools -------------------------------------------------------------------
+
+    async def run_tools(self, calls: list[ToolCall]) -> list[tuple[ToolCall, Any]]:
+        """Run each tool call once, in order.
+
+        Args:
+            calls: The calls the model asked for.
+
+        Returns:
+            Each call that ran with its result; a duplicated call ID is dropped.
+        """
+        results = []
+        seen = set()
+        for tool_call in calls:
+            key = tool_call.id or f"{tool_call.name}:{len(results)}"
+            if key in seen:
+                continue  # a duplicated call id runs once
+            seen.add(key)
+            results.append((tool_call, await self.run_tool(tool_call)))
+        return results
+
+    async def run_tool(self, tool_call: ToolCall) -> Any:
+        """Validate and run one tool call.
+
+        Args:
+            tool_call: The call to run.
+
+        Returns:
+            The tool's result, or an error object the model can read.
+        """
+        tool = TOOLS.get(tool_call.name)
+        if tool is None:
+            self.event("tool_unknown")
+            return {"error": "unknown_tool", "detail": "no tool with that name"}
+        if tool.end_call:
+            self.ending = True
+            return {"ok": True}
+        arguments = tool_call.arguments
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments or "{}")
+            except ValueError:
+                return {"error": "invalid_arguments", "detail": "arguments are not JSON"}
+        if not isinstance(arguments, dict):
+            return {"error": "invalid_arguments", "detail": "arguments must be an object"}
+        try:
+            parsed = tool.args.model_validate(arguments) if tool.args else None
+        except ValidationError as error:
+            problems = [{"field": ".".join(map(str, e["loc"])), "problem": e["type"]} for e in error.errors()]
+            return {"error": "invalid_arguments", "detail": problems}
+        if self.tool_future is not None and not self.tool_future.done():
+            return {"error": "busy", "detail": "an earlier action is still running and its outcome is unknown"}
+        kwargs = parsed.model_dump(by_alias=True, exclude_unset=True) if parsed else {}
+        future = start_handler(tool.run, kwargs)
+        self.tool_future = future
+        future.add_done_callback(lambda done: self.tool_settled(tool.name, done))
+        self.event("tool_started", tool=tool.name)
+        finished, _ = await asyncio.wait({future}, timeout=TOOL_DEADLINE)
+        if not finished:
+            # Still running, and it keeps running. Say so rather than guess.
+            self.event("tool_timeout", tool=tool.name)
+            return {"error": "timeout", "outcome": "unknown", "detail": "the action did not finish in time; it may still complete"}
+        if future.exception() is not None:
+            self.event("tool_failed", tool=tool.name, error=type(future.exception()).__name__)
+            return {"error": "tool_failed", "detail": "the action raised an error"}
+        result = future.result()
+        try:
+            if tool.result is not None:
+                tool.result.model_validate(result)
+            json.dumps(result)
+        except (ValidationError, TypeError, ValueError):
+            self.event("tool_bad_result", tool=tool.name)
+            return {"error": "invalid_result", "detail": "the action returned something its declared output does not allow"}
+        return result
+
+    def tool_settled(self, name: str, future: asyncio.Future) -> None:
+        """Note that a handler finished, and free a slot it was holding.
+
+        Args:
+            name: The tool's name.
+            future: The handler's finished future.
+        """
+        if not future.cancelled() and future.exception() is not None:
+            future.exception()  # retrieved, so asyncio does not log it as lost
+        if self.holding:
+            self.holding = False
+            self.event("tool_finished_after_call", tool=name)
+            self.slots.orphaned -= 1
+            self.release()
+
+    # --- ending ------------------------------------------------------------------
+
+    def close(self) -> None:
+        """Note the socket is gone; give the slot back once no handler is running."""
+        self.closed = True
+        self.cancel_stream()
+        if self.closer is not None:
+            self.closer.cancel()
+        if self.tool_future is not None and not self.tool_future.done():
+            self.holding = True
+            self.slots.orphaned += 1
+            self.event("slot_held", reason="tool_still_running")
+            return
+        self.release()
+
+    def release(self) -> None:
+        """Give the call's slot back, once."""
+        if not self.released:
+            self.released = True
+            self.slots.give_back()
+
+
+async def receive(ws: WebSocket) -> Mapping[str, Any] | None:
+    """Read the next frame.
+
+    Args:
+        ws: The WebSocket to read.
+
+    Returns:
+        The frame, or None once the peer has closed the socket.
+    """
+    try:
+        message = await ws.receive()
+    except (WebSocketDisconnect, RuntimeError):
+        return None
+    return None if message["type"] == "websocket.disconnect" else message
+
+
+async def close_quietly(ws: WebSocket, code: int = CLOSE_NORMAL) -> None:
+    """Close the socket, unless it is already closed on either side.
+
+    Args:
+        ws: The WebSocket to close.
+        code: The close code to send.
+    """
+    with contextlib.suppress(WebSocketDisconnect, ConnectionError, RuntimeError):
+        await ws.close(code=code)
+
+
+async def drain(ws: WebSocket) -> None:
+    """Read and drop messages until the peer closes the socket.
+
+    Args:
+        ws: The WebSocket to drain.
+    """
+    while await receive(ws) is not None:
+        pass
+
+
+def heard_prefix(sent: str, heard: str) -> str:
+    """Find the part of a sent reply the caller heard.
+
+    Args:
+        sent: Everything that was sent to the socket.
+        heard: What ConversationRelay says was played before the interrupt.
+
+    Returns:
+        The part of `sent` the caller heard, or "" when that is not clear.
+    """
+
+    def norm(text: str) -> str:
+        """Fold case and whitespace so two spellings of a line compare equal."""
+        return " ".join(text.split()).lower()
+
+    target = norm(heard)
+    if not target or not norm(sent).startswith(target):
+        return ""
+    return next((sent[:end] for end in range(len(sent) + 1) if len(norm(sent[:end])) >= len(target)), sent)
+{{if .Logic}}
+
+# --- custom logic --------------------------------------------------------------
+
+
+@dataclass
+class ModelSettings:
+    """The package's think binding, for logic that calls a model itself."""
+
+    model: str
+    base_url: str | None  # None means the provider's own endpoint
+    api_key: str
+    params: dict[str, Any]  # forwarded request params, as the package wrote them
+    extra_body: dict[str, Any]  # what the SLNG router reads from the body
+    extra_headers: dict[str, str]  # and from the headers
+
+
+class Session:
+    """What logic.respond() gets, one per call.
+
+    The app owns the call: the protocol, interrupts, call slots and shutdown.
+    respond() owns the turn: it reads the conversation and yields the reply.
+    """
+
+    def __init__(self, call: Call, history: list[dict[str, Any]]) -> None:
+        """Bind the session to a call and its history.
+
+        Args:
+            call: The call this session belongs to.
+            history: The brain's history list, shared.
+        """
+        self._history = history
+        self.instructions = INSTRUCTIONS
+        self.model = ModelSettings(
+            model=MODEL,
+            base_url={{if .Router}}ROUTER_BASE_URL{{else}}None{{end}},
+            api_key=os.environ[ENV_MODEL_KEY],
+            params=dict(MODEL_PARAMS),
+            {{- with .Router}}
+            extra_body={{.Body}},
+            extra_headers={{"{"}}{{pyq .AgentHeader}}: ROUTER_SCOPE{{"}"}},
+            {{- else}}
+            extra_body={},
+            extra_headers={},
+            {{- end}}
+        )
+        self.state: dict[str, Any] = {}  # yours, kept for the whole call
+        self.bind(call)
+
+    def bind(self, call: Call) -> None:
+        """Point this session at the call's current ConversationRelay session.
+
+        A resumed call keeps this object, its history and its state, so a tool
+        that holds the session still ends the right one.
+
+        Args:
+            call: The call whose session is current.
+        """
+        self._call = call
+        setup = call.setup
+        self.call: dict[str, Any] = {
+            "call_sid": call.call_sid,
+            "session_id": call.session_id,
+            "from": str(setup.get("from", "")),
+            "to": str(setup.get("to", "")),
+            "direction": str(setup.get("direction", "")),
+            "custom_parameters": dict(setup.get("customParameters") or {}),
+        }
+{{- with .Router}}
+        self.model.extra_headers[{{pyq .SessionHeader}}] = call.session_id
+{{- end}}
+
+    @property
+    def history(self) -> list[dict[str, str]]:
+        """What the caller said and heard, oldest first.
+
+        The last entry is the turn to answer. A reply the caller interrupted
+        holds only what they heard. A copy, so changing it changes nothing here.
+        """
+        return [{"role": e["role"], "content": e["content"]} for e in self._history if e["content"]]
+
+    def end(self, reason: str = "end_call", **data: Any) -> None:
+        """End the session once this reply has been sent.
+
+        Twilio then asks /connect-action what comes next, with reason as
+        handoffData's reasonCode and data beside it: that is what next_twiml()
+        reads.
+
+        Args:
+            reason: The handoffData reasonCode.
+            **data: Extra handoffData for next_twiml().
+        """
+        self._call.ending = True
+        self._call.end_reason, self._call.end_data = str(reason), data
+        self._call.event("logic_end", reason=str(reason)[:LOG_KIND_CHARS])
+
+    @property
+    def twilio(self) -> Any:
+        """A Twilio REST client on this app's account, for any Twilio API during the call.
+
+        It is synchronous: call it through asyncio.to_thread.
+        """
+        return twilio_client()
+
+
+class LogicBrain:
+    """The turn, handed to the package's own logic.respond(session).
+
+    It fills the same six methods as the model brains, so the call loop, its
+    interrupts and its failure path are the same code for both. respond()
+    runs its own tools, so a reply here never carries a tool call.
+    """
+
+    def __init__(self, client: Any) -> None:
+        """Start an empty history.
+
+        Args:
+            client: Unused; respond() brings its own client.
+        """
+        self.history: list[dict[str, Any]] = []
+        self.session: Session | None = None
+
+    def user(self, text: str) -> None:
+        """Add something the caller said.
+
+        Args:
+            text: The caller's words.
+        """
+        self.history.append({"role": "user", "content": text})
+
+    def assistant_text(self, text: str) -> dict[str, Any]:
+        """Add something the agent said.
+
+        Args:
+            text: The agent's words.
+
+        Returns:
+            The history entry, so a later interrupt can edit it.
+        """
+        entry = {"role": "assistant", "content": text}
+        self.history.append(entry)
+        return entry
+
+    async def stream(self, call: Call, cycle: Cycle) -> Reply:
+        """Run logic.respond() and speak what it yields.
+
+        Args:
+            call: The call to speak on.
+            cycle: The speech cycle this reply fills.
+
+        Returns:
+            The text the logic produced; never a tool call.
+
+        Raises:
+            TypeError: If respond() yields something other than a str.
+        """
+        if self.session is None:
+            self.session = Session(call, self.history)
+        elif self.session._call is not call:
+            self.session.bind(call)  # the same call, resumed in a new session
+        generated: list[str] = []
+        async for piece in logic.respond(self.session):
+            if not isinstance(piece, str):
+                raise TypeError("logic.respond() must yield str")
+            if piece:
+                generated.append(piece)
+                await call.speak(cycle, piece)
+        return Reply(calls=[], generated="".join(generated))
+
+    def commit(self, cycle: Cycle, reply: Reply, results: list[tuple[ToolCall, Any]]) -> Any:
+        """Record what was said this cycle.
+
+        Args:
+            cycle: The cycle that was spoken.
+            reply: Unused; a reply here has no tool calls.
+            results: Unused, always empty.
+
+        Returns:
+            The assistant entry.
+        """
+        return self.assistant_text(cycle.text)
+
+    def set_text(self, entry: dict[str, Any], text: str) -> None:
+        """Cut an entry's text down to what the caller heard.
+
+        Args:
+            entry: A history entry from assistant_text.
+            text: The text to keep.
+        """
+        entry["content"] = text
+
+    def trim(self) -> None:
+        """Drop the oldest turns once the history is too long."""
+        trim_history(self.history, lambda e: e["role"] == "user")
+
+
+{{end}}

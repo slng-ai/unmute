@@ -12,7 +12,10 @@ COPY pyproject.toml ./
 RUN pip install --no-cache-dir uv \
     && uv pip install --system --no-cache -r pyproject.toml
 
-COPY app.py conversation-relay.xml.tmpl ./
+# The app's own modules and its prompt. One left out builds an image that
+# cannot import its own code.
+COPY *.py conversation-relay.xml.tmpl ./
+COPY prompts/ ./prompts/
 {{- if .LocalTools}}
 COPY tools/ ./tools/
 {{- end}}

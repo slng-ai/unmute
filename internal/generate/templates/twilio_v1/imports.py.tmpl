@@ -1,0 +1,44 @@
+{{- /* The import block every emitted module draws from. Each module keeps the
+statements it references and gains one for each name another module defines
+(linkPython, internal/generate/pylink.go), so no module lists its own. */ -}}
+{{- define "imports" -}}
+import asyncio
+import contextlib
+import copy
+import inspect
+import json
+import logging
+import os
+import re
+import threading
+import time
+import xml.etree.ElementTree as ET
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
+from functools import cache
+from pathlib import Path
+from typing import Annotated, Any, Literal, Protocol
+from urllib.parse import urlsplit
+
+import uvicorn
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+{{- if .OpenAI}}
+from openai import AsyncOpenAI{{if .Router}}, DefaultAsyncHttpxClient{{end}}
+{{- else}}
+{{- if not .Vertex}}
+from google import genai
+{{- end}}
+from google.genai import types
+{{- end}}
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, create_model
+from twilio.request_validator import RequestValidator
+{{- if or .Logic .LocalTools}}
+{{end}}
+{{- if .Logic}}
+import logic
+{{- end}}
+{{- range .LocalTools}}
+import tools.{{.Name}}
+{{- end}}
+{{- end}}
