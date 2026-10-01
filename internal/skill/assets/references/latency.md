@@ -231,8 +231,8 @@ three spellings across three hosts (2026-08-27, nine requests) and answers only 
 its own `/no_think` directive in the prompt. For a model like that, use
 `prompt_suffix` on the think entry, which the compiler appends to every system
 prompt that binding sends. It is prompt text, so it works wherever the model reads
-its instructions, and you can read what it did in the emitted `*_PROMPT`
-constants.
+its instructions, and you can read what it did in the emitted `prompts/*.md`
+files.
 
 Read the number, not the setting. `usage.completion_tokens_details.reasoning_tokens`
 on a live response is what says whether thinking is actually off: 0 or 1 means it

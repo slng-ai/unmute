@@ -69,7 +69,7 @@ RUN {{range .Knowledge.Credentials}}--mount=type=secret,id={{.}} {{end}}\
     fi; \
     export {{.}}="$(cat /run/secrets/{{.}})"; \
 {{- end}}
-    python -c "import logging; logging.basicConfig(level=logging.INFO, format='unmute: %(message)s'); import knowledge; knowledge.bake()"
+    python -c "import logging; logging.basicConfig(level=logging.INFO, format='unmute: %(message)s'); from utils import knowledge; knowledge.bake()"
 # Root ran the bake, so the run user is given the result. Only reads happen at run
 # time; this is about being able to open the files at all.
 RUN [ ! -d knowledge_index ] || chown -R appuser:appuser knowledge_index
