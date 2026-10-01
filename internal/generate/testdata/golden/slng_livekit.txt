@@ -127,7 +127,7 @@ from settings import logger
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
-def _render(text: str, userdata: object, *, quote_values: bool = False, site: str = "") -> str:
+def _render(text: str, userdata: Userdata | None, *, quote_values: bool = False, site: str = "") -> str:
     """Substitute each variable token from the session userdata.
 
     Only substituted values are URL-encoded, never the surrounding literal.
@@ -399,7 +399,7 @@ _STATE_DEPENDENCIES = {
 }
 
 
-def _save_result(step: str, state: object, values: dict) -> dict:
+def _save_result(step: str, state: Userdata, values: dict) -> dict:
     """Validate all assignments before changing any call state.
 
     Args:
@@ -434,7 +434,7 @@ def _save_result(step: str, state: object, values: dict) -> dict:
     return values
 
 
-def _save_batch(state: object, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
+def _save_batch(state: Userdata, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
     """Commit a validated batch and invalidate older results of changed inputs.
 
     Args:
@@ -549,11 +549,11 @@ def _state_text(name: str, value: object) -> str:
     return text
 
 
-def _prompt_value(state: object, name: str, site: str = "") -> tuple[str, object]:
+def _prompt_value(state: Userdata | None, name: str, site: str = "") -> tuple[str, object]:
     """Read the value a prompt placeholder names, unless it is still unconfirmed.
 
     Args:
-        state: The call's shared state object.
+        state: The call's shared state, or None before the call has begun.
         name: The flat placeholder name.
         site: The prompt site reading it, so the confirming step still sees it.
 
@@ -566,7 +566,7 @@ def _prompt_value(state: object, name: str, site: str = "") -> tuple[str, object
     return root, value
 
 
-def _state_lookup(state: object, name: str) -> tuple[str, object]:
+def _state_lookup(state: Userdata | None, name: str) -> tuple[str, object]:
     """Find the value a placeholder names, and the declared name it belongs to.
 
     A path is authored {{customer.status}} and emitted {{customer__status}}: one
@@ -598,7 +598,8 @@ def _state_lookup(state: object, name: str) -> tuple[str, object]:
 @dataclass
 class Userdata:
     """The session state every agent and task of one call shares."""
-    caller_alias: str | None = None  # What the caller says to call them.
+    # What the caller says to call them.
+    caller_alias: str | None = None
     customer_id: str | None = None
     verified: bool | None = False
     # One value per call, set where the call begins. It groups this call's think

@@ -794,7 +794,7 @@ async def _prefetch_wait(work: object, deadline: float) -> dict:
             task.cancel()
 
 
-async def _prefetch(state, call_context: dict | None) -> None:  # noqa: ANN001 - the state class is Userdata or State by target
+async def _prefetch(state: STATE_CLASS, call_context: dict | None) -> None:
     """Resolve every declared pre-fetch entry, inside one startup budget.
 
     Args:

@@ -112,10 +112,10 @@ variables:
 
   # A value outside the set is refused where it enters and the refusal lists
   # what was allowed, so the model corrects itself rather than writing something
-  # the record cannot hold.
+  # the record cannot hold. No default: an empty string is not one of the four
+  # words, so the value starts as None until take_details fills it.
   enquiry:
     type: Literal["new_customer", "existing_customer", "complaint", "other"]
-    default: ""
     description: What the caller rang about, in one of the four words listed.
 
   # The one value here the model has to convert rather than copy: a caller says

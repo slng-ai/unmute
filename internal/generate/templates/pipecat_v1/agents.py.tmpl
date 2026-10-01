@@ -1132,7 +1132,7 @@ def _flow_visit(
 # re-registered function name always resolves to the same callable.
 {{range .FlowTools}}
 
-async def _flow_tool_{{.Name}}(args: Any, flow_manager: FlowManager{{if .NeedsState}}, state: Any = None{{end}}) -> Any:
+async def _flow_tool_{{.Name}}(args: Any, flow_manager: FlowManager{{if .NeedsState}}, state: State{{end}}) -> Any:
     {{flowToolDoc 4 .Description .NeedsState}}
 {{if .Needed}}    refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
     if refusal:

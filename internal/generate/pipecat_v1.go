@@ -1172,7 +1172,7 @@ func flowToolDoc(indent int, description string, needsState bool) string {
 		{"flow_manager", "FlowManager", "The flow the step runs in."},
 	}
 	if needsState {
-		params = append(params, docParam{"state", "Any", "The call's typed variables."})
+		params = append(params, docParam{"state", "State", "The call's typed variables."})
 	}
 	return pyDocstring(indent, description, params)
 }

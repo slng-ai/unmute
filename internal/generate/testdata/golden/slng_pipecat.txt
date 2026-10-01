@@ -376,7 +376,7 @@ _STATE_DEPENDENCIES = {
 }
 
 
-def _save_result(step: str, state: object, values: dict) -> dict:
+def _save_result(step: str, state: State, values: dict) -> dict:
     """Validate all assignments before changing any call state.
 
     Args:
@@ -411,7 +411,7 @@ def _save_result(step: str, state: object, values: dict) -> dict:
     return values
 
 
-def _save_batch(state: object, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
+def _save_batch(state: State, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
     """Commit a validated batch and invalidate older results of changed inputs.
 
     Args:
@@ -526,11 +526,11 @@ def _state_text(name: str, value: object) -> str:
     return text
 
 
-def _prompt_value(state: object, name: str, site: str = "") -> tuple[str, object]:
+def _prompt_value(state: State | None, name: str, site: str = "") -> tuple[str, object]:
     """Read the value a prompt placeholder names, unless it is still unconfirmed.
 
     Args:
-        state: The call's shared state object.
+        state: The call's shared state, or None before the call has begun.
         name: The flat placeholder name.
         site: The prompt site reading it, so the confirming step still sees it.
 
@@ -543,7 +543,7 @@ def _prompt_value(state: object, name: str, site: str = "") -> tuple[str, object
     return root, value
 
 
-def _state_lookup(state: object, name: str) -> tuple[str, object]:
+def _state_lookup(state: State | None, name: str) -> tuple[str, object]:
     """Find the value a placeholder names, and the declared name it belongs to.
 
     A path is authored {{customer.status}} and emitted {{customer__status}}: one
@@ -574,7 +574,8 @@ def _state_lookup(state: object, name: str) -> tuple[str, object]:
 class State:
     """Typed call variables, shared across agents."""
 
-    caller_alias: str | None = None  # What the caller says to call them.
+    # What the caller says to call them.
+    caller_alias: str | None = None
     customer_id: str | None = None
     verified: bool = False
 
@@ -630,7 +631,7 @@ def build_state(call_context: dict[str, Any] | None = None) -> State:
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
-def _render(text: str, state: Any, *, quote_values: bool = False, site: str = "") -> str:
+def _render(text: str, state: State | None, *, quote_values: bool = False, site: str = "") -> str:
     """Substitute each variable token from the call state.
 
     Only substituted values are URL-encoded, never the surrounding literal.

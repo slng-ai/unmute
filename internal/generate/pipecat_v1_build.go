@@ -257,6 +257,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		return pipecatData{}, err
 	}
 	if typed.Source != "" {
+		typed.Source = withStateClass(typed.Source, "State")
 		data.TypedState = &typed
 		var typingNames []string
 		if typed.NeedsAnnotated {
@@ -273,7 +274,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	if block, needed := Prefetch(agent, prefetchStateExpr, func(entry ir.Prefetch) PrefetchRequest {
 		return prefetchRequestFor(agent, entry)
 	}); needed {
-		data.Prefetch, data.NeedsPrefetch = block.Source, true
+		data.Prefetch, data.NeedsPrefetch = withStateClass(block.Source, "State"), true
 		data.NeedsPrefetchClock, data.NeedsPrefetchAsync = block.NeedsClock, block.NeedsAsync
 		data.NeedsPrefetchLocal, data.NeedsPrefetchSeed = block.NeedsLocal, block.NeedsSeed
 		data.NeedsHTTPX = data.NeedsHTTPX || prefetchNeedsHTTPX(agent)

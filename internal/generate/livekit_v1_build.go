@@ -249,6 +249,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		return livekitData{}, err
 	}
 	if typed.Source != "" {
+		typed.Source = withStateClass(typed.Source, "Userdata")
 		data.TypedState = &typed
 		needAnnotated = needAnnotated || typed.NeedsAnnotated
 		needLiteral = needLiteral || typed.NeedsLiteral
@@ -462,7 +463,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		}
 		return prefetchRequestFor(agent, entry)
 	}); needed {
-		data.Prefetch, data.NeedsPrefetch = block.Source, true
+		data.Prefetch, data.NeedsPrefetch = withStateClass(block.Source, "Userdata"), true
 		data.NeedsPrefetchClock, data.NeedsPrefetchAsync = block.NeedsClock, block.NeedsAsync
 		data.NeedsPrefetchLocal, data.NeedsPrefetchSeed = block.NeedsLocal, block.NeedsSeed
 		data.NeedsHTTPX = data.NeedsHTTPX || prefetchNeedsHTTPX(agent)
