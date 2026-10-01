@@ -85,11 +85,31 @@ def prompt_of(agent_obj) -> str:
     return (getattr(agent_obj, "instructions", "") or "").replace("\n", " | ")
 
 
+ENDED: list[str] = []
+
+
+class TextJob:
+    """The job a text run does not have, for end_call to close.
+
+    LiveKit's EndCallTool closes the job once the session closes, and with no
+    job it raised "no job context found" and the run hung until settle() timed
+    out. This records the end instead, so the run stops the way a call does.
+    """
+
+    def add_shutdown_callback(self, callback) -> None:
+        """Drop it: there is no room to delete."""
+
+    def shutdown(self, reason: str = "") -> None:
+        ENDED.append(reason)
+
+
 async def settle(session, timeout: float = 60.0) -> None:
-    """Wait until the agent has replied and is listening again."""
+    """Wait until the agent has replied and is listening again, or has hung up."""
     quiet = 0
     for _ in range(int(timeout / 0.1)):
         await asyncio.sleep(0.1)
+        if ENDED:
+            return
         quiet = quiet + 1 if session.agent_state == "listening" else 0
         if quiet >= 10:
             return
@@ -164,6 +184,10 @@ async def run(args: argparse.Namespace) -> None:
     import call  # noqa: PLC0415
     import session as state  # noqa: PLC0415
     from livekit.agents import AgentSession  # noqa: PLC0415
+    from livekit.agents.beta.tools import end_call as end_call_tool  # noqa: PLC0415
+
+    # The tool imported the name itself, so this is where it is replaced.
+    end_call_tool.get_job_context = TextJob
 
     entry = getattr(generated, "ENTRY_AGENT_CLASS", None)
     if entry is None:
@@ -241,6 +265,10 @@ async def run(args: argparse.Namespace) -> None:
             print("   active agent:", type(current).__name__)
             print("   active prompt:", prompt_of(current))
             print("   state:", state_of(session.userdata))
+            if ENDED:
+                left = len(args.line) - i
+                print(f"   [end] the agent ended the call; {left} caller line(s) not sent")
+                break
         print("\n=== final state")
         print(state_of(session.userdata))
 

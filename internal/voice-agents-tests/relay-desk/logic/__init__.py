@@ -53,6 +53,11 @@ def build(session: Any) -> Agent:
     @agent.tool_plain
     def end_call() -> str:
         """End the call once the caller says they are done."""
+        # A question is not a goodbye. Measured 2026-10-01: after a hold the
+        # model answered one and called this in the same reply, in 19 of 90
+        # runs, and a prompt line alone only took that to 5 of 60.
+        if session.history[-1]["content"].rstrip().endswith("?"):
+            return "The caller just asked a question, so the call goes on. Answer it and do not say goodbye."
         session.end("caller_done")
         return "The call ends after this reply."
 

@@ -30,6 +30,7 @@ import contextlib
 import copy
 import importlib
 import json
+import logging
 import os
 import sys
 import threading
@@ -1050,12 +1051,28 @@ async def real_logic(app: Any) -> None:
             await relay.prompt("What was the very first thing I asked you on this call?")
             back = text_of(await relay.reply(timeout=40))
             check("monday" in back.lower(), f"the agent forgot the call after the hold: {back!r}")
+            # A question is not a goodbye. Measured 2026-10-01, the model answered
+            # this one and called end_call in the same reply in about one run in
+            # six. The end then waited in the socket, and the goodbye below read it.
+            check(not e.calls[-1].ending, f"the agent hung up on a question after the hold: {back!r}")
             print(f"  back after the hold: {back!r}")
 
         await relay.prompt("That's all, thank you. Goodbye.")
-        await relay.reply(timeout=40)
-        end = await relay.next(timeout=10)
-        check(end and end["type"] == "end", f"the goodbye did not end the call: {end}")
+        said = await relay.reply(timeout=40)
+        goodbye = text_of(said)
+        # reply() stops at the first message that is not text. A goodbye that
+        # spoke nothing first therefore hands back the end itself, and waiting
+        # for another one fails a call that did end.
+        end = said[-1] if said[-1].get("type") == "end" else await relay.next(timeout=10)
+        # Which of two things went wrong decides the fix: the model skipped
+        # end_call (ending is False), or the end never reached the relay
+        # (ending is True).
+        call = e.calls[-1]
+        check(
+            end and end["type"] == "end",
+            f"the goodbye did not end the call: {end}; ending={call.ending} "
+            f"reason={call.end_reason!r}; said {goodbye!r}",
+        )
         check("caller_done" in end["handoffData"], f"the goodbye ended the wrong way: {end}")
         print("  goodbye ended the call through session.end()")
 
@@ -1184,6 +1201,9 @@ def main() -> None:
             os.environ.pop(name, None)
             load_key(app, args.env_file, name)
         print(f"real: {app.MODEL}")
+        # The call's own event lines, as main() would log them: a failed real
+        # run is read from these.
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
         asyncio.run(real_logic(app) if hasattr(app, "LogicBrain") else real(app))
         print("real: pass")
         return
