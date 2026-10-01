@@ -68,7 +68,7 @@ func TestAWithdrawingTaskUnconfirmsOnEntry(t *testing.T) {
 // dependency pass a save runs.
 func TestWithdrawalClearsDerivedValuesToo(t *testing.T) {
 	for name, module := range terminalModules(t) {
-		body := blockAfter(t, module, "def _withdraw_confirmation(state: object, step: str) -> None:")
+		body := blockAfter(t, module, "def _withdraw_confirmation(state: ")
 		for _, want := range []string{
 			"_STATE_CONFIRM.items()",
 			"for name, reads in _STATE_DEPENDENCIES.items():",

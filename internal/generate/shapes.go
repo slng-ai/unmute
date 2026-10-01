@@ -811,6 +811,16 @@ func classDocstring(class ir.Shape) string {
 	return pyTriple("The " + class.Name + " shape declared in agent.yaml.")
 }
 
+// stateClassToken stands for the target's state class in the helper text both
+// targets share: State on Pipecat, Userdata on LiveKit. withStateClass fills it
+// in, so each target's helpers are typed with its own class. One left unfilled
+// is an undefined name, which ruff and ty both refuse.
+const stateClassToken = "STATE_CLASS"
+
+func withStateClass(source, class string) string {
+	return strings.ReplaceAll(source, stateClassToken, class)
+}
+
 // stateRuntimeHelpers is the refusal type and the small helpers every save goes
 // through.
 const stateRuntimeHelpers = `
@@ -1034,7 +1044,7 @@ def _typed_result(step: str, values: dict) -> dict:
 const stateSaveHelpers = `}
 
 
-def _save_result(step: str, state: object, values: dict) -> dict:
+def _save_result(step: str, state: STATE_CLASS, values: dict) -> dict:
     """Validate all assignments before changing any call state.
 
     Args:
@@ -1069,7 +1079,7 @@ def _save_result(step: str, state: object, values: dict) -> dict:
     return values
 
 
-def _save_batch(state: object, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
+def _save_batch(state: STATE_CLASS, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
     """Commit a validated batch and invalidate older results of changed inputs.
 
     Args:
@@ -1210,7 +1220,7 @@ def _merge_retained(step: str, args: dict, retained: dict) -> dict:
 // stateWithdrawalHelpers is what a group step carrying skip_when_confirmed needs.
 const stateWithdrawalHelpers = `
 
-def _is_confirmed(state: object, name: str) -> bool:
+def _is_confirmed(state: STATE_CLASS, name: str) -> bool:
     """Say whether a value is confirmed right now.
 
     Both halves matter: a value nobody has agreed to is unconfirmed, and so is
@@ -1228,7 +1238,7 @@ def _is_confirmed(state: object, name: str) -> bool:
     return name not in getattr(state, "_unconfirmed", ()) and value is not None and value != ""
 
 
-def _withdraw_confirmation(state: object, step: str) -> None:
+def _withdraw_confirmation(state: STATE_CLASS, step: str) -> None:
     """Withdraw what this step confirms, because this step is about to run again.
 
     A step a group may skip cannot be trusted to have confirmed anything once it
@@ -1308,11 +1318,11 @@ const stateRenderHelpers = `def _state_text(name: str, value: object) -> str:
     return text
 
 
-def _prompt_value(state: object, name: str, site: str = "") -> tuple[str, object]:
+def _prompt_value(state: STATE_CLASS | None, name: str, site: str = "") -> tuple[str, object]:
     """Read the value a prompt placeholder names, unless it is still unconfirmed.
 
     Args:
-        state: The call's shared state object.
+        state: The call's shared state, or None before the call has begun.
         name: The flat placeholder name.
         site: The prompt site reading it, so the confirming step still sees it.
 
@@ -1325,7 +1335,7 @@ def _prompt_value(state: object, name: str, site: str = "") -> tuple[str, object
     return root, value
 
 
-def _state_lookup(state: object, name: str) -> tuple[str, object]:
+def _state_lookup(state: STATE_CLASS | None, name: str) -> tuple[str, object]:
     """Find the value a placeholder names, and the declared name it belongs to.
 
     A path is authored {{customer.status}} and emitted {{customer__status}}: one

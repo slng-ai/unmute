@@ -342,8 +342,9 @@ func TestTypedStateCarriesEveryDeclaredDescription(t *testing.T) {
 
 // TestTypedStateBlockIsByteIdenticalOnBothTargets is FR-006 where it is
 // cheapest to hold: the declared-state code is rendered once, in shapes.go,
-// and inserted into both modules verbatim. Rendering it twice is how the two
-// targets would drift, and this is what notices.
+// and inserted into both modules verbatim, with only the target's own state
+// class filled in. Rendering it twice is how the two targets would drift, and
+// this is what notices.
 func TestTypedStateBlockIsByteIdenticalOnBothTargets(t *testing.T) {
 	agent := loadTypedState(t)
 	block, err := TypedState(agent)
@@ -353,8 +354,8 @@ func TestTypedStateBlockIsByteIdenticalOnBothTargets(t *testing.T) {
 	if block.Source == "" {
 		t.Fatal("the fixture rendered no block, so this gate proves nothing")
 	}
-	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
-		if !strings.Contains(emitted(t, agent, provider), block.Source) {
+	for provider, class := range map[ir.Provider]string{ir.ProviderLiveKit: "Userdata", ir.ProviderPipecat: "State"} {
+		if !strings.Contains(emitted(t, agent, provider), withStateClass(block.Source, class)) {
 			t.Errorf("%s does not carry the rendered block verbatim, so the two targets can differ", provider)
 		}
 	}

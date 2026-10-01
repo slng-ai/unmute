@@ -5,7 +5,7 @@
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
-def _render(text: str, userdata: object, *, quote_values: bool = False, site: str = "") -> str:
+def _render(text: str, userdata: Userdata | None, *, quote_values: bool = False, site: str = "") -> str:
     """Substitute each variable token from the session userdata.
 
     Only substituted values are URL-encoded, never the surrounding literal.
@@ -39,7 +39,7 @@ def _render(text: str, userdata: object, *, quote_values: bool = False, site: st
 
 {{end}}
 {{- if .NeedsRefusal}}
-def _refusal(tool: str, userdata: object, needed: list[tuple[str, str]]) -> str:
+def _refusal(tool: str, userdata: Userdata, needed: list[tuple[str, str]]) -> str:
     """Refuse a call whose injected variables are still unset.
 
     The model is told what to do about each one, and no half-formed request is
@@ -88,7 +88,10 @@ class Userdata:
     _unconfirmed: set[str] = field(default_factory=lambda: set(_STATE_CONFIRM))
 {{- end}}
 {{- range .Vars}}
-    {{.Name}}: {{.Anno}} = {{.Default}}{{if .LiteralDefault}}  # ty: ignore[invalid-assignment]{{end}}{{if .Description}}  # {{.Description}}{{end}}
+{{- if .Description}}
+    # {{.Description}}
+{{- end}}
+    {{.Name}}: {{.Anno}} = {{.Default}}{{if .LiteralDefault}}  # ty: ignore[invalid-assignment]{{end}}
 {{- end}}
 {{- if .Slng.Any}}
     # One value per call, set where the call begins. It groups this call's think
