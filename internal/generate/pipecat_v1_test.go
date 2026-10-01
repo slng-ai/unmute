@@ -3050,7 +3050,7 @@ func TestPipecatMessagesLeavesNoOrphanedToolCall(t *testing.T) {
 		`isinstance(message, dict) and message.get("role") in ("user", "assistant")`,
 		`if message.get("tool_calls") else message`,
 		`if key != "tool_calls"`,
-		`if not message.get("tool_calls") or turn.get("content")`,
+		`if not message.get("tool_calls") or message.get("content")`,
 	} {
 		if !containsCollapsed(helper, want) {
 			t.Errorf("the _speech_only helper is missing %q:\n%s", want, helper)

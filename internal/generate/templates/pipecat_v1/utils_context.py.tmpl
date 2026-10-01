@@ -32,16 +32,13 @@ def _speech_only(messages: list[Any]) -> list[Any]:
         # Provider metadata (including Gemini thought signatures) is not speech.
         if isinstance(message, dict) and message.get("role") in ("user", "assistant")
     ]
-    spoken = [
+    # A turn that called a tool keeps what it said, if it said anything.
+    return [
         {key: value for key, value in message.items() if key != "tool_calls"}
         if message.get("tool_calls")
         else message
         for message in said
-    ]
-    return [
-        turn
-        for message, turn in zip(said, spoken, strict=True)
-        if not message.get("tool_calls") or turn.get("content")
+        if not message.get("tool_calls") or message.get("content")
     ]
 {{end}}
 {{- if .NeedsLastN}}

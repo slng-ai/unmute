@@ -861,16 +861,13 @@ def _configure_logging() -> None:
     _LOGGING_CONFIGURED = True
 
 
-# Checked at import, which is what makes the container refuse to start rather
+# Checked at import, so a container without its keys refuses to start rather
 # than start and go quiet.
 #
-# It used to be checked only inside run_bot, once per session. The container
-# then reported healthy, the platform marked the deployment ready, the browser
-# got a valid answer to its offer — and the failure happened in a background
-# task where only the log saw it. A caller heard silence. That is the exact
-# trade Principle II calls the worst one available, and two documentation pages
-# already promised the opposite: "the container starts, checks the keys the
-# agent needs, and stops with the names it did not find" (Wave C, 2026-08-15).
+# A check inside run_bot alone runs once per session. The container then
+# reports healthy, the platform marks the deployment ready, and the browser
+# gets a valid answer to its offer. The failure happens in a background task
+# that only the log sees, and the caller hears silence.
 #
 # run_bot still calls it, because a session that somehow starts without them
 # should fail before the caller hears anything either.

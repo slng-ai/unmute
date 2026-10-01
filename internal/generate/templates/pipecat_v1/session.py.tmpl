@@ -113,7 +113,7 @@ def _render(text: str, state: Any, *, quote_values: bool = False, site: str = ""
 {{end}}{{if .NeedsRefusal}}
 
 def _refusal(tool: str, state: Any, needed: list[tuple[str, str]]) -> str:
-    """Refuse a call whose injected variables are still unset (V4).
+    """Refuse a call whose injected variables are still unset.
 
     The model is told what to do about each one, and no half-formed request is
     ever sent.
