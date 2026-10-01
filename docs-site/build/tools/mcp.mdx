@@ -241,7 +241,7 @@ FIRECRAWL_API_KEY=
 FIRECRAWL_MCP_URL=
 ```
 
-The same two names land in `build/livekit/agent.py`'s startup check, `REQUIRED_ENV`,
+The same two names land in `REQUIRED_ENV` in `build/livekit/settings.py`, which the startup check reads,
 and in `build/livekit/compile-report.json`, which says where each one came from:
 
 ```json
