@@ -73,7 +73,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # an attestation. Hashed from the rest of the app's modules, the prompt, the
 # TwiML, the pins, the image and the tools; never from a credential or the
 # public origin.
-ARTIFACT_ID = "sha256:35acc6c241b9f73329bf34385674a1aab12e63b03ae005f0da7374a7601cc834"
+ARTIFACT_ID = "sha256:80105d202abb3cc5dd76b1bf0ba794ad2113ff43ee5ca5345760b103c1426208"
 === prompts/__init__.py ===
 """The system prompts, one Markdown file each beside this module.
 
@@ -1846,7 +1846,8 @@ person says them, for example "nine in the morning". No lists, no markdown.
 
 When the caller says goodbye or that they are done, call end_call, and say one
 short goodbye in that same reply. The call only ends when you call end_call, so
-never say goodbye without it.
+never say goodbye without it. A caller who asks a question is not done, even
+after a hold: answer it and wait.
 === pyproject.toml ===
 [project]
 name = "relay-desk"
@@ -2108,7 +2109,7 @@ def opening_hours(day):
     return {"day": day, "open": bool(opens), "opens": opens, "closes": closes}
 === compile-report.json ===
 {
-  "artifact_id": "sha256:35acc6c241b9f73329bf34385674a1aab12e63b03ae005f0da7374a7601cc834",
+  "artifact_id": "sha256:80105d202abb3cc5dd76b1bf0ba794ad2113ff43ee5ca5345760b103c1426208",
   "bindings": [
     {
       "binding": {
