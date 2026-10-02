@@ -1,0 +1,150 @@
+{
+  "source": "internal/testdata/typed_state/state.py",
+  "digest": "7e807f3a50875043266844da0d8b5b048b5450bd300f0fea3f9645fa5b2714f7",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Appointment": {
+          "description": "One thing being booked, moved or cancelled.",
+          "properties": {
+            "scheduled_date": {
+              "format": "date",
+              "title": "Scheduled Date",
+              "type": "string"
+            },
+            "scheduled_time": {
+              "description": "The time the caller agreed to.",
+              "format": "time",
+              "title": "Scheduled Time",
+              "type": "string"
+            },
+            "appointment_type": {
+              "description": "The service the caller asked for, in the salon's own words.",
+              "enum": [
+                "haircut",
+                "dry_cut"
+              ],
+              "title": "Appointment Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "scheduled_date",
+            "scheduled_time",
+            "appointment_type"
+          ],
+          "title": "Appointment",
+          "type": "object"
+        }
+      },
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Count"
+        },
+        "accepted": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Accepted"
+        },
+        "caller_reason": {
+          "default": [],
+          "description": "Why the caller rang. More than one, because one call can do more than one thing.",
+          "items": {
+            "enum": [
+              "create_booking",
+              "cancel_booking"
+            ],
+            "type": "string"
+          },
+          "title": "Caller Reason",
+          "type": "array"
+        },
+        "appointments": {
+          "default": [],
+          "description": "What this call has booked so far, in the order the caller gave them.",
+          "items": {
+            "$ref": "#/$defs/Appointment"
+          },
+          "title": "Appointments",
+          "type": "array"
+        },
+        "caller_phone": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The number the caller rang from, once they have agreed it is theirs.",
+          "title": "Caller Phone"
+        },
+        "last_appointment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Appointment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The appointment most recently booked on this call, so a prompt can name one part of it."
+        },
+        "reminder_email": {
+          "anyOf": [
+            {
+              "format": "email",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where the caller wants the reminder sent, saved only once they have spelled it out.",
+          "title": "Reminder Email"
+        },
+        "booked_for": {
+          "anyOf": [
+            {
+              "format": "name-email",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who the appointment is under, with their name and their email address held apart.",
+          "title": "Booked For"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

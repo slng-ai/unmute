@@ -1,0 +1,28 @@
+{
+  "source": "internal/testdata/remy/state.py",
+  "digest": "2311b1124c459ecf4abe399b1f7caa762ea9dd5d1b3876aaa7868d6e7ddac5fe",
+  "report": {
+    "schema": {
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "caller_phone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Phone"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

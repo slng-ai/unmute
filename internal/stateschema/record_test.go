@@ -131,6 +131,27 @@ func TestEveryStatePyIsRecorded(t *testing.T) {
 	}
 }
 
+// TestEveryPackageStateReads holds every package's state.py to the rules a
+// call depends on. The reader's own test models are left out, because most of
+// them exist to be refused.
+func TestEveryPackageStateReads(t *testing.T) {
+	for _, rel := range stateFiles(t) {
+		if strings.HasPrefix(rel, "internal/stateschema/") {
+			continue
+		}
+		model, err := Recorded{Dir: recordedDir}.Read(t.Context(), filepath.Dir(rel), readSource(t, rel))
+		if err != nil {
+			t.Errorf("%s: %v", rel, err)
+			continue
+		}
+		for _, field := range model.Fields {
+			if field.Required {
+				t.Errorf("%s: State.%s has no default", rel, field.Name)
+			}
+		}
+	}
+}
+
 // TestNoOrphanRecording fails on a recording no file matches any more.
 func TestNoOrphanRecording(t *testing.T) {
 	live := map[string]bool{}

@@ -1,0 +1,136 @@
+{
+  "source": "examples/salon-concierge/state.py",
+  "digest": "8e545359ea8c35ef16265c389100cbb378adef91fc71ffb5de0254a8f60cad57",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Appointment": {
+          "description": "The latest booking successfully created, moved, or cancelled.",
+          "properties": {
+            "booking_id": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "service": {
+              "enum": [
+                "haircut",
+                "hair-color",
+                "blowout"
+              ],
+              "title": "Service",
+              "type": "string"
+            },
+            "date": {
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            },
+            "spoken": {
+              "title": "Spoken",
+              "type": "string"
+            },
+            "time": {
+              "format": "time",
+              "title": "Time",
+              "type": "string"
+            },
+            "action": {
+              "enum": [
+                "book",
+                "move",
+                "cancel"
+              ],
+              "title": "Action",
+              "type": "string"
+            }
+          },
+          "required": [
+            "booking_id",
+            "service",
+            "date",
+            "spoken",
+            "time",
+            "action"
+          ],
+          "title": "Appointment",
+          "type": "object"
+        }
+      },
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "appointment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Appointment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The latest successful booking action, saved only after the tool succeeds."
+        },
+        "booking_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Today's date in the salon's own timezone, YYYY-MM-DD. Read once from the clock before the greeting, so a caller saying \"tomorrow\" costs one model request instead of two chained tool calls. A call that crosses midnight keeps the day it started on, which is deliberate: a date changing underneath a conversation would leave the caller and the agent disagreeing about what \"tomorrow\" means halfway through.",
+          "title": "Booking Date"
+        },
+        "booking_weekday": {
+          "default": "",
+          "description": "The weekday today falls on, spelled out in English: Monday to Sunday. From the same clock reading as `booking_date`, so the two cannot disagree about which day it is. It is what lets the agent answer \"next Friday\" without a second turn working out what day today is first.",
+          "title": "Booking Weekday",
+          "type": "string"
+        },
+        "salon_local_time": {
+          "anyOf": [
+            {
+              "format": "time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The salon's own wall clock when the call began, HH:MM on a 24 hour clock. From the same reading as the two above. It is what lets the agent know that a caller asking for \"this afternoon\" at 17:40 is asking for something that has nearly passed, rather than offering them a slot that is already gone.",
+          "title": "Salon Local Time"
+        },
+        "customer_phone": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The caller's phone number in E.164: a plus sign, then digits, with no spaces, brackets or dashes. One shape for every phone number in this package, the MANAGER_PHONE_NUMBER transfer destination included, so no prompt and no tool has to guess which shape it is holding.\nNo `source:` here on purpose. The prefetch block below reads the carrier's fact and this variable receives it, which leaves the per-route refusal for a variable naming a source its target cannot supply exactly as strict as it is: on a route with no caller ID the entry skips and this holds its default.\nOffered to the caller for a yes, never acted on unasked. Somebody may be ringing from a friend's phone, or may hold a second account, so until the verification step has heard them agree this value stays unconfirmed and appears in no prompt but that step's own.",
+          "title": "Customer Phone"
+        },
+        "customer_verified": {
+          "default": "",
+          "description": "Whether verification has already run on this call, and what it found. Set by the verification step as it ends, which only happens on a number the caller agreed to, so a value here means the number beside it is confirmed.\nIt exists for customer care, which has to decide whether to identify the caller before writing a complaint down and cannot read `customer_phone` to find out: an unconfirmed number renders in no prompt but the verification step's own, and a confirmed one must not be in front of an agent that might say it out loud. This carries the same fact with nothing sensitive in it.\nThe concierge does not read it. The `book` flow decides the same thing structurally with `skip_when_confirmed:`, off the confirmation itself rather than off a copy of it.\nEmpty means nobody has been verified yet on this call.",
+          "title": "Customer Verified",
+          "type": "string"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

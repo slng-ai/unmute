@@ -1,0 +1,35 @@
+{
+  "source": "internal/testdata/slng_memory_sms/state.py",
+  "digest": "76e326cd5e9f5555c429620b3e7a55135d29c914614be77008cc62d5f48071c9",
+  "report": {
+    "schema": {
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "customer_name": {
+          "default": "there",
+          "description": "The caller's first name, supplied by the session.",
+          "title": "Customer Name",
+          "type": "string"
+        },
+        "caller_phone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The caller's mobile number, recorded after the caller confirmed it.",
+          "title": "Caller Phone"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}
