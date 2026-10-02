@@ -2,7 +2,7 @@
 
 Write the record and read the reference number back.
 
-Ringing about: {{enquiry}}. Today is {{today_date}}.
+Ringing about: {{state.enquiry}}. Today is {{state.today_date}}.
 
 ## What to do
 

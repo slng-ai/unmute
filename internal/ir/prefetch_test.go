@@ -436,8 +436,8 @@ func TestBuildPrefetchRefusesTheSource(t *testing.T) {
 		},
 		{
 			name: "rule 13: args name an undeclared variable",
-			from: `      - phone: "{{caller_phone}}"`,
-			to:   `      - phone: "{{callr_phone}}"`,
+			from: `      - phone: "{{state.caller_phone}}"`,
+			to:   `      - phone: "{{state.callr_phone}}"`,
 			want: []string{"reads {{callr_phone}}", "not a declared variable"},
 		},
 	} {
@@ -468,7 +468,7 @@ func TestBuildPrefetchRefusesABackwardsOrder(t *testing.T) {
 
 	t.Run("caller below profile is refused", func(t *testing.T) {
 		caller := "  - name: caller\n    source: from_number\n    assign:\n      - caller_phone: result.value\n\n"
-		profile := "  - name: profile\n    tool: lookup_customer\n    # This lookup reads. The key is required either way: the compiler cannot\n    # check either answer, so it makes the author state one.\n    writes: false\n    args:\n      - phone: \"{{caller_phone}}\"\n    assign:\n      - caller_name: result.name\n"
+		profile := "  - name: profile\n    tool: lookup_customer\n    # This lookup reads. The key is required either way: the compiler cannot\n    # check either answer, so it makes the author state one.\n    writes: false\n    args:\n      - phone: \"{{state.caller_phone}}\"\n    assign:\n      - caller_name: result.name\n"
 		err := patchPrefetchCore(t, caller+profile, profile+"\n"+caller)
 		if err == nil {
 			t.Fatal("a backwards list was accepted, so the file's visible order is not the agent's")
@@ -522,8 +522,8 @@ func TestBuildPrefetchRefusesConfirmation(t *testing.T) {
 
 	t.Run("rule 17: two inputs confirmed by different steps", func(t *testing.T) {
 		dir := writePatchedPrefetchCore(t,
-			"      - phone: \"{{caller_phone}}\"",
-			"      - phone: \"{{caller_phone}}\"\n      - account: \"{{customer_id}}\"")
+			"      - phone: \"{{state.caller_phone}}\"",
+			"      - phone: \"{{state.caller_phone}}\"\n      - account: \"{{state.customer_id}}\"")
 		pkg, err := packagespec.Load(dir)
 		if err != nil {
 			t.Fatal(err)

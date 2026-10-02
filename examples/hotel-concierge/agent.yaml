@@ -99,7 +99,7 @@ tools:
 conversation:
   greeting:
     speaks_first: agent
-    text: "Good day, this is the concierge desk at {{hotel_name}}. How can I help with your stay?"
+    text: "Good day, this is the concierge desk at {{state.hotel_name}}. How can I help with your stay?"
   interruption:
     enabled: true
 

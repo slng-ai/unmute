@@ -101,7 +101,7 @@ prefetch:
     # check either answer, so it makes the author state one.
     writes: false
     args:
-      - phone: "{{caller_phone}}"
+      - phone: "{{state.caller_phone}}"
     assign:
       - caller_name: result.name
 

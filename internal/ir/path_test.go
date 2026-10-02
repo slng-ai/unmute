@@ -28,6 +28,17 @@ func TestFlattenPathsAndPathRoot(t *testing.T) {
 	if got := PathFields("note"); len(got) != 0 {
 		t.Errorf("PathFields of a flat reference = %v, want none", got)
 	}
+	// The authored state. prefix is spelling only: the emitted form and every
+	// reader of a reference see the bare name.
+	if got := FlattenPaths("Hi {{ state.customer.status }} {{state.note}}"); got != "Hi {{ customer__status }} {{note}}" {
+		t.Errorf("FlattenPaths with state. = %q", got)
+	}
+	if got := TemplateRefs("{{state.a.b}} {{state.note}} {{$KEY}}"); strings.Join(got, ",") != "a.b,note,$KEY" {
+		t.Errorf("TemplateRefs with state. = %v", got)
+	}
+	if got := PathRoot("state.customer.status"); got != "customer" {
+		t.Errorf("PathRoot with state. = %q", got)
+	}
 }
 
 // TestBuildResolvesAPlaceholderPath is spec 005 US1 and US2 at the compiler: a

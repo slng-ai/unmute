@@ -7,9 +7,9 @@ Already on file, one per line. This block is for you, not for the caller: never
 read it out and never describe its state. "None recorded yet" against a line
 means nothing is saved for it, so just ask.
 
-Name: {{contact.name}}
-Address: {{caller_email}}
-Ringing about: {{enquiry}}
+Name: {{state.contact.name}}
+Address: {{state.caller_email}}
+Ringing about: {{state.enquiry}}
 
 ## What to do
 

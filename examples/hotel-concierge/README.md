@@ -129,7 +129,7 @@ the model has no text tool, and the prompt says so to the guest.
   other regions, and a push into `eu-north` refuses them by name.
 - **Variables.** Four template variables, each with a default: `hotel_name`,
   `neighbourhood`, `city`, `hotel_website`. The greeting names
-  `{{hotel_name}}` and the prompt names all four. A fifth, `caller_phone`, has
+  `{{state.hotel_name}}` and the prompt names all four. A fifth, `caller_phone`, has
   `source: conversation` and no default: the model records it once the guest
   confirms the number, and it comes back on the call record.
 - **Tools.** Every one is a reference: this target creates no tool, and no

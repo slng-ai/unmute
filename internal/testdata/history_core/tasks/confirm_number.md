@@ -1,6 +1,6 @@
 Read the caller's number back and get a yes before anything acts on it.
 
-You have them on {{caller_phone}}. Say it back and ask whether that is the right
+You have them on {{state.caller_phone}}. Say it back and ask whether that is the right
 number. Do not act on it until they agree.
 
 If they say no, ask for the number they want to use instead.

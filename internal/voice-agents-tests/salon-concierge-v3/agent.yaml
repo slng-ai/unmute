@@ -262,7 +262,7 @@ prefetch:
     # would answer true, which is why this entry points at this one.
     writes: false
     args:
-      - phone: "{{customer_phone}}"
+      - phone: "{{state.customer_phone}}"
     assign:
       - customer_name: result.name
       - customer_id: result.id

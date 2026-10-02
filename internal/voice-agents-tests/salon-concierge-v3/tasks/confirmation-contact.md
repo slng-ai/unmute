@@ -2,7 +2,7 @@
 
 Find out who the booking confirmation should go to and record it.
 
-Currently on file: {{confirmation_contact.name}} at {{confirmation_email}}.
+Currently on file: {{state.confirmation_contact.name}} at {{state.confirmation_email}}.
 
 ## What to do
 
