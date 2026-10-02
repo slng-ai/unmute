@@ -150,11 +150,14 @@ and one target sends its schema with strict mode on, where both are rejected.
 That failure appears on the first real call and in no local check, so the format
 lives in the description instead.
 
-**The value is checked where it is saved.** The generated project validates
-every declared field before anything enters call state. A value that does not
-fit is refused, nothing is written, the previous contents stand, and the format
-sentence goes back to the model as the tool result, so it corrects itself on the
-next turn. The sentence the model reads and the sentence it gets back on a
+**The value is checked where it is saved.** The call state is a Pydantic
+model, and its field types are the check every save goes through: a step's
+result, a pre-fetched value, a dispatched one and a carrier fact. The values of
+one save are checked together. A value that does not fit is refused, nothing is
+written, the previous contents stand, and the format sentence goes back to the
+model as the tool result, so it corrects itself on the next turn. A variable
+with no `default:` starts as `None`, meaning no value yet; one with a
+`default:` never holds `None`. The sentence the model reads and the sentence it gets back on a
 refusal come from one place and cannot disagree.
 
 Three families behave differently:

@@ -286,7 +286,7 @@ generated._save_result("verify_caller",state,{"caller_phone":"+34600111222"})
 assert generated._prompt_value(state,"caller_name")[1]=="OLD_PROFILE"
 assert generated._prompt_value(state,"customer_id")[1]=="OLD_RELATED"
 generated._save_result("verify_caller",state,{"caller_phone":"+34600999888"})
-assert state.caller_name is None and state.customer_id is None
+assert state.caller_name==generated._default(state,"caller_name") and state.customer_id==generated._default(state,"customer_id")
 assert state.booking_date=="2026-09-06"
 seed()
 before=snapshot(state)
@@ -296,7 +296,7 @@ else: raise AssertionError("invalid batch saved")
 assert snapshot(state)==before
 # Explicit replacements in the same valid batch survive input invalidation.
 generated._save_batch(state,{"caller_phone":"+34600999888","caller_name":"NEW_PROFILE"},step="verify_caller")
-assert state.caller_name=="NEW_PROFILE" and state.customer_id is None
+assert state.caller_name=="NEW_PROFILE" and state.customer_id==generated._default(state,"customer_id")
 assert "caller_name" not in state._prefetch_provenance
 # Another writer is not agreement, even when it repeats an agreed value.
 generated._save_batch(state,{"caller_phone":"+34600999888"},step="another_task")

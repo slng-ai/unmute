@@ -431,11 +431,16 @@ references. Missing values render as `{{.TypedState.Empty}}`; false, zero and
 empty lists keep their values. Referencing an object shares the whole object.
 History is a separate choice and does not clear saved values.
 
-Each declared shape is a generated Pydantic class in this module. A step's
-result is validated against it before anything is recorded, so a value outside a
-declared set never enters the state: the previous contents stay as they were and
-the model is told which field and what was allowed, which is what lets it
-correct itself on the next turn.
+The call's state is a Pydantic model in `state.py`, and each declared shape is
+a Pydantic class beside it. A field's type is the check every save goes
+through: a step's result, a pre-fetched value, a dispatched one and a carrier
+fact. The values one save brings are checked together, and nothing is recorded
+unless all of them fit. The previous contents then stay as they were, and the
+model is told which field and what was allowed, which is what lets it correct
+itself on the next turn.
+
+A variable with a `default:` always holds a value of its type. A variable with
+none starts as `None`, which means no value yet.
 
 A text type with a validated shape (`Phone`, `Date`, `Time`, `Id`, `EmailStr`)
 is a `str` in the schema the model is sent, with its shape checked by a

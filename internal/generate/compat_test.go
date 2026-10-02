@@ -176,7 +176,13 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // fields, one annotation rule on both (a value with a default holds its type,
 // one without may be None), list defaults written as [] because Pydantic copies
 // them per call, and the confirmation and provenance records declared as
-// private attributes rather than set onto the object at run time.
+// private attributes rather than set onto the object at run time. Last, the
+// model became the check: _STATE_TYPES and _plain are gone, a save is checked
+// once by building the batch into the state model, the state holds models
+// rather than dicts, plain data is made only at the edges (pydantic_core's
+// to_jsonable_python for a tool result or an injected object, to_json for a
+// prompt, which renders the same bytes json.dumps did), and an invalidated
+// pre-fetched value goes back to its default instead of to None.
 //
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.

@@ -117,11 +117,9 @@ async def settle(session, timeout: float = 60.0) -> None:
 
 
 def state_of(userdata) -> str:
-    public = {
-        name: value
-        for name, value in vars(userdata).items()
-        if not name.startswith("_")
-    }
+    # The state is a Pydantic model holding models, so dump it in JSON mode
+    # rather than printing each saved object's repr.
+    public = userdata.model_dump(mode="json")
     public["_unconfirmed"] = sorted(getattr(userdata, "_unconfirmed", set()))
     return json.dumps(public, ensure_ascii=False, default=str)
 

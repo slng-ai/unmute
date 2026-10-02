@@ -52,11 +52,21 @@ func TestPlaceholderPathIsWalkedOnBothTargets(t *testing.T) {
 // naming a part reads it through the lookup, keeping the part's own type, and
 // the unset guard names the whole record.
 func TestInjectOfAPathLowersToTheLookup(t *testing.T) {
-	if got := injectExpr("{{customer__status}}", "ctx.userdata"); got != `_state_lookup(ctx.userdata, "customer__status")[1]` {
+	// The state holds an object as a model, so a part of one leaves as plain
+	// data, and so does the whole object; a plain value is the attribute read
+	// it always was.
+	variables := map[string]ir.Variable{
+		"customer":  {Shape: &ir.TypeRef{Shape: "Customer"}},
+		"caller_id": {Type: ir.PrimitiveString},
+	}
+	if got := injectExpr("{{customer__status}}", "ctx.userdata", variables); got != `to_jsonable_python(_state_lookup(ctx.userdata, "customer__status")[1])` {
 		t.Errorf("injectExpr(path) = %s", got)
 	}
-	if got := injectExpr("{{customer}}", "ctx.userdata"); got != "ctx.userdata.customer" {
-		t.Errorf("injectExpr(whole value) = %s, which is not the attribute read it always was", got)
+	if got := injectExpr("{{customer}}", "ctx.userdata", variables); got != "to_jsonable_python(ctx.userdata.customer)" {
+		t.Errorf("injectExpr(whole object) = %s, which sends a model no JSON body accepts", got)
+	}
+	if got := injectExpr("{{caller_id}}", "ctx.userdata", variables); got != "ctx.userdata.caller_id" {
+		t.Errorf("injectExpr(plain value) = %s, which is not the attribute read it always was", got)
 	}
 	needed := neededVars(ir.Tool{Inject: map[string]any{"status": "{{customer__status}}", "phone": "{{customer__phone_number}}"}},
 		map[string]ir.Variable{"customer": {Description: "The record the lookup returned."}}, nil)

@@ -93,7 +93,7 @@ async def check_livekit_handoff_branches():
     assert await step._end_on_book_it(ctx, BOOKED) is None
     assert not step.done()
     assert step._finish_call_id == "tool-1"
-    assert fresh.booking["reference"] == "bkg_0001"
+    assert fresh.booking.reference == "bkg_0001"
     # The transfer sees the settled success and moves the caller.
     moved = await step.to_care(transfer_ctx)
     assert moved is None
@@ -143,7 +143,7 @@ async def check_livekit_handoff_branches():
     finally:
         generated.tools.book_it.book_it = original_tool
     assert ended is None and moved is None, (ended, moved)
-    assert later.booking["reference"] == "bkg_0001"
+    assert later.booking.reference == "bkg_0001"
     assert waiting.done()
     # A save failure is the same answer, and the result stays in front of the
     # model with the repair instruction.

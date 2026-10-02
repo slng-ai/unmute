@@ -305,11 +305,16 @@ references. Missing values render as `none recorded yet.`; false, zero and
 empty lists keep their values. Referencing an object shares the whole object.
 History is a separate choice and does not clear saved values.
 
-Each declared shape is a generated Pydantic class in this module. A step's
-result is validated against it before anything is recorded, so a value outside a
-declared set never enters the state: the previous contents stay as they were and
-the model is told which field and what was allowed, which is what lets it
-correct itself on the next turn.
+The call's state is a Pydantic model in `state.py`, and each declared shape is
+a Pydantic class beside it. A field's type is the check every save goes
+through: a step's result, a pre-fetched value, a dispatched one and a carrier
+fact. The values one save brings are checked together, and nothing is recorded
+unless all of them fit. The previous contents then stay as they were, and the
+model is told which field and what was allowed, which is what lets it correct
+itself on the next turn.
+
+A variable with a `default:` always holds a value of its type. A variable with
+none starts as `None`, which means no value yet.
 
 A text type with a validated shape (`Phone`, `Date`, `Time`, `Id`, `EmailStr`)
 is a `str` in the schema the model is sent, with its shape checked by a
@@ -1628,10 +1633,9 @@ def require_env() -> None:
 
 from __future__ import annotations
 
-import json
-
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, PrivateAttr, TypeAdapter, ValidationError
+from pydantic_core import to_json, to_jsonable_python
 
 # --- declared state ----------------------------------------------------------
 # Generated from the `shapes:` and the typed `variables:` in agent.yaml. Both
@@ -1680,10 +1684,63 @@ def _typed(field: str, adapter: TypeAdapter, value: object) -> object:
     try:
         return adapter.validate_python(value)
     except ValidationError as error:
-        first = error.errors()[0]
-        where = ".".join(str(part) for part in first["loc"])
-        named = f"{field}.{where}" if where else field
-        raise _StateRefused(f"{named}: {first['msg']}") from None
+        raise _StateRefused(_refusal_text(error, field)) from None
+
+
+def _refusal_text(error: ValidationError, field: str = "") -> str:
+    """Word the first problem in a refusal the way the model is shown it.
+
+    Args:
+        error: What Pydantic refused.
+        field: The declared value the error is about, when its location does
+            not already start with it.
+
+    Returns:
+        The path to the value and Pydantic's own message, such as
+        "record.record_id: Field required".
+    """
+    first = error.errors()[0]
+    where = ".".join(str(part) for part in (field, *first["loc"]) if part != "")
+    return f"{where}: {first['msg']}"
+
+
+def _checked(state: State, values: dict) -> dict:
+    """Validate one batch against the state model, before any of it is saved.
+
+    The batch is built into one fresh model, so each value is checked by its
+    own field's annotation, and the state itself is not touched until every
+    value has passed. A field the batch leaves out takes its default, which
+    Pydantic does not validate, so a default outside its declared set never
+    refuses a save of something else.
+
+    Args:
+        state: The call's shared state object.
+        values: Declared value names mapped to what to save.
+
+    Returns:
+        The validated values, by name: models where the type is a shape.
+
+    Raises:
+        _StateRefused: If a value does not fit its declared type.
+    """
+    try:
+        checked = type(state).model_validate(values)
+    except ValidationError as error:
+        raise _StateRefused(_refusal_text(error)) from None
+    return {name: getattr(checked, name) for name in values}
+
+
+def _default(state: State, name: str) -> object:
+    """Read the value a declared field starts the call with.
+
+    Args:
+        state: The call's shared state object.
+        name: Name of the declared value.
+
+    Returns:
+        A fresh copy of the field's default.
+    """
+    return type(state).model_fields[name].get_default(call_default_factory=True)
 
 
 def _append_entry(entries: list, value: object) -> None:
@@ -1710,31 +1767,10 @@ def _append_entry(entries: list, value: object) -> None:
     """
     if value is None:
         return
-    if isinstance(value, (dict, list)) and value in entries:
+    if isinstance(value, (BaseModel, dict, list)) and value in entries:
         return
     entries.append(value)
 
-
-def _plain(value: object) -> object:
-    """Turn a validated value into plain data.
-
-    Plain data is the only shape both frameworks accept back from a tool: one
-    refuses a BaseModel outright and drops the whole tool result with a log
-    line, the other cannot serialise one at all.
-
-    Args:
-        value: A validated value, possibly holding models.
-
-    Returns:
-        The same value with every model replaced by its JSON-mode dict.
-    """
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, list):
-        return [_plain(entry) for entry in value]
-    if isinstance(value, dict):
-        return {key: _plain(entry) for key, entry in value.items()}
-    return value
 
 
 def _schema(adapter: TypeAdapter) -> object:
@@ -1831,7 +1867,8 @@ def _typed_result(step: str, values: dict) -> dict:
         values: The step's finish values.
 
     Returns:
-        The values with each declared field validated and made plain.
+        The values with each declared field validated, as a model where its
+        type is a shape.
 
     Raises:
         _StateRefused: If a declared field does not fit its type.
@@ -1850,14 +1887,10 @@ def _typed_result(step: str, values: dict) -> dict:
     # the result, and the assignment that reads it by name raised a
     # KeyError inside the finish handler on the target whose framework
     # validates no argument of its own.
-    validated = {name: _plain(_typed(name, adapter, values.get(name))) for name, adapter in adapters.items()}
+    validated = {name: _typed(name, adapter, values.get(name)) for name, adapter in adapters.items()}
     return values | validated
 
 
-_STATE_TYPES = {
-    "customer_id": TypeAdapter(str),
-    "verified": TypeAdapter(bool),
-}
 _TASK_ASSIGNMENTS = {
 }
 _STATE_CONFIRM = {
@@ -1875,8 +1908,8 @@ def _save_result(step: str, state: State, values: dict) -> dict:
         values: The step's finish values.
 
     Returns:
-        The validated values, or the unserved request alone when the step could
-        not help.
+        The validated values as plain data, or the unserved request alone when
+        the step could not help.
 
     Raises:
         _StateRefused: If an assigned value does not fit its declared type.
@@ -1886,19 +1919,24 @@ def _save_result(step: str, state: State, values: dict) -> dict:
         return values
     pending = {}
     for name, path, append in _TASK_ASSIGNMENTS.get(step, ()):
-        # A dotted path walks nested dicts, and is None past any missing link.
+        # A dotted path walks the result's fields, a dict at the top and a model
+        # below it, and is None past any missing link.
         value = values
         for part in path.split("."):
-            value = value.get(part) if isinstance(value, dict) else None
+            if value is None:
+                break
+            value = value.get(part) if isinstance(value, dict) else getattr(value, part, None)
         if append:
             if value is None:
                 continue
-            entries = list(getattr(state, name, None) or [])
+            entries = list(getattr(state, name))
             _append_entry(entries, value)
             value = entries
-        pending[name] = _plain(_typed(name, _STATE_TYPES[name], value))
+        pending[name] = value
     _save_batch(state, pending, step=step)
-    return values
+    # Plain data for the framework: one refuses a BaseModel in a tool result and
+    # drops the whole result, the other cannot serialise one at all.
+    return to_jsonable_python(values)
 
 
 def _save_batch(state: State, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
@@ -1916,7 +1954,7 @@ def _save_batch(state: State, values: dict, *, step: str | None = None, inputs: 
     """
     if not values:
         return
-    pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
+    pending = _checked(state, values)
     unconfirmed = set(state._unconfirmed)
     provenance = dict(state._prefetch_provenance)
     affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
@@ -1943,9 +1981,10 @@ def _save_batch(state: State, values: dict, *, step: str | None = None, inputs: 
             name: Name of the declared value.
 
         Returns:
-            The pending value, none if it was invalidated, else what state holds.
+            The pending value, the starting value if it was invalidated, else
+            what state holds.
         """
-        return None if name in invalidated else pending.get(name, getattr(state, name, None))
+        return _default(state, name) if name in invalidated else pending.get(name, getattr(state, name, None))
 
     # Dependencies are acyclic: prefetch can only read earlier entries. Each pass
     # reads what the previous one settled, so this runs to a fixed point.
@@ -1960,8 +1999,11 @@ def _save_batch(state: State, values: dict, *, step: str | None = None, inputs: 
                 unconfirmed.add(name)
         if before == unconfirmed:
             break
+    # An invalidated value goes back to what the call started with, which for a
+    # value with no default is None, and for a list is empty: never a None the
+    # field's own annotation would refuse.
     for name in invalidated:
-        setattr(state, name, None)
+        setattr(state, name, _default(state, name))
     for name, value in pending.items():
         setattr(state, name, value)
     state._unconfirmed = unconfirmed
@@ -2019,7 +2061,7 @@ def _state_text(name: str, value: object) -> str:
     if value is None or value == "":
         return _STATE_EMPTY
     if not isinstance(value, str):
-        value = json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
+        value = to_json(value).decode()
     text = str(value)
     if len(text) > _STATE_VALUE_MAX:
         # The length is only knowable here, at run time, so this cannot be a

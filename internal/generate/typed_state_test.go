@@ -21,7 +21,7 @@ var typedStateMarkers = []string{
 	"# --- declared state",
 	"class _StateRefused",
 	"def _typed(",
-	"def _plain(",
+	"def _checked(",
 	"def _typed_result(",
 	"def _state_text(",
 	"def _state_lookup(",
@@ -406,13 +406,11 @@ func TestLiveKitFinishParameterIsTheGeneratedClass(t *testing.T) {
 }
 
 // TestDottedAssignWalksIntoAShapedResultAtEmission is gap 1 of the scoped
-// variables feature, proven at the emitted seam: a step's result is a plain
-// dict by the time either driver assigns from it, because _typed_result's
-// _plain (shapes.go) has already dumped every declared shape out of its
-// Pydantic model, nested shapes included. So a dotted assign field walks a
-// chain of dict .get() calls rather than a single subscript, every link but the
-// last wrapped in `or {}` so an absent or null parent reads as None rather than
-// raising.
+// variables feature, proven at the emitted seam: a step's result is a dict
+// whose declared fields _typed_result (shapes.go) has validated into Pydantic
+// models, nested shapes included. So a dotted assign field walks the path one
+// part at a time, a dict key at the top and a model field below it, and an
+// absent or null parent reads as None rather than raising.
 //
 // A bare (undotted) field keeps the single subscript this always rendered:
 // TestLiveKitV1SingleTaskDelegate already holds that byte for byte, so this
@@ -546,8 +544,9 @@ func TestAValueOutsideALiteralSetIsRefusedWhereItEnters(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`named = f"{field}.{where}" if where else field`,
-		`raise _StateRefused(f"{named}: {first[`,
+		`where = ".".join(str(part) for part in (field, *first["loc"]) if part != "")`,
+		`return f"{where}: {first['msg']}"`,
+		"raise _StateRefused(_refusal_text(error, field)) from None",
 	} {
 		if !strings.Contains(block.Source, want) {
 			t.Errorf("the shared refusal does not name the field: %q missing", want)
@@ -641,7 +640,7 @@ func TestAnAbsentEntryAppendsNothing(t *testing.T) {
 		}
 		for _, want := range []string{
 			"    if value is None:\n        return\n",
-			"    if isinstance(value, (dict, list)) and value in entries:\n        return\n",
+			"    if isinstance(value, (BaseModel, dict, list)) and value in entries:\n        return\n",
 		} {
 			if !strings.Contains(module, want) {
 				t.Errorf("%s does not emit %q in _append_entry", provider, want)
@@ -775,7 +774,7 @@ func TestAnOmittedResultFieldValidatesRatherThanVanishing(t *testing.T) {
 	agent := loadTypedState(t)
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		source := emitted(t, agent, provider)
-		if !strings.Contains(source, "_plain(_typed(name, adapter, values.get(name)))") {
+		if !strings.Contains(source, "_typed(name, adapter, values.get(name))") {
 			t.Errorf("%s does not put an absent declared field through its adapter; the key stays missing "+
 				"and the assignment that reads it raises a KeyError inside the finish handler", provider)
 		}

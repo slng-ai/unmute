@@ -311,6 +311,7 @@ the module that defines it. Checked against 1.6.10 and 1.8.x. */}}from livekit.a
 {{end}}{{if .NeedsOpenAIReasoning}}from openai import types as openai_types
 {{end}}{{if .Realtime}}{{range .Realtime.Imports}}{{.}}
 {{end}}{{end}}{{if .PydanticImports}}from pydantic import {{.PydanticImports}}
+{{end}}{{if .TypedState}}from pydantic_core import to_json, to_jsonable_python
 {{end}}
 from utils import dev_metrics
 {{if .Knowledge.Knowledge}}from utils import knowledge

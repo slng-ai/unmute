@@ -269,7 +269,8 @@ def appointment_value(action, booking_id, slot_id):
 
 
 def check_saved_appointment(module, state, appointment):
-    assert state.appointment == appointment, state.appointment
+    saved = module.to_jsonable_python(state.appointment)
+    assert saved == appointment, saved
     for name, site in (("CONCIERGE_PROMPT", "agent:concierge"),
                        ("COMPLAINT_SPECIALIST_PROMPT", "agent:complaint_specialist")):
         prompt = module._render(getattr(module, name), state, site=site)
@@ -398,8 +399,8 @@ async def create_then_cancel(userdata):
     assert len(task.completions) == 1, task.completions
     assert task.completions[0]["appointment"]["action"] == "book", task.completions
     saved = userdata.appointment
-    assert saved["action"] == "book" and saved["service"] == "haircut", saved
-    booking_id = saved["booking_id"]
+    assert saved.action == "book" and saved.service == "haircut", saved
+    booking_id = saved.booking_id
     appointment = appointment_value("book", booking_id, slot_id)
     check_saved_appointment(agent, userdata, appointment)
 
@@ -421,7 +422,7 @@ async def create_then_cancel(userdata):
         ctx, action="move", additional=False, booking_id=booking_id, confirmed=True, slot_id=slot_id
     )
     assert moved is None, moved
-    assert userdata.appointment["booking_id"] == booking_id
+    assert userdata.appointment.booking_id == booking_id
     appointment = appointment_value("move", booking_id, slot_id)
     check_saved_appointment(agent, userdata, appointment)
 
@@ -705,9 +706,9 @@ async def booking_flow(worker, context, *, action, booking_id=""):
             },
             flow_manager,
         )
-        booking_id = worker.state.appointment["booking_id"]
+        booking_id = worker.state.appointment.booking_id
     elif action == "move":
-        requested = (date.fromisoformat(worker.state.appointment["date"]) + timedelta(days=1)).isoformat()
+        requested = (date.fromisoformat(worker.state.appointment.date) + timedelta(days=1)).isoformat()
         available = await step["find_slots"](
             {"date": requested, "service": "haircut"}, flow_manager)
         slot_id = available["slots"][0]["slot_id"]
@@ -792,7 +793,7 @@ async def verify_then_create():
         flow_manager,
     )
     assert result == {"status": "ok"} and next_node is None, (result, next_node)
-    booking_id = state.appointment["booking_id"]
+    booking_id = state.appointment.booking_id
     check_saved_appointment(bot, state, appointment_value("book", booking_id, slot_id))
     # The caller's yes arrived after the owner's snapshot, so it is carried back
     # once, right above the status, and the first line is not repeated.

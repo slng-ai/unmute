@@ -69,6 +69,9 @@ os.environ["UNMUTE_CALL_START"] = json.dumps({
 })
 state = from_dispatch()
 assert field(state, "record", "record_id") == "R1", state.record
+# Stored as the model its type names, not as the dict that arrived.
+assert type(state.record).__name__ == "CustomerRecord", type(state.record)
+assert state.record.record_id == "R1", state.record
 assert state.notes == ["called before"], state.notes
 assert state.caller_phone == "+34600111222", state.caller_phone
 
@@ -96,6 +99,12 @@ assert generated._save_fact(fact, "caller_number", "anonymous") is False
 assert fact.caller_number == "", fact.caller_number
 assert generated._save_fact(fact, "caller_number", "+34600111333") is True
 assert fact.caller_number == "+34600111333", fact.caller_number
+
+# The list default is written [], which is safe only because Pydantic copies it
+# for each instance: one call's notes never appear on the next call.
+one, two = generated.` + fresh + `, generated.` + fresh + `
+one.notes.append("only on the first call")
+assert two.notes == [], two.notes
 print("call start typed ok")
 `
 }
