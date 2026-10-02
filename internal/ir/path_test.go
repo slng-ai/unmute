@@ -59,70 +59,70 @@ func TestBuildResolvesAPlaceholderPath(t *testing.T) {
 		{
 			name: "a field of a shaped variable, stored in its emitted form",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Markdown["instructions.md"] += "\nThe last booking, if any, was on {{last_appointment.scheduled_date}}.\n"
+				pkg.Markdown["instructions.md"] += "\nThe last booking, if any, was on {{state.last_appointment.scheduled_date}}.\n"
 			},
 			flat:   "{{last_appointment__scheduled_date}}",
-			dotted: "{{last_appointment.scheduled_date}}",
+			dotted: "{{state.last_appointment.scheduled_date}}",
 		},
 		{
 			name: "an unknown field lists the fields the shape declares",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Markdown["instructions.md"] += "\n{{last_appointment.kind}}\n"
+				pkg.Markdown["instructions.md"] += "\n{{state.last_appointment.kind}}\n"
 			},
-			want: `references {{last_appointment.kind}}: shape "Appointment" declares no field "kind". It declares scheduled_date, scheduled_time, appointment_type`,
+			want: `references {{last_appointment.kind}}: the value has no field "kind"; it has scheduled_date, scheduled_time, appointment_type`,
 		},
 		{
 			name: "a path through a list names the root and points at assign",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Markdown["instructions.md"] += "\n{{appointments.scheduled_date}}\n"
+				pkg.Markdown["instructions.md"] += "\n{{state.appointments.scheduled_date}}\n"
 			},
 			want: "references {{appointments.scheduled_date}}: appointments is list[Appointment], and a path cannot name a field inside a list: nothing says which entry it means. Record the entry you need into its own variable with assign:",
 		},
 		{
 			name: "a plain variable has no fields",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["note"] = packagespec.Variable{Type: "string", Description: "A note."}
-				pkg.Markdown["instructions.md"] += "\n{{note.first}}\n"
+				addState(pkg, stringField("note"))
+				pkg.Markdown["instructions.md"] += "\n{{state.note.first}}\n"
 			},
-			want: "references {{note.first}}: note is a plain string with no fields to name; write {{note}}",
+			want: "references {{note.first}}: note is str, which has no fields to name; write {{state.note}}",
 		},
 		{
 			name: "a text type has no fields, in the one prompt that may name it",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Markdown["tasks/confirm_number.md"] += "\n{{caller_phone.digits}}\n"
+				pkg.Markdown["tasks/confirm_number.md"] += "\n{{state.caller_phone.digits}}\n"
 			},
-			want: "references {{caller_phone.digits}}: caller_phone is Phone, which has no fields to name; write {{caller_phone}}",
+			want: "references {{caller_phone.digits}}: caller_phone is str (phone) | None, which has no fields to name; write {{state.caller_phone}}",
 		},
 		{
 			// A path into a shape the compiler supplies, which resolves through
 			// the same catalog a declared shape does.
 			name: "a field of a supplied shape",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Markdown["instructions.md"] += "\nThe address on file is {{booked_for.email}}.\n"
+				pkg.Markdown["instructions.md"] += "\nThe address on file is {{state.booked_for.email}}.\n"
 			},
 			flat:   "{{booked_for__email}}",
-			dotted: "{{booked_for.email}}",
+			dotted: "{{state.booked_for.email}}",
 		},
 		{
 			name: "an unknown field of a supplied shape lists what it declares",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Markdown["instructions.md"] += "\n{{booked_for.address}}\n"
+				pkg.Markdown["instructions.md"] += "\n{{state.booked_for.address}}\n"
 			},
-			want: `shape "NameEmail" declares no field "address"`,
+			want: `references {{booked_for.address}}: the value has no field "address"; it has name, email`,
 		},
 		{
 			name: "the greeting rule is about the root",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Conversation.Greeting.Text = "Welcome back, your last visit was {{last_appointment.scheduled_date}}."
+				pkg.Agent.Conversation.Greeting.Text = "Welcome back, your last visit was {{state.last_appointment.scheduled_date}}."
 			},
 			want: "references {{last_appointment.scheduled_date}}, which has no value when the prompt is built",
 		},
 		{
 			name: "an undeclared root is the undeclared-name refusal, token as written",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Markdown["instructions.md"] += "\n{{custmer.status}}\n"
+				pkg.Markdown["instructions.md"] += "\n{{state.custmer.status}}\n"
 			},
-			want: "references {{custmer.status}}, which is not a declared variable",
+			want: "references {{custmer.status}}, which State in state.py does not declare",
 		},
 		{
 			// GATE. A value the model records during the call reaches SLNG as a
@@ -133,25 +133,22 @@ func TestBuildResolvesAPlaceholderPath(t *testing.T) {
 			// and the line.
 			name: "a value the model records during the call reaches no prompt",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["caller_email"] = packagespec.Variable{
-					Type:        "string",
-					Source:      "conversation",
-					Description: "The caller's email address, read back and agreed before it is recorded.",
-				}
-				pkg.Markdown["instructions.md"] += "\nSend the invite to {{caller_email}}.\n"
+				addState(pkg, stringField("caller_email"))
+				pkg.Agent.Variables = append(pkg.Agent.Variables, packagespec.Variable{Name: "caller_email", Source: "conversation"})
+				pkg.Markdown["instructions.md"] += "\nSend the invite to {{state.caller_email}}.\n"
 			},
 			want: "references {{caller_email}}, a value the model records during the call, which no prompt receives: describe the value in the variable's description: and name it in prose here instead",
 		},
 		{
 			name: "a placeholder carries no logic",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Markdown["instructions.md"] += "\n{{last_appointment.scheduled_date | upper}}\n"
+				pkg.Markdown["instructions.md"] += "\n{{state.last_appointment.scheduled_date | upper}}\n"
 			},
-			want: `shape "Appointment" declares no field "scheduled_date | upper"`,
+			want: `the value has no field "scheduled_date | upper"`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pkg, err := packagespec.Load(filepath.Join("..", "testdata", "typed_state"))
+			pkg, err := loadRecorded(filepath.Join("..", "testdata", "typed_state"))
 			if err != nil {
 				t.Fatal(err)
 			}

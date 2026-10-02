@@ -4,7 +4,7 @@ from datetime import date, time
 from typing import Annotated, Literal
 
 import phonenumbers
-from pydantic import BaseModel, EmailStr, Field, NameEmail, StringConstraints
+from pydantic import BaseModel, EmailStr, Field, StringConstraints
 from pydantic_extra_types.phone_numbers import PhoneNumberValidator
 
 # A phone number in E.164, as +34600111222. PhoneNumber alone saves the
@@ -14,6 +14,17 @@ Phone = Annotated[
 ]
 # An identifier: letters and digits, then dot, dash, underscore or colon.
 Id = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")]
+
+
+class Contact(BaseModel):
+    """A person's name and email address, held as two separate parts.
+
+    Two fields rather than Pydantic's NameEmail, which is one string: a prompt
+    can then use the name without saying the address out loud.
+    """
+
+    name: str
+    email: EmailStr
 
 
 class Appointment(BaseModel):
@@ -92,7 +103,7 @@ class State(BaseModel):
     appointment_service: (
         Literal["haircut", "haircolor", "haircut_and_haircolor", "dry_cut"] | None
     ) = Field(None, description="The service selected with the caller.")
-    confirmation_contact: NameEmail | None = Field(
+    confirmation_contact: Contact | None = Field(
         None,
         description="Who the confirmation goes to, name and address held apart, so a prompt can name the person without reading their address out loud. Here to find what only a real call finds: whether a model can turn a spelled-out address into the written form on the first try, and whether the refusal it gets back when it cannot is one it can correct itself from.",
     )

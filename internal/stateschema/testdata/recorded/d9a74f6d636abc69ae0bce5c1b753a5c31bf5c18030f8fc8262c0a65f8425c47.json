@@ -1,6 +1,6 @@
 {
   "source": "internal/voice-agents-tests/salon-concierge-v3/state.py",
-  "digest": "bb6cb68e17cf25998f0f5f896375e476ed506b17ba7e0154c89a4d6c88d22da8",
+  "digest": "d9a74f6d636abc69ae0bce5c1b753a5c31bf5c18030f8fc8262c0a65f8425c47",
   "report": {
     "schema": {
       "$defs": {
@@ -112,6 +112,26 @@
             "resolution"
           ],
           "title": "Complaint",
+          "type": "object"
+        },
+        "Contact": {
+          "description": "A person's name and email address, held as two separate parts.\n\nTwo fields rather than Pydantic's NameEmail, which is one string: a prompt\ncan then use the name without saying the address out loud.",
+          "properties": {
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "email": {
+              "format": "email",
+              "title": "Email",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ],
+          "title": "Contact",
           "type": "object"
         }
       },
@@ -275,16 +295,14 @@
         "confirmation_contact": {
           "anyOf": [
             {
-              "format": "name-email",
-              "type": "string"
+              "$ref": "#/$defs/Contact"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "Who the confirmation goes to, name and address held apart, so a prompt can name the person without reading their address out loud. Here to find what only a real call finds: whether a model can turn a spelled-out address into the written form on the first try, and whether the refusal it gets back when it cannot is one it can correct itself from.",
-          "title": "Confirmation Contact"
+          "description": "Who the confirmation goes to, name and address held apart, so a prompt can name the person without reading their address out loud. Here to find what only a real call finds: whether a model can turn a spelled-out address into the written form on the first try, and whether the refusal it gets back when it cannot is one it can correct itself from."
         },
         "confirmation_email": {
           "anyOf": [

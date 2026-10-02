@@ -250,7 +250,7 @@ message says what the token is rather than telling you to declare a variable
 that must not exist.
 
 For a value your prompt varies per call, declare a package variable and write
-`{{"{{name}}"}}`. For a credential, let the tool that needs it name its Vault
+`{{"{{state.name}}"}}`. For a credential, let the tool that needs it name its Vault
 entry: a tool's `auth:` block names the entry by its bare name, with no
 braces and no dollar.
 
@@ -276,6 +276,11 @@ None is dropped quietly.
 | a second `deployment_region` | SLNG takes exactly one |
 | outbound calling, `on_voicemail` | a package declares no carrier state on SLNG; `unmute deploy` attaches an existing trunk after a push |
 | a warm human transfer | SLNG's curated transfer places a single blind transfer |
+| a `state.py` field that is a model, a list, a `Literal` or a checked format | SLNG runs no code from your package and has nowhere to check one. A plain `str`, `int`, `float` or `bool` is fine, and so is `str \| None` |
+
+A package with a `state.py` needs `uv` on `PATH` to validate and compile, even
+when SLNG is its only target, because unmute reads the file by running it. The
+first run needs network. A package without a `state.py` needs no `uv`.
 
 An MCP tool works when its selected names and discovery snapshot pass the
 platform checks. A real deploy may refresh an unusable snapshot once; a dry

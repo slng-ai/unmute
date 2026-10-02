@@ -58,7 +58,13 @@ else:
 # An over-long value truncates and the call continues. It must never raise:
 # ending a live call over a variable is the one thing FR-018 forbids.
 class _State:
-    pass
+    """The two things CallState.render asks of a state, over plain attributes."""
+
+    def is_unconfirmed(self, flat):
+        return False
+
+    def plain(self, flat):
+        return getattr(self, flat.partition("__")[0], None)
 
 
 state = _State()
@@ -216,7 +222,7 @@ func scopedRouterFixture(agent *ir.Agent) {
 }
 
 func TestSmokeRouterActiveScopeLiveKit(t *testing.T) {
-	runLiveKitSmokeScript(t, "typed_state", nil, scopedRouterFixture, scopedRouterScript("agent", "Userdata()"))
+	runLiveKitSmokeScript(t, "typed_state", nil, scopedRouterFixture, scopedRouterScript("agent", "CallState()"))
 }
 func TestSmokeRouterActiveScopePipecat(t *testing.T) {
 	runPipecatSmokeScript(t, "typed_state", nil, scopedRouterFixture, scopedRouterScript("bot", "build_state()"))
@@ -270,7 +276,7 @@ async def check():
     observer = next(scope for scope, site in generated._SLNG_SCOPE_SITES.items() if site == "task:record_flags")
     assert (await request(confirm))["template_variables"]["caller_phone"] == "+34600111222"
     assert (await request(observer))["template_variables"] == {"caller_phone":"none recorded yet."}
-    generated._save_result("confirm_number",state,{"caller_phone":"+34600111222"})
+    state.save_result("confirm_number", {"caller_phone":"+34600111222"})
     assert (await request(observer))["template_variables"] == {"caller_phone":"+34600111222"}
 asyncio.run(check())
 print("active router request: selected field only; sibling, other-task and stale values absent; empty scope clears; next request refreshes")
@@ -285,7 +291,7 @@ func historyBoundaryFixture(agent *ir.Agent) {
 	}
 }
 func TestSmokeHistoryEntryLiveKit(t *testing.T) {
-	runLiveKitSmokeScript(t, "typed_state", nil, historyBoundaryFixture, historyEntryScript("agent", "Userdata()"))
+	runLiveKitSmokeScript(t, "typed_state", nil, historyBoundaryFixture, historyEntryScript("agent", "CallState()"))
 }
 func TestSmokeHistoryEntryPipecat(t *testing.T) {
 	runPipecatSmokeScript(t, "typed_state", nil, historyBoundaryFixture, historyEntryScript("bot", "build_state()"))

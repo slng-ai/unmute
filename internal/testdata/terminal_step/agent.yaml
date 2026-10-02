@@ -54,8 +54,7 @@ agents:
             success:
               - status: cancelled
         assign:
-          - booking: result.booking
-
+          - booking: result.booking?
       # Opens by speaking one fixed line and waiting, with the step's own
       # history reset, which is the pair that proves the line survives.
       - name: take_note
@@ -106,36 +105,11 @@ task_groups:
     context_scope: isolated
     then: return
 
-shapes:
-  - name: Booking
-    description: One saved booking action.
-    fields:
-      - name: reference
-        type: str
-        description: The booking reference the tool returned.
-      - name: service
-        type: str
-        description: The service booked, as the tool spelled it.
-      - name: action
-        type: Literal["create", "cancel"]
-        description: What the tool did.
-
+# How the values on State in state.py behave: where one comes from, and
+# which step confirms it. A value needs an entry only for one of those.
 variables:
-  customer_phone:
-    type: Phone
-    default: ""
+  - name: customer_phone
     confirm: verify
-    description: >-
-      The caller's number in E.164, saved once the lookup recognises it.
-
-  booking:
-    type: Booking | None
-    description: The latest successful booking action.
-
-  note:
-    type: string
-    default: ""
-    description: What the caller asked to pass on to the stylist.
 
 models:
   think:

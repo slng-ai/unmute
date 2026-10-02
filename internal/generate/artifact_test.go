@@ -93,7 +93,7 @@ func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { //
 	configured.Connection = "primary_phone"
 	setConnectionRoute(pkg, "primary_phone", "cloud-websocket", "twilio")
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func loadCompilerAgent(t *testing.T) *ir.Agent {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

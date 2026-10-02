@@ -1,6 +1,6 @@
 {
   "source": "internal/testdata/typed_state/state.py",
-  "digest": "7e807f3a50875043266844da0d8b5b048b5450bd300f0fea3f9645fa5b2714f7",
+  "digest": "fddc5e432dcbd36dbde68a66db206050f735aa3a08dadc7586be360a8607f3eb",
   "report": {
     "schema": {
       "$defs": {
@@ -34,6 +34,26 @@
             "appointment_type"
           ],
           "title": "Appointment",
+          "type": "object"
+        },
+        "Contact": {
+          "description": "A person's name and email address, held as two separate parts.\n\nTwo fields rather than Pydantic's NameEmail, which is one string: a prompt\ncan then use the name without saying the address out loud.",
+          "properties": {
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "email": {
+              "format": "email",
+              "title": "Email",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ],
+          "title": "Contact",
           "type": "object"
         }
       },
@@ -128,16 +148,14 @@
         "booked_for": {
           "anyOf": [
             {
-              "format": "name-email",
-              "type": "string"
+              "$ref": "#/$defs/Contact"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "Who the appointment is under, with their name and their email address held apart.",
-          "title": "Booked For"
+          "description": "Who the appointment is under, with their name and their email address held apart."
         }
       },
       "title": "State",

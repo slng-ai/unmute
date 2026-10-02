@@ -36,19 +36,28 @@ difference the author can act on, and the table is allowed exactly one
 and not a place to park a note to self.
 
 ## IR
-Go structs are the schema source for their own surface: `internal/spec` derives the unresolved authoring schema, while `internal/ir` derives the resolved/debug schema. **Do not hand-author `.json` schema files.** Flow: `spec.Load` → `ir.Build` → `ir.Validate` → `generate.Generate`.
+Go structs are the schema source for their own surface: `internal/spec` derives the unresolved authoring schema, while `internal/ir` derives the resolved/debug schema. **Do not hand-author `.json` schema files.** Flow: `spec.Load` → `state.py` read through uv → `ir.Build` → `ir.Validate` → `generate.Generate`.
 
 ### Typed session state
-A variable's `type:` is a single-line Python type expression, and `shapes:` is
-a top-level **list** of named field groups it can refer to. A task's `assign:`
-derives its finish fields from the destination variables, so authors declare
-each type once. The grammar and error column live in
-`internal/spec/typeexpr.go`; the vocabulary and advice live in
-`internal/ir/shapes.go`. The shared emitted Python lives in
-`internal/generate/shapes.go` and is inserted into both code targets verbatim.
+A package's call state is a Pydantic model the author writes in
+`<package>/state.py`: `class State(BaseModel)`. `agent.yaml` keeps a
+`variables:` **list** holding only the values that need a `source:` or a
+`confirm:`. A task's `assign:` derives its finish fields from the destination
+fields, so authors declare each type once.
+
+Go never parses a type. `internal/stateschema` reads `state.py` by running uv
+with the pinned Pydantic in `internal/target/state.go` and parses the JSON
+Schema Pydantic writes for `State`, between `spec.Load` and `ir.Build`. Tests
+use the recorded fixtures under `internal/stateschema/testdata/recorded`, so
+`make test` needs no Python. Re-record them with
+`go test ./internal/stateschema -run TestRecord -update` (needs uv) after any
+edit to a `state.py`, then re-record the generate goldens. The emitted runtime
+is `internal/generate/call_state.go`: the author's `state.py` is copied as
+written, and a generated `call_state.py` adds `CallState(State)` and one
+`StepResult` model per step.
 
 No saved value enters a prompt automatically. A prompt grants access by naming
-`{{variable}}` or `{{variable.field}}`. Omitted task and handoff history means
+`{{state.x}}` or `{{state.x.y}}`. Omitted task and handoff history means
 spoken `messages`; `reset` receives no old conversation. Task return restores
 the owner's earlier context and adds only a completed or unserved status.
 

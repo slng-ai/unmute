@@ -3,6 +3,8 @@ package spec
 import (
 	"fmt"
 	"strings"
+
+	"github.com/slng-ai/unmute/internal/stateschema"
 )
 
 // Package is the decoded, unresolved v1 package assembled from its files.
@@ -65,12 +67,14 @@ type Package struct {
 	// or a task group an agent names.
 	Tasks     map[string]Task     `json:"-" yaml:"-"`
 	Callables map[string]Callable `json:"-" yaml:"-"`
-	// variableOrder is the order agent.yaml declared the variables in, read off
-	// the file because a map cannot carry it. Unexported and reached through
-	// VariableOrder(), because it is derived from bytes this struct already
-	// holds and nothing should be able to set it to something else.
-	variableOrder []string
-	files         map[string][]byte
+	// StateSource is state.py's bytes, nil when the package has none. The code
+	// targets copy it into the generated project as written, and the compiler
+	// reads its fields through internal/stateschema, never by parsing it.
+	StateSource []byte `json:"-" yaml:"-"`
+	// State is what Pydantic says state.py declares, set by ReadState. Nil with
+	// a StateSource means nobody asked yet, which ir.Build refuses.
+	State *stateschema.Model `json:"-" yaml:"-"`
+	files map[string][]byte
 }
 
 // Location returns the first source line containing token in a package file.
@@ -137,16 +141,14 @@ type AgentFile struct {
 	Listen string `json:"listen,omitempty" yaml:"listen,omitempty"`
 	Turn   string `json:"turn,omitempty" yaml:"turn,omitempty"`
 	// Shapes declares the named groups of fields a variable's `type:` refers to.
-	// A list, not a name-keyed catalog, for the reason every authored block in
-	// this file is a list: a map has no order a reader can see and no place for a
-	// per-entry comment (CLAUDE.md, no dictionaries in the authoring surface).
-	// `models:` was unavailable for the name as well, because it already holds
-	// the think/speak/listen/turn catalog.
-	//
-	// Declared before Variables because a variable's type reads a shape's name,
-	// and struct order is what the derived schema publishes.
-	Shapes    []Shape             `json:"shapes,omitempty" yaml:"shapes,omitempty"`
-	Variables map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
+	// Shapes is retired. A shape is a BaseModel in state.py now. The field
+	// survives only so a file still carrying the old key is refused with the
+	// sentence naming where it moved, like Timezone below.
+	Shapes any `json:"-" yaml:"shapes,omitempty"`
+	// Variables says how the State fields that need it behave: where one comes
+	// from (source:) and which step confirms it (confirm:). Their types live in
+	// state.py.
+	Variables Variables `json:"variables,omitempty" yaml:"variables,omitempty"`
 	// Timezone is retired. The zone lives on the clock entry that reads it, so
 	// two entries can read two zones and so the key sits beside the thing it
 	// governs. This field survives only so a file still carrying the old key is
@@ -371,18 +373,6 @@ type Upstream struct {
 	SessionTokenEnv    string `json:"session_token_env,omitempty" yaml:"session_token_env,omitempty"`
 	Region             string `json:"region,omitempty" yaml:"region,omitempty"`
 	ModelID            string `json:"model_id,omitempty" yaml:"model_id,omitempty"`
-}
-
-type Variable struct {
-	Type    string `json:"type" yaml:"type"`
-	Default any    `json:"default,omitempty" yaml:"default,omitempty"`
-	Source  string `json:"source,omitempty" yaml:"source,omitempty"`
-	// Confirm names the step that must hear the caller agree before anything acts
-	// on this value. Until then the value stays marked unconfirmed and renders
-	// only in that step's own prompt. Empty means the value is settled the moment
-	// it arrives, which is true of every variable that existed before this field.
-	Confirm     string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
-	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 // Prefetch is one entry under `prefetch:`. Exactly one source key is present:

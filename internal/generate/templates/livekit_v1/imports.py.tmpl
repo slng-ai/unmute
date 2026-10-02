@@ -221,7 +221,7 @@ from pathlib import Path
 {{end}}import logging
 import os
 {{if .NeedsAnnounceChoice}}import random
-{{end}}{{if or .NeedsRender (and .TypedState .TypedState.NeedsRe)}}import re
+{{end}}{{if .NeedsRender}}import re
 {{end}}{{if or .HasWarmTransfer .HasColdTransfer}}import time
 {{end}}{{if .Slng.Any}}import uuid
 {{end}}from collections.abc import AsyncIterable
@@ -232,8 +232,7 @@ import os
 {{end}}
 {{if .NeedsHTTPX}}import httpx
 {{end}}from dotenv import load_dotenv
-{{if and .TypedState .TypedState.NeedsEmailValidator}}from email_validator import EmailNotValidError, validate_email
-{{end}}from livekit import {{if or .Outbound .HasColdTransfer .HasWarmTransfer}}api, {{end}}rtc
+from livekit import {{if or .Outbound .HasColdTransfer .HasWarmTransfer}}api, {{end}}rtc
 from livekit.agents import (
 {{- if .Outbound}}
     AMD,
@@ -316,6 +315,7 @@ the module that defines it. Checked against 1.6.10 and 1.8.x. */}}from livekit.a
 from utils import dev_metrics
 {{if .Knowledge.Knowledge}}from utils import knowledge
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
+{{end}}{{if and .TypedState .TypedState.HasState}}from state import State
 {{end}}from utils.dev_metrics import dev_llm_node{{if .NeedsDevSay}}, dev_say{{end}}, install_dev_metrics
 {{if .Tracing}}{{if eq .TracingProvider "coval"}}from utils.tracing import setup_coval
 {{else}}from utils.tracing import setup_langfuse

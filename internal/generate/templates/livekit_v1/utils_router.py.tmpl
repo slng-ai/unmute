@@ -148,7 +148,7 @@ _SLNG_SCOPE_SITES = {{.Slng.TemplateSites}}
 
 
 def _slng_template_variables(
-    state: Userdata | None, names: list[str] | tuple[str, ...], *, scope: str = ""
+    state: CallState | None, names: list[str] | tuple[str, ...], *, scope: str = ""
 ) -> dict[str, str]:
     """Collect the values the router substitutes into the prompt's placeholders.
 
@@ -169,10 +169,10 @@ def _slng_template_variables(
 {{- if .TypedState}}
         # The bound is measured on the JSON rendering, not on the repr of the
         # object: they are different lengths, and the one the router receives is
-        # the one that has to fit. _state_text carries its own bound and its own
-        # warning, so a declared value is already shortened by here. A path
-        # arrives as one flat name, and _state_lookup walks it.
-        text = _state_text(*_prompt_value(state, name, _SLNG_SCOPE_SITES.get(scope, "")))
+        # the one that has to fit. CallState.render carries its own bound and its
+        # own warning, so a declared value is already shortened by here. A path
+        # arrives as one flat name, and CallState.lookup walks it.
+        text = CallState.render(state, name, _SLNG_SCOPE_SITES.get(scope, ""))
 {{- else}}
         value = getattr(state, name, None) if state is not None else None
         text = "" if value is None else str(value)

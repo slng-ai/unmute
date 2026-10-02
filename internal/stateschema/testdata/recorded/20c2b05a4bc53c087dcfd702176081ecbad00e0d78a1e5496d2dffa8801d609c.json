@@ -1,9 +1,29 @@
 {
   "source": "examples/customer-intake/state.py",
-  "digest": "a6bf768ef6679b64e5d34b2f6a6616ebb1cc864511e0018f90ad228bb56325af",
+  "digest": "20c2b05a4bc53c087dcfd702176081ecbad00e0d78a1e5496d2dffa8801d609c",
   "report": {
     "schema": {
       "$defs": {
+        "Contact": {
+          "description": "A person's name and email address, held as two separate parts.\n\nTwo fields rather than Pydantic's NameEmail, which is one string: a prompt\ncan then use the name without saying the address out loud.",
+          "properties": {
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "email": {
+              "format": "email",
+              "title": "Email",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ],
+          "title": "Contact",
+          "type": "object"
+        },
         "CustomerRecord": {
           "description": "The record the intake desk opened for this caller.",
           "properties": {
@@ -56,16 +76,14 @@
         "contact": {
           "anyOf": [
             {
-              "format": "name-email",
-              "type": "string"
+              "$ref": "#/$defs/Contact"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "Who the caller is and where their confirmation goes, the name and the email address held as two separate parts.",
-          "title": "Contact"
+          "description": "Who the caller is and where their confirmation goes, the name and the email address held as two separate parts."
         },
         "caller_email": {
           "anyOf": [

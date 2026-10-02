@@ -98,7 +98,7 @@ class Model(llm.LLM):
             self.requests.append(("verify", False))
             if self.alone:
                 return ("call", ("finish", {"unserved_request": "The caller gave a wrong number and hung back."}))
-            return ("call", ("look_up", {"phone": "5550101010"}))
+            return ("call", ("look_up", {"phone": "34600111222"}))
         if "book_it" in names:
             self.requests.append(("book", False))
             self.book_requests += 1
@@ -181,7 +181,7 @@ async def journey(*, interrupt=False, alone=False):
     if interrupt:
         speaker.holds["Which service would you like?"] = asyncio.Event()
     session = AgentSession(
-        userdata=agent.Userdata(),
+        userdata=agent.CallState(),
         llm=model,
         tts=speaker,
         turn_handling={"turn_detection": "manual"},
@@ -229,7 +229,7 @@ async def check_two_steps_one_acknowledgement():
     # step for a reply after its tool, and nothing asked verification for one.
     assert model.requests == [("owner", False), ("verify", False), ("book", False), ("owner", True)], model.requests
     assert speaker.spoken == ["All set, your haircut is booked."], speaker.spoken
-    assert userdata.customer_phone == "+5550101010", userdata.customer_phone
+    assert userdata.customer_phone == "+34600111222", userdata.customer_phone
     assert userdata.booking.reference == "bkg_0001", userdata.booking
     assert owner_output(items, "do_book") == {"status": "completed"}
 

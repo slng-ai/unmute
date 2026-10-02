@@ -5,12 +5,14 @@ import (
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/stateschema"
 )
 
 // TestPlaceholderPathIsWalkedOnBothTargets is spec 005 US1 and US4 at emission:
-// the fixture's prompt names {{last_appointment.appointment_type}}, and both
-// modules carry it as one flat name, walk it through the shared lookup in the
-// local renderer, and send the same flat name to the router with its live value.
+// the fixture's prompt names {{state.last_appointment.appointment_type}}, and
+// both modules carry it as one flat name, walk it through CallState.lookup in
+// the local renderer, and send the same flat name to the router with its live
+// value.
 func TestPlaceholderPathIsWalkedOnBothTargets(t *testing.T) {
 	agent := loadTypedState(t)
 	if got := agent.Agents["desk"].Instructions; !strings.Contains(got, "{{last_appointment__appointment_type}}") {
@@ -19,16 +21,14 @@ func TestPlaceholderPathIsWalkedOnBothTargets(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		module := emitted(t, agent, provider)
 		for _, want := range []string{
-			"def _state_lookup(state: ",
-			`root, _, path = name.partition("__")`,
-			"_state_text(*_prompt_value(",
+			"    def lookup(self, flat: str) -> tuple[str, object]:",
+			`root, _, path = flat.partition("__")`,
+			"CallState.render(",
 			"{{last_appointment__appointment_type}}",
 			`"last_appointment__appointment_type"`,
-			// A path into a shape the compiler supplies flattens and walks
-			// exactly like one into a declared shape. It only can because
-			// internal/ir seeds the shape into the catalog: a reference with no
-			// entry there is refused at build with "which has no fields to
-			// name", so a prompt could never read one part of the pair.
+			// A path into a model the author declares flattens and walks exactly
+			// like any other. A reference to a field the model does not have is
+			// refused at build, so a prompt can name one part of the pair.
 			"{{booked_for__name}}",
 			`"booked_for__name"`,
 		} {
@@ -41,28 +41,28 @@ func TestPlaceholderPathIsWalkedOnBothTargets(t *testing.T) {
 		}
 		// The walk reads None past an absent link rather than raising, which is
 		// what lets a prompt name a field of a record nobody has filled.
-		body := functionBody(t, module, "def _state_lookup(state: ")
-		if !strings.Contains(body, "if value is None:") || !strings.Contains(body, "isinstance(value, dict)") {
+		body := functionBody(t, module, "    def lookup(self, flat: str)")
+		if !strings.Contains(body, "if value is None:") || !strings.Contains(body, "getattr(value, part, None)") {
 			t.Errorf("%s: the walk does not stop at an absent link:\n%s", provider, body)
 		}
 	}
 }
 
-// TestInjectOfAPathLowersToTheLookup is spec 005 US3: a single-token inject
-// naming a part reads it through the lookup, keeping the part's own type, and
+// TestInjectOfAPathLowersToThePlainRead is spec 005 US3: a single-token inject
+// naming a part reads it through state.plain, keeping the part's own type, and
 // the unset guard names the whole record.
-func TestInjectOfAPathLowersToTheLookup(t *testing.T) {
+func TestInjectOfAPathLowersToThePlainRead(t *testing.T) {
 	// The state holds an object as a model, so a part of one leaves as plain
 	// data, and so does the whole object; a plain value is the attribute read
 	// it always was.
 	variables := map[string]ir.Variable{
-		"customer":  {Shape: &ir.TypeRef{Shape: "Customer"}},
-		"caller_id": {Type: ir.PrimitiveString},
+		"customer":  {Schema: &stateschema.Type{Kind: stateschema.KindObject, Model: "Customer", Nullable: true}},
+		"caller_id": {Type: ir.PrimitiveString, Schema: &stateschema.Type{Kind: stateschema.KindString}},
 	}
-	if got := injectExpr("{{customer__status}}", "ctx.userdata", variables); got != `to_jsonable_python(_state_lookup(ctx.userdata, "customer__status")[1])` {
+	if got := injectExpr("{{customer__status}}", "ctx.userdata", variables); got != `ctx.userdata.plain("customer__status")` {
 		t.Errorf("injectExpr(path) = %s", got)
 	}
-	if got := injectExpr("{{customer}}", "ctx.userdata", variables); got != "to_jsonable_python(ctx.userdata.customer)" {
+	if got := injectExpr("{{customer}}", "ctx.userdata", variables); got != `ctx.userdata.plain("customer")` {
 		t.Errorf("injectExpr(whole object) = %s, which sends a model no JSON body accepts", got)
 	}
 	if got := injectExpr("{{caller_id}}", "ctx.userdata", variables); got != "ctx.userdata.caller_id" {

@@ -51,7 +51,7 @@ func livekitSIPFixture(t *testing.T, carrier string, inbound, outbound, cold boo
 		human.Warm = &spec.WarmTransfer{Destination: "billing_line"}
 		pkg.Agent.Escalations["to_human"] = human
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -460,7 +460,7 @@ from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
 async def main() -> None:
     context = LLMContext()
     owner = bot.IntakeAgent(
-        state=bot.State(customer_id=None, verified=False),
+        state=bot.CallState(customer_id=None, verified=False),
         context=context,
         call_context=None,
     )
@@ -695,7 +695,8 @@ async def main() -> None:
     assert callbacks[-1][0] == {"status": "completed"}
     assert callbacks[-1][1].run_llm is False, "next task must own the next LLM turn"
     assert callbacks[-1][1].on_context_updated is not None
-    assert owner._run_verify_results["verify"] == exact_result
+    # The saved result is the step's own values, and nothing was reported unserved.
+    assert owner._run_verify_results["verify"] == {**exact_result, "unserved_request": ""}
     assert owner._run_verify_active_step == "complete"
 
     callbacks.clear()
@@ -738,7 +739,7 @@ async def main() -> None:
     else:
         raise AssertionError("final completion failure was swallowed")
     assert owner._run_verify_active_step is None
-    assert owner._run_verify_results["complete"] == {"complete": True}
+    assert owner._run_verify_results["complete"] == {"complete": True, "unserved_request": ""}
     assert context.get_messages() == before_final_messages
     assert context.tools is before_final_tools
     assert prompt_restores[0].endswith("Current customer: cus-smoke.")
@@ -798,10 +799,10 @@ async def main() -> None:
     first_context = {"_phone_call": {"call_id": "call-a"}}
     second_context = {"_phone_call": {"call_id": "call-b"}}
     first = bot.BillingAgent(
-        state=bot.State(), context=LLMContext(), call_context=first_context,
+        state=bot.CallState(), context=LLMContext(), call_context=first_context,
     )
     second = bot.BillingAgent(
-        state=bot.State(), context=LLMContext(), call_context=second_context,
+        state=bot.CallState(), context=LLMContext(), call_context=second_context,
     )
 
     first_attempt = Params()
@@ -2246,7 +2247,7 @@ func runPipecatSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

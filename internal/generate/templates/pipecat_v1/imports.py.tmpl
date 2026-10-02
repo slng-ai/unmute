@@ -29,7 +29,7 @@ from collections.abc import {{.ABCImports}}
 {{end}}{{if or .HasFlows .CallStartVars .Slng.Vertex .NeedsPrefetchSeed .TypedState}}import json
 {{end}}import os
 {{if .NeedsAnnounceChoice}}import random
-{{end}}{{if or .NeedsRender (and .TypedState .TypedState.NeedsRe)}}import re
+{{end}}{{if .NeedsRender}}import re
 {{end}}import sys
 {{if .Slng.Any}}import uuid
 {{end}}{{if .NeedsPrefetchClock}}from datetime import datetime
@@ -42,11 +42,11 @@ import aiohttp
 import aiohttp
 {{end}}{{end}}{{if .UsesHTTPX}}
 import httpx
-{{end}}{{if and .TypedState .TypedState.NeedsEmailValidator}}from email_validator import EmailNotValidError, validate_email
 {{end}}{{if .Slng.RouterClass}}from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pipecat.utils.http import connection_limits
 {{end}}{{if .Knowledge.Knowledge}}from utils import knowledge
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
+{{end}}{{if and .TypedState .TypedState.HasState}}from state import State
 {{end}}from dotenv import load_dotenv
 from loguru import logger{{if .PydanticImports}}
 from pydantic import {{.PydanticImports}}{{end}}{{if .TypedState}}

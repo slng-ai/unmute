@@ -34,11 +34,12 @@ On this page:
 A task is one entry under an agent's `tasks:`. This one identifies the caller
 and saves what it learns:
 
-```yaml agent.yaml
-variables:
-  customer_id:
-    type: Id
+```python state.py
+class State(BaseModel):
+    customer_id: str = ""
+```
 
+```yaml agent.yaml
 agents:
   appointment_desk:
     tasks:
@@ -60,15 +61,13 @@ Four keys carry it: **what it is** (`name`, `instructions`), **when to run it**
 
 ## Declare a task
 
-```yaml agent.yaml
-variables:
-  customer_id:
-    type: Id
-    description: The customer record selected for this call.
-  customer_name:
-    type: string
-    description: The customer's name.
+```python state.py
+class State(BaseModel):
+    customer_id: str = Field("", description="The customer record selected for this call.")
+    customer_name: str = Field("", description="The customer's name.")
+```
 
+```yaml agent.yaml
 agents:
   appointment_desk:
     # the agent's other keys stay as they are
@@ -237,7 +236,7 @@ The prompt a task runs on has four parts. You write the first one.
    `finish` call, lists the values from `assign:`, and gives the model a way
    out for a request the task cannot serve. You do not write "call finish when
    you are done" yourself.
-3. **The values your placeholders name.** Each `{{variable}}` in your
+3. **The values your placeholders name.** Each `{{state.variable}}` in your
    instructions is replaced with the saved value. No other saved value is
    added.
 4. **The history you chose** with `context.history`. When omitted, it is
@@ -274,7 +273,7 @@ Saving and sharing are separate choices. Put a placeholder in the prompt that
 needs the value:
 
 ```markdown tasks/booking.md
-The verified customer is {{customer_name}} with ID {{customer_id}}.
+The verified customer is {{state.customer_name}} with ID {{state.customer_id}}.
 Help them manage their appointment.
 ```
 
@@ -285,10 +284,10 @@ send a value to the model. An unset value renders as `none recorded yet.`
 A dotted reference selects one field and does not send its siblings:
 
 ```markdown
-Move appointment {{appointment.id}} to {{appointment.date}}.
+Move appointment {{state.appointment.id}} to {{state.appointment.date}}.
 ```
 
-See [Variables](/reference/variables) for shapes, dotted paths, append
+See [Variables](/reference/variables) for models, dotted paths, append
 assignments, and confirmation.
 
 ## Choose conversation history
@@ -316,8 +315,8 @@ tasks, including every task history value.
 ```
 
 ```markdown tasks/reschedule-booking.md
-Move appointment {{appointment_id}} to {{appointment_date}}
-at {{appointment_time}}.
+Move appointment {{state.appointment_id}} to {{state.appointment_date}}
+at {{state.appointment_time}}.
 
 If the requested date or time is unavailable, ask the caller.
 Confirm the change before making it.
@@ -385,11 +384,12 @@ Taking one ends the task and any remaining task-group steps. See
 
 Append one result to a list with `+`:
 
-```yaml agent.yaml
-variables:
-  appointments:
-    type: list[Appointment]
+```python state.py
+class State(BaseModel):
+    appointments: list[Appointment] = []
+```
 
+```yaml agent.yaml
 assign:
   - appointments+: result.appointment
 ```
@@ -405,8 +405,13 @@ assign:
   - appointment_id: result.appointment.id
 ```
 
-The whole-object assignment establishes the result shape. The compiler then
+The whole-object assignment establishes the result's fields. The compiler then
 checks the nested path and derives its type.
+
+A step must return every whole value it assigns. Mark one it may leave out
+with `?` after the result field, as `- appointment: result.appointment?`. A
+path like `result.appointment.id` reads part of a value the step already
+returns, so it takes no `?`.
 
 ### Share a task across agents
 

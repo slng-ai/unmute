@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -92,6 +93,9 @@ func checkSecrets(pkg *packagespec.Package) error {
 // as words, never as a hole (_state_text and _render's plain fallback, both in
 // generate), so naming one early is never silent.
 func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
+	if err := checkStatePrefix(pkg, agent); err != nil {
+		return err
+	}
 	if pkg.Agent.Conversation != nil && pkg.Agent.Conversation.Greeting != nil {
 		text := pkg.Agent.Conversation.Greeting.Text
 		if err := checkTemplateSite(pkg, agent, "agent.yaml", "text:", "conversation.greeting.text", text, true, true); err != nil {
@@ -136,6 +140,54 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	return nil
 }
 
+// checkStatePrefix refuses a state value named without StatePrefix. It reads
+// the authored text, before FlattenPaths drops the prefix, so it is the one
+// place that can tell {{state.x}} from {{x}}. Every authored template site is
+// walked here: the greeting, every prompt, every tool inject and webhook path,
+// and every pre-fetch argument.
+func checkStatePrefix(pkg *packagespec.Package, agent *Agent) error {
+	type site struct{ file, token, text string }
+	var sites []site
+	if pkg.Agent.Conversation != nil && pkg.Agent.Conversation.Greeting != nil {
+		sites = append(sites, site{"agent.yaml", "text:", pkg.Agent.Conversation.Greeting.Text})
+	}
+	for _, name := range sortedKeys(pkg.Markdown) {
+		sites = append(sites, site{name, "", pkg.Markdown[name]})
+	}
+	for _, name := range sortedKeys(pkg.Tools) {
+		raw := pkg.Tools[name]
+		file := filepath.Join("tools", name+".yaml")
+		for _, pair := range raw.Inject {
+			if text, ok := pair.Value.(string); ok {
+				sites = append(sites, site{file, pair.Key, text})
+			}
+		}
+		if raw.Webhook != nil {
+			sites = append(sites, site{file, "path:", raw.Webhook.Path})
+		}
+	}
+	for _, entry := range pkg.Agent.Prefetch {
+		for _, pair := range entry.Args {
+			if text, ok := pair.Value.(string); ok {
+				sites = append(sites, site{"agent.yaml", "prefetch:", text})
+			}
+		}
+	}
+	for _, s := range sites {
+		for _, match := range templatePattern.FindAllStringSubmatch(s.text, -1) {
+			ref := match[1]
+			if strings.HasPrefix(ref, "$") || strings.HasPrefix(ref, StatePrefix) {
+				continue
+			}
+			if _, ok := agent.Variables[PathRoot(ref)]; ok {
+				return fmt.Errorf("%s: {{%s}} names a value on State; write {{%s%s}}",
+					pkg.Location(s.file, firstNonBlank(s.token, "{{")), ref, StatePrefix, ref)
+			}
+		}
+	}
+	return nil
+}
+
 // checkTemplateSite resolves one site's tokens. prompt marks a site the model
 // reads, which scopes refusal 16 to the sites it exists to protect. requireNow
 // marks the one site rendered before the call begins, where a variable with no
@@ -170,7 +222,7 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 			if slices.Contains(agent.Secrets, root) || envNamePattern.MatchString(root) {
 				return fmt.Errorf("%s: %s references {{%s}}, but secrets never flow through templates; a secret reaches a tool through its own *_env field", where, site, ref)
 			}
-			return fmt.Errorf("%s: %s references {{%s}}, which is not a declared variable", where, site, ref)
+			return fmt.Errorf("%s: %s references {{%s}}, which State in state.py does not declare", where, site, ref)
 		}
 		// A value the model records during the call is never substituted into a
 		// prompt. SLNG emits it as a runtime variable and fills it with its own
@@ -192,7 +244,7 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 			return fmt.Errorf("%s: %s references {{%s}}, which has no value when the prompt is built; give it source: call_start, a system source, or a default", where, site, ref)
 		}
 		if len(fields) > 0 {
-			if err := checkPathFields(agent.Shapes, root, string(variable.Type), variable.Shape, fields); err != nil {
+			if err := checkPathFields(root, variable, fields); err != nil {
 				return fmt.Errorf("%s: %s references {{%s}}: %w", where, site, ref, err)
 			}
 		}
@@ -201,28 +253,22 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 }
 
 // checkPathFields resolves the fields a placeholder walks after its root. The
-// root's own type decides whether there is anything to walk: a plain type, a
-// text type such as Phone, a literal set and a list have no fields, and each is
-// refused naming the type and the whole name to write instead. The list case is
-// caught here rather than left to FieldPath so the message can name the root,
-// which FieldPath never sees. Past the root, FieldPath's own messages apply: an
-// unknown field lists the fields the shape declares, a list partway down says
-// nothing names its entry, and a plain field partway down says it has no fields.
-// A token carrying anything but names and dots ends up here too, and is refused
-// as an unknown field with the text as written: a placeholder carries no logic.
-func checkPathFields(shapes map[string]Shape, root, plain string, typ *TypeRef, fields []string) error {
+// root's own type decides whether there is anything to walk: a scalar, a
+// checked text type, a closed set and a list have no fields, and each is
+// refused naming the type and the whole name to write instead. Past the root,
+// Type.Path's own messages apply: an unknown field lists the fields the model
+// declares, and a list partway down says nothing names its entry.
+func checkPathFields(root string, variable Variable, fields []string) error {
+	typ := variable.Schema
 	switch {
-	case typ == nil:
-		return fmt.Errorf("%s is a plain %s with no fields to name; write {{%s}}", root, plain, root)
 	case typ.IsList():
 		return fmt.Errorf("%s is %s, and a path cannot name a field inside a list: nothing says which entry it "+
 			"means. Record the entry you need into its own variable with assign: on the step that records it, "+
-			"and name that variable here", root, typ.String())
+			"and name that variable here", root, typ)
+	case typ.Kind != stateschema.KindObject:
+		return fmt.Errorf("%s is %s, which has no fields to name; write {{state.%s}}", root, typ, root)
 	}
-	if _, ok := shapes[typ.Shape]; !ok {
-		return fmt.Errorf("%s is %s, which has no fields to name; write {{%s}}", root, typ.String(), root)
-	}
-	_, err := FieldPath(shapes, typ, fields)
+	_, err := typ.Path(fields)
 	return err
 }
 

@@ -357,17 +357,9 @@ type livekitAssign struct {
 // livekitVar is one typed shared-state field on the generated Userdata
 // dataclass (SCHEMA 4.4; LiveKit session userdata).
 type livekitVar struct {
-	// Anno is the whole annotation, including nullability, because a declared
-	// list is not nullable: it starts empty so an append never has to create it.
-	Anno        string
 	Name        string
 	PyType      string
-	Default     string // Python literal; "None" when the spec declares none
 	Description string
-	// LiteralDefault marks a variable typed as a set of allowed words that also
-	// starts on a value: the author's default is not checked against the words,
-	// so a type checker can disagree with it (an empty string, say).
-	LiteralDefault bool
 }
 
 // livekitCallStartVar is one dispatched input variable, hydrated from the job
@@ -546,6 +538,8 @@ type livekitDeploy struct {
 }
 
 type livekitData struct {
+	// StateSource is the author's state.py, copied into the project as written.
+	StateSource string
 	// Project is the package's own name, and it labels the generated project:
 	// the pyproject name, the logger, the trace name, the README title, the
 	// Twilio friendly names. It used to be the target instance name, which made
@@ -797,7 +791,6 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldWebhookPath:           true, // rendered, URL-encoded path on the base URL
 	targetcap.FieldTemplates:             true, // update_instructions/_render at session start
 	targetcap.FieldTypedState:            true, // a generated Pydantic class per shape, validated at each finish
-	targetcap.FieldShapedText:            true, // str plus an AfterValidator, never a schema keyword
 
 }
 
@@ -913,7 +906,7 @@ var livekitModules = []struct{ tmpl, path string }{
 	{"utils_auth.py", "utils/auth.py"},
 	{"utils_context.py", "utils/context.py"},
 	{"utils_mcp.py", "utils/mcp.py"},
-	{"state.py", "state.py"},
+	{"call_state.py", "call_state.py"},
 	{"session.py", "session.py"},
 	{"utils_telephony.py", "utils/telephony.py"},
 	{"utils_router.py", "utils/router.py"},
@@ -994,6 +987,10 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		for _, lt := range data.LocalTools {
 			files = append(files, File{Path: "tools/" + lt.Name + ".py", Content: []byte(lt.Source)})
 		}
+	}
+	// The author's state.py, copied as written: call_state.py subclasses it.
+	if data.StateSource != "" {
+		files = append(files, File{Path: "state.py", Content: []byte(data.StateSource), Verbatim: true})
 	}
 	return files, nil
 }

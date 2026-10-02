@@ -44,14 +44,11 @@ models:
       model: slng/deepgram/nova:3-en
       language: en
 
+# How the values on State in state.py behave: where one comes from, and
+# which step confirms it. A value needs an entry only for one of those.
 variables:
-  customer_name:
-    type: string
-    default: there
-  customer_id:
-    type: string
+  - name: customer_id
     source: call_start
-    default: unknown
 
 agents:
   support:

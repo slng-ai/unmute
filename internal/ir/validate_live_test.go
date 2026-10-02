@@ -13,7 +13,7 @@ import (
 // backed by an OpenAI think entry, two tools, a greeting and an idle nudge.
 func liveAgent(t *testing.T) *Agent {
 	t.Helper()
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "live_model"))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", "live_model"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestValidateLiveIsRefusedOnSlngAlone(t *testing.T) {
 func TestBuildRefusesAnAgentNamingBothFormsOrNeither(t *testing.T) {
 	load := func(t *testing.T, mutate func(pkg *packagespec.Package)) error {
 		t.Helper()
-		pkg, err := packagespec.Load(filepath.Join("..", "testdata", "live_model"))
+		pkg, err := loadRecorded(filepath.Join("..", "testdata", "live_model"))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -46,6 +46,8 @@ class State(BaseModel):
         None,
         description='The salon\'s own wall clock when the call began, HH:MM on a 24 hour clock. From the same reading as the two above. It is what lets the agent know that a caller asking for "this afternoon" at 17:40 is asking for something that has nearly passed, rather than offering them a slot that is already gone.',
     )
+    # confirm: in agent.yaml is verify_customer. Until that step has heard the
+    # caller agree, this value renders in no prompt but its own.
     customer_phone: Phone | None = Field(
         None,
         description="The caller's phone number in E.164: a plus sign, then digits, with no spaces, brackets or dashes. One shape for every phone number in this package, the MANAGER_PHONE_NUMBER transfer destination included, so no prompt and no tool has to guess which shape it is holding.\nNo `source:` here on purpose. The prefetch block below reads the carrier's fact and this variable receives it, which leaves the per-route refusal for a variable naming a source its target cannot supply exactly as strict as it is: on a route with no caller ID the entry skips and this holds its default.\nOffered to the caller for a yes, never acted on unasked. Somebody may be ringing from a friend's phone, or may hold a second account, so until the verification step has heard them agree this value stays unconfirmed and appears in no prompt but that step's own.",

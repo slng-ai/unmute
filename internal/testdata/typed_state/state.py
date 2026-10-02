@@ -4,7 +4,7 @@ from datetime import date, time
 from typing import Annotated, Literal
 
 import phonenumbers
-from pydantic import BaseModel, EmailStr, Field, NameEmail
+from pydantic import BaseModel, EmailStr, Field
 from pydantic_extra_types.phone_numbers import PhoneNumberValidator
 
 # A phone number in E.164, as +34600111222. PhoneNumber alone saves the
@@ -12,6 +12,17 @@ from pydantic_extra_types.phone_numbers import PhoneNumberValidator
 Phone = Annotated[
     str | phonenumbers.PhoneNumber, PhoneNumberValidator(number_format="E164")
 ]
+
+
+class Contact(BaseModel):
+    """A person's name and email address, held as two separate parts.
+
+    Two fields rather than Pydantic's NameEmail, which is one string: a prompt
+    can then use the name without saying the address out loud.
+    """
+
+    name: str
+    email: EmailStr
 
 
 class Appointment(BaseModel):
@@ -49,7 +60,7 @@ class State(BaseModel):
         None,
         description="Where the caller wants the reminder sent, saved only once they have spelled it out.",
     )
-    booked_for: NameEmail | None = Field(
+    booked_for: Contact | None = Field(
         None,
         description="Who the appointment is under, with their name and their email address held apart.",
     )

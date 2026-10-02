@@ -73,7 +73,8 @@ build/pipecat/
 ├── call.py             # one session
 ├── agents.py           # agents, tools, task steps
 ├── session.py          # prefetch and call start
-├── state.py            # saved values
+├── call_state.py       # CallState, the saved values
+├── state.py            # your State class, copied
 ├── settings.py         # every fixed value
 ├── prompts/            # one Markdown file per prompt
 ├── utils/              # helpers, including per-turn timings for unmute dev
@@ -94,7 +95,8 @@ build/livekit/
 ├── call.py             # prewarm and one session
 ├── agents.py           # agents, tools, task steps
 ├── session.py          # prefetch and call start
-├── state.py            # saved values
+├── call_state.py       # CallState, the saved values
+├── state.py            # your State class, copied
 ├── settings.py         # every fixed value
 ├── prompts/            # one Markdown file per prompt
 ├── utils/              # helpers, including per-turn timings for unmute dev

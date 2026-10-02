@@ -47,34 +47,11 @@ handoffs:
     context:
       history: full
 
+# How the values on State in state.py behave: where one comes from, and
+# which step confirms it. A value needs an entry only for one of those.
 variables:
-  customer_id:
-    type: string
-    default: ""
-  verified:
-    type: boolean
-    default: false
-  # All three read once at session start, from one reading of the clock, in the
-  # zone the entry below names.
-  booking_date:
-    type: string
-    default: ""
-  booking_weekday:
-    type: string
-    default: ""
-  booking_year:
-    type: string
-    default: ""
-  # No source: here on purpose. The prefetch below reads the carrier fact and
-  # this variable receives it, which is what keeps the per-route refusal for a
-  # variable naming a source its target cannot supply exactly as strict as it is.
-  caller_phone:
-    type: string
-    default: ""
+  - name: caller_phone
     confirm: verify_caller
-  caller_name:
-    type: string
-    default: ""
 
 # An ordered list. Entries resolve top to bottom, so "caller" has to sit above
 # "profile", which reads what it assigns. Written the other way round it is

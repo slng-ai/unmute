@@ -28,7 +28,7 @@ There are two independent choices:
 | Choice | How you control it |
 |---|---|
 | Earlier conversation | `context.history` on a task or handoff |
-| Saved variables | `{{variable}}` or `{{variable.field}}` in the receiving prompt |
+| Saved variables | `{{state.variable}}` or `{{state.variable.field}}` in the receiving prompt |
 
 A variable is never added to a prompt automatically. A task with `reset` can
 still read the values its prompt names. A task with no placeholders can still
@@ -81,17 +81,23 @@ This example assumes the selection task has the tools needed to find the
 booking and check available times. Add the following fields and assignments
 to that task in your package:
 
-```yaml agent.yaml
-variables:
-  appointment_id:
-    type: Id
-  appointment_date:
-    type: Date
-    description: The requested new date selected for this move.
-  appointment_time:
-    type: Time
-    description: The requested new time selected for this move.
+```python state.py
+from datetime import date, time
 
+from pydantic import BaseModel, Field
+
+
+class State(BaseModel):
+    appointment_id: str = ""
+    appointment_date: date | None = Field(
+        None, description="The requested new date selected for this move."
+    )
+    appointment_time: time | None = Field(
+        None, description="The requested new time selected for this move."
+    )
+```
+
+```yaml agent.yaml
 agents:
   concierge:
     tasks:
@@ -110,10 +116,10 @@ Ask only for details that are missing. Once the caller selects a new time,
 finish with the appointment ID and the selected new date and time.
 ```
 
-The three variable declarations provide the finish argument types. The
+The three fields on `State` provide the finish argument types. The
 selection task uses `messages` by default, so it can use "Friday afternoon"
 from the caller's request. If several times are available, it asks the caller
-to choose before saving an exact `Time`.
+to choose before saving an exact `time`.
 
 In the owner's instructions, make the order clear:
 
@@ -140,9 +146,9 @@ agents:
 ```
 
 ```markdown tasks/reschedule-booking.md
-Appointment to move: {{appointment_id}}
-Requested new date: {{appointment_date}}
-Requested new time: {{appointment_time}}
+Appointment to move: {{state.appointment_id}}
+Requested new date: {{state.appointment_date}}
+Requested new time: {{state.appointment_time}}
 
 If any value is missing, ask the caller for it. Otherwise use these values.
 Confirm the exact change before calling save_booking.
@@ -166,14 +172,14 @@ its pre-task conversation back plus `completed` or `unserved`. It does not
 receive the task's private messages or tool results, even with `messages`.
 
 For continuity after a move, save the successful result separately. Declare
-an `Appointment` shape with the fields your booking tool returns, as shown in
-[Variables](/build/variables#group-fields-into-a-shape), and add:
+an `Appointment` model in `state.py` with the fields your booking tool returns, as shown in
+[Variables](/build/variables#group-fields-into-a-model), and add a field:
 
-```yaml agent.yaml
-variables:
-  appointment:
-    type: Appointment
-    description: The latest appointment successfully saved by the booking tool.
+```python state.py
+class State(BaseModel):
+    appointment: Appointment | None = Field(
+        None, description="The latest appointment successfully saved by the booking tool."
+    )
 ```
 
 ```yaml
@@ -192,7 +198,7 @@ caller request. Let the owner confirm the change.
 The owner and any later agent that needs the booking should read it:
 
 ```markdown instructions.md
-Latest saved appointment: {{appointment}}
+Latest saved appointment: {{state.appointment}}
 When a booking task completes, confirm this appointment once.
 Use it instead of older dates mentioned in the conversation.
 ```

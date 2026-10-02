@@ -19,13 +19,13 @@ weekday, keep just the timestamp.
 
 Merge these entries into an existing package:
 
-```yaml agent.yaml
-variables:
-  current_datetime:
-    type: str
-  current_weekday:
-    type: str
+```python state.py
+class State(BaseModel):
+    current_datetime: str = ""
+    current_weekday: str = ""
+```
 
+```yaml agent.yaml
 prefetch:
   - name: local_clock
     clock: now
@@ -35,8 +35,8 @@ prefetch:
       - current_weekday: result.day_of_week
 ```
 
-Use a shape for fields that travel together as a task result. Pre-fetch fills
-plain values, so it cannot save the clock into a shape. Keep separate values
+Use a model for fields that travel together as a task result. Pre-fetch fills
+plain values, so it cannot save the clock into a model. Keep separate values
 when they have different confirmation steps or different readers.
 
 ## How a value moves
@@ -45,212 +45,186 @@ Three parts write or read state:
 
 | Key | Think of it as | Lives | Read by |
 |---|---|---|---|
-| `variables:` | the call's typed state | the whole call | only prompts and tools that explicitly reference a value |
+| `State` in `state.py` | the call's typed state | the whole call | only prompts and tools that explicitly reference a value |
 | `prefetch:` + `assign:` | state filled before the first word | the whole call | the same |
 | task `assign:` | fields a task saves when it finishes | the whole call from then on | the same |
 
 Values are supplied at session start, filled by `prefetch:`, or saved at task
 finish by `assign:`. Conversation sharing is controlled separately by
 `context.history`. A reset task receives no old speech, so put each saved value
-it needs directly in its prompt as `{{name}}`.
+it needs directly in its prompt as `{{state.name}}`.
 
 ## Declaring a variable
 
-```yaml agent.yaml
-variables:
-  customer_name:
-    type: string
-    source: call_start
-    default: there
-    description: Caller's first name, used in the greeting and the prompt.
+Types, defaults and descriptions live on the `State` class in `state.py`, next
+to `agent.yaml`. Each field is one variable. `agent.yaml` has a `variables:`
+list only for a value that needs a `source:` or a `confirm:`.
+
+```python state.py
+from pydantic import BaseModel, Field
+
+
+class State(BaseModel):
+    customer_name: str = Field(
+        "there", description="Caller's first name, used in the greeting and the prompt."
+    )
 ```
 
-| Field | Required | What it is |
+```yaml agent.yaml
+variables:
+  - name: customer_name
+    source: call_start
+```
+
+| `variables:` key | Required | What it is |
 |---|---|---|
-| `type` | yes | a type expression. See the type grammar below |
+| `name` | yes | the field on `State` this entry configures. A name that is no field is refused |
 | `source` | no | where the value comes from |
-| `default` | no | the value to use when nothing supplies one |
 | `confirm` | no | the step that must hear the caller agree before anything acts on this |
-| `description` | no | explains the value to readers and describes the task's derived finish argument |
 
-## The type grammar
+The old map form is refused, as is a `type:`, `default:` or `description:` key
+and a top-level `shapes:`:
 
-Write `type:` as a single-line Python type expression. Choose a built-in type
-or compose a type using the forms below. The type checks
-saved values and defines the task's finish argument. A variable's description
-helps the model choose the right value; it does not expose the saved value.
+```text
+variables: is a list now. Types, defaults and descriptions live on State in state.py; list here only the values that need source: or confirm:, as `- name: caller_phone`
+```
+
+An entry with neither `source:` nor `confirm:` is refused too. A field is a
+variable whether or not it is listed.
+
+## The State class
+
+`state.py` holds one class named `State`, a Pydantic `BaseModel`. The field's
+type checks saved values and defines the task's finish argument.
+`Field(description=...)` is what the model reads when a task asks it for the
+value, so write it for the model and so it reads whole when the value is empty.
+Reasoning for the next author goes in `#` comments.
 
 | Type | Value |
 |---|---|
-| `str` | Text |
-| `int` | A whole number |
-| `float` | A number that may have a decimal part |
-| `bool` | `true` or `false` |
-| `Phone` | One leading `+`, then 7 to 15 digits; the first digit is nonzero |
-| `Date` | Text in `YYYY-MM-DD` format |
-| `Time` | A 24-hour time in `HH:MM` format |
-| `Id` | 1 to 64 characters; starts with an ASCII letter or digit, followed by letters, digits, `.`, `-`, `_`, or `:` |
-| `EmailStr` | A valid email address. The saved value is the normalized form |
-| `NameEmail` | An object with a `name` field and an `email` field |
+| `str`, `int`, `float`, `bool` | text, a whole number, a number, `true` or `false` |
+| `date`, `time` | a calendar date and a time of day. A prompt shows `2026-10-02` and `16:30:00` |
+| `Literal["a", "b"]` | one of the strings listed |
+| `list[T]` | an array of `T`. Starts as `[]` |
+| a `BaseModel` class | an object with that class's fields. Models can hold models and lists |
+| `T \| None` | a value of `T` or `null` |
+| `EmailStr` | a valid email address |
+| `Annotated[str, StringConstraints(pattern=...)]` | text matching the pattern |
 
-Aliases: `string` means `str`, `integer` means `int`, `number` means `float`,
-and `boolean` means `bool`. Text-format checks are separate from business
-checks such as phone ownership, calendar validity, or record existence.
+Core Pydantic and the standard library types it supports are open. So are three
+`pydantic_extra_types` modules and no others:
 
-The two email types are checked with the `email-validator` package, which the
-generated project declares when you use either of them. The check reads the
-address only; it never looks up whether the domain accepts mail, because it runs
-while the caller is on the line.
+| Module | Types | Needs |
+|---|---|---|
+| `phone_numbers` | `PhoneNumber`, `PhoneNumberValidator` | `phonenumbers` |
+| `currency_code` | `ISO4217`, `Currency` | `pycountry` |
+| `language_code` | `LanguageAlpha2`, `LanguageName`, `ISO639_3`, `ISO639_5` | `pycountry` |
 
-`NameEmail` is an object type the compiler supplies. Do not declare it under
-`shapes:`, and do not declare your own `name`/`email` shape instead: the name is
-refused, and the supplied one already parses a single string. It takes the two
-fields, or one string in either of two forms, `Fred Bloggs
-<fred.bloggs@example.com>` or the address on its own, in which case `name`
-becomes the part before the at sign. Read one part with `{{contact.name}}` or a
-dotted assignment, exactly as for a shape you declared.
+Any other `pydantic_extra_types` import is refused. A sibling import is refused
+too. A phone number in E.164 needs a recipe, because `PhoneNumber` alone saves
+`tel:+34-600-111-222`:
 
-| Form | Value |
+```python state.py
+Phone = Annotated[
+    str | phonenumbers.PhoneNumber, PhoneNumberValidator(number_format="E164")
+]
+```
+
+Pydantic's `NameEmail` is one string in the schema, so a prompt cannot read
+`.name` from it. Use a two-field model instead:
+
+```python state.py
+class Contact(BaseModel):
+    name: str
+    email: EmailStr
+```
+
+Read one part with `{{state.contact.name}}` or a dotted assignment.
+
+**Every field needs a default.** Use `= None` with `| None`, `= ""` for text and
+`= []` for a list. A default its own type refuses is refused: `Literal["a", "b"]
+= ""` fails, so write `Literal["a", "b"] | None = None`. An empty referenced
+value renders as `none recorded yet.`.
+
+Refused, each naming the field and the fix:
+
+- an alias, or a frozen model
+- a `dict` field. Declare its keys as a model
+- a union of two types that are not `None`
+- a model that holds itself
+- a field name that shadows a `BaseModel` attribute, starts with `model_`, or is
+  `state`
+- a field name the generated class uses: `initial_value`, `is_confirmed`,
+  `is_unconfirmed`, `lookup`, `plain`, `render`, `save_batch`, `save_call_start`,
+  `save_fact`, `save_result`, `slng_session_id`, `withdraw_confirmation`
+- a name that is not lowercase words joined by single underscores, at every depth
+
+### How unmute reads state.py
+
+`unmute validate` and `unmute compile` run `state.py` through `uv` with pinned
+Pydantic (2.13.5), email-validator 2.3.0, pydantic-extra-types 2.11.1,
+phonenumbers 9.0.40 and pycountry 26.2.16 on Python 3.12, about 0.2 seconds warm.
+`uv` must be on `PATH` for any package with a `state.py`, an SLNG-only one
+included, and the first run needs network. A package without a `state.py` needs
+no `uv`. The generated project gets `state.py` as written, plus a generated
+`call_state.py` with `CallState(State)`, which holds the one way a value is
+saved, the confirmation marks and the rendering.
+
+| Target | What `state.py` may hold |
 |---|---|
-| `Literal["value1", "value2"]` | One of the distinct, double-quoted strings listed |
-| Your shape's name | An object with the fields you declare under `shapes:` |
-| `list[T]` | An array of values of type `T` |
-| `T \| None` | A value of type `T` or `null` |
-
-`T` stands for a built-in type, a `Literal` expression, or a shape name.
-Lists start as `[]`. Use `T | None` for scalars or objects whose saved result
-may be absent. Shapes can contain other shapes and lists.
-
-No variable is appended to prompts automatically. Use `{{name}}` or
-`{{name.field}}` in each prompt that needs it. An empty referenced value renders
-as `none recorded yet.`.
+| SLNG | plain `str`, `int`, `float`, `bool` only. A model, list, `Literal` or checked format is refused. `str \| None` is fine |
+| LiveKit and Pipecat | everything above |
+| Twilio | no `state.py`. A package with one is refused |
 
 ## How a type is enforced
 
-A declared type does two jobs, in two different places, and knowing which is
-which is what stops an author writing the format into a prompt as well.
+A type does two jobs, in two places.
 
-**The model is told, not constrained.** Every text type reaches the model as a
-plain string carrying a sentence about the format. This is the whole schema the
-model receives for a `Phone`:
+**The model is told, not constrained.** The finish argument's schema comes from
+the field's type and description. Format and pattern keywords are not sent,
+because one target sends its schema with strict mode on and rejects them. The
+rule travels as words in the description instead.
 
-```json
-{
-  "description": "a phone number in E.164, one leading plus and 7 to 15 digits, like ...",
-  "type": "string"
-}
+**The value is checked where it is saved.** Every save goes through the Pydantic
+model: a step's result, a pre-fetched value, a dispatched one and a carrier
+fact. The values of one save are checked together. A value that does not fit is
+refused, nothing is written, the previous contents stand, and the reason goes
+back to the model as the tool result so it corrects itself next turn.
+
+Checking runs in process with no network request. Only a refusal costs a model
+request, so a type that refuses something a caller can legitimately say is worth
+changing, not a prompt worth rewording. Do not restate a format in a prompt: the
+description already carries it. Format checks are not business checks such as
+phone ownership or record existence.
+
+## Grouping fields into a model
+
+A pre-fetch cannot fill a model or a list. Use a task to produce grouped fields
+and separate scalar variables for clock and lookup results.
+
+```python state.py
+class Record(BaseModel):
+    id: str
+    label: str = Field(description="The name shown to the caller.")
+
+
+class State(BaseModel):
+    selected_record: Record | None = None
 ```
 
-The real description ends with an example number. It is left out here for the
-same reason no prompt may carry one: a model cannot always tell an illustration
-from a value it is holding, and it reads it out.
-
-No `pattern` and no `format` keyword. Either one would travel to the provider,
-and one target sends its schema with strict mode on, where both are rejected.
-That failure appears on the first real call and in no local check, so the format
-lives in the description instead.
-
-**The value is checked where it is saved.** The call state is a Pydantic
-model, and its field types are the check every save goes through: a step's
-result, a pre-fetched value, a dispatched one and a carrier fact. The values of
-one save are checked together. A value that does not fit is refused, nothing is
-written, the previous contents stand, and the format sentence goes back to the
-model as the tool result, so it corrects itself on the next turn. A variable
-with no `default:` starts as `None`, meaning no value yet; one with a
-`default:` never holds `None`. The sentence the model reads and the sentence it gets back on a
-refusal come from one place and cannot disagree.
-
-Three families behave differently:
-
-| Family | What the model receives | Where it is checked |
-|---|---|---|
-| `Phone`, `Date`, `Time`, `Id`, `EmailStr` | `type: string` plus the format sentence | When the value is saved |
-| `Literal[...]` | An `enum` holding the exact values | The provider limits generation, and it is checked again on save |
-| A shape, `NameEmail`, `list[...]` | The real object or array, each field carrying its own format sentence | On save, field by field |
-
-**What it costs.** Checking runs in process and makes no network request:
-roughly 0.2 microseconds for the pattern types and 18 for `EmailStr`, which
-calls a library instead of matching a pattern. No model request is made to check
-anything. The one thing that does cost a model request is a refusal, so a type
-that refuses something a caller can legitimately say is a type worth changing,
-not a prompt worth rewording.
-
-**Do not restate a format in a prompt.** The description already carries it to
-the model, and a second copy in the prompt is a second thing to keep in step. A
-prompt should say what to ask for and how to say it out loud, not what shape to
-write down.
-
-## `shapes:` groups fields into a named type
-
-A pre-fetch cannot fill a shape or a list. Use a task to produce grouped fields;
-use separate scalar variables for clock and lookup pre-fetch results. A single
-pre-fetch may assign several scalar variables from one result.
-
-A top-level list, declared once, each item naming a group of fields a
-`type:` can then refer to:
-
-```yaml agent.yaml
-shapes:
-  - name: Record
-    description: A record selected by the caller.
-    fields:
-      - id: Id
-      - name: label
-        type: str
-        description: The name shown to the caller.
-
-variables:
-  selected_record:
-    type: Record | None
-```
-
-| Key | Required | What it is |
-|---|---|---|
-| `name` | yes | what a `type:` refers to. Written in `CapWords`: it names a generated Pydantic class |
-| `description` | no | reaches the model as the class docstring |
-| `fields` | yes | one or more fields, in either form below |
-
-**Short form**, one line, a `Pair`:
-
-```yaml
-- scheduled_date: Date
-```
-
-**Long form**, reached only when the field wants a description:
-
-```yaml
-- name: scheduled_date
-  type: Date
-  description: The day, as the caller gave it.
-```
-
-Refused, each with its line:
-
-- `confirm:` on a field. It belongs to the variable whose `type:` names the
-  shape, never to a field inside it, so a guard cannot be escaped by naming
-  the field one level down.
-- A field holding two keys, or none. Same rule as every other pair list in
-  this schema.
-- The same field name declared twice in one shape.
-- A shape with no `name:`, no `fields:`, or a name another shape already
-  uses.
-- A shape named the same as a primitive, a shaped text type, a shape the
-  compiler supplies such as `NameEmail`, `Literal`, `list`, or `None`. Give it a
-  name of its own, in `CapWords`.
-- A shape that refers to itself, directly or through another shape. Nothing
-  can render an object with no bottom, and the model would be asked to fill
-  one in.
+Use the class as a field's type. `confirm:` goes on the `State` field, never on a
+field inside the model.
 
 ## Where values come from
 
 | Source | Who supplies it | Availability |
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
-| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so write the prompt to read whole while it is still empty, or give it a `default:` |
-| `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only: it becomes a runtime variable the platform's `set_runtime_variables` tool fills, returned on the call record as `memory_variables`. No `default:`, and a `description:` is required because the model reads it. **No `{{placeholder}}` either, in any prompt or the greeting.** Refused on `livekit` and `pipecat`, where a step's `assign:` does this job |
+| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so write the prompt to read whole while it is still empty, or give its field a default in `state.py` |
+| `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only: it becomes a runtime variable the platform's `set_runtime_variables` tool fills, returned on the call record as `memory_variables`. Its field is `= None` and has a `Field(description=...)`, because the model reads it. **No `{{state.placeholder}}` either, in any prompt or the greeting.** Refused on `livekit` and `pipecat`, where a step's `assign:` does this job |
 
 **A value the model records reaches no prompt.** It has no value when the prompt
-is built, and SLNG rejects a prompt that names one, so writing `{{caller_email}}`
+is built, and SLNG rejects a prompt that names one, so writing `{{state.caller_email}}`
 for a `source: conversation` variable is refused:
 
 ```text
@@ -259,7 +233,7 @@ agent.yaml:41: conversation.greeting.text references {{caller_email}}, a value t
   description: and name it in prose here instead
 ```
 
-That is the whole way one works: put the detail in `description:`, which the
+That is the whole way one works: put the detail in `Field(description=...)`, which the
 model reads when it fills the value, and refer to the thing in prose ("the email
 address you read back") rather than with a placeholder. `examples/hotel-concierge`
 is the shape — one runtime variable never written into its prompt, beside four
@@ -282,10 +256,10 @@ either way on a route that grants it. An inbound code-target phone channel
 also requires a default for every `call_start` variable.
 
 A value from the dispatch or from the phone adapter is checked against the
-variable's type when it is saved, the same check a step's `assign:` gets. A
-dispatched value that does not fit stops the call before the greeting, and the
-error names the field. A phone-adapter fact that does not fit, such as
-`anonymous` for a `Phone`, is treated as a fact that never arrived.
+field's type in `state.py` when it is saved, the same check a step's `assign:`
+gets. A dispatched value that does not fit stops the call before the greeting,
+and the error names the field. A phone-adapter fact that does not fit, such as
+`anonymous` for an E.164 phone field, is treated as a fact that never arrived.
 
 ## Resolving a value before the call starts
 
@@ -317,7 +291,7 @@ prefetch:
     # unasked, on every call including wrong numbers, change anything".
     writes: false
     args:
-      - phone: "{{customer_phone}}"
+      - phone: "{{state.customer_phone}}"
     assign:
       - account_name: result.name
       - account_on_file: result.status
@@ -409,10 +383,9 @@ permission, and it prints no warning: the entry is named in
 It resolves before anybody speaks, so all it has is one value: a formatted
 clock reading, the number the call carries, one field of a tool result.
 
-Assignable: a plain type, shaped text (`Phone`, `Date`, `Time`, `Id`,
-`EmailStr`), and a `Literal` when the tool's own result field declares the same
-set. Refused: a `list[...]`, a declared shape or `NameEmail`, naming the step to
-assign it from instead.
+Assignable: a plain type, a `date`, a `time`, a checked phone number, an email
+address, and a `Literal` when the tool's own result field declares the same set.
+Refused: a `list[...]` or a model, naming the step to assign it from instead.
 
 Do not reach for a pre-fetch to seed a list. A list is what a call accumulates
 while it runs, one entry per thing that happened, appended by the step that
@@ -478,9 +451,7 @@ acting on it unasked is wrong.
 
 ```yaml agent.yaml
 variables:
-  customer_phone:
-    type: string
-    default: ""
+  - name: customer_phone
     confirm: verify_customer
 ```
 
@@ -500,7 +471,7 @@ and to ask from scratch when the value is empty. Both paths, in one prompt.
 
 ## How a variable reaches a prompt
 
-Use `{{name}}` at the site that needs the value:
+Use `{{state.name}}` at the site that needs the value:
 
 | Site | Renders | Can name |
 |---|---|---|
@@ -512,34 +483,31 @@ Use `{{name}}` at the site that needs the value:
 
 ### Naming one part of a value
 
-A `{{name}}` placeholder can also name one field inside a variable, with a
-dotted path: `{{customer.status}}`. The root, the name before the first dot,
+A `{{state.name}}` placeholder can also name one field inside a variable, with a
+dotted path: `{{state.customer.status}}`. The root, the name before the first dot,
 follows every rule a whole value already follows at that site: a declared
 variable awaiting confirmation renders only in its confirming step's prompt, the
 greeting only names something that already has a value, and a secret never
 renders.
 
-Each name after the first dot is a field the shape of the value before it
-declares, so a path can go as deep as the shapes go.
+Each name after the first dot is a field the model of the value before it
+declares, so a path can go as deep as the models go.
 
-```yaml agent.yaml
-shapes:
-  - name: Customer
-    fields:
-      - phone_number: Phone
-      - name: status
-        type: Literal["new", "returning", "vip"]
+```python state.py
+class Customer(BaseModel):
+    phone_number: Phone
+    status: Literal["new", "returning", "vip"]
 
-variables:
-  customer:
-    type: Customer | None
+
+class State(BaseModel):
+    customer: Customer | None = None
 ```
 
 `customer` gets its value from a step's `assign:`, the same as any variable.
 A prompt can then read one field of it:
 
 ```md
-The caller is a {{customer.status}} customer, if the lookup has run.
+The caller is a {{state.customer.status}} customer, if the lookup has run.
 ```
 
 Written to read whole before the lookup has run: a part renders the same
@@ -552,16 +520,20 @@ The compiler checks the path before generating anything, naming the file and
 the line. Refused:
 
 ```
-references {{last_appointment.kind}}: shape "Appointment" declares no field "kind". It declares scheduled_date, scheduled_time, appointment_type
+references {{last_appointment.kind}}: last_appointment has no field "kind"; it has scheduled_date, scheduled_time, appointment_type
 
 references {{appointments.scheduled_date}}: appointments is list[Appointment], and a path cannot name a field inside a list: nothing says which entry it means. Record the entry you need into its own variable with assign: on the step that records it, and name that variable here
 
-references {{note.first}}: note is a plain string with no fields to name; write {{note}}
+references {{note.first}}: note is a plain string with no fields to name; write {{state.note}}
 
-references {{caller_phone.digits}}: caller_phone is Phone, which has no fields to name; write {{caller_phone}}
+references {{caller_phone.digits}}: caller_phone is a string, which has no fields to name; write {{state.caller_phone}}
 ```
 
-A placeholder carries no logic: no conditions, no filters, no function calls.
+A name `State` does not declare is refused with `which State in state.py does not
+declare`.
+
+A bare `{{customer}}` that names a `State` field is refused with `write
+{{state.customer}}`. A placeholder carries no logic: no conditions, no filters, no function calls.
 Write the value into a sentence and say what to do with it in the
 instructions. A structured part already renders as JSON, so there is nothing
 left for the placeholder to compute.
@@ -602,8 +574,8 @@ input:
     - slot_id
 
 inject:
-  - customer_id: "{{customer_id}}"
-  - service: "{{requested_service}}"
+  - customer_id: "{{state.customer_id}}"
+  - service: "{{state.requested_service}}"
 ```
 
 `inject` values are not part of the model's schema, so the model can neither see
@@ -632,9 +604,9 @@ agents:
           - customer_id: result.customer_id
 ```
 
-The task's finish field is derived from the destination variable named by
-`assign:`. A successful finish saves it there. Declare the variable at the top
-level; do not repeat the field or type in a task `result:` block.
+The task's finish field is derived from the destination field on `State`. A
+successful finish saves it there. Declare the field in `state.py`; do not repeat
+the field or type in a task `result:` block.
 
 A `+` on the key appends one entry instead of replacing the value:
 
@@ -643,13 +615,13 @@ A `+` on the key appends one entry instead of replacing the value:
           - appointments+: result.appointment
 ```
 
-Legal only when the variable's declared type is `list[...]`. Refused
+Legal only when the field's declared type is `list[...]`. Refused
 otherwise, naming the value and its declared type:
 
 ```
 assign appends to "customer_phone" with "customer_phone+:", and "customer_phone"
 is declared Phone rather than a list. Drop the "+" to replace the value, or
-declare it list[...] so an entry can be added to it
+declare it list[...] in state.py so an entry can be added to it
 ```
 
 Without the `+`, `assign:` replaces the value, exactly as it always has.
@@ -657,8 +629,8 @@ Without the `+`, `assign:` replaces the value, exactly as it always has.
 ### Picking one part of a structured result
 
 The right side of an `assign:` pair does not have to be the whole result. It
-can be `result.<field>`, or a dotted path into a declared shape,
-`result.<field>.<subfield>`, as deep as the shape goes:
+can be `result.<field>`, or a dotted path into a model from `state.py`,
+`result.<field>.<subfield>`, as deep as the model goes:
 
 ```yaml agent.yaml
 tasks:
@@ -668,50 +640,45 @@ tasks:
       - last_booking_day: result.appointment.scheduled_date
 ```
 
-with `last_booking_day` declared `type: Date | None`.
+with `last_booking_day` declared `date | None`.
 
-The picked part's type has to fit the variable it lands in: a `Date` field
-into a `Date` variable, a `Literal` into the same `Literal`, a whole shape
-into a variable declared with that shape. Refused rather than silently
+The picked part's type has to fit the field it lands in: a `date` into a
+`date`, a `Literal` into the same `Literal`, a whole model into a field declared
+with that model. Refused rather than silently
 accepted:
 
 - **a path through a list.** Nothing says which entry to take, so
   `result.appointments.scheduled_date` is refused.
-- **a path into a field with no declared shape.** Once the path reaches a
+- **a path into a field that is not a model.** Once the path reaches a
   scalar, going one level deeper has nothing left to read.
 
 If a field on the way is optional, `Appointment | None` above, the picked
-value may be absent for a visit where the task left it out. Give the variable
-the same option, `Date | None`, so an absent pick is a legal value, or use an
+value may be absent for a visit where the task left it out. Give the field
+the same option, `date | None`, so an absent pick is a legal value, or use an
 appending assign, `name+:`, which already skips an absent entry instead of
 writing one into the list.
 
 The same path form works in a prompt placeholder too: see "Naming one part of
 a value" above.
 
-### A value the caller may not give is declared `| None`
+### A value the caller may not give ends in `?`
 
-Every field a step assigns goes through its declared type whether the model
-sent it or not. A field the model leaves out arrives as `None`, and so does one
-it sends as an explicit null. A type without `| None` refuses both, which
-refuses the whole finish call: nothing is saved, the model is told why and gets
-another go, and the caller waits through a wasted round trip.
+A step must return every whole value it assigns. A finish that leaves one out,
+or sends an explicit null, is refused: nothing is saved, the model is told why
+and the caller waits through the retry. Mark a value the step may leave out with
+`?` after the result field:
 
-So **declare the option in the type**, `Time | None`, for any value the caller
-may simply not give. Do not try to solve it in the description. A description
-saying "send an empty string when there is none" was tried on a live call and
-the next run sent an explicit null instead: no wording reliably stops a model
-saying "nothing" when there is nothing, and the type is the only place that
-settles it.
+```yaml agent.yaml
+assign:
+  - callback_time: result.callback_time?
+```
 
-An empty string is still the right thing for a value that is *always* asked for
-and may not be known yet, which is why every text type accepts one. The
-difference is whether absence is a legal outcome of the step. If it is, say so
-in the type.
-
-Absence is already legal in one other place, and needs nothing: an appending
-assign, `notes+:`, whose field is optional on its own and drops an absent entry
-instead of writing it into the list.
+Also declare the field `time | None = None` in `state.py`. Do not try to solve
+absence in the description: no wording reliably stops a model saying "nothing"
+when there is nothing. An empty string is still right for a text value that is
+always asked for and may not be known yet. Appending assigns, `notes+:`, are
+always optional and drop an absent entry. A finish with a non-empty
+`unserved_request` is never refused for a missing value.
 
 ## Ordering a step that needs an earlier value
 
@@ -726,7 +693,7 @@ silently reading tool does with a value that is not there yet.
 
 Saved values remain in call state across a handoff, but the receiving model
 sees only values its own prompt references. Put each needed value in that
-prompt with `{{name}}` or `{{name.field}}`.
+prompt with `{{state.name}}` or `{{state.name.field}}`.
 
 ```yaml
     context:
@@ -742,8 +709,8 @@ share no earlier speech.
 unmute dev ./my-agent --var customer_name=Ada --var customer_id=cus_2002
 ```
 
-Repeatable, and each value is parsed against the declared type: pass JSON for an
-object or a list. `--var` is the
+Repeatable, and each value is parsed against the field's type in `state.py`: pass
+JSON for a model or a list, quoted for your shell. `--var` is the
 local stand-in for the dispatch payload, so it accepts the two kinds of variable
 that payload fills: `source: call_start`, and a variable that declares no
 `source:` at all. It refuses a runtime-owned source, because that one arrives

@@ -849,6 +849,12 @@ func providerOptions(framework targetcap.Provider, role targetcap.Role) []menuCh
 }
 
 func editVariables(runner *fieldRunner, data *scaffold.Data) error {
+	if data.State != nil {
+		// The types are Python the author wrote, which the console cannot edit
+		// without rewriting their file.
+		return showNotice(runner, "Variables live in state.py",
+			"This package declares its call state in state.py. Edit that file to add or change a value.")
+	}
 	for {
 		options := make([]menuChoice, 0, len(data.Variables)+2)
 		for _, variable := range data.Variables {

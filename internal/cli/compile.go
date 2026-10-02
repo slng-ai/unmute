@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	"github.com/slng-ai/unmute/internal/style"
 	"github.com/slng-ai/unmute/internal/target"
 	"github.com/spf13/cobra"
@@ -45,7 +47,7 @@ func newCompileCmd() *cobra.Command {
 func runCompile(cmd *cobra.Command, dir string, names []string) error {
 	out := cmd.OutOrStdout()
 	printHeader(out, "compile "+displayDir(dir))
-	agent, targets, err := loadPackage(dir, names)
+	agent, targets, err := loadPackage(cmd.Context(), dir, names)
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", dir, err)
 	}
@@ -95,9 +97,12 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 
 // loadPackage loads, builds, and selects target instances — the shared front of
 // compile / apply / dev. With no names it selects every declared target.
-func loadPackage(dir string, names []string) (*ir.Agent, []ir.Target, error) {
+func loadPackage(ctx context.Context, dir string, names []string) (*ir.Agent, []ir.Target, error) {
 	pkg, err := spec.Load(dir)
 	if err != nil {
+		return nil, nil, fmt.Errorf("load: %w", err)
+	}
+	if err := pkg.ReadState(ctx, stateschema.ReaderFrom(ctx)); err != nil {
 		return nil, nil, fmt.Errorf("load: %w", err)
 	}
 	agent, err := ir.Build(pkg)

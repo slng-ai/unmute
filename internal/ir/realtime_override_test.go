@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	packagespec "github.com/slng-ai/unmute/internal/spec"
 )
 
 // TestRealtimeOverrideKeepsTheTurnDecision: a per-target `models:` override
@@ -39,7 +37,7 @@ func TestRealtimeOverrideKeepsTheTurnDecision(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "targets.yaml"), []byte(targets), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	pkg, err := packagespec.Load(root)
+	pkg, err := loadRecorded(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +68,7 @@ func TestRealtimeOverrideKeepsTheTurnDecision(t *testing.T) {
 //   - the undeclared-secret warning, which is the only thing between an author
 //     and a worker that starts, answers the phone and 401s on the first word.
 func TestRealtimeReachesTheReportAndTheSecretCheck(t *testing.T) {
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "realtime_model"))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", "realtime_model"))
 	if err != nil {
 		t.Fatal(err)
 	}

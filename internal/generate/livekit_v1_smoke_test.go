@@ -248,8 +248,9 @@ class ProbeLLM(llm.LLM):
             finish_tool = next(
                 tool for tool in tools if getattr(tool.info, "name", "") == "finish"
             )
-            finish_schema = llm.utils.build_legacy_openai_schema(finish_tool)
-            finish_params = finish_schema["function"]["parameters"]
+            # The step's own result model sends one raw schema, so the SDK does
+            # not build it from a signature.
+            finish_params = finish_tool.info.raw_schema["parameters"]
             assert set(finish_params["properties"]) == {"unserved_request"}
             # The reserved escape field stays optional through the SDK's own
             # schema builder: a required one would have the model invent a
@@ -324,7 +325,7 @@ class FailingSession:
 async def main():
     transfer_session = BlockingSession()
     transfer_ctx = SimpleNamespace(
-        userdata=SimpleNamespace(caller_phone="+15551234567"),
+        userdata=agent.CallState(),
         session=transfer_session,
         function_call=SimpleNamespace(call_id="transfer-finish"),
     )
@@ -333,7 +334,7 @@ async def main():
         transfer_first.back_to_greeter(transfer_ctx)
     )
     await transfer_session.started.wait()
-    await transfer_first.finish(transfer_ctx)
+    await transfer_first.finish({}, transfer_ctx)
     assert not transfer_first.completions
     transfer_session.release.set()
     await pending_transfer
@@ -342,18 +343,18 @@ async def main():
 
     finish_session = BlockingSession()
     finish_ctx = SimpleNamespace(
-        userdata=SimpleNamespace(caller_phone="+15551234567"),
+        userdata=agent.CallState(),
         session=finish_session,
         function_call=SimpleNamespace(call_id="first-finish"),
     )
     finish_first = RecordingFindSlot()
-    await finish_first.finish(finish_ctx)
+    await finish_first.finish({}, finish_ctx)
     await finish_first.back_to_greeter(finish_ctx)
     assert finish_first.completions == [{"unserved_request": ""}]
     assert finish_session.announcements == 0
 
     failed_ctx = SimpleNamespace(
-        userdata=SimpleNamespace(caller_phone="+15551234567"),
+        userdata=agent.CallState(),
         session=FailingSession(),
         function_call=SimpleNamespace(call_id="failed-transfer-finish"),
     )
@@ -364,7 +365,7 @@ async def main():
         assert str(error) == "announcement failed"
     else:
         raise AssertionError("failed announcement did not escape")
-    await failed_transfer.finish(failed_ctx)
+    await failed_transfer.finish({}, failed_ctx)
     assert failed_transfer.completions == [{"unserved_request": ""}]
 
     observed = []
@@ -412,7 +413,7 @@ async def main():
     probe_llm = ProbeLLM()
     try:
         async with AgentSession(
-            userdata=agent.Userdata(),
+            userdata=agent.CallState(),
             llm=probe_llm,
             turn_handling={"turn_detection": "manual"},
         ) as session:
@@ -748,7 +749,7 @@ async def run_case(case):
     task = ProbeFindSlot(chat_ctx=prepared_context())
 
     async with AgentSession(
-        userdata=agent.Userdata(),
+        userdata=agent.CallState(),
         llm=probe_llm,
         turn_handling={"turn_detection": "manual"},
     ) as session:
@@ -1497,7 +1498,7 @@ func TestSmokeV26LiveKitExamplesStaticCheck(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			agent, err := ir.Build(pkg)
+			agent, err := buildWithState(t, pkg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1628,7 +1629,7 @@ func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1795,7 +1796,7 @@ async def main():
     agent.slng.TTS = lambda **kwargs: None
     probe = ProbeLLM()
     async with AgentSession(
-        userdata=agent.Userdata(), llm=probe, turn_handling={"turn_detection": "manual"}
+        userdata=agent.CallState(), llm=probe, turn_handling={"turn_detection": "manual"}
     ) as session:
         await session.start(ProbeReservations())
         session.generate_reply(user_input="A table for two tonight, please.")
@@ -1824,7 +1825,7 @@ func TestSmokeLiveKitHarnessRecoversAGroupStepHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

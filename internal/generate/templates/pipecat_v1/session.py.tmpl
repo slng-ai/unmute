@@ -1,6 +1,6 @@
 """How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
 
-{{if .Variables}}{{if .CallStartVars}}
+{{if .TypedState}}{{if .CallStartVars}}
 def _dispatched_call_start(call_context: dict[str, Any] | None) -> dict[str, Any]:
     """Read the input variables that arrived with the dispatch.
 
@@ -30,7 +30,7 @@ def _dispatched_call_start(call_context: dict[str, Any] | None) -> dict[str, Any
     return values
 
 {{end}}
-def build_state(call_context: dict[str, Any] | None = None) -> State:
+def build_state(call_context: dict[str, Any] | None = None) -> CallState:
     """Build the call's typed variables from the dispatch and the call's own facts.
 
     Args:
@@ -43,9 +43,9 @@ def build_state(call_context: dict[str, Any] | None = None) -> State:
         RuntimeError: When a required input variable was not dispatched, or a
             dispatched value does not fit its declared type.
 {{end}}    """
-    state = State()
+    state = CallState()
 {{if .CallStartVars}}    call_start = _dispatched_call_start(call_context)
-    _save_call_start(state, call_start, {{.CallStartNames}})
+    state.save_call_start(call_start)
 {{if .RequiredCallStart}}    missing = [
         name for name in ({{range .RequiredCallStart}}{{pyq .}}, {{end}}) if name not in call_start
     ]
@@ -60,7 +60,7 @@ def build_state(call_context: dict[str, Any] | None = None) -> State:
     # and hold an empty string on every live call.
 {{range .SystemSourceVars}}    _value = (call_context or {}).get({{pyq .Source}})
     if _value:
-        _save_fact(state, {{pyq .Name}}, _value)
+        state.save_fact({{pyq .Name}}, _value)
 {{end}}{{end}}{{if .RequiredCallStart}}    if missing:
         raise RuntimeError(f"Missing call context fields: {', '.join(missing)}")
 {{end}}    return state
@@ -68,7 +68,7 @@ def build_state(call_context: dict[str, Any] | None = None) -> State:
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
-def _render(text: str, state: State | None, *, quote_values: bool = False, site: str = "") -> str:
+def _render(text: str, state: CallState | None, *, quote_values: bool = False, site: str = "") -> str:
     """Substitute each variable token from the call state.
 
     Only substituted values are URL-encoded, never the surrounding literal.
@@ -88,11 +88,9 @@ def _render(text: str, state: State | None, *, quote_values: bool = False, site:
     def _one(match: re.Match[str]) -> str:
         """Render one token."""
 {{- if .TypedState}}
-        # Through _state_lookup, which walks a path emitted as one flat name, and
-        # _state_text, so a declared value renders as compact JSON and an empty
-        # one as words. Anything not declared structured comes back exactly as
-        # str() gave it.
-        value = _state_text(*_prompt_value(state, match.group(1), site))
+        # Through CallState.render, which walks a path emitted as one flat name,
+        # renders a declared value as compact JSON and an empty one as words.
+        value = CallState.render(state, match.group(1), site)
 {{- else}}
         value = getattr(state, match.group(1), None)
         value = "" if value is None else str(value)
@@ -102,7 +100,7 @@ def _render(text: str, state: State | None, *, quote_values: bool = False, site:
     return _TEMPLATE.sub(_one, text)
 {{end}}{{if .NeedsRefusal}}
 
-def _refusal(tool: str, state: State, needed: list[tuple[str, str]]) -> str:
+def _refusal(tool: str, state: CallState, needed: list[tuple[str, str]]) -> str:
     """Refuse a call whose injected variables are still unset.
 
     The model is told what to do about each one, and no half-formed request is
@@ -119,12 +117,12 @@ def _refusal(tool: str, state: State, needed: list[tuple[str, str]]) -> str:
     unset = [
         (name, hint)
         for name, hint in needed
-        if _state_lookup(state, name)[1] in (None, "")
+        if state.lookup(name)[1] in (None, "")
 {{- if .NeedsPrefetchUnconfirmed}}
         # A value the caller has not agreed to is present and not usable. Without
         # this, a pre-fetched number would reach somebody else's record: the
         # request would go out against a proposal rather than a fact.
-        or _state_lookup(state, name)[0] in getattr(state, "_unconfirmed", ())
+        or state.is_unconfirmed(name)
 {{- end}}
     ]
     if not unset:

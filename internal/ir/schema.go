@@ -4,6 +4,8 @@ import (
 	"reflect"
 
 	"github.com/google/jsonschema-go/jsonschema"
+
+	"github.com/slng-ai/unmute/internal/stateschema"
 )
 
 // Schema derives the resolved-IR schema at runtime.
@@ -12,17 +14,12 @@ func Schema() (*jsonschema.Schema, error) {
 	if err != nil {
 		return nil, err
 	}
-	resultField, err := resultFieldSchema()
-	if err != nil {
-		return nil, err
-	}
 	options := enumOptions()
 	options.TypeSchemas[reflect.TypeFor[Control]()] = controls
-	options.TypeSchemas[reflect.TypeFor[ResultField]()] = resultField
-	// Every TypeRef publishes a reference to one definition, because a TypeRef's
-	// `list` holds a TypeRef and reflection cannot follow a type into itself:
-	// deriving it directly is a cycle the library refuses.
-	options.TypeSchemas[reflect.TypeFor[TypeRef]()] = &jsonschema.Schema{Ref: typeRefPointer}
+	// Every state type publishes a reference to one definition, because a
+	// type's items and fields hold types and reflection cannot follow a type
+	// into itself: deriving it directly is a cycle the library refuses.
+	options.TypeSchemas[reflect.TypeFor[stateschema.Type]()] = &jsonschema.Schema{Ref: stateTypePointer}
 	schema, err := jsonschema.For[Agent](options)
 	if err != nil {
 		return nil, err
@@ -30,77 +27,43 @@ func Schema() (*jsonschema.Schema, error) {
 	if schema.Defs == nil {
 		schema.Defs = map[string]*jsonschema.Schema{}
 	}
-	schema.Defs[typeRefDef] = typeRefSchema()
+	schema.Defs[stateTypeDef] = stateTypeSchema()
 	return schema, nil
 }
 
-// typeRefDef names the one definition the resolved type tree lives in, and
-// typeRefPointer is how every field referring to it points there.
+// stateTypeDef names the one definition a state type lives in, and
+// stateTypePointer is how every field referring to it points there.
 const (
-	typeRefDef     = "TypeRef"
-	typeRefPointer = "#/$defs/" + typeRefDef
+	stateTypeDef     = "StateType"
+	stateTypePointer = "#/$defs/" + stateTypeDef
 )
 
-// typeRefSchema publishes the resolved type tree.
-//
-// Hand-wired rather than derived, for the same reason resultFieldSchema is: the
-// shape reflection would produce is not the shape the type means. Here the
-// recursion is the reason. Every field of TypeRef appears below, and
-// shape_test.go fails if the struct grows one this misses, so the two cannot
-// drift in silence.
-func typeRefSchema() *jsonschema.Schema {
+// stateTypeSchema publishes stateschema.Type. Hand-wired because it recurses.
+// TestStateTypeSchemaNamesEveryField fails if the struct grows a field this
+// misses, so the two cannot drift in silence.
+func stateTypeSchema() *jsonschema.Schema {
+	field := &jsonschema.Schema{Type: "object", Properties: map[string]*jsonschema.Schema{
+		"name": {Type: "string"}, "description": {Type: "string"}, "type": {Ref: stateTypePointer},
+		"required": {Type: "boolean"}, "default": {},
+	}}
 	return &jsonschema.Schema{
-		Type: "object",
-		Description: "One resolved type expression. Exactly one of primitive, shaped, literal, " +
-			"list and shape is set; optional rides on whichever it is.",
+		Type:        "object",
+		Description: "One state type, as Pydantic described it in state.py's JSON Schema.",
 		Properties: map[string]*jsonschema.Schema{
-			"primitive": enum(PrimitiveString, PrimitiveNumber, PrimitiveBoolean, PrimitiveInteger),
-			"shaped":    enum(shapedTextOrder...),
-			"literal":   {Type: "array", Items: &jsonschema.Schema{Type: "string"}},
-			"list":      {Ref: typeRefPointer},
-			"shape":     {Type: "string"},
-			"optional":  {Type: "boolean"},
+			"kind":     {Type: "string", Enum: []any{"string", "integer", "number", "boolean", "object", "array"}},
+			"nullable": {Type: "boolean"},
+			"enum":     {Type: "array", Items: &jsonschema.Schema{Type: "string"}},
+			"format":   {Type: "string"},
+			"pattern":  {Type: "string"},
+			"model":    {Type: "string"},
+			"fields":   {Type: "array", Items: field},
+			"items":    {Ref: stateTypePointer},
 		},
 	}
 }
 
-type primitiveResultFieldSchema struct {
-	Type PrimitiveType `json:"type"`
-}
-
-type enumResultFieldSchema struct {
-	Type PrimitiveType `json:"type"`
-	Enum []string      `json:"enum"`
-}
-
-type nestedResultFieldSchema struct {
-	Schema map[string]any `json:"schema"`
-}
-
-func resultFieldSchema() (*jsonschema.Schema, error) {
-	options := enumOptions()
-	primitive, err := jsonschema.For[primitiveResultFieldSchema](options)
-	if err != nil {
-		return nil, err
-	}
-	enumResult, err := jsonschema.For[enumResultFieldSchema](options)
-	if err != nil {
-		return nil, err
-	}
-	nested, err := jsonschema.For[nestedResultFieldSchema](options)
-	if err != nil {
-		return nil, err
-	}
-	value := any(PrimitiveString)
-	enumResult.Properties["type"] = &jsonschema.Schema{Type: "string", Const: &value}
-	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{primitive, enumResult, nested}}, nil
-}
-
 func controlSchema() (*jsonschema.Schema, error) {
 	options := enumOptions()
-	// A handoff's inputs carry a TypeRef, so the same reference the whole
-	// schema uses has to be in place here too, or the derivation cycles.
-	options.TypeSchemas[reflect.TypeFor[TypeRef]()] = &jsonschema.Schema{Ref: typeRefPointer}
 	delegate, err := jsonschema.For[Delegate](options)
 	if err != nil {
 		return nil, err
@@ -131,7 +94,6 @@ func enumOptions() *jsonschema.ForOptions {
 		reflect.TypeFor[SemanticEndpointing](): enum(SemanticEndpointingRequired, SemanticEndpointingPreferred, SemanticEndpointingOff),
 		reflect.TypeFor[Pace]():                enum(PaceSnappy, PaceBalanced, PacePatient),
 		reflect.TypeFor[PrimitiveType]():       enum(PrimitiveString, PrimitiveNumber, PrimitiveBoolean, PrimitiveInteger),
-		reflect.TypeFor[ShapedText]():          enum(shapedTextOrder...),
 		reflect.TypeFor[VariableSource](): enum(
 			VariableSourceCallStart, VariableSourceSessionID, VariableSourceCarrier,
 			VariableSourceConnection, VariableSourceCallID, VariableSourceStreamID,

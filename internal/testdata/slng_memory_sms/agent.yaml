@@ -39,15 +39,11 @@ models:
       model: deepgram/nova:3
       language: en
 
+# How the values on State in state.py behave: where one comes from, and
+# which step confirms it. A value needs an entry only for one of those.
 variables:
-  customer_name:
-    type: string
-    default: there
-    description: The caller's first name, supplied by the session.
-  caller_phone:
-    type: string
+  - name: caller_phone
     source: conversation
-    description: The caller's mobile number, recorded after the caller confirmed it.
 
 tools:
   - current_datetime

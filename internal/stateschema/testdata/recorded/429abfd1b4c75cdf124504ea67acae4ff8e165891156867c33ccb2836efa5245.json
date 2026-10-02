@@ -1,6 +1,6 @@
 {
   "source": "examples/hotel-concierge/state.py",
-  "digest": "f21c4dd9b0d1d6f9b41cb92eaa5fb844b853eeb2d9a12be9eaa6f3cb98277a38",
+  "digest": "429abfd1b4c75cdf124504ea67acae4ff8e165891156867c33ccb2836efa5245",
   "report": {
     "schema": {
       "description": "What one call knows, shared by every agent and task in it.",

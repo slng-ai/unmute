@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -197,4 +198,30 @@ func ExtraTypes(source []byte) ([]string, error) {
 	}
 	slices.Sort(out)
 	return out, nil
+}
+
+type readerKey struct{}
+
+// WithReader puts the reader commands use into a context. A command reads
+// state.py through UV unless a test put Recorded here.
+func WithReader(ctx context.Context, reader Reader) context.Context {
+	return context.WithValue(ctx, readerKey{}, reader)
+}
+
+// ReaderFrom returns the reader in ctx, or UV.
+func ReaderFrom(ctx context.Context) Reader {
+	if ctx == nil {
+		return UV{}
+	}
+	if reader, ok := ctx.Value(readerKey{}).(Reader); ok {
+		return reader
+	}
+	return UV{}
+}
+
+// RecordedInRepo reads this repository's own recordings, for a test in any
+// package that loads a package with a state.py.
+func RecordedInRepo() Recorded {
+	_, file, _, _ := runtime.Caller(0)
+	return Recorded{Dir: filepath.Join(filepath.Dir(file), "testdata", "recorded")}
 }

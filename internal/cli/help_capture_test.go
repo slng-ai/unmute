@@ -36,7 +36,7 @@ func renderHelp(t *testing.T) string {
 		root.SetOut(buf)
 		root.SetErr(buf)
 		root.SetArgs(append(append([]string{}, path...), "--help"))
-		if err := root.Execute(); err != nil {
+		if err := root.ExecuteContext(recordedCtx(t)); err != nil {
 			t.Fatalf("unmute %s --help: %v", strings.Join(path, " "), err)
 		}
 		fmt.Fprintf(&out, "$ unmute %s--help\n", commandPrefix(path))
@@ -104,7 +104,7 @@ func TestDocsSiteCLIPagesQuoteHelp(t *testing.T) {
 		root.SetOut(buf)
 		root.SetErr(buf)
 		root.SetArgs(append(append([]string{}, path...), "--help"))
-		if err := root.Execute(); err != nil {
+		if err := root.ExecuteContext(recordedCtx(t)); err != nil {
 			t.Fatal(err)
 		}
 		// The usage line, which says what the command's arguments are. Checking

@@ -397,12 +397,8 @@ type pipecatTransfer struct {
 type pipecatVariable struct {
 	Name        string
 	PyType      string
-	Default     string // Python literal
 	Source      string
 	Description string
-	// LiteralDefault marks an authored default outside the variable's allowed
-	// words, which ty refuses; see defaultOutsideLiteral.
-	LiteralDefault bool
 }
 
 // pipecatCallStartVar is one dispatched input variable, hydrated from the call
@@ -503,6 +499,8 @@ type pipecatTransportParams struct {
 }
 
 type pipecatData struct {
+	// StateSource is the author's state.py, copied into the project as written.
+	StateSource string
 	// Project is the package's own name, and it labels the generated project:
 	// the pyproject name, the logger, the trace name, the README title. It used
 	// to be the target instance name, which made a project call itself `pipecat`
@@ -839,7 +837,6 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldWebhookPath:          true, // rendered, URL-encoded path on the base URL
 	targetcap.FieldTemplates:            true, // _render over prompts and the greeting at session start
 	targetcap.FieldTypedState:           true, // a generated Pydantic class per shape, validated at each finish
-	targetcap.FieldShapedText:           true, // str plus an AfterValidator, never a schema keyword
 
 	targetcap.FieldWarmInstances: true, // [scaling] min_agents in pcc-deploy.toml
 }
@@ -931,7 +928,7 @@ var pipecatModules = []struct{ tmpl, path string }{
 	{"utils_context.py", "utils/context.py"},
 	{"utils_mcp.py", "utils/mcp.py"},
 	{"utils_telephony.py", "utils/telephony.py"},
-	{"state.py", "state.py"},
+	{"call_state.py", "call_state.py"},
 	{"session.py", "session.py"},
 	{"utils_router.py", "utils/router.py"},
 	{"agents.py", "agents.py"},
@@ -1018,6 +1015,10 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		for _, lt := range data.LocalTools {
 			files = append(files, File{Path: "tools/" + lt.Name + ".py", Content: []byte(lt.Source)})
 		}
+	}
+	// The author's state.py, copied as written: call_state.py subclasses it.
+	if data.StateSource != "" {
+		files = append(files, File{Path: "state.py", Content: []byte(data.StateSource), Verbatim: true})
 	}
 	return files, nil
 }
@@ -1205,11 +1206,11 @@ func (d pipecatData) TypingNames() string {
 	if d.CloudWebsocket != nil {
 		carrier = d.CloudWebsocket.AccountSIDEnv == ""
 	}
-	if carrier || (!d.Inline && len(d.Variables) > 0) {
+	if carrier || (!d.Inline && d.TypedState != nil) {
 		names = append(names, "cast")
 	}
 	sort.Strings(names)
-	return strings.Join(names, ", ")
+	return strings.Join(slices.Compact(names), ", ")
 }
 
 // NeedsLLMServiceType is true when some agent's build_*_llm is emitted, which
@@ -1266,7 +1267,7 @@ var (
 	// beside its entry file, which ruff files apart from third-party imports.
 	firstPartyModules = map[string]bool{
 		"agents": true, "brain": true, "call": true, "dev_metrics": true, "handoff": true,
-		"knowledge": true, "logic": true, "prompts": true, "session": true, "settings": true, "state": true,
+		"knowledge": true, "logic": true, "prompts": true, "session": true, "settings": true, "state": true, "call_state": true,
 		"telephony_helper": true, "tool_runner": true, "tools": true, "tracing": true, "utils": true,
 	}
 )

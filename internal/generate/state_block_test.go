@@ -7,11 +7,26 @@ import (
 	"github.com/slng-ai/unmute/internal/ir"
 )
 
+// between returns the text from one marker up to the next, so a test asserts
+// on the method it means rather than on the whole class.
+func between(t *testing.T, source, from, to string) string {
+	t.Helper()
+	start := strings.Index(source, from)
+	if start < 0 {
+		t.Fatalf("the module emits no %q", from)
+	}
+	end := strings.Index(source[start:], to)
+	if end < 0 {
+		t.Fatalf("the module has no %q after %q", to, from)
+	}
+	return source[start : start+end]
+}
+
 // TestStateBlockRendersJSONAndNotARepr is the half of FR-005 that lives in the
 // emitted module, and the half of Fail Loud that a truncation could break in
 // silence.
 //
-// Both render paths stringified with str(), which prints a Python repr for a
+// A prompt that stringified with str() would print a Python repr for a
 // structured value: single quotes, None rather than null, and nothing a
 // provider ever produced. The bound is measured on the JSON rendering, because
 // the JSON is what the model receives and the two lengths differ.
@@ -20,21 +35,19 @@ func TestStateBlockRendersJSONAndNotARepr(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		module := emitted(t, agent, provider)
 		for _, want := range []string{
-			"value = to_json(value).decode()",
-			"_STATE_VALUE_MAX",
-			"value = _state_text(*_prompt_value(",
-			"text = _state_text(*_prompt_value(state, name,",
+			"text = value if isinstance(value, str) else to_json(value).decode()",
+			"VALUE_MAX: ClassVar[int] = ",
+			"CallState.render(",
 		} {
 			if !strings.Contains(module, want) {
 				t.Errorf("%s does not emit %q, so a declared value reaches a prompt as a Python repr",
 					provider, want)
 			}
 		}
-		// The bound is measured after the JSON rendering, which is what
-		// _state_text does: the length check is inside it, below the dumps.
-		body := functionBody(t, module, "def _state_text(name: str, value: object) -> str:")
+		// The bound is measured after the JSON rendering.
+		body := between(t, module, "    def render(", "    def save_result(")
 		dumps := strings.Index(body, "to_json(value)")
-		bound := strings.Index(body, "len(text) > _STATE_VALUE_MAX")
+		bound := strings.Index(body, "len(text) > cls.VALUE_MAX")
 		if dumps < 0 || bound < 0 || bound < dumps {
 			t.Errorf("%s measures the bound before rendering the JSON, so a structured value is bounded by "+
 				"the length of its repr:\n%s", provider, body)
@@ -44,7 +57,7 @@ func TestStateBlockRendersJSONAndNotARepr(t *testing.T) {
 			t.Errorf("%s shortens a value with no warning, which is the hidden downgrade Fail Loud forbids:\n%s",
 				provider, body)
 		}
-		if !strings.Contains(body, "text[:_STATE_VALUE_MAX]") {
+		if !strings.Contains(body, "text[: cls.VALUE_MAX]") {
 			t.Errorf("%s does not shorten the value it warned about:\n%s", provider, body)
 		}
 	}
@@ -52,28 +65,23 @@ func TestStateBlockRendersJSONAndNotARepr(t *testing.T) {
 
 // TestStateTextRendersEmptyNotNoneForABarePrimitive is what checkTemplates'
 // deleted read restriction used to make moot: once an agent prompt or a task
-// prompt may name any declared variable (gaps 2 and 3 of the scoped variables
-// feature), a plain str/int/bool/float variable with nothing in it yet is a
-// realistic render, not only a structured one. _state_text's own fallback
-// already covers it unconditionally, for a name outside _STATE_STRUCTURED as
-// much as for one inside it. A bare primitive holding Python None renders the
-// shared missing-value words and never the word "None". This holds it so a future change to the
-// structured branch cannot silently reintroduce a repr for the bare case.
+// prompt may name any declared variable, a plain str/int/bool/float variable
+// with nothing in it yet is a realistic render, not only a structured one.
+// render's own fallback covers it unconditionally. A bare primitive holding
+// Python None renders the shared missing-value words and never the word
+// "None".
 func TestStateTextRendersEmptyNotNoneForABarePrimitive(t *testing.T) {
 	agent := loadTypedState(t)
-	block, err := TypedState(agent)
+	block, err := TypedState(agent, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := functionBody(t, block.Source, "def _state_text(name: str, value: object) -> str:")
-	if body == "" {
-		t.Fatal("no _state_text emitted, so this gate proves nothing")
+	body := between(t, block.Source, "    def render(", "    def save_result(")
+	if !strings.Contains(body, "\n        if value is None or value == \"\":\n            return cls.EMPTY_TEXT\n") {
+		t.Errorf("render does not unconditionally render a missing value as the shared empty text:\n%s", body)
 	}
-	// At the function's own indent, not nested inside `if name in
-	// _STATE_STRUCTURED:`, so it runs whether or not the name is declared
-	// structured.
-	if !strings.Contains(body, "\n    if value is None or value == \"\":\n        return _STATE_EMPTY\n") {
-		t.Errorf("_state_text does not unconditionally render a missing value as the shared empty text:\n%s", body)
+	if !strings.Contains(body, "if state is None:\n            return cls.EMPTY_TEXT") {
+		t.Errorf("render does not read before the call has begun as empty:\n%s", body)
 	}
 }
 
@@ -83,12 +91,12 @@ func TestStateTextRendersEmptyNotNoneForABarePrimitive(t *testing.T) {
 // through loguru, and either style prints literally on the other target.
 func TestStateBlockWarningCarriesNoLibrarySpecificPlaceholder(t *testing.T) {
 	agent := loadTypedState(t)
-	block, err := TypedState(agent)
+	block, err := TypedState(agent, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, line := range strings.Split(block.Source, "\n") {
-		if !strings.Contains(line, "declared state:") && !strings.Contains(line, "_STATE_VALUE_MAX}") {
+		if !strings.Contains(line, "declared state:") && !strings.Contains(line, "VALUE_MAX}") {
 			continue
 		}
 		if strings.Contains(line, "%s") || strings.Contains(line, "%d") {
@@ -110,7 +118,7 @@ func TestStateBlockPromptsReadWholeWithEveryValueEmpty(t *testing.T) {
 	agent := loadTypedState(t)
 	var declared []string
 	for name, variable := range agent.Variables {
-		if variable.Shape != nil {
+		if variable.Structured() {
 			declared = append(declared, name)
 		}
 	}

@@ -39,7 +39,7 @@ agents:
           - contact: result.contact
           - caller_email: result.contact.email
           - enquiry: result.enquiry
-          - callback_time: result.callback_time
+          - callback_time: result.callback_time?
           - notes+: result.note
         context:
           history: messages
@@ -60,115 +60,11 @@ agents:
         context:
           history: messages
 
-shapes:
-  - name: CustomerRecord
-    description: The record the intake desk opened for this caller.
-    fields:
-      - record_id: Id
-      - opened_on: Date
-      - enquiry: Literal["new_customer", "existing_customer", "complaint", "other"]
-
-# A description here is not a note to the next author. Every variable a step
-# assigns becomes a parameter on that step's finish call, and this text is the
-# only thing the model is told about it. So each one is written for the model,
-# short, and it reads whole when the value is empty. The reasoning an author
-# wants is in the `#` comments, which reach nothing.
+# How the values on State in state.py behave: where one comes from, and
+# which step confirms it. A value needs an entry only for one of those.
 variables:
-  # confirm: names the step that must hear a yes. Until it does, this value
-  # renders in no prompt but that step's own, and every tool injecting it
-  # refuses itself with the step's name. Somebody may be ringing from a friend's
-  # phone, so a pre-fetched number is a proposal, not a fact.
-  #
-  # No `source:` on purpose: the prefetch entry receives the carrier's fact into
-  # this variable instead. That keeps the per-route refusal for a variable
-  # naming a source its target cannot supply exactly as strict as it is, and on
-  # a route with no caller ID the entry skips and this holds its default.
-  caller_phone:
-    type: Phone
-    default: ""
+  - name: caller_phone
     confirm: verify_contact
-    description: >-
-      The caller's number in E.164: a plus sign, then digits, with no spaces,
-      brackets or dashes.
-
-  # A shape the compiler supplies. It is a shape rather than a text type so the
-  # two parts read separately: the agent can use the name without saying the
-  # address out loud. It also takes the whole thing as one string, so a tool
-  # handing back a name in front of an address needs nothing written here.
-  contact:
-    type: NameEmail
-    description: >-
-      Who the caller is and where their confirmation goes, the name and the
-      email address held as two separate parts.
-
-  # Filled by a dotted assign off `contact`, so the caller spells the address
-  # out once and both values come from that one answer. Checked by
-  # email-validator with no DNS lookup, because this runs inside a turn and a
-  # slow resolver would hold the caller in silence.
-  caller_email:
-    type: EmailStr
-    default: ""
-    description: The caller's email address on its own, with no name around it.
-
-  # A value outside the set is refused where it enters and the refusal lists
-  # what was allowed, so the model corrects itself rather than writing something
-  # the record cannot hold. No default: an empty string is not one of the four
-  # words, so the value starts as None until take_details fills it.
-  enquiry:
-    type: Literal["new_customer", "existing_customer", "complaint", "other"]
-    description: What the caller rang about, in one of the four words listed.
-
-  # The one value here the model has to convert rather than copy: a caller says
-  # "half four" or "after lunch" and this has to become 16:30 or nothing. A
-  # wrong one is refused with the format and the model gets one more go, which
-  # is the whole reason the type is not a plain string.
-  #
-  # `| None` because this is the one value the caller may simply not give, and
-  # the type has to say so. Every declared finish field goes through its type
-  # whether the model sent it or not, so an absent one arrives as None and a
-  # type without `| None` refuses the whole finish call. Declared as plain Time
-  # it cost a live call a round trip on "callback_time: Input should be a valid
-  # string", and rewording the description to ask for an empty string did not
-  # fix it: the next run sent an explicit null instead. No wording reliably
-  # stops a model saying "nothing" when there is nothing. The type is the fix.
-  callback_time:
-    type: Time | None
-    description: >-
-      A good time of day to ring the caller back, on the 24 hour clock. Leave it
-      out when the caller has not named one.
-
-  # Appended with `notes+:` rather than assigned, so a second remark does not
-  # overwrite the first. A list starts empty, which is why it takes no default.
-  notes:
-    type: list[str]
-    description: >-
-      Anything the caller added that no other field holds, one short entry per
-      thing they said.
-
-  # The model relays the tool's return into the finish call, and that is where
-  # the Id and the Date on it are actually checked. A wrong one is refused with
-  # the format, so the model can correct itself rather than saving a mangled
-  # reference.
-  record:
-    type: CustomerRecord
-    description: >-
-      The record create_customer_record wrote, exactly as it came back. Fill it
-      only after that tool succeeded.
-
-  # Taken off `record` with a dotted assign, so the reference can be read back
-  # to the caller without rendering the whole record into a prompt.
-  record_id:
-    type: Id
-    default: ""
-    description: The reference number for this caller's record, on its own.
-
-  # Read once from the clock before the greeting. No step assigns it, so its
-  # description is what a prompt reader sees rather than something the model
-  # fills in.
-  today_date:
-    type: Date
-    default: ""
-    description: Today's date at the desk, written year-month-day.
 
 prefetch:
   - name: today

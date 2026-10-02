@@ -3,7 +3,7 @@ title: "Designing declared state"
 description: "Choose facts that help the next task, keep requested changes separate from saved outcomes, and avoid repeated questions."
 ---
 
-Declare a variable when another part of the call needs a reliable fact.
+Add a field to `State` in `state.py` when another part of the call needs a reliable fact.
 Then reference it only in the prompts or tools that need it. Keeping a value
 in call state does not put it in every model request.
 
@@ -12,7 +12,7 @@ On this page:
 - [One saved fact, end to end](#one-saved-fact-end-to-end) - declare, save, read
 - [Start with the next reader](#start-with-the-next-reader) - who needs this value
 - [Separate a request from an outcome](#separate-a-request-from-an-outcome) - asked for, not booked
-- [Group fields that describe one result](#group-fields-that-describe-one-result) - when to use a shape
+- [Group fields that describe one result](#group-fields-that-describe-one-result) - when to use a model
 - [Match the type to the actual value](#match-the-type-to-the-actual-value) - what your tools return
 - [Choose a current value or a list](#choose-a-current-value-or-a-list) - latest record, or every one
 - [Finish as soon as the work succeeds](#finish-as-soon-as-the-work-succeeds) - save, then finish at once
@@ -25,12 +25,14 @@ On this page:
 Every saved fact has the same three parts. Declare it, save it in the step
 that learns it, and read it in the prompt that needs it:
 
-```yaml agent.yaml
-variables:
-  appointment:
-    type: Appointment
-    description: The latest booking successfully saved by the booking task.
+```python state.py
+class State(BaseModel):
+    appointment: Appointment | None = Field(
+        None, description="The latest booking successfully saved by the booking task."
+    )
+```
 
+```yaml agent.yaml
 agents:
   concierge:
     tasks:
@@ -42,7 +44,7 @@ agents:
 ```
 
 ```markdown instructions.md
-Latest saved appointment: {{appointment}}
+Latest saved appointment: {{state.appointment}}
 Use it when the caller refers to a booking just made.
 ```
 
@@ -80,43 +82,48 @@ and new times.
 ## Group fields that describe one result
 
 Start with separate variables for independent facts, such as a caller's name
-and preferred language. Use a shape when the fields describe the same record
+and preferred language. Use a model when the fields describe the same record
 and should be saved together.
 
 For a booking flow:
 
 1. Look at the successful booking tool result. Identify the fields later
    tasks need, such as its ID, service, date, and time.
-2. Declare an `Appointment` shape with those fields. Use `Id` only if the
-   actual booking ID fits its limits, and `Date` and `Time` for the saved time.
-3. Declare `appointment` with `type: Appointment`. Give it a description such
-   as "The latest appointment successfully saved by the booking tool."
+2. Declare an `Appointment` model in `state.py` with those fields. Use `str`
+   for the booking ID, with a pattern only if the real ID always fits it, and
+   `date` and `time` for the saved time.
+3. Add `appointment: Appointment | None = None` to `State`. Give it a
+   description such as "The latest appointment successfully saved by the
+   booking tool."
 4. Assign `appointment: result.appointment` in the booking task. Tell the task
    to copy the successful result and finish immediately.
-5. Reference `{{appointment}}` in the owner, or just `{{appointment.date}}`
+5. Reference `{{state.appointment}}` in the owner, or just `{{state.appointment.date}}`
    in a prompt that needs only the date.
 
 This keeps the booking ID and its current time together. Do not add unrelated
-caller details to the shape just because the booking task can see them.
-The [Variables guide](/build/variables#group-fields-into-a-shape)
-shows the YAML declaration and field descriptions.
+caller details to the model just because the booking task can see them.
+The [Variables guide](/build/variables#group-fields-into-a-model)
+shows the model and its field descriptions.
 
 ## Match the type to the actual value
 
-Use a shape for fields that belong together. Include fields your tools return
+Use a model for fields that belong together. Include fields your tools return
 or the caller can supply. Do not require an ID that no tool produces.
 
-Use `T | None` when a successful result may legitimately have no value. A
-required `Id` cannot be replaced by an empty string just to finish the task.
+Use `T | None = None` when a successful result may legitimately have no value.
+A field with a pattern cannot be replaced by an empty string just to finish
+the task. When a step may finish without a value, mark it in `assign:` with
+`?` after the result field, as `- callback_time: result.callback_time?`.
+Otherwise the step must return every whole value it assigns.
 
-An external identifier may need `str`. For example, a booking slot containing
-`|` does not fit `Id`. Preserve the exact value the tool returned. The
-[type reference](/reference/variables#text-types-and-their-limits) lists the
-format checks and their limits.
+An external identifier may need a plain `str`. For example, a booking slot
+containing `|` does not fit an identifier pattern. Preserve the exact value the
+tool returned. The [reference](/reference/variables#what-a-field-can-be) lists
+the types and their limits.
 
 ## Choose a current value or a list
 
-Use one shaped variable for the latest successful appointment. Replacing it
+Use one model-typed field for the latest successful appointment. Replacing it
 makes the new date the current one.
 
 Use a list when later tasks need several records. Append with `+`:
@@ -126,7 +133,7 @@ assign:
   - notes+: result.note
 ```
 
-This needs a variable declared as `list[str]`, or `list[Note]` for a shape.
+This needs a field declared as `list[str]`, or `list[Note]` for a model.
 An identical structured item is not added twice. A changed item is added
 separately; append does not find and replace an earlier record with the same
 ID. Plain values may repeat.
@@ -177,7 +184,7 @@ the group runs the confirming step again on its own.
 Prefer a label and a clear fallback:
 
 ```markdown
-Latest saved appointment: {{appointment}}
+Latest saved appointment: {{state.appointment}}
 Use it to identify the booking the caller just made. If no appointment is
 recorded, ask which booking they mean and look it up.
 ```
@@ -202,7 +209,7 @@ a trace to confirm that each receiving prompt contains the facts it needs.
     Task structure and tool placement, so the step gets entered.
   </Card>
   <Card title="Variables" icon="braces" href="/build/variables">
-    The YAML for declaring a value, a shape, and a list.
+    How to declare a value, a model, and a list in `state.py`.
   </Card>
   <Card title="Checking what the agent did" icon="chart-line" href="/best-practices/verifying-behaviour">
     Reading a trace to see which saved value each prompt received.

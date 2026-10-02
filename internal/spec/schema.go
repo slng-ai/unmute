@@ -80,11 +80,6 @@ func Schema() (*jsonschema.Schema, error) {
 	// Both hooks below are derived before they are registered, because each one
 	// publishes a shape that includes the reflected struct: registering first
 	// would make the derivation read its own hook.
-	field, err := fieldSchema(options)
-	if err != nil {
-		return nil, err
-	}
-	options.TypeSchemas[reflect.TypeFor[Field]()] = field
 	item, err := taskItemSchema(options)
 	if err != nil {
 		return nil, err
@@ -109,29 +104,6 @@ func stepItemSchema(options *jsonschema.ForOptions) (*jsonschema.Schema, error) 
 	}
 	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{
 		{Type: "string", Description: "The name of a task the group always runs."},
-		long,
-	}}, nil
-}
-
-// fieldSchema publishes the two shapes one item of a shape's `fields:` may
-// take. Reflection sees Name, Type and Description and would publish only the
-// long form, and the long form is the one an author almost never writes: a
-// field is `- scheduled_date: Date` unless it wants a description.
-func fieldSchema(options *jsonschema.ForOptions) (*jsonschema.Schema, error) {
-	long, err := jsonschema.For[Field](options)
-	if err != nil {
-		return nil, err
-	}
-	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{
-		{
-			Type:                 "object",
-			MinProperties:        ptr(1),
-			MaxProperties:        ptr(1),
-			AdditionalProperties: &jsonschema.Schema{Type: "string"},
-			Description: "One field, written `- scheduled_date: Date`. Exactly one key per list item, " +
-				"the field's name to its type expression: an item holding two is a dropped indent " +
-				"and is refused with its line.",
-		},
 		long,
 	}}, nil
 }

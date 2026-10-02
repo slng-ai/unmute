@@ -61,7 +61,7 @@ func TestPipecatV1BuiltinEndCallTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func mcpPipecatAgent(t *testing.T, tool ir.Tool) *ir.Agent {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestPipecatV1NoAuthHelpersWithoutAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,7 @@ func TestPipecatV1Golden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestV32PipecatGreetingModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +516,7 @@ func TestV31PipecatTracingIsIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +543,7 @@ func TestV21PipecatUsesNativeTracing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -584,7 +584,7 @@ func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +634,7 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -715,7 +715,7 @@ func TestV25PipecatTracesConfiguredSystemInstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +743,7 @@ func TestV22PipecatToolCallsAreTraced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,7 +790,7 @@ func TestV22PipecatMCPToolCallsAreTraced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -906,7 +906,7 @@ func TestPipecatV1MCPReservesFlowFunctionNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -952,14 +952,14 @@ func addPipecatTaskTransferFixture(agent *ir.Agent) {
 		Instructions: "Verify the caller, unless they need billing help.",
 		Tools:        []string{"to_billing"},
 		Result: map[string]ir.ResultField{
-			"verified": {Type: ir.PrimitiveBoolean},
-			"label":    {Type: ir.PrimitiveString},
+			"verified": {Type: boolType(), Var: "verified"},
+			"label":    {Type: stringType(), Var: "customer_id"},
 		},
 		Context: ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.Tasks["complete"] = ir.Task{
 		Instructions: "Complete verification.",
-		Result:       map[string]ir.ResultField{"complete": {Type: ir.PrimitiveBoolean}},
+		Result:       map[string]ir.ResultField{"complete": {Type: boolType(), Var: "verified"}},
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.TaskGroups["verification"] = ir.TaskGroup{
@@ -985,13 +985,13 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	addPipecatTaskTransferFixture(agent)
 	verify := agent.Tasks["verify"]
-	verify.Result["details"] = ir.ResultField{Schema: map[string]any{"type": "object"}}
+	verify.Result["details"] = ir.ResultField{Type: objectType(), Var: "customer_id"}
 	agent.Tasks["verify"] = verify
 
 	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
@@ -1077,7 +1077,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1090,8 +1090,8 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		Instructions: "Ask for the caller's email, look them up, and confirm their account tier.",
 		Tools:        []string{"lookup_customer"},
 		Result: map[string]ir.ResultField{
-			"verified_flag": {Type: ir.PrimitiveBoolean},
-			"tier":          {Type: ir.PrimitiveString, Enum: []string{"free", "pro"}},
+			"verified_flag": {Type: boolType()},
+			"tier":          {Type: stringType("free", "pro")},
 		},
 		Context: ir.TaskContext{History: ir.HistoryFull},
 	}
@@ -1309,14 +1309,14 @@ func TestV3PipecatToolsResolveCallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	agent.Tasks["collect"] = ir.Task{
 		Instructions: "Ask for the caller's email and confirm their tier.",
 		Tools:        []string{"lookup_customer"},
-		Result:       map[string]ir.ResultField{"tier": {Type: ir.PrimitiveString}},
+		Result:       map[string]ir.ResultField{"tier": {Type: stringType()}},
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.Controls["run_collect"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "collect", When: "Collect account details."}
@@ -1364,14 +1364,14 @@ func TestPipecatV1DirectToolGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	agent.Tasks["collect"] = ir.Task{
 		Instructions: "Collect the caller's email.",
 		Tools:        []string{"lookup_customer"},
-		Result:       map[string]ir.ResultField{"email": {Type: ir.PrimitiveString}},
+		Result:       map[string]ir.ResultField{"email": {Type: stringType()}},
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.Controls["run_collect"] = &ir.Delegate{
@@ -1418,7 +1418,7 @@ func TestV2PipecatV1AgentTransferAnnouncementWaitsForSourcePlayout(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1510,7 +1510,7 @@ func TestF3PipecatSingleAgentInline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1551,7 +1551,7 @@ func TestPipecatV1MCPUsesWorkerTopology(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1613,7 +1613,7 @@ func TestV1PipecatAgentToolCarriesSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1637,7 +1637,7 @@ func TestV1PipecatAgentToolCarriesSchema(t *testing.T) {
 	agent.Tasks["book"] = ir.Task{
 		Instructions: "Book the caller's chosen service.",
 		Tools:        []string{"book_service"},
-		Result:       map[string]ir.ResultField{"ok": {Type: ir.PrimitiveBoolean}},
+		Result:       map[string]ir.ResultField{"ok": {Type: boolType()}},
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.Controls["run_book"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "book", When: "Book a service."}
@@ -1682,7 +1682,7 @@ func TestPipecatRuffCheckClean(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1690,7 +1690,7 @@ func TestPipecatRuffCheckClean(t *testing.T) {
 	agent.Tasks["collect"] = ir.Task{
 		Instructions: "Ask for the caller's email and confirm their tier.",
 		Tools:        []string{"lookup_customer"},
-		Result:       map[string]ir.ResultField{"tier": {Type: ir.PrimitiveString, Enum: []string{"free", "pro"}}},
+		Result:       map[string]ir.ResultField{"tier": {Type: stringType("free", "pro")}},
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.Controls["run_collect"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "collect", When: "Collect account details."}
@@ -1717,13 +1717,13 @@ func TestPipecatRejectsBlankTaskInstructions(t *testing.T) { // V27
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	agent.Tasks["blank"] = ir.Task{
 		Instructions: " \n\t",
-		Result:       map[string]ir.ResultField{"done": {Type: ir.PrimitiveBoolean}},
+		Result:       map[string]ir.ResultField{"done": {Type: boolType()}},
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.Controls["run_blank"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "blank", When: "Run the blank task."}
@@ -1742,7 +1742,7 @@ func TestPipecatV1OmitsTracingUnlessConfigured(t *testing.T) { // V19, V31
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1801,7 +1801,7 @@ func TestPipecatV1LocalTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1815,7 +1815,7 @@ func TestPipecatV1LocalTool(t *testing.T) {
 	agent.Tasks["collect"] = ir.Task{
 		Instructions: "Ask what the caller needs, then pull their notes.",
 		Tools:        []string{"fetch_notes"},
-		Result:       map[string]ir.ResultField{"summary": {Type: ir.PrimitiveString}},
+		Result:       map[string]ir.ResultField{"summary": {Type: stringType()}},
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.Controls["run_collect"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "collect", When: "Collect the caller's request."}
@@ -1889,7 +1889,7 @@ func TestPipecatWarmHumanTransferFailsEverywhere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1910,7 +1910,7 @@ func TestPipecatCarrierlessHumanTransferFailsBeforeLowering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1966,7 +1966,7 @@ func TestPipecatListenAssemblyAI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2049,7 +2049,7 @@ func TestUS1_DailyTransportAcceptsInboundCallFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2095,7 +2095,7 @@ func TestUS1_NonDailyRouteKeepsGenericTransportParams(t *testing.T) {
 	configured.Connection = "primary_phone"
 	setConnectionRoute(pkg, "primary_phone", "cloud-websocket", "twilio")
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2121,7 +2121,7 @@ func plainPipecatArtifact(t *testing.T) Artifact {
 		t.Fatal(err)
 	}
 	pkg.Targets = map[string]spec.Target{"pipecat": pkg.Targets["pipecat"]}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2333,7 +2333,7 @@ func TestUS3_NoPrerequisiteWithoutTheCapability(t *testing.T) {
 	configured := pkg.Targets["pipecat"]
 	configured.Connection = ""
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2361,7 +2361,7 @@ func TestUS3_TransferDestinationIsInTheStartupCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2396,7 +2396,7 @@ func pipecatArtifactWithRegion(t *testing.T, region string) Artifact {
 		configured.DeploymentRegion = spec.Regions{region}
 	}
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2527,7 +2527,7 @@ func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2605,7 +2605,7 @@ func TestPipecatWebWaitsForRTVIClientReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2646,7 +2646,7 @@ func TestV1_DailyColdTransferHandlesPrimitiveFailures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		agent, err := ir.Build(pkg)
+		agent, err := buildWithState(t, pkg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2758,7 +2758,7 @@ func TestPipecatV1TaskToolAnnounceQueuesFrameFromFlowManager(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		agent, err := ir.Build(pkg)
+		agent, err := buildWithState(t, pkg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2815,7 +2815,7 @@ func TestPipecatV1ToolAnnounceQueuesFrameWithoutWaiting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2891,7 +2891,7 @@ func TestPipecatV1ToolAnnounceOnInlinePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2941,7 +2941,7 @@ func pipecatHistoryArtifact(t *testing.T) Artifact {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3191,7 +3191,7 @@ func TestPipecatTaskGroupStillGovernsItsMembersContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3230,7 +3230,7 @@ func TestPipecatFullOnlyPackageEmitsNoShaping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

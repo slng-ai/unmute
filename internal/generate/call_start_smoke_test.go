@@ -4,37 +4,27 @@ package generate
 
 import (
 	"testing"
-
-	"github.com/slng-ai/unmute/internal/ir"
 )
 
 // L4 smoke for what arrives before the first word: a dispatched value and a
 // carrier fact are saved through the declared type, on the real SDK, the same
 // way a step's finish is. customer-intake declares an object, a list and a
-// Phone that a dispatch may fill; addCallerNumberFact adds the one thing it does
-// not declare, a Phone the carrier fills.
+// Phone that a dispatch may fill, and a carrier fact is saved by name, so the
+// same Phone field stands in for the one the carrier fills.
 
 func TestSmokeLiveKitCallStartIsTyped(t *testing.T) {
-	runLiveKitSmokeScript(t, "customer-intake", nil, addCallerNumberFact, callStartScript("agent", "Userdata()", livekitFromDispatch))
+	runLiveKitSmokeScript(t, "customer-intake", nil, nil, callStartScript("agent", "CallState()", livekitFromDispatch))
 }
 
 func TestSmokePipecatCallStartIsTyped(t *testing.T) {
-	runPipecatSmokeScript(t, "customer-intake", nil, addCallerNumberFact, callStartScript("bot", "build_state()", pipecatFromDispatch))
-}
-
-func addCallerNumberFact(agent *ir.Agent) {
-	agent.Variables["caller_number"] = ir.Variable{
-		Type: ir.PrimitiveString, Shape: &ir.TypeRef{Shaped: ir.ShapedPhone},
-		Source: ir.VariableSourceFromNumber, Default: "",
-	}
-	agent.VariableOrder = append(agent.VariableOrder, "caller_number")
+	runPipecatSmokeScript(t, "customer-intake", nil, nil, callStartScript("bot", "build_state()", pipecatFromDispatch))
 }
 
 // Each target reads the dispatch through its own entry point, so the script
 // drives that one rather than the shared helper alone.
 const (
 	livekitFromDispatch = `def from_dispatch():
-    state = generated.Userdata()
+    state = generated.CallState()
     generated._hydrate_call_start(state, generated._dispatched_call_start({}))
     return state
 `
@@ -57,7 +47,7 @@ generated = _project("` + module + `")
 
 def field(state, name, key):
     """Read one field of a saved object, whatever form the state holds it in."""
-    return json.loads(generated._state_text(name, getattr(state, name)))[key]
+    return state.plain(name)[key]
 
 
 # An object, a list and a Phone are saved. LiveKit used to refuse the first two
@@ -87,7 +77,7 @@ else:
 del os.environ["UNMUTE_CALL_START"]
 partial = generated.` + fresh + `
 try:
-    generated._save_call_start(partial, {"caller_phone": "600111222", "notes": ["kept?"]}, ("caller_phone", "notes"))
+    partial.save_call_start({"caller_phone": "600111222", "notes": ["kept?"]})
 except RuntimeError:
     pass
 assert partial.notes == [], "a refused batch saved part of itself"
@@ -95,10 +85,10 @@ assert partial.notes == [], "a refused batch saved part of itself"
 # A carrier fact that does not fit is left unsaved and reported, so the caller
 # who withholds their number is treated as one with no number, not hung up on.
 fact = generated.` + fresh + `
-assert generated._save_fact(fact, "caller_number", "anonymous") is False
-assert fact.caller_number == "", fact.caller_number
-assert generated._save_fact(fact, "caller_number", "+34600111333") is True
-assert fact.caller_number == "+34600111333", fact.caller_number
+assert fact.save_fact("caller_phone", "anonymous") is False
+assert fact.caller_phone is None, fact.caller_phone
+assert fact.save_fact("caller_phone", "+34600111333") is True
+assert fact.caller_phone == "+34600111333", fact.caller_phone
 
 # The list default is written [], which is safe only because Pydantic copies it
 # for each instance: one call's notes never appear on the next call.

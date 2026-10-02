@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
@@ -20,7 +19,7 @@ func terminalModule(t *testing.T, targetName, file string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +42,7 @@ func terminalModules(t *testing.T) map[string]string {
 // cannot answer "did this tool succeed" differently.
 func TestTerminalHelpersAreByteIdenticalOnBothTargets(t *testing.T) {
 	modules := terminalModules(t)
-	for _, marker := range []string{"def _terminal_success(", "def _merge_retained(", "def _success_word("} {
+	for _, marker := range []string{"def _terminal_success(", "    def retain(", "def _success_word("} {
 		livekit := blockAfter(t, modules["livekit"], marker)
 		pipecat := blockAfter(t, modules["pipecat"], marker)
 		if livekit != pipecat {
@@ -78,7 +77,7 @@ func TestTerminalToolEndsTheStepOnBothTargets(t *testing.T) {
 		"return await self._end_on_book_it(ctx, result)",
 		"return await self._end_on_cancel_it(ctx, result)",
 		"return await self._end_on_look_up(ctx, result)",
-		`_values = _save_result("book", ctx.userdata, result)`,
+		`_values = ctx.userdata.save_result("book", result)`,
 		"self.complete(_values)",
 		// None, so livekit-agents sets reply_required False and makes no
 		// request. This one line is the feature.
@@ -92,7 +91,7 @@ func TestTerminalToolEndsTheStepOnBothTargets(t *testing.T) {
 	for _, want := range []string{
 		"async def _do_book_terminal_book_book_it(\n        self, args: Any, flow_manager: FlowManager\n    ) -> tuple[dict[str, Any], Any]:",
 		"result = await _flow_tool_book_it(args, flow_manager, state=self.state)",
-		`_values = _save_result("book", self.state, result)`,
+		`_values = self.state.save_result("book", result)`,
 		// The wrapper saves once and hands the saved values to the finish
 		// handler's tail. Going through the finish handler saved twice, and a
 		// second save is a second entry on every list an assign appends to.
@@ -123,7 +122,7 @@ func TestTerminalToolLeavesANonSuccessToTheModel(t *testing.T) {
 // how to record it, and the step stays open.
 func TestARefusedSaveKeepsTheResultAndSaysHowToRepair(t *testing.T) {
 	for name, module := range terminalModules(t) {
-		if !strings.Contains(module, "except _StateRefused as refused:") {
+		if !strings.Contains(module, "except StateRefused as refused:") {
 			t.Errorf("%s does not catch a refused save in its terminal path", name)
 		}
 		for _, want := range []string{

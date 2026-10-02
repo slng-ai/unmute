@@ -69,15 +69,15 @@ handoffs:
 
 Declare a value once and reference it in the receiving prompt:
 
-```yaml agent.yaml
-variables:
-  appointment_id:
-    type: Id
-    description: The appointment selected during this call.
+```python state.py
+class State(BaseModel):
+    appointment_id: str = Field(
+        "", description="The appointment selected during this call."
+    )
 ```
 
 ```markdown agents/appointment-manager.md
-You are handling appointment {{appointment_id}}.
+You are handling appointment {{state.appointment_id}}.
 Ask what the caller wants to change.
 ```
 

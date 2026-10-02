@@ -84,7 +84,6 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	contractErrors, contractWarnings := ValidateManifest(agent)
 	global = append(global, contractErrors...)
 	globalWarnings = append(globalWarnings, contractWarnings...)
-	global = append(global, validateConfiguredTargets(agent, caps)...)
 	global = append(global, slngOneAgentIDPerPackage(agent)...)
 	global = append(global, slngScopeErrors(agent)...)
 	global = append(global, knowledgeErrors(agent)...)
@@ -244,32 +243,6 @@ func resolvedHasLocal(resolved Target) bool {
 	return false
 }
 
-func validateConfiguredTargets(agent *Agent, caps targetcap.Table) []string {
-	hasNestedResult := false
-	for _, task := range agent.Tasks {
-		for _, field := range task.Result {
-			hasNestedResult = hasNestedResult || field.Schema != nil
-		}
-	}
-	if !hasNestedResult {
-		return nil
-	}
-	var errors []string
-	for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
-		resolved := agent.Targets[name]
-		provider := targetcap.Provider(resolved.Provider)
-		if !slices.Contains(targetcap.Providers, provider) {
-			errors = add(errors, fmt.Sprintf("configured target %q has unknown provider %q", name, resolved.Provider))
-			continue
-		}
-		capability := caps.Capability(targetcap.FieldTaskNestedResult, provider)
-		if capability.Tag == targetcap.Gated || capability.Tag == targetcap.Provisional {
-			errors = add(errors, fmt.Sprintf("configured target %q: %s", name, capability.Note))
-		}
-	}
-	return errors
-}
-
 // validateStructure returns target-independent errors plus target-independent
 // warnings. The warnings seed every target row, because a schema key is a
 // property of the package, not of the target that compiles it.
@@ -318,9 +291,6 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		}
 	}
 	for name, variable := range agent.Variables {
-		if !validPrimitive(variable.Type) {
-			errors = add(errors, fmt.Sprintf("variable %q has invalid type %q", name, variable.Type))
-		}
 		if variable.Source != "" && !validVariableSource(variable.Source) {
 			errors = add(errors, fmt.Sprintf("variable %q has invalid source %q", name, variable.Source))
 		}
@@ -329,17 +299,10 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			// model reads the description to know what to record: SLNG requires
 			// one on every runtime variable.
 			if variable.Default != nil {
-				errors = add(errors, fmt.Sprintf("variable %q is recorded by the model during the call and takes no default: remove default:, or drop source: conversation and let the dispatch supply it", name))
+				errors = add(errors, fmt.Sprintf("variable %q is recorded by the model during the call and takes no default: give it `= None` in state.py, or drop source: conversation and let the dispatch supply it", name))
 			}
 			if strings.TrimSpace(variable.Description) == "" {
-				errors = add(errors, fmt.Sprintf("variable %q is recorded by the model during the call, so it needs a description: the model reads it to know what to record and when", name))
-			}
-		}
-		if variable.Default != nil && !defaultMatches(variable.Type, variable.Default) {
-			if variable.Shape != nil {
-				errors = add(errors, fmt.Sprintf("variable %q is %s, which starts empty and takes no default: remove default:", name, variable.Shape.String()))
-			} else {
-				errors = add(errors, fmt.Sprintf("variable %q default does not match type %q", name, variable.Type))
+				errors = add(errors, fmt.Sprintf("variable %q is recorded by the model during the call, so it needs a description: give it Field(description=...) in state.py; the model reads it to know what to record and when", name))
 			}
 		}
 	}
@@ -348,22 +311,10 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		// had one mixed list that could hold any kind. A task now has `tools:` and
 		// `handoffs:` and no other key, so the illegal thing has nowhere to be
 		// written and the rule is structure rather than a check.
-		for fieldName, field := range task.Result {
+		for fieldName := range task.Result {
 			if fieldName == UnservedResultField {
 				errors = add(errors, fmt.Sprintf("task %q result %q is reserved: every generated task finish already takes %s for a request the step cannot serve", name, fieldName, UnservedResultField))
 			}
-			if field.Schema == nil && !validPrimitive(field.Type) {
-				errors = add(errors, fmt.Sprintf("task %q result %q has invalid type %q", name, fieldName, field.Type))
-			}
-			if field.Enum != nil && len(field.Enum) == 0 {
-				errors = add(errors, fmt.Sprintf("task %q result %q enum must not be empty", name, fieldName))
-			}
-			// A nested result field carries a raw schema (build.go stashes any
-			// unrecognised map as ResultField.Schema), which the Pipecat driver
-			// serialises through resultProperties/pyLiteral exactly the way it
-			// serialises tool properties. Same unvalidated surface, so the same
-			// walk applies.
-			validateSchemaKeys(fmt.Sprintf("task %q result %q", name, fieldName), "schema", field.Schema, &schemas)
 		}
 		errors = append(errors, validateContextShape(name, task.Context)...)
 	}
@@ -2326,27 +2277,16 @@ func validateVariables(agent *Agent, provider targetcap.Provider, caps targetcap
 			break
 		}
 	}
-	// A declared shape and a text type with a validated shape are gated apart,
-	// because they are refused for the same reason but fixed differently: one
-	// asks the author to flatten a group of fields, the other to give up a
-	// check. Reported through the capability table like every other per-target
-	// difference, so one target's refusal cannot drift from its row.
-	declaresShape, declaresShaped := len(agent.Shapes) > 0, false
+	// A value more than one plain scalar needs the typed state runtime: a
+	// model, a list, a closed set, or a checked text type. A plain value that
+	// may be None does not: None is only "no value yet". Reported through the
+	// capability table like every other per-target difference, so one target's
+	// refusal cannot drift from its row.
 	for _, name := range sortedKeys(agent.Variables) {
-		shape := agent.Variables[name].Shape
-		if shape == nil {
-			continue
+		if schema := agent.Variables[name].Schema; schema != nil && !schema.Plain() {
+			applyCapability(caps, targetcap.FieldTypedState, provider, row)
+			break
 		}
-		declaresShaped = declaresShaped || reaches(shape, func(ref *TypeRef) bool { return ref.Shaped != "" })
-		declaresShape = declaresShape || reaches(shape, func(ref *TypeRef) bool {
-			return ref.Shape != "" || len(ref.Literal) > 0 || ref.List != nil || ref.Optional
-		})
-	}
-	if declaresShape {
-		applyCapability(caps, targetcap.FieldTypedState, provider, row)
-	}
-	if declaresShaped {
-		applyCapability(caps, targetcap.FieldShapedText, provider, row)
 	}
 	if len(agent.Prefetch) > 0 {
 		applyCapability(caps, targetcap.FieldPrefetch, provider, row)
@@ -3835,10 +3775,6 @@ func validVariableSource(value VariableSource) bool {
 	}
 }
 
-func validPrimitive(value PrimitiveType) bool {
-	return value == PrimitiveString || value == PrimitiveNumber || value == PrimitiveBoolean || value == PrimitiveInteger
-}
-
 func validRequiredControl(value string) bool {
 	switch value {
 	case "cold_transfer", "warm_transfer", "dtmf_send", "dtmf_receive", "hold", "hangup", "voicemail_detection", "ivr_navigation":
@@ -3846,28 +3782,6 @@ func validRequiredControl(value string) bool {
 	default:
 		return false
 	}
-}
-
-func defaultMatches(kind PrimitiveType, value any) bool {
-	switch kind {
-	case PrimitiveString:
-		_, ok := value.(string)
-		return ok
-	case PrimitiveBoolean:
-		_, ok := value.(bool)
-		return ok
-	case PrimitiveInteger:
-		switch value.(type) {
-		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-			return true
-		}
-	case PrimitiveNumber:
-		switch value.(type) {
-		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
-			return true
-		}
-	}
-	return false
 }
 
 func add(values []string, value string) []string {

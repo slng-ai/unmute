@@ -303,7 +303,7 @@ func TestDeployRefusesAPackageWithNoSlngTarget(t *testing.T) {
 	root.SetOut(&out)
 	root.SetErr(&out)
 	root.SetArgs([]string{"deploy", filepath.Join("..", "..", "examples", "salon-concierge")})
-	err := root.Execute()
+	err := root.ExecuteContext(recordedCtx(t))
 	if err == nil {
 		t.Fatal("deploying a package with no slng target succeeded")
 	}
@@ -462,7 +462,7 @@ func deployFixture(t *testing.T, fixture, input, script string, args ...string) 
 	root.SetErr(&stderr)
 	root.SetIn(strings.NewReader(input))
 	root.SetArgs(append([]string{"deploy", dir}, args...))
-	err = root.Execute()
+	err = root.ExecuteContext(recordedCtx(t))
 	return dir, stdout.String(), stderr.String(), err
 }
 
@@ -1749,7 +1749,7 @@ esac`
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
 	root.SetArgs([]string{"deploy", dir, "--dry-run"})
-	if err := root.Execute(); err != nil {
+	if err := root.ExecuteContext(recordedCtx(t)); err != nil {
 		t.Fatalf("deploy: %v\n%s", err, stderr.String())
 	}
 
@@ -1836,7 +1836,7 @@ esac`
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
 	root.SetArgs([]string{"deploy", dir, "--dry-run"})
-	err = root.Execute()
+	err = root.ExecuteContext(recordedCtx(t))
 	if err == nil {
 		t.Fatalf("two references to one hosted tool were accepted, so one file's settings would be dropped silently:\n%s", stdout.String())
 	}

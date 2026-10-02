@@ -32,10 +32,10 @@ input:
 # its own date instead, and the model relaying it back is where the Date type
 # gets checked.
 inject:
-  - phone: "{{caller_phone}}"
-  - email: "{{caller_email}}"
-  - name: "{{contact.name}}"
-  - enquiry: "{{enquiry}}"
+  - phone: "{{state.caller_phone}}"
+  - email: "{{state.caller_email}}"
+  - name: "{{state.contact.name}}"
+  - enquiry: "{{state.enquiry}}"
 
 output:
   type: object

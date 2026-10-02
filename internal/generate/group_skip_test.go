@@ -12,10 +12,10 @@ func TestAGroupSkipsAConfirmedStep(t *testing.T) {
 	livekit := terminalModule(t, "livekit", agentSource)
 	for _, want := range []string{
 		// The shared group decides per step as it is built.
-		`if _is_confirmed(ctx.userdata, "customer_phone"):`,
+		`if ctx.userdata.is_confirmed("customer_phone"):`,
 		`logger.info("skipped verify: customer_phone is already confirmed")`,
 		// The isolated sequence decides once, as a plan it then walks.
-		`if not (confirmed and _is_confirmed(ctx.userdata, confirmed))`,
+		`if not (confirmed and ctx.userdata.is_confirmed(confirmed))`,
 		`("verify", "customer_phone"),`,
 		`if "verify" not in _plan:`,
 		"for _id in _plan:",
@@ -28,7 +28,7 @@ func TestAGroupSkipsAConfirmedStep(t *testing.T) {
 	for _, want := range []string{
 		"self._do_book_plan = [",
 		`("verify", "customer_phone"),`,
-		"if not (confirmed and _is_confirmed(self.state, confirmed))",
+		"if not (confirmed and self.state.is_confirmed(confirmed))",
 		"def _do_book_next(self, name: str) -> str | None:",
 	} {
 		if !strings.Contains(pipecat, want) {
@@ -42,22 +42,22 @@ func TestAGroupSkipsAConfirmedStep(t *testing.T) {
 // confirmation the same step is about to replace.
 func TestAWithdrawingTaskUnconfirmsOnEntry(t *testing.T) {
 	livekit := terminalModule(t, "livekit", agentSource)
-	if !strings.Contains(livekit, `_withdraw_confirmation(self.session.userdata, "verify")`) {
+	if !strings.Contains(livekit, `self.session.userdata.withdraw_confirmation("verify")`) {
 		t.Error("livekit agent.py does not withdraw on entering the skippable step")
 	}
 	// Before the prompt renders, or the step reads a confirmation it is about
 	// to replace.
-	withdrawAt := strings.Index(livekit, `_withdraw_confirmation(self.session.userdata, "verify")`)
+	withdrawAt := strings.Index(livekit, `self.session.userdata.withdraw_confirmation("verify")`)
 	promptAt := strings.Index(livekit, "await self.update_instructions(")
 	if withdrawAt < 0 || (promptAt >= 0 && promptAt < withdrawAt) {
 		t.Errorf("withdrawal must come before the prompt: withdraw=%d prompt=%d", withdrawAt, promptAt)
 	}
 	pipecat := terminalModule(t, "pipecat", agentSource)
-	if !strings.Contains(pipecat, `_withdraw_confirmation(self.state, "verify")`) {
+	if !strings.Contains(pipecat, `self.state.withdraw_confirmation("verify")`) {
 		t.Error("pipecat bot.py does not withdraw on entering the skippable step")
 	}
 	nodeAt := strings.Index(pipecat, "def _do_book_node_verify(self)")
-	withdrawAt = strings.Index(pipecat[nodeAt:], `_withdraw_confirmation(self.state, "verify")`)
+	withdrawAt = strings.Index(pipecat[nodeAt:], `self.state.withdraw_confirmation("verify")`)
 	roleAt := strings.Index(pipecat[nodeAt:], "role_message=")
 	if nodeAt < 0 || withdrawAt < 0 || roleAt < withdrawAt {
 		t.Errorf("withdrawal must come before role_message: node=%d withdraw=%d role=%d", nodeAt, withdrawAt, roleAt)
@@ -68,15 +68,15 @@ func TestAWithdrawingTaskUnconfirmsOnEntry(t *testing.T) {
 // dependency pass a save runs.
 func TestWithdrawalClearsDerivedValuesToo(t *testing.T) {
 	for name, module := range terminalModules(t) {
-		body := blockAfter(t, module, "def _withdraw_confirmation(state: ")
+		body := between(t, module, "    def withdraw_confirmation(", "def _task_status(")
 		for _, want := range []string{
-			"_STATE_CONFIRM.items()",
-			"for name, reads in _STATE_DEPENDENCIES.items():",
+			"self.CONFIRM.items()",
+			"for name, reads in self.DEPENDENCIES.items():",
 			"if any(source in unconfirmed for source in reads):",
-			"state._unconfirmed = unconfirmed",
+			"self._unconfirmed = unconfirmed",
 		} {
 			if !strings.Contains(body, want) {
-				t.Errorf("%s: _withdraw_confirmation missing %q", name, want)
+				t.Errorf("%s: withdraw_confirmation missing %q", name, want)
 			}
 		}
 	}

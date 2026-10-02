@@ -46,7 +46,7 @@ func TestEmittedTaskPromptsAlwaysOfferAnEscape(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load: %v", err)
 			}
-			agent, err := ir.Build(pkg)
+			agent, err := buildWithState(t, pkg)
 			if err != nil {
 				t.Fatalf("build: %v", err)
 			}
@@ -106,7 +106,7 @@ func TestEmittedFinishCarriesTheUnservedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,18 +118,18 @@ func TestEmittedFinishCarriesTheUnservedRequest(t *testing.T) {
 			continue
 		}
 		finishes++
-		if !strings.Contains(line, ir.UnservedResultField+": ") || !strings.HasSuffix(line, `= "") -> str | None:`) {
-			t.Errorf("agent.py: finish must take an optional %s: %s", ir.UnservedResultField, strings.TrimSpace(line))
+		if !strings.Contains(line, "raw_arguments: dict[str, object]") {
+			t.Errorf("agent.py: finish must take the raw arguments, so unserved_request is read from StepResult: %s", strings.TrimSpace(line))
 		}
 	}
 	if finishes == 0 {
 		t.Fatal("agent.py: no task finish emitted")
 	}
 	// Every finish saves through the one validator, and so does every step that
-	// ends on its own tool: the count is the finishes plus the terminal endings,
-	// less the one definition in the shared block.
+	// ends on its own tool: the count is the finishes plus the terminal endings.
+	// The dot keeps the one definition out of the count.
 	terminal := strings.Count(livekit, "async def _end_on_")
-	if got := strings.Count(livekit, `_save_result(`) - 1; got != finishes+terminal {
+	if got := strings.Count(livekit, `.save_result(`); got != finishes+terminal {
 		t.Errorf("agent.py: %d saves for %d finishes and %d terminal endings; every one has to go through the validator",
 			got, finishes, terminal)
 	}
@@ -142,8 +142,16 @@ func TestEmittedFinishCarriesTheUnservedRequest(t *testing.T) {
 	if nodes == 0 {
 		t.Fatal("bot.py: no task finish emitted")
 	}
-	if got := strings.Count(pipecat, `"`+ir.UnservedResultField+`": {"description"`); got != nodes {
-		t.Errorf("bot.py: %d of %d finish schemas declare %s", got, nodes, ir.UnservedResultField)
+	// Each finish node takes its properties from the step's result model, and
+	// that model, one class for every step, carries the unserved request.
+	if got := strings.Count(pipecat, `.tool_parameters()["properties"]`); got != nodes {
+		t.Errorf("bot.py: %d of %d finish schemas come from the step's result model", got, nodes)
+	}
+	if !strings.Contains(pipecat, ir.UnservedResultField+`: str = Field("", description=`) {
+		t.Errorf("bot.py: the step result model does not declare %s", ir.UnservedResultField)
+	}
+	if !strings.Contains(pipecat, `"required": []`) {
+		t.Errorf("bot.py: %s must stay optional, because a required field would force the model to invent one", ir.UnservedResultField)
 	}
 	// Optional, always: a required field would force the model to invent one.
 	if required := regexp.MustCompile(`required=\[[^]]*` + ir.UnservedResultField).FindString(pipecat); required != "" {
