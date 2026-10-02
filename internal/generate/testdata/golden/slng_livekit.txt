@@ -113,10 +113,9 @@ def _caller_turns(chat_ctx: llm.ChatContext) -> int:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 
 from openai import AsyncOpenAI
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, PrivateAttr, TypeAdapter, ValidationError
 
 from settings import logger
 
@@ -415,8 +414,8 @@ def _save_batch(state: Userdata, values: dict, *, step: str | None = None, input
     if not values:
         return
     pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
-    unconfirmed: set[str] = set(getattr(state, "_unconfirmed", ()))
-    provenance = dict(getattr(state, "_prefetch_provenance", {}))
+    unconfirmed = set(state._unconfirmed)
+    provenance = dict(state._prefetch_provenance)
     affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
     # Grow the changed set with everything derived from it, until nothing new joins.
     while more := {name for name, reads in provenance.items() if set(reads) & affected} - affected:
@@ -462,10 +461,8 @@ def _save_batch(state: Userdata, values: dict, *, step: str | None = None, input
         setattr(state, name, None)
     for name, value in pending.items():
         setattr(state, name, value)
-    if hasattr(state, "_unconfirmed"):
-        setattr(state, "_unconfirmed", unconfirmed)  # noqa: B010 - state is typed object
-    if inputs is not None or hasattr(state, "_prefetch_provenance"):
-        setattr(state, "_prefetch_provenance", provenance)  # noqa: B010 - state is typed object
+    state._unconfirmed = unconfirmed
+    state._prefetch_provenance = provenance
 
 
 def _save_call_start(state: Userdata, values: dict, names: tuple[str, ...]) -> None:
@@ -581,14 +578,22 @@ def _state_lookup(state: Userdata | None, name: str) -> tuple[str, object]:
 
 
 # --- shared state ------------------------------------------------------------
-# Typed session state: tasks assign into it, transfers read it.
-@dataclass
-class Userdata:
+# Typed session state: tasks assign into it, transfers read it. Each field's
+# annotation is the check a save goes through.
+class Userdata(BaseModel):
     """The session state every agent and task of one call shares."""
+
+    # A misspelt name is refused, never saved somewhere nothing reads it.
+    model_config = ConfigDict(extra="forbid")
+    # Facts about the values, not values: which ones still wait for the caller
+    # to confirm them, and which inputs each pre-fetched one was derived from.
+    # Private, so no save, prompt or dispatch payload can ever set them.
+    _unconfirmed: set[str] = PrivateAttr(default_factory=lambda: set(_STATE_CONFIRM))
+    _prefetch_provenance: dict[str, tuple[str, ...]] = PrivateAttr(default_factory=dict)
     # What the caller says to call them.
     caller_alias: str | None = None
     customer_id: str | None = None
-    verified: bool | None = False
+    verified: bool = False
     # One value per call, set where the call begins. It groups this call's think
     # requests for support and scopes nothing: the cache scope is the agent id
     # header, so this may differ freely between calls. It lives here rather than
@@ -597,8 +602,9 @@ class Userdata:
     slng_session_id: str = ""
     # And the router client, for the same reason: the summarizer is built inside
     # an agent method, where the entrypoint's local is out of scope. One client
-    # per call, so the pool and its response hook are the call's own.
-    slng_client: AsyncOpenAI | None = None
+    # per call, so the pool and its response hook are the call's own. A client
+    # is not call state, so it is private: never validated, never dumped.
+    _slng_client: AsyncOpenAI | None = PrivateAttr(default=None)
 """How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
 
 from __future__ import annotations
@@ -1649,7 +1655,7 @@ async def run_call(ctx: JobContext) -> None:
     # client it built itself. Without this a worker leaks one connection pool per
     # call it serves.
     slng_client = _slng_router_client()
-    slng_state.slng_client = slng_client
+    slng_state._slng_client = slng_client
 
     async def _close_slng_client() -> None:
         await slng_client.close()
@@ -1674,7 +1680,7 @@ async def run_call(ctx: JobContext) -> None:
             llm_conn_options=APIConnectOptions(max_retry=1),
         ),
         stt=deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3"),
-        llm=openai.LLM(client=slng_state.slng_client, model="gpt-5.6-luna"),
+        llm=openai.LLM(client=slng_state._slng_client, model="gpt-5.6-luna"),
         tts=elevenlabs.TTS(api_key=os.environ["ELEVEN_API_KEY"], voice_id="cgSgspJ2msm6clMCkdW9"),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),

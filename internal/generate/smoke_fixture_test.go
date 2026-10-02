@@ -287,7 +287,7 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 		symbols  []string
 	}{
 		{ir.ProviderLiveKit, agentSource, []string{
-			"class Userdata:", "class ManageBooking(", "class VerifyCustomer(",
+			"class Userdata(BaseModel):", "class ManageBooking(", "class VerifyCustomer(",
 			"class ComplaintSpecialist(", "class _TaskTransfer(",
 			"async def record_complaint(", "async def to_complaints(",
 			// The smoke scripts drive the pre-fetch directly, because that is the
@@ -296,7 +296,7 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 			"async def _prefetch(",
 		}},
 		{ir.ProviderPipecat, agentSource, []string{
-			"class State:", "class ConciergeAgent(", "class ComplaintSpecialistAgent(",
+			"class State(BaseModel):", "class ConciergeAgent(", "class ComplaintSpecialistAgent(",
 			// One read and one write, since the five narrower booking tools were
 			// merged: find_slots answers "what do they hold" and "what is free"
 			// in one call, and save_booking is the only tool that changes a

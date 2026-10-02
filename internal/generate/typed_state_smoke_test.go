@@ -217,19 +217,26 @@ asyncio.run(check_finish_handler())
 state = generated.` + stateExpr + `
 
 from copy import deepcopy
-before_escape = deepcopy(vars(state))
+
+
+def snapshot(s):
+    """Everything a save may change: the fields, and the two private records."""
+    return deepcopy((vars(s), s._unconfirmed, s._prefetch_provenance))
+
+
+before_escape = snapshot(state)
 assert generated._save_result("confirm_number", state, {"unserved_request": "another request"}) == {"unserved_request": "another request"}
-assert vars(state) == before_escape
+assert snapshot(state) == before_escape
 
 assert generated._save_result("no_output", state, {}) == {}
-assert vars(state) == before_escape
+assert snapshot(state) == before_escape
 try:
     generated._save_result("record_flags", state, {"count": 4, "accepted": "not-a-boolean"})
 except generated._StateRefused:
     pass
 else:
     raise AssertionError("invalid primitive result was accepted")
-assert vars(state) == before_escape
+assert snapshot(state) == before_escape
 generated._save_result("record_flags", state, {"count": 0, "accepted": False})
 assert state.count == 0 and state.accepted is False
 
@@ -240,12 +247,11 @@ assert generated._state_text("caller_reason", 0) == "0"
 
 # A later invalid destination cannot leave an earlier append behind. A retry
 # uses the same call state and only commits once all destinations fit.
-from copy import deepcopy
 from pydantic import TypeAdapter
 
 original_adapter = generated._STATE_TYPES["last_appointment"]
 generated._STATE_TYPES["last_appointment"] = TypeAdapter(int)
-before_batch = deepcopy(vars(state))
+before_batch = snapshot(state)
 try:
     generated._save_result("book", state, {
         "reason": "create_booking",
@@ -257,7 +263,7 @@ except generated._StateRefused:
     pass
 else:
     raise AssertionError("invalid final destination was saved")
-assert vars(state) == before_batch, (vars(state), before_batch)
+assert snapshot(state) == before_batch, (snapshot(state), before_batch)
 generated._STATE_TYPES["last_appointment"] = original_adapter
 generated._save_result("book", state, {
     "reason": "create_booking",

@@ -1629,10 +1629,9 @@ def require_env() -> None:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 
 from loguru import logger
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, PrivateAttr, TypeAdapter, ValidationError
 
 # --- declared state ----------------------------------------------------------
 # Generated from the `shapes:` and the typed `variables:` in agent.yaml. Both
@@ -1918,8 +1917,8 @@ def _save_batch(state: State, values: dict, *, step: str | None = None, inputs: 
     if not values:
         return
     pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
-    unconfirmed: set[str] = set(getattr(state, "_unconfirmed", ()))
-    provenance = dict(getattr(state, "_prefetch_provenance", {}))
+    unconfirmed = set(state._unconfirmed)
+    provenance = dict(state._prefetch_provenance)
     affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
     # Grow the changed set with everything derived from it, until nothing new joins.
     while more := {name for name, reads in provenance.items() if set(reads) & affected} - affected:
@@ -1965,10 +1964,8 @@ def _save_batch(state: State, values: dict, *, step: str | None = None, inputs: 
         setattr(state, name, None)
     for name, value in pending.items():
         setattr(state, name, value)
-    if hasattr(state, "_unconfirmed"):
-        setattr(state, "_unconfirmed", unconfirmed)  # noqa: B010 - state is typed object
-    if inputs is not None or hasattr(state, "_prefetch_provenance"):
-        setattr(state, "_prefetch_provenance", provenance)  # noqa: B010 - state is typed object
+    state._unconfirmed = unconfirmed
+    state._prefetch_provenance = provenance
 
 
 def _save_call_start(state: State, values: dict, names: tuple[str, ...]) -> None:
@@ -2083,9 +2080,17 @@ def _state_lookup(state: State | None, name: str) -> tuple[str, object]:
     return root, value
 
 
-@dataclass
-class State:
+# Each field's annotation is the check a save goes through.
+class State(BaseModel):
     """Typed call variables, shared across agents."""
+
+    # A misspelt name is refused, never saved somewhere nothing reads it.
+    model_config = ConfigDict(extra="forbid")
+    # Facts about the values, not values: which ones still wait for the caller
+    # to confirm them, and which inputs each pre-fetched one was derived from.
+    # Private, so no save, prompt or dispatch payload can ever set them.
+    _unconfirmed: set[str] = PrivateAttr(default_factory=lambda: set(_STATE_CONFIRM))
+    _prefetch_provenance: dict[str, tuple[str, ...]] = PrivateAttr(default_factory=dict)
 
     customer_id: str | None = None
     verified: bool = False

@@ -525,6 +525,7 @@ func emittedClassNames(agent *ir.Agent) map[string]string {
 		"Agent": "the framework", "AgentTask": "the framework", "AgentSession": "the framework",
 		"BaseModel": "Pydantic", "Field": "Pydantic", "TypeAdapter": "Pydantic",
 		"AfterValidator": "Pydantic", "ValidationError": "Pydantic",
+		"ConfigDict": "Pydantic", "PrivateAttr": "Pydantic",
 		"Annotated": "the typing module", "Literal": "the typing module",
 		"NodeConfig": "the framework", "LLMWorker": "the framework",
 	}
@@ -695,56 +696,47 @@ func walkTypeRefs(agent *ir.Agent, visit func(*ir.TypeRef)) {
 
 }
 
-// stateField is one declared value as a shared-state dataclass declares it:
-// the annotation, and the default.
+// stateField is one declared value as the state model declares it: the
+// annotation, and the default.
 //
-// A declared list starts empty rather than absent, so an append never has to
-// create it, and through a factory because a shared mutable default on a
-// dataclass is one call's state leaking into the next.
-//
-// nullableWithDefault is the one place the two targets differ, and the
-// divergence is older than this feature: LiveKit annotates every field
-// `| None` whatever its default, while Pipecat annotates a field carrying a
-// default with its bare type. Passed in rather than decided here, so this file
-// does not quietly pick a winner and no package written before this feature
-// emits a byte differently.
-func stateField(variable ir.Variable, nullableWithDefault bool) (anno, def string) {
+// The annotation is the check, so it says exactly what a save may hold, and
+// both targets write the same one. A value with an authored default holds its
+// declared type and never None. A value with no default starts as None, which
+// is "no value yet", so its annotation admits None and a save of None is a
+// value nobody has given yet rather than a wrong one. A declared list starts
+// empty rather than absent, so an append never has to create it; Pydantic
+// copies the empty list for each call, so one call's entries cannot leak into
+// the next.
+func stateField(variable ir.Variable) (anno, def string) {
 	anno = pyType(variable.Type)
 	if variable.Shape != nil {
 		anno = PyAnno(variable.Shape)
 	}
 	if variable.Shape.IsList() {
-		return anno, "field(default_factory=list)"
+		return anno, "[]"
 	}
-	def = "None"
 	if variable.Default != nil {
-		def = pyLiteral(variable.Default)
+		return anno, pyLiteral(variable.Default)
 	}
-	if variable.Default == nil || nullableWithDefault {
-		if !strings.HasSuffix(anno, " | None") {
-			anno += " | None"
-		}
+	if !strings.HasSuffix(anno, " | None") {
+		anno += " | None"
 	}
-	return anno, def
-}
-
-// StateNeedsDataclassField reports whether any declared value starts as an
-// empty list, which is the one thing that needs `field` beside `dataclass`.
-func StateNeedsDataclassField(agent *ir.Agent) bool {
-	for _, variable := range agent.Variables {
-		if variable.Shape.IsList() {
-			return true
-		}
-	}
-	return false
+	return anno, "None"
 }
 
 // PydanticImports is the `from pydantic import ...` line each module needs.
 // One computed list rather than two conditional lines, because Field is wanted
 // by a tool argument description as well as by a shape field and importing it
 // twice is what a linter reads as a redefinition.
-func PydanticImports(needsField bool, typed *TypedStateBlock) string {
+//
+// stateClass says the module defines the state model, which is a BaseModel
+// with a config and private attributes whether or not anything is typed: a
+// LiveKit package on the SLNG router alone has one.
+func PydanticImports(needsField, stateClass bool, typed *TypedStateBlock) string {
 	var names []string
+	if stateClass {
+		names = append(names, "BaseModel", "ConfigDict", "PrivateAttr")
+	}
 	if typed != nil {
 		if typed.NeedsShaped {
 			names = append(names, "AfterValidator")
@@ -759,6 +751,7 @@ func PydanticImports(needsField bool, typed *TypedStateBlock) string {
 		names = append(names, "Field")
 	}
 	slices.Sort(names)
+	names = slices.Compact(names)
 	return strings.Join(names, ", ")
 }
 
@@ -1110,8 +1103,8 @@ def _save_batch(state: STATE_CLASS, values: dict, *, step: str | None = None, in
     if not values:
         return
     pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
-    unconfirmed: set[str] = set(getattr(state, "_unconfirmed", ()))
-    provenance = dict(getattr(state, "_prefetch_provenance", {}))
+    unconfirmed = set(state._unconfirmed)
+    provenance = dict(state._prefetch_provenance)
     affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
     # Grow the changed set with everything derived from it, until nothing new joins.
     while more := {name for name, reads in provenance.items() if set(reads) & affected} - affected:
@@ -1157,10 +1150,8 @@ def _save_batch(state: STATE_CLASS, values: dict, *, step: str | None = None, in
         setattr(state, name, None)
     for name, value in pending.items():
         setattr(state, name, value)
-    if hasattr(state, "_unconfirmed"):
-        setattr(state, "_unconfirmed", unconfirmed)  # noqa: B010 - state is typed object
-    if inputs is not None or hasattr(state, "_prefetch_provenance"):
-        setattr(state, "_prefetch_provenance", provenance)  # noqa: B010 - state is typed object
+    state._unconfirmed = unconfirmed
+    state._prefetch_provenance = provenance
 `
 
 // stateCallStartHelper saves what the dispatch sent, through the same check
@@ -1306,7 +1297,7 @@ def _is_confirmed(state: STATE_CLASS, name: str) -> bool:
         True when the value is filled and nobody has withdrawn its confirmation.
     """
     value = getattr(state, name, None)
-    return name not in getattr(state, "_unconfirmed", ()) and value is not None and value != ""
+    return name not in state._unconfirmed and value is not None and value != ""
 
 
 def _withdraw_confirmation(state: STATE_CLASS, step: str) -> None:
@@ -1327,7 +1318,7 @@ def _withdraw_confirmation(state: STATE_CLASS, step: str) -> None:
     withdrawn = {name for name, owner in _STATE_CONFIRM.items() if owner == step}
     if not withdrawn:
         return
-    unconfirmed = set(getattr(state, "_unconfirmed", ())) | withdrawn
+    unconfirmed = state._unconfirmed | withdrawn
     # Dependencies are acyclic, so one pass per entry settles them. The same
     # loop _save_batch runs, deliberately not shared with it: sharing would mean
     # editing a function every package emits, and every package that writes none
@@ -1339,8 +1330,7 @@ def _withdraw_confirmation(state: STATE_CLASS, step: str) -> None:
                 unconfirmed.add(name)
         if before == unconfirmed:
             break
-    if hasattr(state, "_unconfirmed"):
-        setattr(state, "_unconfirmed", unconfirmed)  # noqa: B010 - state is typed object
+    state._unconfirmed = unconfirmed
     logger.info("withdrew confirmation on entering " + step)
 `
 

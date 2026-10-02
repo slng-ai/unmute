@@ -254,8 +254,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		needAnnotated = needAnnotated || typed.NeedsAnnotated
 		needLiteral = needLiteral || typed.NeedsLiteral
 	}
-	data.PydanticImports = PydanticImports(data.NeedsField, data.TypedState)
-	data.NeedsDataclassField = StateNeedsDataclassField(agent) || PrefetchUnconfirmed(agent)
 	// Sorted the way the emitted import line has to be: Annotated, Any, Literal.
 	typingImports := func(needAny bool) string {
 		var names []string
@@ -409,7 +407,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// on the session; `assign` and `requires` read and write its fields.
 	for _, name := range sortedVarNames(agent) {
 		v := agent.Variables[name]
-		anno, def := stateField(v, true)
+		anno, def := stateField(v)
 		data.Vars = append(data.Vars, livekitVar{
 			Name: name, PyType: pyType(v.Type), Anno: anno, Default: def, Description: oneLine(v.Description),
 			LiteralDefault: defaultOutsideLiteral(anno, def),
@@ -591,6 +589,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// it from a method body is the only way the header set can travel per
 	// request.
 	data.HasUserdata = data.HasVars || slng.Any()
+	data.PydanticImports = PydanticImports(data.NeedsField, data.HasUserdata, data.TypedState)
 	// The emitted mixin names llm.LLM to tell a per-class model override from
 	// the session default, the way the framework's own activity does.
 	data.NeedsLLM = data.NeedsLLM || slng.Any()
@@ -1634,8 +1633,8 @@ const (
 	// The router client, in the two scopes that build a router model: the
 	// entrypoint local it was just assigned to, and an agent method reaching the
 	// same object through the session.
-	livekitEntryClientExpr   = "slng_state.slng_client"
-	livekitRuntimeClientExpr = "self.session.userdata.slng_client"
+	livekitEntryClientExpr   = "slng_state._slng_client"
+	livekitRuntimeClientExpr = "self.session.userdata._slng_client"
 )
 
 // livekitSessionIDField is the field the per-call session id occupies on the user

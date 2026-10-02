@@ -646,9 +646,6 @@ type livekitData struct {
 	TypingImports      string     // `from typing import ...` names (Annotated/Literal), "" if none (V2)
 	NeedsField         bool       // any tool arg carries a description (V2)
 	PydanticImports    string     // the whole `from pydantic import ...` line, "" if none
-	// NeedsDataclassField is `field` beside `dataclass`, wanted only by a
-	// declared list, which starts empty through a default_factory.
-	NeedsDataclassField bool
 	// TypedState is the declared-shape block, rendered once in shapes.go for
 	// both targets, or nil for a package that declares nothing structured. That
 	// nil is what makes such a package byte-identical (FR-015).

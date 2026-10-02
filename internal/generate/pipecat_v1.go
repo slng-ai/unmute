@@ -647,12 +647,9 @@ type pipecatData struct {
 	// PydanticImports is the whole `from pydantic import ...` line, "" if none.
 	PydanticImports string
 	// TypingImports is the `from typing import ...` names, "" if none.
-	TypingImports string
-	// NeedsDataclassField is `field` beside `dataclass`, wanted only by a
-	// declared list, which starts empty through a default_factory.
-	NeedsDataclassField bool
-	NeedsStateBind      bool // any flow tool reading state (inject inside a task)
-	NeedsRefusal        bool // any tool whose injected variables can be unset (V4)
+	TypingImports  string
+	NeedsStateBind bool // any flow tool reading state (inject inside a task)
+	NeedsRefusal   bool // any tool whose injected variables can be unset (V4)
 	// NeedsLastN gates the emitted _last_n helper, so a package that authors no
 	// last_n window emits nothing new. Same pattern as LiveKit's own NeedsLastN.
 	NeedsLastN bool

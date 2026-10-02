@@ -225,8 +225,7 @@ import os
 {{end}}{{if or .HasWarmTransfer .HasColdTransfer}}import time
 {{end}}{{if .Slng.Any}}import uuid
 {{end}}from collections.abc import AsyncIterable
-{{if .HasUserdata}}from dataclasses import {{if .NeedsDataclassField}}dataclass, field{{else}}dataclass{{end}}
-{{end}}{{if .NeedsPrefetchClock}}from datetime import datetime
+{{if .NeedsPrefetchClock}}from datetime import datetime
 {{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
 {{end}}{{if .NeedsPrefetchClock}}from zoneinfo import ZoneInfo

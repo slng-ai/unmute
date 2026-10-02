@@ -171,7 +171,12 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // The same day, the declared state moved out of session.py into its own
 // state.py on both code targets. The code moved and did not change: apart from
 // imports, module docstrings and the generated-file list, every line of every
-// golden is the same multiset of lines before and after.
+// golden is the same multiset of lines before and after. Then the state class
+// became a Pydantic BaseModel on both targets instead of a dataclass: the same
+// fields, one annotation rule on both (a value with a default holds its type,
+// one without may be None), list defaults written as [] because Pydantic copies
+// them per call, and the confirmation and provenance records declared as
+// private attributes rather than set onto the object at run time.
 //
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.

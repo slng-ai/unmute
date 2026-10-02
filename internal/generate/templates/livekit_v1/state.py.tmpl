@@ -5,13 +5,19 @@
 {{end}}
 {{- if .HasUserdata}}
 # --- shared state ------------------------------------------------------------
-# Typed session state: tasks assign into it, transfers read it.
-@dataclass
-class Userdata:
+# Typed session state: tasks assign into it, transfers read it. Each field's
+# annotation is the check a save goes through.
+class Userdata(BaseModel):
     """The session state every agent and task of one call shares."""
 
-{{- if .NeedsPrefetchUnconfirmed}}
-    _unconfirmed: set[str] = field(default_factory=lambda: set(_STATE_CONFIRM))
+    # A misspelt name is refused, never saved somewhere nothing reads it.
+    model_config = ConfigDict(extra="forbid")
+{{- if .TypedState}}
+    # Facts about the values, not values: which ones still wait for the caller
+    # to confirm them, and which inputs each pre-fetched one was derived from.
+    # Private, so no save, prompt or dispatch payload can ever set them.
+    _unconfirmed: set[str] = PrivateAttr(default_factory=lambda: set(_STATE_CONFIRM))
+    _prefetch_provenance: dict[str, tuple[str, ...]] = PrivateAttr(default_factory=dict)
 {{- end}}
 {{- range .Vars}}
 {{- if .Description}}
@@ -29,8 +35,9 @@ class Userdata:
 {{- if .Slng.ClientBaseURL}}
     # And the router client, for the same reason: the summarizer is built inside
     # an agent method, where the entrypoint's local is out of scope. One client
-    # per call, so the pool and its response hook are the call's own.
-    slng_client: AsyncOpenAI | None = None
+    # per call, so the pool and its response hook are the call's own. A client
+    # is not call state, so it is private: never validated, never dumped.
+    _slng_client: AsyncOpenAI | None = PrivateAttr(default=None)
 {{- end}}
 {{- end}}
 

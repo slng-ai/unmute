@@ -134,7 +134,7 @@ func TestTypedStateEmitsTheBlockWhenAuthored(t *testing.T) {
 			"def _typed_result(step: str, values: dict) -> dict:",
 			"_STATE_STRUCTURED = {",
 			"Phone = Annotated[\n    str,\n    AfterValidator(_shape_phone),\n",
-			"field(default_factory=list)",
+			"appointments: list[Appointment] = []",
 		} {
 			if !strings.Contains(module, want) {
 				t.Errorf("%s does not emit %q", provider, want)
@@ -472,7 +472,7 @@ func TestTwoAppendedEntriesAreBothRecorded(t *testing.T) {
 			`("caller_reason", "reason", True)`,
 			"_append_entry(entries, value)",
 			// And the list is there to append to before the first step runs.
-			"appointments: list[Appointment] = field(default_factory=list)",
+			"appointments: list[Appointment] = []",
 		} {
 			if !strings.Contains(module, want) {
 				t.Errorf("%s does not emit %q, so the second entry replaces the first", provider, want)
@@ -487,11 +487,15 @@ func TestTwoAppendedEntriesAreBothRecorded(t *testing.T) {
 			}
 		}
 	}
-	// A shared mutable default is one call's state leaking into the next, which
-	// is why the list arrives through a factory rather than as a literal.
+	// A shared mutable default would be one call's state leaking into the next.
+	// The literal is safe only because the state is a Pydantic model, which
+	// copies a field's default for each instance; on a dataclass it would be
+	// one list for every call. The smoke suite measures the copy.
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
-		if strings.Contains(emitted(t, agent, provider), "appointments: list[Appointment] = []") {
-			t.Errorf("%s shares one list between calls", provider)
+		module := emitted(t, agent, provider)
+		if !strings.Contains(module, "(BaseModel):\n    \"\"\"The session state") &&
+			!strings.Contains(module, "(BaseModel):\n    \"\"\"Typed call variables") {
+			t.Errorf("%s declares its list defaults on a state class that is not a BaseModel, so every call shares one list", provider)
 		}
 	}
 }

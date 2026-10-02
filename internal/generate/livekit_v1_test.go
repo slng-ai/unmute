@@ -999,7 +999,7 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 		"async def do_find(self, ctx: RunContext) -> dict:",
 		"result = await FindSlot(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))",
 		`_values = _save_result("find_slot", ctx.userdata, {"date": date, "unserved_request": unserved_request})`,
-		"@dataclass\nclass Userdata:",
+		"class Userdata(BaseModel):",
 		"caller_phone: str | None = None",
 		"session = AgentSession[Userdata](",
 		"userdata=Userdata(),",
