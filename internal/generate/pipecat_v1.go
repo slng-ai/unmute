@@ -1243,6 +1243,15 @@ func (d pipecatData) RequiredCallStart() []string {
 	return names
 }
 
+// CallStartNames is the Python tuple of variables a dispatch may fill.
+func (d pipecatData) CallStartNames() string {
+	names := make([]string, len(d.CallStartVars))
+	for i, v := range d.CallStartVars {
+		names[i] = v.Name
+	}
+	return "(" + pyTuple(names) + ")"
+}
+
 // botImportWidth is ruff's default line length, the width isort wraps at.
 const botImportWidth = 88
 

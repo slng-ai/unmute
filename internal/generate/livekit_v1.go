@@ -284,19 +284,11 @@ type livekitTelephony struct {
 	HasWarm       bool
 	Greeting      *livekitGreeting
 	SystemSources []livekitSystemSource
-	CallStart     []livekitCallStart
 }
 
 type livekitSystemSource struct {
 	Variable string
 	Source   string
-}
-
-type livekitCallStart struct {
-	Name      string
-	Type      string
-	TypeCheck string
-	Required  bool
 }
 
 // livekitDelegate lowers a delegate control. A single task awaits its
@@ -381,10 +373,11 @@ type livekitVar struct {
 // livekitCallStartVar is one dispatched input variable, hydrated from the job
 // metadata or the dev UNMUTE_CALL_START payload before the greeting.
 type livekitCallStartVar struct {
-	Name      string
-	Type      string
-	TypeCheck string
-	Required  bool
+	Name string
+	// Type is the authored type, `CustomerRecord` rather than `string`, because
+	// the runbook lists it and the dispatched value is checked against it.
+	Type     string
+	Required bool
 }
 
 type livekitStep struct {
@@ -1099,6 +1092,15 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 		return wrapLongImports(buf.Bytes()), nil
 	}
 	return buf.Bytes(), nil
+}
+
+// CallStartNames is the Python tuple of variables a dispatch may fill.
+func (d livekitData) CallStartNames() string {
+	names := make([]string, len(d.CallStartVars))
+	for i, v := range d.CallStartVars {
+		names[i] = v.Name
+	}
+	return "(" + pyTuple(names) + ")"
 }
 
 // livekitFuncs are the functions every LiveKit template can call.

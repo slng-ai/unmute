@@ -416,7 +416,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		})
 		if v.Source == ir.VariableSourceCallStart || v.Source == "" {
 			data.CallStartVars = append(data.CallStartVars, livekitCallStartVar{
-				Name: name, Type: string(v.Type), TypeCheck: livekitTypeCheck(v.Type),
+				Name: name, Type: authoredType(v),
 				Required: v.Default == nil && v.Source == ir.VariableSourceCallStart,
 			})
 		}
@@ -658,14 +658,6 @@ func fillLiveKitTelephonyCommon(telephony *livekitTelephony, agent *ir.Agent, pl
 			telephony.HasOutbound = true
 		case "warm_transfer":
 			telephony.HasWarm = true
-		}
-	}
-	for _, variable := range sortedVarNames(agent) {
-		def := agent.Variables[variable]
-		if def.Source == ir.VariableSourceCallStart {
-			telephony.CallStart = append(telephony.CallStart, livekitCallStart{
-				Name: variable, Type: string(def.Type), TypeCheck: livekitTypeCheck(def.Type), Required: def.Default == nil,
-			})
 		}
 	}
 	sourceVariables := make([]string, 0, len(plan.SystemSources))

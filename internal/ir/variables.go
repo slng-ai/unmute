@@ -30,6 +30,25 @@ var systemSources = []VariableSource{
 	VariableSourceFromNumber, VariableSourceToNumber,
 }
 
+// stateReservedNames are the variable names the generated state model cannot
+// hold as fields. A variable becomes a field on a Pydantic model, so a name the
+// model already defines either fails when the class is built (model_config) or
+// shadows a method the runtime calls (copy, dict, json). And a field named after
+// a builtin replaces that builtin inside the class body, so every later field
+// annotated `str` or `list[...]` reads the default value instead of the type.
+// Any `model_` name is reserved too, which is Pydantic's own rule.
+var stateReservedNames = []string{
+	"bool", "construct", "copy", "dict", "float", "from_orm", "int", "json", "list",
+	"parse_file", "parse_obj", "parse_raw", "schema", "schema_json", "set", "str",
+	"tuple", "update_forward_refs", "validate",
+}
+
+// stateReservedName reports a variable name the generated state model cannot
+// hold.
+func stateReservedName(name string) bool {
+	return strings.HasPrefix(name, "model_") || slices.Contains(stateReservedNames, name)
+}
+
 // IsSystemSource reports whether a source is runtime-owned, meaning the value
 // arrives from the telephony route rather than from a dispatch payload or the
 // conversation. Both drivers and the telephony plan key off this.

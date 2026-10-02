@@ -513,7 +513,7 @@ func TestPipecatHydratesASystemSourceVariable(t *testing.T) {
 	bot := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		`_value = (call_context or {}).get("from_number")`,
-		`state.caller_fact = _value`,
+		`_save_fact(state, "caller_fact", _value)`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("build_state does not hydrate a system-source variable: %s", want)

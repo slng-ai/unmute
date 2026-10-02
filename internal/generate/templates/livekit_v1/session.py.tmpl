@@ -146,11 +146,12 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
         metadata: The parsed job metadata, if any.
 
     Returns:
-        The variables, checked against their declared types.
+        The variables. Their types are checked when _hydrate_call_start saves
+        them.
 
     Raises:
-        RuntimeError: A value has the wrong type, a required one is missing, or
-            UNMUTE_CALL_START is not a JSON object.
+        RuntimeError: A required value is missing, or UNMUTE_CALL_START is not a
+            JSON object.
     """
     values = dict((metadata or {}).get("call_start", {}))
     raw = os.getenv("UNMUTE_CALL_START")
@@ -164,32 +165,25 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
         # The dispatch wins: env is the local stand-in for it.
         values = supplied | values
     missing: list[str] = []
-{{- range .CallStartVars}}
-    if {{pyq .Name}} in values:
-        value = values[{{pyq .Name}}]
-        if not ({{.TypeCheck}}):
-            raise RuntimeError({{pyq (printf "call_start.%s must be %s" .Name .Type)}})
-{{- if .Required}}
-    else:
+{{- range .CallStartVars}}{{if .Required}}
+    if {{pyq .Name}} not in values:
         missing.append({{pyq .Name}})
-{{- end}}
-{{- end}}
+{{- end}}{{end}}
     if missing:
         raise RuntimeError("Missing call_start fields: " + ", ".join(missing))
     return values
 
 
 def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
-    """Copy the dispatched input variables onto the session state.
+    """Save the dispatched input variables onto the session state.
 
     Args:
         userdata: The state to fill.
         values: The variables from _dispatched_call_start.
+
+    Raises:
+        RuntimeError: A value does not fit its declared type.
     """
-{{- range .CallStartVars}}
-    if {{pyq .Name}} in values:
-        userdata.{{.Name}} = values[{{pyq .Name}}]
-{{- end}}
-    return None
+    _save_call_start(userdata, values, {{.CallStartNames}})
 
 {{end}}

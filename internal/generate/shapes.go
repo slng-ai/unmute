@@ -180,6 +180,11 @@ type TypedStateBlock struct {
 	// NeedsWithdrawal says some group step carries `skip_when_confirmed:`, which
 	// is the one thing that emits the confirmation helpers.
 	NeedsWithdrawal bool
+	// NeedsCallStart says some variable can be filled by the dispatch, and
+	// NeedsFacts that some variable reads a fact the carrier sends. Each emits
+	// the helper that saves that kind of arrival, and nothing else does.
+	NeedsCallStart bool
+	NeedsFacts     bool
 	// NeedsShaped says any text type with a validated shape is used, which is
 	// what needs AfterValidator and typing.Annotated.
 	NeedsShaped    bool
@@ -302,6 +307,10 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 			block.NeedsWithdrawal = true
 		}
 	}
+	for _, variable := range agent.Variables {
+		block.NeedsCallStart = block.NeedsCallStart || variable.Source == ir.VariableSourceCallStart || variable.Source == ""
+		block.NeedsFacts = block.NeedsFacts || ir.IsSystemSource(variable.Source)
+	}
 	used := usedShapedText(agent)
 	if len(classes) == 0 && len(agent.Variables) == 0 && len(finish) == 0 && len(agent.Tasks) == 0 {
 		return TypedStateBlock{}, nil
@@ -415,6 +424,12 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 		}
 	}
 	b.WriteString(stateSaveHelpers)
+	if block.NeedsCallStart {
+		b.WriteString(stateCallStartHelper)
+	}
+	if block.NeedsFacts {
+		b.WriteString(stateFactHelper)
+	}
 	if block.NeedsTerminal {
 		b.WriteString(stateTerminalHelpers)
 	}
@@ -1146,6 +1161,62 @@ def _save_batch(state: STATE_CLASS, values: dict, *, step: str | None = None, in
         setattr(state, "_unconfirmed", unconfirmed)  # noqa: B010 - state is typed object
     if inputs is not None or hasattr(state, "_prefetch_provenance"):
         setattr(state, "_prefetch_provenance", provenance)  # noqa: B010 - state is typed object
+`
+
+// stateCallStartHelper saves what the dispatch sent, through the same check
+// every other save goes through.
+const stateCallStartHelper = `
+
+def _save_call_start(state: STATE_CLASS, values: dict, names: tuple[str, ...]) -> None:
+    """Save the values the dispatch sent, each checked against its declared type.
+
+    A value that does not fit stops the call before it starts. The dispatch is
+    the author's own payload, so a wrong value in it is a defect to fix, and a
+    call started anyway would run on a value nobody declared. Nothing is saved
+    when one value is refused.
+
+    Args:
+        state: The call's shared state object.
+        values: The dispatched values, by variable name.
+        names: The variables a dispatch may fill.
+
+    Raises:
+        RuntimeError: If a dispatched value does not fit its declared type.
+    """
+    try:
+        _save_batch(state, {name: values[name] for name in names if name in values})
+    except _StateRefused as refused:
+        raise RuntimeError(f"call_start: {refused.message}") from None
+`
+
+// stateFactHelper saves one fact the carrier sent. Separate from the call-start
+// helper because a refusal means something different: the author can fix a
+// dispatch, nobody can fix a caller who withholds their number.
+const stateFactHelper = `
+
+def _save_fact(state: STATE_CLASS, name: str, value: object) -> bool:
+    """Save one fact the carrier sent, unless it does not fit its declared type.
+
+    A caller who withholds their number arrives as "anonymous", which is not a
+    phone number and is nobody's mistake. Ending the call for it would hang up
+    on the caller, so a fact that does not fit is logged, left unsaved, and
+    treated as a fact that never arrived. Each fact is saved on its own, so one
+    odd value never drops the others.
+
+    Args:
+        state: The call's shared state object.
+        name: The declared variable the fact fills.
+        value: The fact as the carrier sent it.
+
+    Returns:
+        Whether the fact was saved.
+    """
+    try:
+        _save_batch(state, {name: value})
+    except _StateRefused as refused:
+        logger.warning(f"call fact {name}: {refused.message}; treated as missing")
+        return False
+    return True
 `
 
 // stateTerminalHelpers is what a task ending on its own tool needs.

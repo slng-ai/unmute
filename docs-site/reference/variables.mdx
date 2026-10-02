@@ -286,6 +286,12 @@ For an inbound LiveKit or Pipecat telephony channel, every `call_start` variable
 needs a default. There is no dispatch payload to supply an unsolicited incoming
 call before its greeting.
 
+A value from the dispatch or from the phone adapter is checked against the
+variable's type when it is saved, the same check a step's `assign:` gets. A
+dispatched value that does not fit stops the call before the greeting, and the
+error names the field. A phone-adapter fact that does not fit, such as
+`anonymous` for a `Phone`, is treated as a fact that never arrived.
+
 ## `prefetch:` resolves a value before the call starts
 
 Some values are knowable before anybody speaks: today's date, the number the call

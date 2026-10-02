@@ -425,6 +425,11 @@ func checkNames(pkg *packagespec.Package) error {
 			}
 		}
 	}
+	for _, name := range sortedKeys(pkg.Agent.Variables) {
+		if stateReservedName(name) {
+			return fmt.Errorf("%s: variable name %q is taken by the generated Pydantic state model, which already defines it or needs the builtin it shadows; rename the variable", pkg.Location("agent.yaml", name), name)
+		}
+	}
 	// All five kinds become callable function names at runtime, so they share one
 	// flat namespace: a name may sit in exactly one catalog, and never on a tool
 	// as well.

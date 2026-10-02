@@ -480,6 +480,28 @@ def _save_batch(state: State, values: dict, *, step: str | None = None, inputs: 
         setattr(state, "_prefetch_provenance", provenance)  # noqa: B010 - state is typed object
 
 
+def _save_call_start(state: State, values: dict, names: tuple[str, ...]) -> None:
+    """Save the values the dispatch sent, each checked against its declared type.
+
+    A value that does not fit stops the call before it starts. The dispatch is
+    the author's own payload, so a wrong value in it is a defect to fix, and a
+    call started anyway would run on a value nobody declared. Nothing is saved
+    when one value is refused.
+
+    Args:
+        state: The call's shared state object.
+        values: The dispatched values, by variable name.
+        names: The variables a dispatch may fill.
+
+    Raises:
+        RuntimeError: If a dispatched value does not fit its declared type.
+    """
+    try:
+        _save_batch(state, {name: values[name] for name in names if name in values})
+    except _StateRefused as refused:
+        raise RuntimeError(f"call_start: {refused.message}") from None
+
+
 _STATE_STRUCTURED = {}
 _STATE_EMPTY = "none recorded yet."
 # The bound on one rendered value, in characters. The same number the router
@@ -617,15 +639,14 @@ def build_state(call_context: dict[str, Any] | None = None) -> State:
 
     Returns:
         The state every agent on the call shares.
+
+    Raises:
+        RuntimeError: When a required input variable was not dispatched, or a
+            dispatched value does not fit its declared type.
     """
     state = State()
     call_start = _dispatched_call_start(call_context)
-    if "caller_alias" in call_start:
-        state.caller_alias = call_start["caller_alias"]
-    if "customer_id" in call_start:
-        state.customer_id = call_start["customer_id"]
-    if "verified" in call_start:
-        state.verified = call_start["verified"]
+    _save_call_start(state, call_start, ("caller_alias", "customer_id", "verified"))
     return state
 
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")

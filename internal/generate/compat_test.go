@@ -161,6 +161,14 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // moves their LiveKit bytes (slng_base_url). LiveKit output for a package that
 // did not change is the same.
 //
+// And on 2026-10-02, for every package a dispatch or a carrier can fill: a
+// call-start value and a call fact are saved through _save_batch, so the
+// declared type checks them like every other value entering the state. Before,
+// LiveKit checked only the primitive (an object or a list was refused as "must
+// be string", a Phone was never checked) and Pipecat checked nothing. A bad
+// dispatched value still stops the call start; a fact that does not fit, such
+// as "anonymous" for a Phone, is now treated as missing instead of saved.
+//
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {

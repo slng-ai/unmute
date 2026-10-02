@@ -633,6 +633,20 @@ func TestBuildRejectsBadAndCollidingNames(t *testing.T) { // V7
 			},
 			want: "collide",
 		},
+		{
+			name: "variable named like a state model setting",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Variables["model_config"] = packagespec.Variable{Type: "string"}
+			},
+			want: "taken by the generated Pydantic state model",
+		},
+		{
+			name: "variable named like a builtin type",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Variables["str"] = packagespec.Variable{Type: "string"}
+			},
+			want: "taken by the generated Pydantic state model",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

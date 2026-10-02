@@ -108,6 +108,14 @@ func callStartPayload(agent *ir.Agent, flags []string) (string, error) {
 			return "", fmt.Errorf("--var %s: %q has source %s, so the runtime supplies it, not you", flag, name, variable.Source)
 		}
 		value, err := parseVarValue(variable.Type, raw)
+		if structured(variable.Shape) {
+			// An object or a list arrives as JSON, which is what the runbook and
+			// the docs tell the reader to pass. Its fields are checked by the
+			// agent where the value is saved, as a dispatched one would be.
+			if jsonErr := json.Unmarshal([]byte(raw), &value); jsonErr != nil {
+				err = fmt.Errorf("%q is not JSON for a %s: %w", raw, variable.Shape, jsonErr)
+			}
+		}
 		if err != nil {
 			return "", fmt.Errorf("--var %s: %w", flag, err)
 		}
@@ -118,6 +126,12 @@ func callStartPayload(agent *ir.Agent, flags []string) (string, error) {
 		return "", err
 	}
 	return string(encoded), nil
+}
+
+// structured reports a declared shape that holds fields or entries, as opposed
+// to text with a checked format such as a Phone, which stays a plain string.
+func structured(shape *ir.TypeRef) bool {
+	return shape != nil && (shape.Shape != "" || shape.List != nil)
 }
 
 // parseVarValue converts a flag's text to the variable's declared type, so the

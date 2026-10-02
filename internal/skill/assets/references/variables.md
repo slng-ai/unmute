@@ -278,6 +278,12 @@ only `connector` grants `stream_id`. A variable's own `source:` and a
 either way on a route that grants it. An inbound code-target phone channel
 also requires a default for every `call_start` variable.
 
+A value from the dispatch or from the phone adapter is checked against the
+variable's type when it is saved, the same check a step's `assign:` gets. A
+dispatched value that does not fit stops the call before the greeting, and the
+error names the field. A phone-adapter fact that does not fit, such as
+`anonymous` for a `Phone`, is treated as a fact that never arrived.
+
 ## Resolving a value before the call starts
 
 `prefetch:` names the facts that are knowable before the greeting and resolves
@@ -733,7 +739,8 @@ share no earlier speech.
 unmute dev ./my-agent --var customer_name=Ada --var customer_id=cus_2002
 ```
 
-Repeatable, and each value is parsed against the declared type. `--var` is the
+Repeatable, and each value is parsed against the declared type: pass JSON for an
+object or a list. `--var` is the
 local stand-in for the dispatch payload, so it accepts the two kinds of variable
 that payload fills: `source: call_start`, and a variable that declares no
 `source:` at all. It refuses a runtime-owned source, because that one arrives

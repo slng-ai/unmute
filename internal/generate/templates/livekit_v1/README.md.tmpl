@@ -403,6 +403,9 @@ This agent expects values supplied when the call starts:
 
 {{range .CallStartVars}}- `{{.Name}}` ({{.Type}}){{if .Required}} — required{{end}}
 {{end}}
+Each value is checked against its declared type before the greeting. A value
+that does not fit stops the call start, and the error names the field.
+
 Locally, pass them with `unmute dev` on the source package:
 
 ```sh

@@ -466,6 +466,28 @@ def _save_batch(state: Userdata, values: dict, *, step: str | None = None, input
         setattr(state, "_prefetch_provenance", provenance)  # noqa: B010 - state is typed object
 
 
+def _save_call_start(state: Userdata, values: dict, names: tuple[str, ...]) -> None:
+    """Save the values the dispatch sent, each checked against its declared type.
+
+    A value that does not fit stops the call before it starts. The dispatch is
+    the author's own payload, so a wrong value in it is a defect to fix, and a
+    call started anyway would run on a value nobody declared. Nothing is saved
+    when one value is refused.
+
+    Args:
+        state: The call's shared state object.
+        values: The dispatched values, by variable name.
+        names: The variables a dispatch may fill.
+
+    Raises:
+        RuntimeError: If a dispatched value does not fit its declared type.
+    """
+    try:
+        _save_batch(state, {name: values[name] for name in names if name in values})
+    except _StateRefused as refused:
+        raise RuntimeError(f"call_start: {refused.message}") from None
+
+
 _STATE_STRUCTURED = {}
 _STATE_EMPTY = "none recorded yet."
 # The bound on one rendered value, in characters. The same number the router
@@ -599,11 +621,12 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
         metadata: The parsed job metadata, if any.
 
     Returns:
-        The variables, checked against their declared types.
+        The variables. Their types are checked when _hydrate_call_start saves
+        them.
 
     Raises:
-        RuntimeError: A value has the wrong type, a required one is missing, or
-            UNMUTE_CALL_START is not a JSON object.
+        RuntimeError: A required value is missing, or UNMUTE_CALL_START is not a
+            JSON object.
     """
     values = dict((metadata or {}).get("call_start", {}))
     raw = os.getenv("UNMUTE_CALL_START")
@@ -617,25 +640,22 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
         # The dispatch wins: env is the local stand-in for it.
         values = supplied | values
     missing: list[str] = []
-    if "caller_phone" in values:
-        value = values["caller_phone"]
-        if not (isinstance(value, str)):
-            raise RuntimeError("call_start.caller_phone must be string")
     if missing:
         raise RuntimeError("Missing call_start fields: " + ", ".join(missing))
     return values
 
 
 def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
-    """Copy the dispatched input variables onto the session state.
+    """Save the dispatched input variables onto the session state.
 
     Args:
         userdata: The state to fill.
         values: The variables from _dispatched_call_start.
+
+    Raises:
+        RuntimeError: A value does not fit its declared type.
     """
-    if "caller_phone" in values:
-        userdata.caller_phone = values["caller_phone"]
-    return None
+    _save_call_start(userdata, values, ("caller_phone",))
 """The agents and the task steps they delegate to, with their tools."""
 
 from __future__ import annotations

@@ -172,7 +172,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		// same payload out of UNMUTE_CALL_START (I.dispatch).
 		if v.Source == ir.VariableSourceCallStart || v.Source == "" {
 			data.CallStartVars = append(data.CallStartVars, pipecatCallStartVar{
-				Name: name, Type: string(v.Type), Required: v.Default == nil && v.Source == ir.VariableSourceCallStart,
+				Name: name, Type: authoredType(v), Required: v.Default == nil && v.Source == ir.VariableSourceCallStart,
 			})
 		}
 		// A fact the call itself carries, lifted into call_context by whichever
