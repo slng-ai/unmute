@@ -174,6 +174,11 @@ func sampleBinding(entry targetcap.Entry) (ir.Binding, string) {
 	if entry.RequiresEndpoint {
 		binding.EndpointEnv = "ACME_BASE_URL"
 	}
+	// pipecat-slng 0.6.0 has no default gateway, so resolution refuses SLNG
+	// speech on Pipecat without one, the same way validate does.
+	if entry.Vendor == "slng" && entry.Framework == targetcap.Pipecat && entry.Role != targetcap.Reason {
+		binding.Params["world_part"] = "eu-north"
+	}
 	return binding, label
 }
 

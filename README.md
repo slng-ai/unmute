@@ -381,11 +381,12 @@ models:
 ```
 
 `world_part` picks one of 13 SLNG speech gateways, on each `listen` and `speak`
-model separately. It becomes the host `eu-north.api.slng.ai` in the generated
-project: `slng_base_url=` on LiveKit, `base_url=` on Pipecat.
+model separately. On Pipecat it is passed as `world_part="eu-north"`. On
+LiveKit it becomes the host `slng_base_url="eu-north.api.slng.ai"`.
 
 The 13 are `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`,
-`jp`, `sg`, `id`, `in` and `au`. Leave `world_part` out and the existing default
+`jp`, `sg`, `id`, `in` and `au`. Pipecat requires `world_part`, because its SLNG
+plugin has no default gateway. On LiveKit, leave it out and the existing default
 URL stands. Reasoning through the SLNG Context Router reads the same key and the
 same 13 values, so one word covers listening, thinking and speaking. Where the
 worker itself runs is a separate choice, `deployment_region` in `targets.yaml`,

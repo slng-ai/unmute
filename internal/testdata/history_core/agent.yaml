@@ -106,11 +106,15 @@ models:
       provider: slng
       model: "slng/deepgram/aura:2-en"
       voice: "aura-2-thalia-en"
+      params:
+        world_part: eu-north
     specialist:
       description: "slower, more deliberate"
       provider: slng
       model: "slng/deepgram/aura:2-en"
       voice: "aura-2-orion-en"
+      params:
+        world_part: eu-north
   listen:
     transcriber:
       description: default STT; targets that cannot run it override the entry

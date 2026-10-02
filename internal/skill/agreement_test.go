@@ -626,8 +626,10 @@ func TestRegionalGuidanceStaysExplicit(t *testing.T) {
 			"world_part",
 			"{world_part}.api.slng.ai",
 			`slng_base_url="eu-north.api.slng.ai"`,
-			`base_url="eu-north.api.slng.ai"`,
-			"Omitting `world_part` keeps the existing default URL.",
+			// pipecat-slng 0.6.0 takes the world part itself and has no default.
+			`world_part="eu-north"`,
+			"Required on Pipecat, where omission is refused.",
+			"On LiveKit, omitting `world_part` keeps the existing default URL.",
 			"`params.slng_base_url` cannot be combined with `params.world_part`",
 			"`na`, `eu`, and `ap` are refused",
 		} {

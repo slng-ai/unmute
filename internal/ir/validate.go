@@ -1484,7 +1484,7 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		}
 		if (provider == targetcap.LiveKit || provider == targetcap.Pipecat) &&
 			binding.Provider == "slng" && (role == targetcap.Listen || role == targetcap.Speak) {
-			if _, err := targetcap.SlngSpeechBaseURL(binding.Params); err != nil {
+			if _, err := targetcap.ParseSlngSpeechGateway(provider, binding.Params); err != nil {
 				row.Errors = add(row.Errors, fmt.Sprintf("%s %s model %q: %v", provider, role, binding.Model, err))
 			}
 		}

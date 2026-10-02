@@ -90,6 +90,10 @@ Everything you say is read out loud.
 	// Authored as two fields, never a folded `openai/...` string: the value is
 	// forwarded to the SDK verbatim.
 	DefaultReasonModel = "gpt-5.6-terra"
+	// SlngSpeechStarterParams names the gateway the starter's SLNG speech
+	// calls. Pipecat has no default since pipecat-slng 0.6.0, so a package
+	// without it fails validate. eu-north is the gateway the examples use.
+	SlngSpeechStarterParams = "world_part: eu-north"
 	// TwilioReasonModel is the think model the twilio target was measured on:
 	// streamed replies and tool follow-ups through Chat Completions on
 	// 2026-09-25, with reasoning_effort none.
@@ -556,7 +560,7 @@ func (d *Data) SetTarget(provider string) {
 	// 605ms on slng/deepgram/nova:3-en (n=16). A new package pays that on every
 	// turn, so the faster route is the one to hand out. It is also the only one
 	// salon-concierge could use, because the hosted id has no eu world part.
-	d.Listen = Binding{Provider: "slng", Model: "deepgram/nova:3"}
+	d.Listen = Binding{Provider: "slng", Model: "deepgram/nova:3", Params: SlngSpeechStarterParams}
 	// One generation parameter, and it is not a preference: a fresh package has
 	// tools, and OpenAI rejects function tools on /v1/chat/completions for a
 	// reasoning model unless the request says `reasoning_effort: "none"`. Sending
@@ -577,7 +581,7 @@ func (d *Data) SetTarget(provider string) {
 	// Proxied to match the transcriber above. The measurement behind that choice
 	// is a transcription one and does not carry over to synthesis, so this half
 	// is consistency with the examples rather than a measured win.
-	d.Speak = Binding{Provider: "slng", Model: "deepgram/aura:2", Voice: "aura-2-thalia-en"}
+	d.Speak = Binding{Provider: "slng", Model: "deepgram/aura:2", Voice: "aura-2-thalia-en", Params: SlngSpeechStarterParams}
 }
 
 // TwilioReasonStarter is the think binding a twilio package starts with for

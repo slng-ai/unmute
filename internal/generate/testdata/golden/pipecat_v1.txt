@@ -594,6 +594,7 @@ def build_billing_tts() -> TTSService:
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-orion-en",
         model="slng/deepgram/aura:2-en",
+        world_part="eu-north",
     )
 
 
@@ -713,6 +714,7 @@ def build_intake_tts() -> TTSService:
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-thalia-en",
         model="slng/deepgram/aura:2-en",
+        world_part="eu-north",
     )
 
 
@@ -1312,7 +1314,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         "provider": "slng",
         "model": "slng/deepgram/aura:2-en",
         "voice": "aura-2-thalia-en",
-        "placement": "api"
+        "placement": "api",
+        "params": {
+          "world_part": "eu-north"
+        }
       }
     },
     {
@@ -1323,7 +1328,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         "provider": "slng",
         "model": "slng/deepgram/aura:2-en",
         "voice": "aura-2-orion-en",
-        "placement": "api"
+        "placement": "api",
+        "params": {
+          "world_part": "eu-north"
+        }
       }
     },
     {
@@ -1396,7 +1404,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     "interruption ignore_phrases emitted as IGNORE_PHRASES; short phrases are also suppressed by the min-words turn-start strategy",
     "listen: deepgram via DeepgramSTTService (pipecat-ai[deepgram], verified 2026-07-15)",
     "reason: openai via OpenAILLMService (pipecat-ai[openai], verified 2026-07-15)",
-    "speak: slng via SlngTTSService (pipecat-slng\u003e=0.5.2, verified 2026-09-09)",
+    "speak: slng via SlngTTSService (pipecat-slng\u003e=0.6.0,\u003c0.7, verified 2026-10-02)",
     "turn role lowers to on-device VAD (Silero); its binding is advisory",
     "turn pace balanced (silence 0.2s from the pace, closes at 1.6s)"
   ]
@@ -1491,7 +1499,7 @@ description = "Generated Pipecat voice agent (compiled by unmute)."
 requires-python = ">=3.11"
 dependencies = [
     "pipecat-ai[deepgram,openai,runner,silero,webrtc,websocket]==1.10.0",
-    "pipecat-slng>=0.5.2",
+    "pipecat-slng>=0.6.0,<0.7",
     "python-dotenv>=1.0",
 
     "httpx>=0.27",

@@ -467,8 +467,9 @@ provider keeps its own endpoint and location settings. Set those on the model
 using fields the selected target's plugin supports.
 
 SLNG listen and speak entries choose their API gateway with
-`params.world_part`, which emits `{world_part}.api.slng.ai` on LiveKit
-and Pipecat. `models.md` has the accepted world parts and model YAML. A gateway
+`params.world_part`. LiveKit gets the host `{world_part}.api.slng.ai` as
+`slng_base_url`, and Pipecat gets `world_part` itself. Pipecat requires it on
+every SLNG speech model. `models.md` has the accepted world parts and model YAML. A gateway
 choice does not set the worker region or guarantee where a provider processes
 speech.
 
