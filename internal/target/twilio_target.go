@@ -56,7 +56,7 @@ var TwilioPins = map[string]string{
 	"fastapi":          "0.141.1",
 	"google-genai":     "2.25.0",
 	"openai":           "3.19.2",
-	"pydantic":         "2.13.5",
+	"pydantic":         StatePins["pydantic"],
 	"python-multipart": "0.0.32",
 	"twilio":           "9.11.1",
 	"uvicorn":          "0.54.0",

@@ -1,0 +1,23 @@
+{
+  "source": "internal/stateschema/testdata/models/no_default.py",
+  "digest": "331fe826aeb15a5c21c7696215b946ea2ef0c29d39ac6a86e466c930c2610754",
+  "report": {
+    "schema": {
+      "description": "A field with no default.",
+      "properties": {
+        "phone": {
+          "title": "Phone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "phone"
+      ],
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "source": "internal/stateschema/testdata/models/dict_field.py",
+  "digest": "42dfe0e4a35a2dbff71d9f5e7553951a6bacd2417a8bc097c47069812598dae8",
+  "report": {
+    "schema": {
+      "description": "A field that is a dict.",
+      "properties": {
+        "tags": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Tags",
+          "type": "object"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}
