@@ -109,9 +109,10 @@ LiveKit's compute names come from its
 [agent region list](https://docs.livekit.io/deploy/admin/regions/endpoints/#agent-deployment-regions).
 
 <ParamField path="listen/speak.params.world_part" type="string">
-  Accepts the speech gateway values in the table. Omit to use the plugin's
-  default endpoint. An empty or unknown value is refused. Do not combine it
-  with `params.base_url` or `params.slng_base_url`.
+  Accepts the speech gateway values in the table. Required on Pipecat, where
+  omission is refused. On LiveKit, omit it to use the plugin's default
+  endpoint. An empty or unknown value is refused. Do not combine it with
+  `params.base_url` or `params.slng_base_url`.
 </ParamField>
 
 <ParamField path="think.params.world_part" type="string" required>
@@ -150,16 +151,16 @@ across the two frameworks.
 
 <ParamField path="params.world_part" type="world part code">
   The SLNG speech gateway an SLNG `listen` or `speak` model connects through.
-  One of the 13 values below. Set it on each model separately. Omitting it keeps
-  the existing default URL.
+  One of the 13 values below. Set it on each model separately. Pipecat requires
+  it. On LiveKit, omitting it keeps the existing default URL.
 </ParamField>
 
-Unmute turns the value into the host `{world_part}.api.slng.ai` in generated
-services. For the `eu-north` in the quickstart above, it emits
-`slng_base_url="eu-north.api.slng.ai"` on LiveKit and
-`base_url="eu-north.api.slng.ai"` on Pipecat for both speech models. The plugin
-receives the host without a scheme or path; Unmute consumes
-`world_part` rather than passing it to the plugin.
+Each world part is served at the host `{world_part}.api.slng.ai`. For the
+`eu-north` in the quickstart above, Unmute emits `world_part="eu-north"` on
+Pipecat and `slng_base_url="eu-north.api.slng.ai"` on LiveKit for both speech
+models. The Pipecat plugin takes the world part itself and builds the host. The
+LiveKit plugin takes the host without a scheme or path, so Unmute turns
+`world_part` into that host and does not pass `world_part` on.
 
 This setting changes generated SLNG speech services on LiveKit and Pipecat.
 Choose the worker's `deployment_region` separately. The SLNG hosted target
@@ -186,7 +187,9 @@ and Pipecat. Set the world part on each model separately.
 | `in` | India | `in.api.slng.ai` |
 | `au` | Australia | `au.api.slng.ai` |
 
-Omitting `world_part` keeps the existing default URL.
+On LiveKit, omitting `world_part` keeps the existing default URL. On Pipecat
+the compiler refuses the model, because the SLNG Pipecat plugin has no default
+gateway.
 
 ### SLNG reasoning uses the same world parts
 
@@ -270,6 +273,15 @@ broad areas.
 
 **Fix:** choose one of the 13 values in
 [the table above](#available-slng-world-parts) explicitly.
+
+### Pipecat asks for a `world_part`
+
+The compiler says `params.world_part is required for SLNG speech on pipecat`.
+The SLNG Pipecat plugin has no default gateway, so a bot built without one
+would stop at startup.
+
+**Fix:** add `world_part` to the model's `params:`, for example
+`world_part: eu-north`. Pick the gateway closest to your callers.
 
 ### The compiler refuses `world_part` next to a URL
 

@@ -840,7 +840,7 @@ class Events(Agent):
         super().__init__(
             instructions=EVENTS_PROMPT,
             chat_ctx=chat_ctx,
-            tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-orion-en", model="slng/deepgram/aura:2-en"),
+            tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], slng_base_url="eu-north.api.slng.ai", voice="aura-2-orion-en", model="slng/deepgram/aura:2-en"),
         )
         if isinstance(chat_ctx, llm.ChatContext):
             self._chat_ctx = chat_ctx.copy()
@@ -1023,7 +1023,7 @@ class Reservations(Agent):
         super().__init__(
             instructions=RESERVATIONS_PROMPT,
             chat_ctx=chat_ctx,
-            tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-orion-en", model="slng/deepgram/aura:2-en"),
+            tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], slng_base_url="eu-north.api.slng.ai", voice="aura-2-orion-en", model="slng/deepgram/aura:2-en"),
         )
         if isinstance(chat_ctx, llm.ChatContext):
             self._chat_ctx = chat_ctx.copy()
@@ -1554,9 +1554,9 @@ async def run_call(ctx: JobContext) -> None:
         conn_options=SessionConnectOptions(
             llm_conn_options=APIConnectOptions(max_retry=1),
         ),
-        stt=slng.STT(api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3-en"),
+        stt=slng.STT(api_key=os.environ["SLNG_API_KEY"], slng_base_url="eu-north.api.slng.ai", model="slng/deepgram/nova:3-en"),
         llm=openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o-mini", temperature=0.4),
-        tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-thalia-en", model="slng/deepgram/aura:2-en"),
+        tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], slng_base_url="eu-north.api.slng.ai", voice="aura-2-thalia-en", model="slng/deepgram/aura:2-en"),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),
             # The CEILING, and the shortest wait the runtime will consider.

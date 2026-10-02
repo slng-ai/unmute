@@ -850,10 +850,16 @@ func TestSlngRouterUsesTheWorldPartsChatCompletionsEndpoint(t *testing.T) {
 		if !strings.Contains(source, `api_key=os.environ["SLNG_API_KEY"]`) {
 			t.Errorf("%s: the router key is not read from the environment", tc.provider)
 		}
-		for _, banned := range []string{"openai.responses", "inference.LLM", "world_part"} {
+		for _, banned := range []string{"openai.responses", "inference.LLM"} {
 			if strings.Contains(source, banned) {
 				t.Errorf("%s: emitted %q, which a router binding never takes", tc.provider, banned)
 			}
+		}
+		// pipecat-slng 0.6.0 speech calls take world_part, one each. Any more
+		// is the router binding leaking its world part as a kwarg.
+		speech := strings.Count(source, "SlngTTSService(") + strings.Count(source, "SlngSTTService(")
+		if got := strings.Count(source, "world_part"); got != speech {
+			t.Errorf("%s: emitted world_part %d times for %d SLNG speech calls; a router binding never takes it", tc.provider, got, speech)
 		}
 	}
 }

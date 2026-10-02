@@ -363,7 +363,7 @@ func TestSlngAllRolesShareDeploymentRegions(t *testing.T) {
 		if err := CheckSlngRegion(region); err != nil {
 			t.Error(err)
 		}
-		if _, err := SlngSpeechBaseURL(map[string]any{"world_part": region}); err != nil {
+		if _, err := ParseSlngSpeechGateway(Pipecat, map[string]any{"world_part": region}); err != nil {
 			t.Error(err)
 		}
 	}
@@ -374,7 +374,7 @@ func TestSlngAllRolesShareDeploymentRegions(t *testing.T) {
 		if err := CheckSlngRegion(region); err == nil {
 			t.Errorf("deployment accepted retired/invalid region %q", region)
 		}
-		if _, err := SlngSpeechBaseURL(map[string]any{"world_part": region}); err == nil {
+		if _, err := ParseSlngSpeechGateway(Pipecat, map[string]any{"world_part": region}); err == nil {
 			t.Errorf("speech accepted retired/invalid region %q", region)
 		}
 	}

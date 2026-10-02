@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"fmt"
 	"maps"
 	"path/filepath"
 	"reflect"
@@ -28,18 +29,20 @@ func TestSlngSpeechGateways(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					key := "base_url"
+					// pipecat-slng 0.6.0 takes world_part itself; the LiveKit
+					// plugin only knows a host.
+					gateway, gone := `world_part="`+part+`"`, "base_url="
 					if fw == target.LiveKit {
-						key = "slng_base_url"
+						gateway, gone = `slng_base_url="`+part+`.api.slng.ai"`, "world_part"
 					}
 					args := joinKVs(call.Args)
-					for _, want := range []string{key + `="` + part + `.api.slng.ai"`, `model="` + binding.Model + `"`, `language="en-IN"`} {
+					for _, want := range []string{gateway, `model="` + binding.Model + `"`, `language="en-IN"`} {
 						if !strings.Contains(args, want) {
 							t.Errorf("missing %s in %s", want, args)
 						}
 					}
-					if strings.Contains(args, "world_part") || strings.Count(args, "base_url=") != 1 {
-						t.Errorf("world_part must become one base URL argument: %s", args)
+					if strings.Contains(args, gone) || strings.Count(args, gateway) != 1 {
+						t.Errorf("want exactly one %s and no %s: %s", gateway, gone, args)
 					}
 					if role == target.Speak && (!strings.Contains(args, `voice="shubh"`) || !strings.Contains(args, "warm_standby_enabled=True")) {
 						t.Errorf("lost speak params: %s", args)
@@ -59,9 +62,10 @@ func TestSlngSpeechGatewayKeepsDeployment(t *testing.T) {
 			agent := loadCompilerAgent(t)
 			tgt := targetByProvider(t, agent, provider)
 			tgt.DeploymentRegions = []string{"eu-central"}
-			tgt.Models.Listen = &ir.Binding{Provider: "slng", Model: "sarvam/saaras:v3", Placement: ir.PlacementAPI}
+			first := map[string]any{"world_part": "eu-north"}
+			tgt.Models.Listen = &ir.Binding{Provider: "slng", Model: "sarvam/saaras:v3", Placement: ir.PlacementAPI, Params: first}
 			for name := range tgt.Models.Speak {
-				tgt.Models.Speak[name] = ir.Binding{Provider: "slng", Model: "sarvam/bulbul:v3", Voice: "shubh", Placement: ir.PlacementAPI}
+				tgt.Models.Speak[name] = ir.Binding{Provider: "slng", Model: "sarvam/bulbul:v3", Voice: "shubh", Placement: ir.PlacementAPI, Params: first}
 			}
 			before, err := Generate(agent, tgt, target.Default())
 			if err != nil {
@@ -76,13 +80,13 @@ func TestSlngSpeechGatewayKeepsDeployment(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			file, key, deploy := agentSource, "base_url", "pcc-deploy.toml"
+			file, gateway, deploy := agentSource, `world_part="%s"`, "pcc-deploy.toml"
 			if provider == ir.ProviderLiveKit {
-				file, key, deploy = agentSource, "slng_base_url", "README.md"
+				file, gateway, deploy = agentSource, `slng_base_url="%s.api.slng.ai"`, "README.md"
 			}
 			src := artifactFile(t, after, file)
 			for _, part := range []string{"in", "au"} {
-				if !strings.Contains(src, key+`="`+part+`.api.slng.ai"`) {
+				if !strings.Contains(src, fmt.Sprintf(gateway, part)) {
 					t.Errorf("%s missing %s gateway", file, part)
 				}
 			}
@@ -129,7 +133,7 @@ func TestSlngSpeechGatewayUsesTargetOverride(t *testing.T) {
 		want     string
 	}{
 		{ir.ProviderLiveKit, agentSource, `slng_base_url="jp.api.slng.ai"`},
-		{ir.ProviderPipecat, agentSource, `base_url="in.api.slng.ai"`},
+		{ir.ProviderPipecat, agentSource, `world_part="in"`},
 	} {
 		artifact, err := Generate(agent, targetByProvider(t, agent, tc.provider), target.Default())
 		if err != nil {
@@ -138,5 +142,17 @@ func TestSlngSpeechGatewayUsesTargetOverride(t *testing.T) {
 		if !strings.Contains(artifactFile(t, artifact, tc.file), tc.want) {
 			t.Errorf("%s did not use its resolved model gateway %s", tc.provider, tc.want)
 		}
+	}
+}
+
+// pipecat-slng 0.6.0 raises TypeError without world_part, so the generator
+// refuses the package itself rather than emit a bot that crashes at import.
+func TestSlngSpeechGatewayRequiredOnPipecat(t *testing.T) {
+	binding := ir.Binding{Provider: "slng", Model: "deepgram/aura:2", Voice: "aura-2-thalia-en"}
+	if _, _, err := resolveService(target.Pipecat, target.Speak, binding, newEnvSet(), slngSite{}); err == nil || !strings.Contains(err.Error(), "params.world_part is required") {
+		t.Fatalf("pipecat SLNG speak without world_part: err %v", err)
+	}
+	if _, _, err := resolveService(target.LiveKit, target.Speak, binding, newEnvSet(), slngSite{}); err != nil {
+		t.Fatalf("livekit keeps its plugin default: %v", err)
 	}
 }
