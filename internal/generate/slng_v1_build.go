@@ -379,7 +379,7 @@ func slngModelsFor(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) slngModels
 	}
 	if listen := tgt.Models.Listen; listen != nil {
 		models.STT = slngModelName(*listen)
-		models.STTKwargs = slngKwargs(listen.Params)
+		models.STTKwargs = slngSpeechKwargs(listen.Params)
 	}
 	if reason := tgt.Models.Reason[entry.Model]; reason.Model != "" {
 		models.LLM = slngModelName(reason)
@@ -388,7 +388,7 @@ func slngModelsFor(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) slngModels
 	if speak, ok := tgt.Models.Speak[entry.Voice]; ok {
 		models.TTS = slngModelName(speak)
 		models.TTSVoice = firstNonEmpty(speak.VoiceID, speak.Voice)
-		models.TTSKwargs = slngKwargs(speak.Params)
+		models.TTSKwargs = slngSpeechKwargs(speak.Params)
 	}
 	models.Fallbacks = slngFallbacksFor(agent, tgt, entry)
 	return models
@@ -431,6 +431,13 @@ func slngModelName(binding ir.Binding) string {
 		return binding.Model
 	}
 	return binding.Provider + "/" + binding.Model
+}
+
+// slngSpeechKwargs is slngKwargs minus world_part. On the code targets it picks
+// the speech gateway; on SLNG the agent's region does, and SLNG refuses
+// world_part as a model kwarg. Same reason the LiveKit driver drops it.
+func slngSpeechKwargs(params map[string]any) map[string]any {
+	return slngKwargs(withoutParams(params, []string{"world_part"}))
 }
 
 // slngKwargs forwards a binding's params as written. It exists to turn a nil map
