@@ -12,6 +12,7 @@ import (
 
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	"github.com/slng-ai/unmute/internal/target"
 )
 
@@ -37,7 +38,7 @@ func TestSlngPreviewIncludesTheBuiltinDescription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +55,7 @@ func compileSlng(t *testing.T, fixture string) (Artifact, map[string]string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,9 +212,11 @@ func TestSlngV1WritesEmptyVariableMapsRatherThanNone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// No variables at all: state.py read as an empty State.
 	pkg.Agent.Variables = nil
+	pkg.State = &stateschema.Model{}
 	pkg.Agent.Conversation.Greeting.Text = "Hi, you have reached Acme Support."
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +477,7 @@ func TestSlngEmitsTheHostedNameAndKeepsTheLocalOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,7 +636,7 @@ func TestResolvedBodyCarriesExactlyWhatWasChecked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

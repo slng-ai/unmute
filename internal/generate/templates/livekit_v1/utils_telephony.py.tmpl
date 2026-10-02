@@ -149,7 +149,7 @@ def _livekit_call_context(room_name: str, participant: rtc.RemoteParticipant | N
 
 
 {{- if .HasVars}}
-def _hydrate_livekit_context(userdata: Userdata, context: dict, *, require_all: bool = True) -> None:
+def _hydrate_livekit_context(userdata: CallState, context: dict, *, require_all: bool = True) -> None:
     """Save the call facts a prompt names onto the session state.
 
     Args:
@@ -163,7 +163,7 @@ def _hydrate_livekit_context(userdata: Userdata, context: dict, *, require_all: 
     missing: list[str] = []
 {{- range .Telephony.SystemSources}}
     value = context.get({{pyq .Source}})
-    if value in (None, "") or not _save_fact(userdata, {{pyq .Variable}}, value):
+    if value in (None, "") or not userdata.save_fact({{pyq .Variable}}, value):
         missing.append({{pyq .Source}})
 {{- end}}
     if missing and require_all:

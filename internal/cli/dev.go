@@ -45,7 +45,7 @@ func newDevCmd() *cobra.Command {
 			// when no dispatch supplied them; setting it in this process's
 			// environment reaches every run path, container or not (I.dispatch).
 			if len(vars) > 0 {
-				agent, _, err := loadPackage(root, nil)
+				agent, _, err := loadPackage(cmd.Context(), root, nil)
 				if err != nil {
 					return fmt.Errorf("dev %s: %w", root, err)
 				}
@@ -164,7 +164,7 @@ func selectDevTarget(cmd *cobra.Command, root, requested string) (string, error)
 	if requested != "" {
 		names = []string{requested}
 	}
-	_, targets, err := loadPackage(root, names)
+	_, targets, err := loadPackage(cmd.Context(), root, names)
 	if err != nil {
 		return "", fmt.Errorf("dev %s: %w", root, err)
 	}

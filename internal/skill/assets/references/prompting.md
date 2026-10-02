@@ -237,8 +237,8 @@ refusal.
 ```markdown
 # Caller information
 
-- The caller's first name is {{customer_name}}.
-- They called from {{from_number}}.
+- The caller's first name is {{state.customer_name}}.
+- They called from {{state.from_number}}.
 ```
 
 Only values that genuinely change per call belong here. The salon's name, the
@@ -252,7 +252,7 @@ has assigned it yet: an unset one renders as nothing, so write the sentence to
 read whole either way. See `variables.md`.
 
 A placeholder may also name one field of a structured value with a dotted
-path, such as `{{customer.status}}`. That part renders the same empty words
+path, such as `{{state.customer.status}}`. That part renders the same empty words
 as a whole value when it is missing, so the sentence still has to read
 whole. A placeholder carries no logic: no conditions, no filters, nothing
 computed, just the value written into the sentence.
@@ -579,7 +579,7 @@ unmute dev ./my-agent
 ```
 
 Have the conversation out loud. A transcript hides the things that go wrong in
-voice: a tool name read out character by character, a literal `{{customer_name}}`
+voice: a tool name read out character by character, a literal `{{state.customer_name}}`
 spoken as words, a mispronounced acronym, digits read as a string.
 
 Seed the variables a real call would carry, so you are testing the real prompt:

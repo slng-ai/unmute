@@ -16,6 +16,7 @@ import (
 	_ "time/tzdata"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -259,10 +260,10 @@ func checkPrefetchArgs(pkg *packagespec.Package, agent *Agent, raw packagespec.P
 				if slices.Contains(agent.Secrets, root) || envNamePattern.MatchString(root) {
 					return fmt.Errorf("%s: prefetch %q reads {{%s}}, but secrets never flow through templates; a secret reaches a tool through its own *_env field", where, raw.Name, ref)
 				}
-				return fmt.Errorf("%s: prefetch %q reads {{%s}}, which is not a declared variable", where, raw.Name, ref)
+				return fmt.Errorf("%s: prefetch %q reads {{%s}}, which State in state.py does not declare", where, raw.Name, ref)
 			}
 			if fields := PathFields(ref); len(fields) > 0 {
-				if err := checkPathFields(agent.Shapes, root, string(variable.Type), variable.Shape, fields); err != nil {
+				if err := checkPathFields(root, variable, fields); err != nil {
 					return fmt.Errorf("%s: prefetch %q reads {{%s}}: %w", where, raw.Name, ref, err)
 				}
 			}
@@ -291,8 +292,8 @@ func checkPrefetchAssign(pkg *packagespec.Package, agent *Agent, raw packagespec
 	fields := prefetchResultFields(agent, *entry)
 	for _, pair := range raw.Assign {
 		if _, declared := agent.Variables[pair.Key]; !declared {
-			return fmt.Errorf("%s: prefetch %q assigns %s, which is not a declared variable. Declare it in the "+
-				"variables: block of agent.yaml", where, raw.Name, pair.Key)
+			return fmt.Errorf("%s: prefetch %q assigns %s, which State in state.py does not declare. Declare it "+
+				"there as a field", where, raw.Name, pair.Key)
 		}
 		// Written inside the walk rather than after it, so one entry naming one
 		// variable on two lines is caught too. Written after it, the map only
@@ -326,15 +327,15 @@ func checkPrefetchAssign(pkg *packagespec.Package, agent *Agent, raw packagespec
 		// rather than left to assignableInto because its advice is to declare
 		// the result field, and a pre-fetch has no step declaring one.
 		want := agent.Variables[pair.Key]
-		if want.Shape != nil && want.Shape.Shaped == "" && len(want.Shape.Literal) == 0 {
+		if want.Schema.Kind == stateschema.KindObject || want.Schema.Kind == stateschema.KindArray {
 			return fmt.Errorf("%s: prefetch %q assigns %s, which is declared %s, and a pre-fetch resolves one plain "+
 				"value before the greeting. Assign %s from the step that produces it, and leave the pre-fetch the "+
-				"values a call already carries", where, raw.Name, pair.Key, want.Shape.String(), pair.Key)
+				"values a call already carries", where, raw.Name, pair.Key, want.Schema, pair.Key)
 		}
-		// Everything a pre-fetch can fill is held to the same predicate a step's
+		// Everything a pre-fetch can fill is held to the same rule a step's
 		// assign: is held to, because the two write into the same variables and
-		// a second predicate would drift from this one.
-		if err := assignableInto(want.Shape, want.Type, prefetchResultField(agent, *entry, field)); err != nil {
+		// a second rule would drift from this one.
+		if err := stateschema.Fits(prefetchResultType(agent, *entry, field), want.Schema); err != nil {
 			return fmt.Errorf("%s: prefetch %q assigns %s from result.%s, and %w",
 				where, raw.Name, pair.Key, field, err)
 		}
@@ -547,31 +548,26 @@ func prefetchResultFields(agent *Agent, entry Prefetch) []string {
 	}
 }
 
-// prefetchResultField types one field of what an entry resolves, so the assign
-// check can hold a pre-fetch to the same predicate a step's result is held to.
-// Every pre-fetch source is plain text: the clock formats its reading, a call
-// fact arrives off the wire as a string, and a tool's output: is JSON Schema,
-// read here for the one property being assigned rather than passed whole (a
-// whole schema is what assignableInto refuses as having no declared shape).
-func prefetchResultField(agent *Agent, entry Prefetch, field string) ResultField {
+// prefetchResultType types one field of what an entry resolves, so the assign
+// check can hold a pre-fetch to the same rule a step's result is held to. The
+// clock formats its reading and a call fact arrives off the wire as text. A
+// tool's output: is JSON Schema, read for the one property being assigned,
+// and a closed set there assigns into a Literal allowing it.
+func prefetchResultType(agent *Agent, entry Prefetch, field string) *stateschema.Type {
+	text := &stateschema.Type{Kind: stateschema.KindString}
 	if entry.Tool == "" {
-		return ResultField{Type: PrimitiveString}
+		return text
 	}
 	properties, _ := agent.Tools[entry.Tool].Output["properties"].(map[string]any)
-	property, _ := properties[field].(map[string]any)
-	out := ResultField{Type: PrimitiveString}
-	if word, ok := property["type"].(string); ok {
-		switch PrimitiveType(word) {
-		case PrimitiveInteger, PrimitiveNumber, PrimitiveBoolean:
-			out.Type = PrimitiveType(word)
-		}
+	property, ok := properties[field].(map[string]any)
+	if !ok {
+		return text
 	}
-	// A closed set on the tool side assigns into a Literal declaring the same
-	// set, which is the one structured type a pre-fetch can honestly fill.
-	if values, err := stringSlice(property["enum"]); err == nil {
-		out.Enum = values
+	typ, err := stateschema.ParseProperty(property)
+	if err != nil {
+		return text
 	}
-	return out
+	return typ
 }
 
 // prefetchSourceLabel names the source in a refusal the way the author wrote it,

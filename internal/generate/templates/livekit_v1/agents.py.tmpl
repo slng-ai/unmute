@@ -590,7 +590,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
                     ({{pyq .ID}}, {{if .SkipWhenConfirmed}}{{pyq .SkipWhenConfirmed}}{{else}}""{{end}}),
 {{- end}}
                 )
-                if not (confirmed and _is_confirmed(ctx.userdata, confirmed))
+                if not (confirmed and ctx.userdata.is_confirmed(confirmed))
             ]
 {{- range .Steps}}
 {{- if .SkipWhenConfirmed}}
@@ -629,7 +629,7 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
             # Decided once, as the group starts, which is what the key says. A
             # step whose confirmation lapses mid-flow is the next invocation's
             # question, not this one's.
-            if _is_confirmed(ctx.userdata, {{pyq .SkipWhenConfirmed}}):
+            if ctx.userdata.is_confirmed({{pyq .SkipWhenConfirmed}}):
                 logger.info({{pyq (printf "skipped %s: %s is already confirmed" .ID .SkipWhenConfirmed)}})
             else:
                 group.add(lambda: {{.Class}}({{if .SpeakOpening}}speak_opening=True{{end}}), id={{pyq .ID}}, description={{pyq .Desc}})
@@ -991,7 +991,7 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
         # Entered, so whatever it confirms is being decided again. Withdrawn
         # before the prompt renders, so this step never reads a confirmation it
         # is about to replace.
-        _withdraw_confirmation(self.session.userdata, {{pyq .Name}})
+        self.session.userdata.withdraw_confirmation({{pyq .Name}})
 {{- end}}
 {{- if .Summary}}
         await self.update_chat_ctx(await _summarize(self.chat_ctx, {{template "llmexpr" .Summary}}))
@@ -1065,8 +1065,8 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
         self._terminal = ({{pyq .Method}}, result)
         self._carried_turn = _newest_caller_turn(self.chat_ctx)
         try:
-            _values = _save_result({{pyq .Terminal.Step}}, ctx.userdata, result)
-        except _StateRefused as refused:
+            _values = ctx.userdata.save_result({{pyq .Terminal.Step}}, result)
+        except StateRefused as refused:
             # The action happened and the save did not. The step stays open so
             # the model can repair it, and its mutations stay closed so the
             # repair cannot run the action a second time.
@@ -1145,8 +1145,15 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
         except BaseException:
             self._terminal_claimed = False
             raise
-{{end}}    @function_tool
-    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}} = None{{end}}, {{$.Unserved.Name}}: {{$.Unserved.Anno}} = "") -> str | None:
+{{end}}    # The schema is StepResult's, built from State's own annotations, so the
+    # model is asked for exactly what the save accepts. Raw, so LiveKit sends it
+    # as written rather than rebuilding it from a signature.
+    @function_tool(raw_schema={
+        "name": "finish",
+        "description": "Save this step's values and finish, or return unserved without saving.",
+        "parameters": STEP_RESULTS[{{pyq .Name}}].tool_parameters(),
+    })
+    async def finish(self, raw_arguments: dict[str, object], ctx: RunContext[CallState]) -> str | None:
         """Save this step's values and finish, or return unserved without saving."""
         if self.done():
             return
@@ -1168,18 +1175,18 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 {{- end}}
         try:
 {{- if .Terminal}}
-            _args = {{"{"}}{{range .Result}}{{pyq .Name}}: {{.Name}}, {{end}}{{pyq $.Unserved.Name}}: {{$.Unserved.Name}}{{"}"}}
+            _args = dict(raw_arguments)
             if self._terminal is not None:
                 # Repairing a save the tool already made. The tool's own values
                 # win where they validate: the model cannot manufacture a
                 # reference, and a repair that retyped one would record an
                 # action nobody took.
-                _args = _merge_retained({{pyq .Name}}, _args, self._terminal[1])
-            _values = _save_result({{pyq .Name}}, ctx.userdata, _args)
+                _args = STEP_RESULTS[{{pyq .Name}}].retain(_args, self._terminal[1])
+            _values = ctx.userdata.save_result({{pyq .Name}}, _args)
 {{- else}}
-            _values = _save_result({{pyq .Name}}, ctx.userdata, {{"{"}}{{range .Result}}{{pyq .Name}}: {{.Name}}, {{end}}{{pyq $.Unserved.Name}}: {{$.Unserved.Name}}{{"}"}})
+            _values = ctx.userdata.save_result({{pyq .Name}}, dict(raw_arguments))
 {{- end}}
-        except _StateRefused as refused:
+        except StateRefused as refused:
             logger.warning("finish %s: %s", {{pyq .Name}}, refused.message)
             return f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."
 {{- if .Transfers}}

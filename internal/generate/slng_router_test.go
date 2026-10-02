@@ -51,7 +51,7 @@ func routerFixture(t *testing.T) *ir.Agent {
 	billing := pkg.Agent.Agents["billing"]
 	billing.Think = "fast_reasoning"
 	pkg.Agent.Agents["billing"] = billing
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,12 +74,12 @@ func routerFixture(t *testing.T) *ir.Agent {
 	agent.Tasks["collect"] = ir.Task{
 		Instructions: "Ask for the caller's email and confirm the account for {{customer_id}}.",
 		Tools:        []string{"lookup_customer"},
-		Result:       map[string]ir.ResultField{"tier": {Type: ir.PrimitiveString}},
+		Result:       map[string]ir.ResultField{"tier": {Type: stringType()}},
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.Tasks["confirm"] = ir.Task{
 		Instructions: "Read the booking back and ask the caller to confirm.",
-		Result:       map[string]ir.ResultField{"confirmed": {Type: ir.PrimitiveBoolean}},
+		Result:       map[string]ir.ResultField{"confirmed": {Type: boolType()}},
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.TaskGroups["triage"] = ir.TaskGroup{
@@ -375,7 +375,7 @@ func TestSlngRouterSuppliesEveryNameAndTruncates(t *testing.T) {
 		// And the values come from the shared prompt lookup and truncation helper.
 		for _, want := range []string{
 			`values[name] = text`,
-			`text = _state_text(*_prompt_value(state, name,`,
+			`text = CallState.render(state, name,`,
 			`if len(text) > _SLNG_VARIABLE_LIMIT:`,
 			`text = text[:_SLNG_VARIABLE_LIMIT]`,
 		} {
@@ -404,7 +404,7 @@ func TestSlngRouterPipecatReadsTheVariablesPerRequest(t *testing.T) {
 	// which variable, only that a write is followed by a refresh, and one write
 	// proves nothing about counting.
 	collect := agent.Tasks["collect"]
-	collect.Result["alias"] = ir.ResultField{Type: ir.PrimitiveString}
+	collect.Result["alias"] = ir.ResultField{Type: stringType()}
 	agent.Tasks["collect"] = collect
 	assignedTask := agent.Tasks["collect"]
 	assignedTask.Assign = []ir.AssignTo{{Var: "customer_id", Field: "tier"}, {Var: "caller_alias", Field: "alias"}}
@@ -416,7 +416,7 @@ func TestSlngRouterPipecatReadsTheVariablesPerRequest(t *testing.T) {
 	for _, want := range []string{
 		`("customer_id", "tier", False)`,
 		`("caller_alias", "alias", False)`,
-		`_save_batch(state, pending, step=step)`,
+		`self.save_batch(pending, step=step)`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("the fixture does not exercise the shared state save %q", want)
@@ -595,7 +595,7 @@ func TestSlngRouterEmitsExactlyOneSessionID(t *testing.T) {
 		wantExprs, wantCreate := []string{"slng_session_id", "self._slng_session_id"}, "slng_session_id = str(uuid.uuid4())"
 		if tc.provider == ir.ProviderLiveKit {
 			wantExprs = []string{"session.userdata.slng_session_id"}
-			wantCreate = "Userdata(slng_session_id=str(uuid.uuid4()))"
+			wantCreate = "CallState(slng_session_id=str(uuid.uuid4()))"
 		}
 		for _, want := range wantExprs {
 			delete(found, want)
@@ -693,7 +693,7 @@ func routerFixtureWithUpstream(t *testing.T, upstream *spec.Upstream, secrets []
 	billing := pkg.Agent.Agents["billing"]
 	billing.Think = "fast_reasoning"
 	pkg.Agent.Agents["billing"] = billing
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -816,7 +816,7 @@ func TestSlngRouterEmitsNothingWithoutABinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1096,7 +1096,7 @@ func TestSlngRouterProvenanceAbsentWithoutARouterBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1145,7 +1145,7 @@ func TestSlngRouterSummarizerCarriesThePromptDirective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

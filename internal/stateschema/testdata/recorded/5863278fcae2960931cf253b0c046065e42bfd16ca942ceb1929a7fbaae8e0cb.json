@@ -1,0 +1,81 @@
+{
+  "source": "internal/testdata/terminal_step/state.py",
+  "digest": "5863278fcae2960931cf253b0c046065e42bfd16ca942ceb1929a7fbaae8e0cb",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Booking": {
+          "description": "One saved booking action.",
+          "properties": {
+            "reference": {
+              "description": "The booking reference the tool returned.",
+              "title": "Reference",
+              "type": "string"
+            },
+            "service": {
+              "description": "The service booked, as the tool spelled it.",
+              "title": "Service",
+              "type": "string"
+            },
+            "action": {
+              "description": "What the tool did.",
+              "enum": [
+                "create",
+                "cancel"
+              ],
+              "title": "Action",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reference",
+            "service",
+            "action"
+          ],
+          "title": "Booking",
+          "type": "object"
+        }
+      },
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "customer_phone": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The caller's number in E.164, saved once the lookup recognises it.",
+          "title": "Customer Phone"
+        },
+        "booking": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Booking"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The latest successful booking action."
+        },
+        "note": {
+          "default": "",
+          "description": "What the caller asked to pass on to the stylist.",
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

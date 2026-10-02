@@ -5,7 +5,7 @@
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 
 
-def _render(text: str, userdata: Userdata | None, *, quote_values: bool = False, site: str = "") -> str:
+def _render(text: str, userdata: CallState | None, *, quote_values: bool = False, site: str = "") -> str:
     """Substitute each variable token from the session userdata.
 
     Only substituted values are URL-encoded, never the surrounding literal.
@@ -24,11 +24,9 @@ def _render(text: str, userdata: Userdata | None, *, quote_values: bool = False,
 
     def _one(match: re.Match[str]) -> str:
 {{- if .TypedState}}
-        # Through _state_lookup, which walks a path emitted as one flat name, and
-        # _state_text, so a declared value renders as compact JSON and an empty
-        # one as words. Anything not declared structured comes back exactly as
-        # str() gave it.
-        value = _state_text(*_prompt_value(userdata, match.group(1), site))
+        # Through CallState.render, which walks a path emitted as one flat name,
+        # renders a declared value as compact JSON and an empty one as words.
+        value = CallState.render(userdata, match.group(1), site)
 {{- else}}
         value = getattr(userdata, match.group(1), None)
         value = "" if value is None else str(value)
@@ -39,7 +37,7 @@ def _render(text: str, userdata: Userdata | None, *, quote_values: bool = False,
 
 {{end}}
 {{- if .NeedsRefusal}}
-def _refusal(tool: str, userdata: Userdata, needed: list[tuple[str, str]]) -> str:
+def _refusal(tool: str, userdata: CallState, needed: list[tuple[str, str]]) -> str:
     """Refuse a call whose injected variables are still unset.
 
     The model is told what to do about each one, and no half-formed request is
@@ -56,12 +54,12 @@ def _refusal(tool: str, userdata: Userdata, needed: list[tuple[str, str]]) -> st
     unset = [
         (name, hint)
         for name, hint in needed
-        if _state_lookup(userdata, name)[1] in (None, "")
+        if userdata.lookup(name)[1] in (None, "")
 {{- if .NeedsPrefetchUnconfirmed}}
         # A value the caller has not agreed to is present and not usable. Without
         # this, a pre-fetched number would reach somebody else's record: the
         # request would go out against a proposal rather than a fact.
-        or _state_lookup(userdata, name)[0] in getattr(userdata, "_unconfirmed", ())
+        or userdata.is_unconfirmed(name)
 {{- end}}
     ]
     if not unset:
@@ -139,7 +137,7 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
     return values
 
 
-def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
+def _hydrate_call_start(userdata: CallState, values: dict) -> None:
     """Save the dispatched input variables onto the session state.
 
     Args:
@@ -149,6 +147,6 @@ def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
     Raises:
         RuntimeError: A value does not fit its declared type.
     """
-    _save_call_start(userdata, values, {{.CallStartNames}})
+    userdata.save_call_start(values)
 
 {{end}}

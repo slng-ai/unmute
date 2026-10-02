@@ -52,7 +52,7 @@ func configuredLiveKitSIPWarmOnly(t *testing.T) (*ir.Agent, ir.Target) {
 	human.Warm = &spec.WarmTransfer{Destination: "billing_line"}
 	pkg.Agent.Escalations["to_human"] = human
 
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

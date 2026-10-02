@@ -222,9 +222,10 @@ naming the same thing.
 
 Three keys do this, and they each do one thing. Each has its own page.
 
-<ParamField path="variables:" type="top-level block">
-  Declares a value the call can hold, and what type it is. A variable is the
-  box. Nothing fills it by itself.
+<ParamField path="variables:" type="top-level list">
+  Says where a value comes from and which step confirms it. The value itself,
+  its type and its default are a field on `State` in `state.py`, the box.
+  Nothing fills it by itself.
 
   [Variables](/build/variables)
 </ParamField>
@@ -244,7 +245,7 @@ Three keys do this, and they each do one thing. Each has its own page.
 </ParamField>
 
 Saved values are never added to a prompt on their own. A prompt reads a value
-only when it names it, as `{{customer_phone}}`.
+only when it names it, as `{{state.customer_phone}}`.
 
 ### Ordering work without a gate
 

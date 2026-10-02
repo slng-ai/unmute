@@ -18,7 +18,7 @@ func prefetchFixture(t *testing.T) *ir.Agent {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,13 +300,13 @@ func TestPrefetchedValueMeetsTheGateOnlyOnceConfirmed(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	py := artifactFile(t, artifact, agentSource)
-	if !strings.Contains(py, `if _state_lookup(userdata, name)[1] in (None, "")`) {
+	if !strings.Contains(py, `if userdata.lookup(name)[1] in (None, "")`) {
 		t.Error("_refusal no longer reads a filled variable as satisfied")
 	}
-	if !strings.Contains(py, `or _state_lookup(userdata, name)[0] in getattr(userdata, "_unconfirmed", ())`) {
+	if !strings.Contains(py, `or userdata.is_unconfirmed(name)`) {
 		t.Error("_refusal does not consult the unconfirmed set, so a proposed value satisfies a call")
 	}
-	if !strings.Contains(py, `state._unconfirmed = set(_STATE_CONFIRM)`) ||
+	if !strings.Contains(py, `_unconfirmed: set[str] = PrivateAttr(default_factory=lambda: set(CallState.CONFIRM))`) ||
 		!strings.Contains(py, `"caller_phone": "verify_caller"`) {
 		t.Error("the pre-fetched number is never marked as awaiting confirmation")
 	}
@@ -314,10 +314,10 @@ func TestPrefetchedValueMeetsTheGateOnlyOnceConfirmed(t *testing.T) {
 	// getattr, because this step is reachable on a path where the pre-fetch never
 	// ran: a bare attribute read there is an AttributeError inside a finish
 	// handler, which a real Pipecat smoke run hit before this was defended.
-	if !strings.Contains(py, `_STATE_CONFIRM[name] == step`) || !strings.Contains(py, `unconfirmed.discard(name)`) {
+	if !strings.Contains(py, `self.CONFIRM[name] == step`) || !strings.Contains(py, `unconfirmed.discard(name)`) {
 		t.Error("the confirming step's assign does not clear the mark, so the caller can never get past it")
 	}
-	if strings.Contains(py, `state._unconfirmed.discard(`) {
+	if strings.Contains(py, `._unconfirmed.discard(`) {
 		t.Error("the mark is cleared with a bare attribute read, which raises when the pre-fetch has not run")
 	}
 }
@@ -513,7 +513,7 @@ func TestPipecatHydratesASystemSourceVariable(t *testing.T) {
 	bot := artifactFile(t, artifact, agentSource)
 	for _, want := range []string{
 		`_value = (call_context or {}).get("from_number")`,
-		`_save_fact(state, "caller_fact", _value)`,
+		`state.save_fact("caller_fact", _value)`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("build_state does not hydrate a system-source variable: %s", want)

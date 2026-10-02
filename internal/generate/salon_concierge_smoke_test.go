@@ -79,7 +79,7 @@ print("handoff activation smoke ok: both workers, empty/nonempty payloads, enabl
 // and injected tool arguments. A slot is opaque text: changing its separators
 // to satisfy an Id validator makes the booking tool reject it.
 func TestSmokeSalonV3RescheduleLiveKit(t *testing.T) {
-	runLiveKitSmokeScript(t, "salon-concierge-v3", nil, nil, salonV3RescheduleScript("agent", "Userdata()"))
+	runLiveKitSmokeScript(t, "salon-concierge-v3", nil, nil, salonV3RescheduleScript("agent", "CallState()"))
 }
 
 func TestSmokeSalonV3ReschedulePipecat(t *testing.T) {
@@ -106,7 +106,7 @@ from tools import check_availability, create_booking, find_or_create_customer, l
 async def main():
     state = generated.` + stateExpr + `
     customer = find_or_create_customer.find_or_create_customer("+15005550006")
-    generated._save_result("verify_customer", state, customer)
+    state.save_result("verify_customer", customer)
     tomorrow = check_availability._booking_today() + timedelta(days=1)
     first = check_availability.check_availability("haircut", tomorrow.isoformat())["slots"][-1]
     booking = create_booking.create_booking(state.customer_phone, "haircut", first["slot_id"], True)
@@ -132,9 +132,8 @@ async def main():
                       appointment_service=service, appointment_slot_id=slot["slot_id"],
                       appointment_time=time, unserved_request=None)
         if generated.__name__ == "agent":
-            from livekit.agents.llm.utils import validated_arguments
             task = generated.ManageBooking()
-            await task.finish(ctx, **validated_arguments(task.finish, values))
+            await task.finish(dict(values), ctx)
             assert task.done(), "finish did not save the exact tool result"
         else:
             worker._manage_booking_active_step = "manage_booking"
@@ -269,8 +268,9 @@ def appointment_value(action, booking_id, slot_id):
 
 
 def check_saved_appointment(module, state, appointment):
-    saved = module.to_jsonable_python(state.appointment)
-    assert saved == appointment, saved
+    saved = state.plain("appointment")
+    # The state holds a time as a time, so it reads back with its seconds.
+    assert saved == {**appointment, "time": appointment["time"][:5] + ":00"}, saved
     for name, site in (("CONCIERGE_PROMPT", "agent:concierge"),
                        ("COMPLAINT_SPECIALIST_PROMPT", "agent:complaint_specialist")):
         prompt = module._render(getattr(module, name), state, site=site)
@@ -380,7 +380,7 @@ async def create_then_cancel(userdata):
     # The date was pre-fetched before caller verification, as it is on a real call.
     assert userdata.booking_date, "the pre-fetch landed no booking_date"
     requested = (
-        date.fromisoformat(userdata.booking_date) + timedelta(days=1)
+        userdata.booking_date + timedelta(days=1)
     ).isoformat()
     available = await task.find_slots(ctx, date=requested, service="haircut")
     slot_id = available["slots"][-1]["slot_id"]
@@ -441,28 +441,28 @@ async def create_then_cancel(userdata):
 
 async def split_verification_then_intent_change():
     chat_ctx = llm.ChatContext.empty()
-    chat_ctx.add_message(role="user", content="303")
-    chat_ctx.add_message(role="user", content="5550199")
+    chat_ctx.add_message(role="user", content="1202")
+    chat_ctx.add_message(role="user", content="4561111")
     fragments = [
         item.raw_text_content
         for item in chat_ctx.items
         if isinstance(item, llm.ChatMessage) and item.role == "user"
     ]
-    assert fragments == ["303", "5550199"], (
+    assert fragments == ["1202", "4561111"], (
         "confirmation must be a fresh caller turn joining both fragments, "
         f"got {fragments!r}"
     )
 
-    userdata = agent.Userdata()
+    userdata = agent.CallState()
     verification = recording_task(agent.VerifyCustomer, chat_ctx)
     ctx = run_context(userdata, "verification-finish")
     # The lookup ends the step itself, so what comes back is the status, and the
     # values it saved are on the state rather than in a finish call.
-    verified = await verification.find_or_create_customer(ctx, phone="3035550199")
+    verified = await verification.find_or_create_customer(ctx, phone="12024561111")
     assert verified is None, verified
     assert len(verification.completions) == 1, verification.completions
     saved_phone = userdata.customer_phone
-    assert saved_phone == "+3035550199", saved_phone
+    assert saved_phone == "+12024561111", saved_phone
     # customer_status is not a saved variable: it is a field the lookup
     # returns, carried in the step's own completion rather than on the state.
     customer_status = verification.completions[0]["customer_status"]
@@ -504,14 +504,13 @@ async def split_verification_then_intent_change():
 
 async def main():
     customer = tool_modules["find_or_create_customer"].find_or_create_customer(
-        "2025550187"
+        "14155552671"
     )
     assert customer["customer_status"] == "created"
     actions.clear()
-    userdata = agent.Userdata(customer_phone=customer["customer_phone"])
+    userdata = agent.CallState(customer_phone=customer["customer_phone"])
     await agent._prefetch(userdata, None)
-    agent._save_result(
-        "verify_customer", userdata, {"customer_phone": customer["customer_phone"], "customer_status": customer["customer_status"]}
+    userdata.save_result("verify_customer", {"customer_phone": customer["customer_phone"], "customer_status": customer["customer_status"]}
     )
     booking_id, slot_id = await create_then_cancel(userdata)
     booking_actions = [name for name, _, _ in actions]
@@ -539,7 +538,7 @@ async def main():
         "find_or_create_customer",
         "record_complaint",
     ]
-    assert intent_actions[0][1] == {"phone": "3035550199"}
+    assert intent_actions[0][1] == {"phone": "12024561111"}
     assert verified["customer_status"] == "created"
     assert complaint_rows() == [
         (
@@ -690,7 +689,7 @@ async def booking_flow(worker, context, *, action, booking_id=""):
         # Same as the LiveKit side: the date was pre-fetched before verification.
         assert worker.state.booking_date, "the pre-fetch landed no booking_date"
         requested = (
-            date.fromisoformat(worker.state.booking_date) + timedelta(days=1)
+            worker.state.booking_date + timedelta(days=1)
         ).isoformat()
         available = await step["find_slots"](
             {"date": requested, "service": "haircut"}, flow_manager
@@ -708,7 +707,7 @@ async def booking_flow(worker, context, *, action, booking_id=""):
         )
         booking_id = worker.state.appointment.booking_id
     elif action == "move":
-        requested = (date.fromisoformat(worker.state.appointment.date) + timedelta(days=1)).isoformat()
+        requested = (worker.state.appointment.date + timedelta(days=1)).isoformat()
         available = await step["find_slots"](
             {"date": requested, "service": "haircut"}, flow_manager)
         slot_id = available["slots"][0]["slot_id"]
@@ -740,7 +739,9 @@ async def booking_flow(worker, context, *, action, booking_id=""):
     # values the tool returned are saved, and the flow is back with the owner.
     assert result == {"status": "ok"} and next_node is None, (result, next_node)
     appointment = appointment_value(action, booking_id, slot_id)
-    assert worker._book_results["manage_booking"]["appointment"] == appointment, worker._book_results
+    assert worker._book_results["manage_booking"]["appointment"] == {
+        **appointment, "time": appointment["time"][:5] + ":00"
+    }, worker._book_results
     assert worker._book_active_step is None
     check_saved_appointment(bot, worker.state, appointment)
     assert owner_status(context) == {"status": "completed"}, context.get_messages()[-1]
@@ -755,10 +756,10 @@ async def verify_then_create():
     verification had closed the booking step's mutations, and the caller's
     first booking was refused as if it were a second one.
     """
-    state = bot.State()
+    state = bot.CallState()
     await bot._prefetch(state, None)
     context = LLMContext()
-    context.add_message({"role": "user", "content": "A haircut tomorrow please, my number is 303 555 0199."})
+    context.add_message({"role": "user", "content": "A haircut tomorrow please, my number is 1 202 456 1111."})
     signature = LLMSpecificMessage(llm="google", message={"type": "thought_signature", "signature": b"salon-probe"})
     context.add_message(signature)
     worker = bot.ConciergeAgent(state=state, context=context, call_context={})
@@ -771,13 +772,13 @@ async def verify_then_create():
     assert worker._book_snapshot[0][-1] is not signature
     assert all(isinstance(message, dict) for message in context.get_messages())
     context.add_message(signature)
-    status, node = await handlers(node)["find_or_create_customer"]({"phone": "3035550199"}, flow_manager)
+    status, node = await handlers(node)["find_or_create_customer"]({"phone": "12024561111"}, flow_manager)
     assert status == {"status": "completed"} and node["name"] == "manage_booking", (status, node)
-    assert state.customer_phone == "+3035550199", state.customer_phone
+    assert state.customer_phone == "+12024561111", state.customer_phone
     # Entering the booking step leaves verification's ending behind.
     assert worker._book_terminal is None and not worker._book_pending
     step = handlers(node)
-    requested = (date.fromisoformat(state.booking_date) + timedelta(days=1)).isoformat()
+    requested = (state.booking_date + timedelta(days=1)).isoformat()
     available = await step["find_slots"]({"date": requested, "service": "haircut"}, flow_manager)
     slot_id = available["slots"][0]["slot_id"]
     context.add_message({"role": "user", "content": "Yes, book it."})
@@ -846,13 +847,13 @@ async def verify_then_create():
 
 async def split_verification_then_intent_change():
     context = LLMContext()
-    context.add_message({"role": "user", "content": "303"})
-    context.add_message({"role": "user", "content": "5550199"})
+    context.add_message({"role": "user", "content": "1202"})
+    context.add_message({"role": "user", "content": "4561111"})
     assert [message["content"] for message in context.get_messages()] == [
-        "303",
-        "5550199",
+        "1202",
+        "4561111",
     ]
-    state = bot.State()
+    state = bot.CallState()
     concierge = bot.ConciergeAgent(
         state=state, context=context, call_context={}
     )
@@ -861,7 +862,7 @@ async def split_verification_then_intent_change():
     node = await enter_book(concierge)
     assert node["name"] == "verify_customer"
     finished, next_node = await handlers(node)["find_or_create_customer"](
-        {"phone": "3035550199"}, flow_manager
+        {"phone": "12024561111"}, flow_manager
     )
     # Verification is the group's first step, so ending it hands over to the
     # booking node rather than returning to the owner. It is the owner request
@@ -876,7 +877,7 @@ async def split_verification_then_intent_change():
     # the one shape tasks/verify-customer.md requires and the customer_phone
     # variable documents, and it has to reach the variable unchanged: a second
     # shape here would put two phone formats back into a package with one.
-    assert state.customer_phone == "+3035550199", (
+    assert state.customer_phone == "+12024561111", (
         "the confirmed phone must reach the variable in the shape the step "
         f"returns it, got {state.customer_phone!r}"
     )
@@ -894,7 +895,7 @@ async def split_verification_then_intent_change():
     assert len(activations) == 1
     assert activations[0][0] == "complaint_specialist"
     assert activations[0][2] is True
-    assert state.customer_phone == "+3035550199"
+    assert state.customer_phone == "+12024561111"
     complaint_messages = [
         message.get("content")
         for message in context.get_messages()
@@ -942,14 +943,13 @@ async def split_verification_then_intent_change():
 
 async def main():
     customer = tool_modules["find_or_create_customer"].find_or_create_customer(
-        "2025550187"
+        "14155552671"
     )
     assert customer["customer_status"] == "created"
     actions.clear()
-    state = bot.State(customer_phone=customer["customer_phone"])
+    state = bot.CallState(customer_phone=customer["customer_phone"])
     await bot._prefetch(state, None)
-    bot._save_result(
-        "verify_customer", state, {"customer_phone": customer["customer_phone"], "customer_status": customer["customer_status"]}
+    state.save_result("verify_customer", {"customer_phone": customer["customer_phone"], "customer_status": customer["customer_status"]}
     )
     context = LLMContext()
     worker = bot.ConciergeAgent(
@@ -996,7 +996,7 @@ async def main():
         "find_or_create_customer",
         "record_complaint",
     ]
-    assert intent_actions[0][1] == {"phone": "3035550199"}
+    assert intent_actions[0][1] == {"phone": "12024561111"}
     assert verified["customer_status"] == "existing", verified
     assert complaint_rows() == [
         (
@@ -1010,7 +1010,7 @@ async def main():
     # booked and moved still reads "booked" here.
     assert set(booking_rows()) == {
         (booking_id, digits(customer["customer_phone"]), "haircut", slot_id, "cancelled"),
-        (fresh_id, "3035550199", "haircut", fresh_slot, "booked"),
+        (fresh_id, "12024561111", "haircut", fresh_slot, "booked"),
     }, booking_rows()
 
 asyncio.run(main())

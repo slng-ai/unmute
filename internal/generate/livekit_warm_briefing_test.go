@@ -64,7 +64,7 @@ func configuredLiveKitSIPTwoWarm(t *testing.T) (*ir.Agent, ir.Target) {
 	billing.Escalations = append(billing.Escalations, "to_manager")
 	pkg.Agent.Agents["billing"] = billing
 
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

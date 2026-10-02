@@ -503,7 +503,7 @@ func TestPreflightSaysWhenAPackageNeedsNothing(t *testing.T) {
 func slngToolsRequirements(t *testing.T) generate.Requirements {
 	t.Helper()
 	dir := filepath.Join("..", "testdata", "slng_tools")
-	agent, selected, err := loadPackage(dir, nil)
+	agent, selected, err := loadPackage(recordedCtx(t), dir, nil)
 	if err != nil {
 		t.Fatalf("load %s: %v", dir, err)
 	}

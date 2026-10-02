@@ -113,10 +113,6 @@ task_groups:
     then: return
     merge: results
 
-variables:
-  caller_phone:
-    type: string
-
 # Models are defined once, in the central map grouped by kind (N15). Agents
 # reference think and speak entries by name; the sole listen and turn entries
 # select themselves. targets.yaml carries infrastructure only.

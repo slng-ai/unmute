@@ -10,6 +10,7 @@ What an author writes, file by file. This is the surface you work in.
 | `manifest.yaml` | when linked | the company rules copied into this package; see [manifests](manifests.md) |
 | an instructions file | yes | the prompt, in Markdown, named by each agent |
 | `targets.yaml` | yes | where it runs, and the framework version pinned |
+| `state.py` | no | the call's `State` class: every variable's type, default and description. Needs `uv` to read |
 | `tools/<name>.yaml` | no | one file per tool |
 | `tools/<name>.py` | no | a Python handler, beside its tool file |
 | `connections/<name>.yaml` | phone agents only | one phone route |
@@ -95,7 +96,7 @@ That is the shape `unmute init <name>` scaffolds, and it runs in a browser.
 | `models` | yes | the model palette, grouped by kind |
 | `listen` | when `models.listen` has two or more entries | which listen entry to use |
 | `turn` | when `models.turn` has two or more entries | which turn entry to use |
-| `variables` | no | per call values |
+| `variables` | no | a list of `source:` and `confirm:` entries for fields on `State` in `state.py`, the file that holds the types |
 | `secrets` | no | environment names the generated project reads |
 | `destinations` | when an escalation is used | symbol to the environment variable holding a number |
 | `agents` | yes | one or more agents, with their nested tasks |
@@ -647,7 +648,7 @@ either is refused when the agent is pushed, and unmute refuses it at validation
 on every target.
 
 Do not write one into a prompt, a greeting or a tool field. For a value that
-varies per call, declare a package variable and write `{{name}}`. For a
+varies per call, declare a package variable and write `{{state.name}}`. For a
 credential, name the Vault entry on the tool that reads it, as a bare name in
 its `auth:` block with no braces and no dollar.
 
@@ -726,7 +727,7 @@ What a twilio package may carry, and nothing else:
   `description`), plus the builtin `end_call` with no `instructions`.
 
 Everything else is refused before a file is written, with the reason:
-more agents, tasks, groups, handoffs, transfers, variables, shapes,
+more agents, tasks, groups, handoffs, transfers, variables, `state.py`,
 prefetch, webhook, MCP, knowledge and hosted tools, tool announce and
 `interruption: cancel`, inactivity and duration timers, `pace` and the other
 turn fields, tracing, realtime and live, fallbacks, custom endpoints,

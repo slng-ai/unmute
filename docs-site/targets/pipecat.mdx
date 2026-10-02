@@ -21,7 +21,8 @@ my-agent/build/pipecat/
 ├── call.py               # one session: pipeline, turn detection, events
 ├── agents.py             # the agents, their tools and task steps
 ├── session.py            # prefetch, call start and prompt rendering
-├── state.py              # declared types and the call's saved values
+├── call_state.py         # CallState: the one way a value is saved, and each step's result
+├── state.py              # your State class, copied as you wrote it
 ├── settings.py           # every fixed value: names, timeouts, required variables
 ├── prompts/              # one Markdown file per agent, tasks in prompts/tasks/
 ├── utils/                # helpers, only the ones this package needs
@@ -98,9 +99,11 @@ instance name, used by `--target` and the `build/<name>/` output folder.
 `bot.py` is the entry point. It loads `.env`, checks the required variables,
 and defines `bot()`, which Pipecat Cloud calls. `call.py` builds one session:
 the pipeline, turn detection, and the greeting. `agents.py` holds the agents,
-their tools, and the task steps. `state.py` holds the declared types and the
-call's saved values, as Pydantic models. `session.py` holds prefetch and call
-start. `settings.py` holds every fixed value.
+their tools, and the task steps. `state.py` is your own `State` class, copied as you wrote it, and present when
+the package has one. `call_state.py` holds `CallState`, a subclass of `State`
+that is the call's saved values, with the one way a value is saved, the
+confirmation marks and the rendering, and one result model per task step.
+`session.py` holds prefetch and call start. `settings.py` holds every fixed value.
 
 Each prompt is a Markdown file in `prompts/`, with task prompts in
 `prompts/tasks/`. The file holds the prompt text exactly. Placeholders are

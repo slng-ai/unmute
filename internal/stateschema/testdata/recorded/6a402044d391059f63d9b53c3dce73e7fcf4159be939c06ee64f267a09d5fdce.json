@@ -1,0 +1,23 @@
+{
+  "source": "internal/stateschema/testdata/models/aliased.py",
+  "digest": "6a402044d391059f63d9b53c3dce73e7fcf4159be939c06ee64f267a09d5fdce",
+  "report": {
+    "schema": {
+      "description": "A field with an alias.",
+      "properties": {
+        "phone": {
+          "default": "",
+          "title": "Phone",
+          "type": "string"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [
+      "State.phone"
+    ],
+    "frozen": []
+  }
+}

@@ -276,7 +276,7 @@ func runValidateCommand(t *testing.T, args ...string) (string, string, error) {
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs(append([]string{"validate"}, args...))
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(recordedCtx(t))
 	return stdout.String(), stderr.String(), err
 }
 

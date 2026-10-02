@@ -8,6 +8,7 @@ import (
 
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	"github.com/slng-ai/unmute/internal/style"
 	"github.com/slng-ai/unmute/internal/target"
 	"github.com/spf13/cobra"
@@ -39,6 +40,9 @@ func runValidate(cmd *cobra.Command, dir string, names []string) error {
 	printHeader(out, "validate "+displayDir(dir))
 	pkg, err := spec.Load(dir)
 	if err != nil {
+		return fmt.Errorf("validate %s: load: %w", dir, err)
+	}
+	if err := pkg.ReadState(cmd.Context(), stateschema.ReaderFrom(cmd.Context())); err != nil {
 		return fmt.Errorf("validate %s: load: %w", dir, err)
 	}
 	agent, err := ir.Build(pkg)

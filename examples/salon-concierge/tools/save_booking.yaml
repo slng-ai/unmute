@@ -49,7 +49,7 @@ input:
     - additional
 
 inject:
-  - customer_phone: "{{customer_phone}}"
+  - customer_phone: "{{state.customer_phone}}"
 
 output:
   type: object

@@ -343,12 +343,12 @@ input:
   properties: {}
 
 inject:
-  - customer_id: "{{customer_id}}"
+  - customer_id: "{{state.customer_id}}"
   - channel: phone
 
 webhook:
   url_env: SALON_API_URL
-  path: /customers/{{customer_id}}/appointments/confirm
+  path: /customers/{{state.customer_id}}/appointments/confirm
   auth:
     type: bearer
     token_env: SALON_API_TOKEN
@@ -360,7 +360,7 @@ interruption: provider_default
 | Field | Required | What it is |
 |---|---|---|
 | `url_env` | yes | the `UPPER_SNAKE` name of a variable holding the base URL |
-| `path` | no | starts with `/`, is appended to that base URL, and may carry `{{variable}}` tokens |
+| `path` | no | starts with `/`, is appended to that base URL, and may carry `{{state.variable}}` tokens |
 | `auth` | no | `bearer` or `api_key`; an API key may name a custom `header` |
 
 `webhook:` runs on LiveKit and Pipecat. For SLNG, create the request tool in
@@ -392,7 +392,7 @@ input:
 
 webhook:
   url_env: COURIER_API_URL
-  path: /tracking/{{tracking_number}}   # WRONG: that is an input property
+  path: /tracking/{{state.tracking_number}}   # WRONG: that is an input property
 ```
 
 ```
@@ -410,7 +410,7 @@ webhook:
 ```
 
 The API then receives `{"tracking_number": "..."}` in the body. Only put a
-`{{name}}` in the path when `name` is in the package's top-level `variables:`
+`{{state.name}}` in the path when `name` is in the package's top-level `variables:`
 block, and say to the user which shape the request ended up with, because they
 may need to change their endpoint to match.
 
@@ -441,7 +441,7 @@ input:
   properties: {}
 
 inject:
-  - customer_id: "{{customer_id}}"
+  - customer_id: "{{state.customer_id}}"
 
 output:
   type: object
@@ -619,7 +619,7 @@ for exactly that reason.
 
 ```yaml
 inject:
-  - customer_id: "{{customer_id}}"
+  - customer_id: "{{state.customer_id}}"
   - channel: phone
 ```
 

@@ -207,7 +207,7 @@ cancellation.
 | `history: full` | spoken messages and complete tool-call pairs |
 
 Saved values remain in call state, but the receiving model sees only those its
-own prompt references with `{{name}}` or `{{name.field}}`. Use `reset` plus
+own prompt references with `{{state.name}}` or `{{state.name.field}}`. Use `reset` plus
 explicit references when the receiver needs saved facts without earlier speech.
 
 Order matters on a handoff the same way it matters on a task: say the
@@ -217,11 +217,7 @@ gate. See "Order steps with the prompt" below.
 ## Task
 
 ```yaml agent.yaml
-variables:
-  customer_id:
-    type: string
-  customer_name:
-    type: string
+# state.py: class State(BaseModel) with customer_id: str = "" and customer_name: str = ""
 
 agents:
   appointment_desk:
@@ -264,7 +260,7 @@ assign:
   - customer_name: result.customer_name
 ```
 
-The right side of a pair can also be a dotted path into a declared shape,
+The right side of a pair can also be a dotted path into a model from `state.py`,
 `result.<field>.<subfield>`, to pick one part of it instead of the whole
 result; see "Picking one part of a structured result" in
 `references/variables.md`.
@@ -281,8 +277,8 @@ prompt.
           history: reset
 ```
 
-For example, `tasks/booking.md` can say `Move appointment {{appointment_id}} to
-{{appointment_date}} at {{appointment_time}}.` No request block, summary or
+For example, `tasks/booking.md` can say `Move appointment {{state.appointment_id}} to
+{{state.appointment_date}} at {{state.appointment_time}}.` No request block, summary or
 triggering sentence is added automatically.
 
 A task can also declare its own `think:`, naming a different reasoning
@@ -295,9 +291,7 @@ A second agent that should offer the same task does not redefine it. It names
 the task by bare string instead:
 
 ```yaml agent.yaml
-variables:
-  customer_id:
-    type: string
+# state.py: class State(BaseModel) with customer_id: str = ""
 
 agents:
   appointment_desk:
@@ -556,13 +550,9 @@ tools:
   - check_slots
   - book_appointment
 
-variables:
-  customer_id:
-    type: string
-  selected_slot:
-    type: string
-  booking_status:
-    type: Literal["booked", "cancelled"]
+# state.py: class State(BaseModel) with customer_id: str = "",
+# selected_slot: str = "" and
+# booking_status: Literal["booked", "cancelled"] | None = None
 
 agents:
   appointment_desk:
@@ -672,7 +662,7 @@ Write the owner's prompt to expect this rather than to work around it: a bare
 which the flow has already acted on.
 
 Task results are private. Each completed step supplies only completion status;
-later tasks read saved values through `{{name}}` or `{{name.field}}`.
+later tasks read saved values through `{{state.name}}` or `{{state.name.field}}`.
 With `then: return`, the owner gets its original context back plus `completed`
 or `unserved`, and reads saved values through its own prompt references.
 `merge: results` combines results internally; it does not expose a result map

@@ -63,7 +63,7 @@ func devDispatchName(agent *ir.Agent, resolved ir.Target) string {
 func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noOpen, verbose bool) error {
 	out := cmd.OutOrStdout()
 	printHeader(out, "dev "+displayDir(root))
-	agent, targets, err := loadPackage(root, []string{targetName})
+	agent, targets, err := loadPackage(cmd.Context(), root, []string{targetName})
 	if err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
 	}

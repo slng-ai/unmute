@@ -18,7 +18,17 @@ type TemplateSegment struct {
 	Var  string
 }
 
+// StatePrefix starts every authored reference to a state value: {{state.x}}
+// names the field x of the State class in state.py. It is the authored
+// spelling only. ParseTemplate and FlattenPaths strip it, so the IR and every
+// emitted prompt carry the bare name, which is what the SLNG router fills.
+const StatePrefix = "state."
+
+// stateRef strips StatePrefix from one token.
+func stateRef(ref string) string { return strings.TrimPrefix(ref, StatePrefix) }
+
 // ParseTemplate splits a template into literal and variable segments, in order.
+// A segment's Var carries the reference without StatePrefix.
 func ParseTemplate(value string) []TemplateSegment {
 	var segments []TemplateSegment
 	last := 0
@@ -26,7 +36,7 @@ func ParseTemplate(value string) []TemplateSegment {
 		if match[0] > last {
 			segments = append(segments, TemplateSegment{Text: value[last:match[0]]})
 		}
-		segments = append(segments, TemplateSegment{Var: value[match[2]:match[3]]})
+		segments = append(segments, TemplateSegment{Var: stateRef(value[match[2]:match[3]])})
 		last = match[1]
 	}
 	if last < len(value) {
@@ -99,12 +109,15 @@ func ValidVaultName(name string) bool {
 // it starts a field.
 const emittedPathSep = "__"
 
-// FlattenPaths rewrites every dotted token in a template to its emitted form and
-// leaves every other byte alone. Build applies it to each template text it
-// stores, so no consumer of the IR ever sees a dot inside a placeholder.
+// FlattenPaths rewrites every token in a template to its emitted form, with
+// StatePrefix dropped and each dot made "__", and leaves every other byte
+// alone. Build applies it to each template text it stores, so no consumer of
+// the IR ever sees a dot inside a placeholder.
 func FlattenPaths(text string) string {
 	return templatePattern.ReplaceAllStringFunc(text, func(token string) string {
-		return strings.ReplaceAll(token, ".", emittedPathSep)
+		inner := templatePattern.FindStringSubmatchIndex(token)
+		ref := stateRef(token[inner[2]:inner[3]])
+		return token[:inner[2]] + strings.ReplaceAll(ref, ".", emittedPathSep) + token[inner[3]:]
 	})
 }
 
@@ -114,7 +127,7 @@ func pathParts(ref string) []string {
 	if strings.HasPrefix(ref, "$") {
 		return []string{ref}
 	}
-	return strings.Split(strings.ReplaceAll(ref, emittedPathSep, "."), ".")
+	return strings.Split(strings.ReplaceAll(stateRef(ref), emittedPathSep, "."), ".")
 }
 
 // PathRoot is the declared name a reference starts from, in either form: the

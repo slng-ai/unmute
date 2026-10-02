@@ -403,8 +403,9 @@ This agent expects values supplied when the call starts:
 
 {{range .CallStartVars}}- `{{.Name}}` ({{.Type}}){{if .Required}} — required{{end}}
 {{end}}
-Each value is checked against its declared type before the greeting. A value
-that does not fit stops the call start, and the error names the field.
+Each value is checked against its field's type in `state.py` before the greeting.
+A value that does not fit stops the call start, and the error names the field.
+A model or a list is passed as JSON.
 
 Locally, pass them with `unmute dev` on the source package:
 
@@ -423,37 +424,39 @@ lk dispatch create --room <room> --agent-name {{.AgentName}} \
 {{if .TypedState}}
 ## Declared state
 
-Variables declare types once. A task's `assign` derives its finish fields and
-saves validated values. A failed or unserved finish saves nothing.
+The call's state is the `State` class you wrote in `state.py`, copied here as
+you wrote it. `call_state.py` is generated. Its `CallState` subclasses your
+`State` and is the one way a value is saved. It also tracks which values still
+await a confirmation and renders a value for a prompt. Each task step gets its
+own result model, built from your field types when the module loads.
 
-A prompt reads only its own `{{"{{variable}}"}}` or `{{"{{variable.field}}"}}`
-references. Missing values render as `{{.TypedState.Empty}}`; false, zero and
-empty lists keep their values. Referencing an object shares the whole object.
-History is a separate choice and does not clear saved values.
+A task's `assign` derives its finish fields from the fields it saves into. A
+step must return every whole value it assigns, except one its `assign` marks
+with `?`. A failed or unserved finish saves nothing.
 
-The call's state is a Pydantic model in `state.py`, and each declared shape is
-a Pydantic class beside it. A field's type is the check every save goes
-through: a step's result, a pre-fetched value, a dispatched one and a carrier
-fact. The values one save brings are checked together, and nothing is recorded
-unless all of them fit. The previous contents then stay as they were, and the
-model is told which field and what was allowed, which is what lets it correct
-itself on the next turn.
+A prompt reads only its own `{{"{{state.variable}}"}}` or
+`{{"{{state.variable.field}}"}}` references. Missing values render as
+`{{.TypedState.Empty}}`; false, zero and empty lists keep their values.
+Referencing an object shares the whole object. History is a separate choice and
+does not clear saved values.
 
-A variable with a `default:` always holds a value of its type. A variable with
-none starts as `None`, which means no value yet.
+A field's type is the check every save goes through: a step's result, a
+pre-fetched value, a dispatched one and a carrier fact. The values one save
+brings are checked together, and nothing is recorded unless all of them fit.
+The previous contents then stay as they were, and the model is told which field
+and what was allowed, which is what lets it correct itself on the next turn.
 
-A text type with a validated shape (`Phone`, `Date`, `Time`, `Id`, `EmailStr`)
-is a `str` in the schema the model is sent, with its shape checked by a
-validator. That is deliberate: a `pattern` in the schema survives the strict
-tool-schema converter and the provider rejects it, so the shape is checked here
-instead.
+A format or pattern rule in your types reaches the model as words in the field's
+description. The schema carries no `pattern` or `format` keyword, because a
+strict provider rejects one. The rule is still checked where the value is saved.
 {{if .TypedState.NeedsEmailValidator}}
-`EmailStr` and `NameEmail` are checked by `email-validator`, which is why this
-project depends on it. The check never asks DNS: it runs while the caller is on
-the line, so it reads the address and stops there rather than looking up whether
-the domain accepts mail. `NameEmail` holds a name and an address as two fields
-and also reads a single string, either `Fred Bloggs <fred@example.com>` or the
-address on its own, in which case the name is the part before the at sign.
+An email type is checked by `email-validator`, which is why this project depends
+on it. The check never asks DNS: it runs while the caller is on the line, so it
+reads the address and stops there rather than looking up whether the domain
+accepts mail.
+{{end}}{{if .TypedState.ExtraTypes}}
+`state.py` imports from `pydantic_extra_types`, so this project depends on it
+with the extras those types need.
 {{end}}{{end}}
 {{if .Slng.Any}}
 ## SLNG Context Router

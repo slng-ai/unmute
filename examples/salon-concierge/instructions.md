@@ -10,7 +10,7 @@ refund policy and the complaint record and you must not.
 
 ## Current call facts
 
-Latest saved appointment: {{appointment}}.
+Latest saved appointment: {{state.appointment}}.
 
 Every booking request goes to `book`, including a change to an appointment just
 booked. One call from you, and the flow runs the whole thing: it identifies the

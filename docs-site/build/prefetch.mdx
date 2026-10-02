@@ -23,12 +23,17 @@ On this page:
 
 Read the clock before the greeting, and save the date:
 
-```yaml agent.yaml
-variables:
-  booking_date:
-    type: Date
-    default: ""
+```python state.py
+from datetime import date
 
+from pydantic import BaseModel
+
+
+class State(BaseModel):
+    booking_date: date | None = None
+```
+
+```yaml agent.yaml
 prefetch:
   - name: today
     clock: now
@@ -40,7 +45,7 @@ prefetch:
 Name it in the prompt that needs it:
 
 ```markdown tasks/booking.md
-Local date: {{booking_date}}
+Local date: {{state.booking_date}}
 Use this as today when the caller says tomorrow or names a weekday.
 ```
 
@@ -94,8 +99,8 @@ during the call.
   | `result.year` | `2026` |
   | `result.timezone` | `Europe/Madrid` |
 
-  All six fields are text, including `result.year`. Use `Date` for
-  `result.date`, `Time` for `result.time`, and `str` for the weekday, year,
+  All six fields are text, including `result.year`. Use `date` for
+  `result.date`, `time` for `result.time`, and `str` for the weekday, year,
   combined datetime, or timezone.
 
   All six come from the same reading. An entry assigning `result.date` and
@@ -141,7 +146,7 @@ prefetch:
     tool: look_up_account
     writes: false
     args:
-      - phone: "{{customer_phone}}"
+      - phone: "{{state.customer_phone}}"
     assign:
       - account_name: result.name
       - account_on_file: result.status
@@ -150,30 +155,32 @@ prefetch:
 `profile` reads once and assigns twice. An entry can fill as many variables as
 the result has fields, and a second `assign:` line costs no second call.
 
-Declare the receiving variables. A default is optional; here an empty string
-means the value is not known yet:
+Declare the receiving fields on `State`. Every field needs a default. Here an
+empty string or `None` means the value is not known yet:
 
-```yaml agent.yaml
-variables:
-  booking_date:
-    type: Date
-    default: ""
-  booking_weekday:
-    type: string
-    default: ""
-  customer_phone:
-    type: Phone
-    default: ""
-  account_name:
-    type: string
-    default: ""
-  account_on_file:
-    type: string
-    default: ""
+```python state.py
+from datetime import date
+from typing import Annotated
+
+import phonenumbers
+from pydantic import BaseModel
+from pydantic_extra_types.phone_numbers import PhoneNumberValidator
+
+Phone = Annotated[
+    str | phonenumbers.PhoneNumber, PhoneNumberValidator(number_format="E164")
+]
+
+
+class State(BaseModel):
+    booking_date: date | None = None
+    booking_weekday: str = ""
+    customer_phone: Phone | None = None
+    account_name: str = ""
+    account_on_file: str = ""
 ```
 
 <Note>
-  Do not give these variables a `source:` of their own. The pre-fetch entry is
+  Do not give these variables a `source:` of their own in `agent.yaml`. The pre-fetch entry is
   what fills them. That is why the same package still works on a phone route
   carrying no caller ID.
 </Note>
@@ -240,9 +247,7 @@ say yes:
 
 ```yaml agent.yaml
 variables:
-  customer_phone:
-    type: Phone
-    default: ""
+  - name: customer_phone
     confirm: verify_customer
 ```
 
@@ -260,7 +265,7 @@ stranger by the account holder's name.
 Then write that step to read the value back:
 
 ```md tasks/verify-customer.md
-The call came from {{customer_phone}}. If there is a number there, read it back
+The call came from {{state.customer_phone}}. If there is a number there, read it back
 and ask if it is the right one for the booking. If it is empty, ask for a number.
 ```
 
@@ -459,12 +464,12 @@ Neither runs a tool, so the key means nothing there.
 
 **Fix:** use one of the six fields above. The refusal lists all six.
 
-### A pre-fetch cannot fill a list or a shape
+### A pre-fetch cannot fill a list or a model
 
 A pre-fetch resolves before anybody speaks, so what it has is one value: a
 formatted clock reading, the number the call carries, one field of a tool
-result. Text is fine, and so is shaped text like `Phone`, `Date` or
-`EmailStr`, because the shape is checked where the value enters the state. A
+result. Text is fine, and so is a `date`, a `time`, a checked phone number or an
+`EmailStr`, because the type is checked where the value enters the state. A
 `Literal` works when the tool's own field declares the same set.
 
 **Fix:** run the lookup in a [task](/build/orchestration/tasks) and save the

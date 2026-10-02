@@ -234,9 +234,6 @@ func primitiveRow(t ir.PrimitiveType) struct{ json, py string } {
 	return primitiveString
 }
 
-// jsonType is a primitive's JSON Schema name.
-func jsonType(t ir.PrimitiveType) string { return primitiveRow(t).json }
-
 // pyType is a primitive's Python annotation.
 func pyType(t ir.PrimitiveType) string { return primitiveRow(t).py }
 
@@ -251,11 +248,8 @@ func pyTypeForJSON(name string) string {
 	return primitiveString.py
 }
 
-// authoredType is a variable's type as its author wrote it: `CustomerRecord`
-// or `Phone`, and the primitive's JSON Schema name for a plain value.
+// authoredType is a variable's type the way state.py's schema names it:
+// `CustomerRecord | None`, or `str` for a plain value.
 func authoredType(variable ir.Variable) string {
-	if variable.Shape != nil {
-		return variable.Shape.String()
-	}
-	return string(variable.Type)
+	return variable.Schema.String()
 }

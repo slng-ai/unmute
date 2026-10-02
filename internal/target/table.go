@@ -136,7 +136,6 @@ const (
 	FieldToolDependencies      Field = "tools.local.dependencies"
 	FieldTemplates             Field = "templates.session_start"
 	FieldTypedState            Field = "variables.type.shape"
-	FieldShapedText            Field = "variables.type.shaped"
 )
 
 type Capability struct {
@@ -481,8 +480,7 @@ func Default() Table {
 			// code drivers write. The slng target writes a spec and emits no
 			// module, so there is nowhere for the class, the validator or the
 			// composed state block to be.
-			FieldTypedState: field(deny(Slng, slngNoModule("a value with a declared shape"))),
-			FieldShapedText: field(deny(Slng, slngNoModule("a value whose text has a validated shape"))),
+			FieldTypedState: field(deny(Slng, slngNoModule("a state field that is more than a plain str, int, float or bool"))),
 			FieldContextNoToolCalls: field(
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (include_tool_calls) yet"),
 				deny(Slng, slngNoHandoff("include_tool_calls: false")),
@@ -869,8 +867,8 @@ func slngNoKnowledge(what string) string {
 // value enters the state, which is inside a module this target never writes.
 func slngNoModule(what string) string {
 	return "slng target pushes a spec and emits no module of its own, so " + what +
-		" has nowhere to be declared or checked: declare the value as one of the primitive types, " +
-		"or compile to livekit or pipecat, which generate the class and validate the value where it enters"
+		" has nowhere to be checked: give the field in state.py a plain str, int, float or bool type, " +
+		"or compile to livekit or pipecat, which validate the value against state.py where it enters"
 }
 
 // codeNoConversationVariable is the one reason both code targets refuse

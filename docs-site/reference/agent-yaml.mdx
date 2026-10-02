@@ -113,14 +113,11 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
   required when there are two or more.
 </ParamField>
 
-<ParamField path="variables" type="map">
-  Per-call values. Accepts lower snake case names. If omitted, there are no declared
-  session values.
-</ParamField>
-
-<ParamField path="shapes" type="list">
-  Field groups a variable's `type:` can refer to. Accepts one or more named field groups,
-  `CapWords` names. If omitted, there are no custom types.
+<ParamField path="variables" type="list">
+  Where a value comes from and which step confirms it. One entry per value, each with a
+  `name:` that is a field on `State` in `state.py`, plus a `source:` or a `confirm:`. Types,
+  defaults and descriptions live in `state.py`. If omitted, no value has a source or a
+  confirmation.
 </ParamField>
 
 <ParamField path="prefetch" type="list">
@@ -434,39 +431,30 @@ values verified in the provider's own documentation.
 
 ```yaml
 variables:
-  caller_name:
-    type: string
+  - name: caller_name
     source: call_start
-    default: there
-    description: Caller's first name.
+
+  - name: customer_phone
+    confirm: verify_customer
 ```
 
-<ParamField path="type" type="string" required>
-  A single-line Python type expression. Accepts `str`, `int`, `float`, `bool`, `Phone`,
-  `Date`, `Time`, `Id`, `EmailStr`, `NameEmail`, a declared shape name, `Literal[...]`,
-  `list[T]`, or `T | None`. The aliases `string`, `integer`, `number`, and `boolean` also
-  work. See the [type grammar](/reference/variables#the-type-grammar) for composition
-  rules and target limits.
-</ParamField>
+A list. Types, defaults and descriptions are not written here. They live on
+the `State` class in `state.py`, next to `agent.yaml`. List a value here only
+when it needs a `source:` or a `confirm:`. An entry with neither is refused,
+and so is the old map form. A `shapes:` block is refused too: declare each
+shape as a Pydantic model in `state.py`.
 
-<ParamField path="description" type="string">
-  A sentence explaining what the value means. Used to describe the task finish argument
-  derived from this variable. Required for `source: conversation`; otherwise omit for no
-  extra description. The saved value is still shared only through placeholders.
-</ParamField>
-
-<ParamField path="default" type="matching the declared type">
-  A scalar starting value, checked against `type`. Shapes, lists, and `NameEmail` take no
-  authored default. If omitted, a scalar or shape starts unset and a list starts as `[]`.
-  An unset value renders as `none recorded yet.` in a prompt.
+<ParamField path="name" type="string" required>
+  The field on `State` this entry configures. An entry naming no field is refused.
 </ParamField>
 
 <ParamField path="source" type="string">
   Accepts `call_start`, `conversation` (SLNG only), or a [system call
   fact](/reference/variables#sources). If omitted, the variable has no automatic call-fact
   source; a task, pre-fetch, or session payload can still fill it. Route support is
-  checked for system sources. `conversation` requires a description and forbids a default;
-  inbound code-target calls require a default for `call_start`.
+  checked for system sources. `conversation` requires a `Field(description=...)` and an
+  `= None` default in `state.py`. Inbound code-target calls require a default for
+  `call_start`.
 </ParamField>
 
 <ParamField path="confirm" type="string">
@@ -475,28 +463,10 @@ variables:
   omitted, the value is usable as soon as it arrives.
 </ParamField>
 
-Full detail on [variables](/reference/variables).
-
-## `shapes`
-
-A pre-fetch cannot fill a shape or a list. Use a task to produce grouped fields;
-use separate scalar variables for clock and lookup pre-fetch results. A single
-pre-fetch may assign several scalar variables from one result.
-
-```yaml
-shapes:
-  - name: Appointment
-    description: One thing being booked, moved or cancelled.
-    fields:
-      - scheduled_date: Date
-      - scheduled_time: Time
-```
-
-A top-level list. Each item names one group of fields a variable can use as its
-`type:`. Task finish fields derive that type from their assignment
-destinations. Full field reference and what it takes to reach the model as
-structured data:
-[variables](/reference/variables#shapes-groups-fields-into-a-named-type).
+Prompts and tool templates name a value as `{{state.name}}`, or
+`{{state.name.field}}` for one field of a model. Full detail on
+[variables](/reference/variables), and on what `state.py` can hold:
+[state.py](/reference/variables#the-state-class-holds-the-types).
 
 ## `prefetch`
 
@@ -774,8 +744,9 @@ agents:
 
 <ParamField path="assign" type="list of one-key pairs">
   Pairs of `variable: result.field`, including dotted result paths. Use `variable+` to
-  append one list item. Omit to save no values; the task can still finish. Types and
-  descriptions come from the destination variables.
+  append one list item, and `result.field?` for a value the step may leave out. Omit to
+  save no values; the task can still finish. Types and descriptions come from the
+  destination fields on `State`.
 </ParamField>
 
 <ParamField path="finish" type="list of objects">
@@ -1086,7 +1057,7 @@ exactly one execution block says how it runs.
 </ParamField>
 
 <ParamField path="inject" type="list of one-key pairs">
-  Hidden argument/value pairs. Values are scalars or strings with `{{variable}}`
+  Hidden argument/value pairs. Values are scalars or strings with `{{state.variable}}`
   placeholders. Omit to inject nothing. Legal on local, webhook, and hosted `slng` tools;
   builtin `send_sms` requires its literal `from_number` setting.
 </ParamField>

@@ -84,7 +84,7 @@ func cloudWebsocketTarget(t *testing.T, opts cloudWebsocketOptions) (*ir.Agent, 
 		pkg.Agent.Escalations["to_human"] = control
 	}
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -60,11 +61,6 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	shapes, err := buildShapes(pkg)
-	if err != nil {
-		return nil, err
-	}
-	declared := shapeNames(shapes)
 	out := &Agent{
 		Manifest: pkg.Manifest,
 		Version:  pkg.Agent.Version,
@@ -77,8 +73,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Models:       models,
 		Listen:       listenName,
 		Turn:         turnName,
-		Shapes:       shapes,
-		Variables:    make(map[string]Variable, len(pkg.Agent.Variables)),
+		Variables:    make(map[string]Variable),
 		Secrets:      slices.Sorted(slices.Values(pkg.Agent.Secrets)),
 		Agents:       make(map[string]AgentDef, len(pkg.Agent.Agents)),
 		Tasks:        make(map[string]Task, len(pkg.Tasks)),
@@ -95,38 +90,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	}
 	out.Knowledge = buildKnowledge(pkg)
 	out.Documents = pkg.Documents
-	out.VariableOrder = variableOrder(pkg)
-	for _, name := range out.VariableOrder {
-		variable := pkg.Agent.Variables[name]
-		resolved := Variable{
-			Type: PrimitiveType(variable.Type), Default: variable.Default,
-			Source: VariableSource(variable.Source), Confirm: variable.Confirm,
-			Description: variable.Description,
-		}
-		// An empty type: is left exactly as it was, because Validate already
-		// refuses it by name and its message is the one an author has read
-		// before. Everything else resolves, and a bare primitive keeps Shape nil
-		// so a package declaring nothing structured resolves byte-identically.
-		if strings.TrimSpace(variable.Type) != "" {
-			ref, err := resolveType(variable.Type, declared)
-			if err != nil {
-				return nil, fmt.Errorf("%s: variable %q: %w",
-					locateType(pkg, variable.Type, name+":"), name, err)
-			}
-			if ref.Structured() {
-				// A structured value reaches a prompt as text, which is the one
-				// thing every existing reader of Type does with it. The truth is
-				// in Shape.
-				resolved.Shape, resolved.Type = ref, PrimitiveString
-			} else {
-				resolved.Type = ref.Primitive
-			}
-		}
-		out.Variables[name] = resolved
+	if err := buildState(pkg, out); err != nil {
+		return nil, err
 	}
-	// Before anything reads the catalog: checkAssignments walks a path through
-	// it, and so do the prompt and prefetch checks further down.
-	seedBuiltinShapes(out)
 	if err := checkInject(pkg); err != nil {
 		return nil, err
 	}
@@ -413,7 +379,7 @@ func checkNames(pkg *packagespec.Package) error {
 		names []string
 	}{
 		{"model", modelNames},
-		{"variable", sortedKeys(pkg.Agent.Variables)}, {"agent", sortedKeys(pkg.Agent.Agents)},
+		{"agent", sortedKeys(pkg.Agent.Agents)},
 		{"task", sortedKeys(pkg.Tasks)}, {"task group", sortedKeys(pkg.Agent.TaskGroups)},
 		{"handoff", sortedKeys(pkg.Agent.Handoffs)},
 		{"escalation", sortedKeys(pkg.Agent.Escalations)}, {"tool", sortedKeys(pkg.Tools)},
@@ -423,11 +389,6 @@ func checkNames(pkg *packagespec.Package) error {
 			if !namePattern.MatchString(name) {
 				return fmt.Errorf("%s: %s name %q must be lowercase snake_case and cannot start with underscore", pkg.Location("agent.yaml", name), set.kind, name)
 			}
-		}
-	}
-	for _, name := range sortedKeys(pkg.Agent.Variables) {
-		if stateReservedName(name) {
-			return fmt.Errorf("%s: variable name %q is taken by the generated Pydantic state model, which already defines it or needs the builtin it shadows; rename the variable", pkg.Location("agent.yaml", name), name)
 		}
 	}
 	// All five kinds become callable function names at runtime, so they share one
@@ -1087,18 +1048,18 @@ func deriveResult(assign []AssignTo, agent *Agent) (map[string]ResultField, erro
 		seen[entry.Var] = true
 		variable, ok := agent.Variables[entry.Var]
 		if !ok {
-			return nil, fmt.Errorf("assign writes to %q, and it is not declared under the variables: block", entry.Var)
+			return nil, fmt.Errorf("assign writes to %q, which State in state.py does not declare", entry.Var)
 		}
-		typ := variable.Shape
-		if typ == nil {
-			typ = &TypeRef{Primitive: variable.Type}
-		}
+		typ := variable.Schema
 		if entry.Append {
 			if !typ.IsList() {
-				return nil, fmt.Errorf("assign appends to %q: declare a list or remove +", entry.Var)
+				return nil, fmt.Errorf("assign appends to %q: declare it a list[...] in state.py, or remove +", entry.Var)
 			}
-			item := *typ.List
-			item.Optional = true
+			// One entry, which may be absent: a step that concludes nothing adds
+			// nothing, rather than inventing an entry on the turn the caller
+			// changed their mind.
+			item := *typ.Items
+			item.Nullable = true
 			typ = &item
 		}
 		root, rest, _ := strings.Cut(entry.Field, ".")
@@ -1108,14 +1069,16 @@ func deriveResult(assign []AssignTo, agent *Agent) (map[string]ResultField, erro
 		if rest != "" {
 			continue
 		}
-		field := ResultField{Type: typ.Primitive, Description: variable.Description}
-		if typ.Structured() {
-			field.Type, field.Shape = PrimitiveString, typ
+		field := ResultField{
+			Description: variable.Description, Var: entry.Var, Append: entry.Append, Type: typ,
+			Required: !entry.Append && !entry.Optional,
 		}
 		if prior, exists := result[root]; exists {
-			if prior.Type != field.Type || !prior.Shape.Equal(field.Shape) {
+			if stateschema.Fits(prior.Type, field.Type) != nil || stateschema.Fits(field.Type, prior.Type) != nil {
 				return nil, fmt.Errorf("assign result.%s has conflicting destination types", root)
 			}
+			prior.Required = prior.Required || field.Required
+			result[root] = prior
 			continue
 		}
 		result[root] = field
@@ -1123,7 +1086,7 @@ func deriveResult(assign []AssignTo, agent *Agent) (map[string]ResultField, erro
 	for _, entry := range assign {
 		root, _, _ := strings.Cut(entry.Field, ".")
 		if _, ok := result[root]; !ok {
-			return nil, fmt.Errorf("assign result.%s needs a whole-field assignment to establish its type; assign result.%s to a declared shape first", entry.Field, root)
+			return nil, fmt.Errorf("assign result.%s needs a whole-field assignment to establish its type; assign result.%s to a variable of that type first", entry.Field, root)
 		}
 	}
 	return result, nil
@@ -1183,7 +1146,9 @@ func assignments(pairs []packagespec.Pair) ([]AssignTo, error) {
 		if !ok {
 			return nil, fmt.Errorf("assign %q must use result.<field>", text)
 		}
-		out = append(out, AssignTo{Var: name, Field: field, Append: appends})
+		// A `?` after the field lets the step finish without it.
+		field, optional := strings.CutSuffix(field, "?")
+		out = append(out, AssignTo{Var: name, Field: field, Append: appends, Optional: optional})
 	}
 	return out, nil
 }
@@ -1270,149 +1235,46 @@ func checkAssignments(taskName string, assign []AssignTo, agent *Agent) error {
 	for _, entry := range assign {
 		want, ok := agent.Variables[entry.Var]
 		if !ok {
-			// Name the block the author has to edit, because "does not resolve"
+			// Name the file the author has to edit, because "does not resolve"
 			// says neither where to look nor what is wrong.
-			return fmt.Errorf("assign writes to %q, and it is not declared under the variables: block", entry.Var)
+			return fmt.Errorf("assign writes to %q, which State in state.py does not declare", entry.Var)
 		}
 		// The first segment indexes the task's derived finish fields; anything
-		// after the first dot is a path into that field's declared shape.
+		// after the first dot is a path into that field's type.
 		root, rest, _ := strings.Cut(entry.Field, ".")
 		field, ok := task.Result[root]
 		if !ok {
 			return fmt.Errorf("assign result field %q does not resolve", entry.Field)
 		}
-		source := field
+		source := field.Type
 		if rest != "" {
-			if field.Shape == nil {
-				// A raw JSON Schema field, an enum field and a bare primitive
-				// field all have no declared shape, so none has fields a path
-				// can walk into. FieldPath says this the same way for a shape
-				// field with no such name; this is the same refusal for a field
-				// that never had fields to begin with.
-				kind := pythonSpelling(field.Type)
-				switch {
-				case field.Schema != nil:
-					kind = "a raw JSON Schema object"
-				case len(field.Enum) > 0:
-					kind = "an enum"
-				}
-				return fmt.Errorf("assign result %q: %q is %s, which has no fields to name", entry.Field, root, kind)
-			}
-			picked, err := FieldPath(agent.Shapes, field.Shape, strings.Split(rest, "."))
+			picked, err := field.Type.Path(strings.Split(rest, "."))
 			if err != nil {
 				return fmt.Errorf("assign result %q: %w", entry.Field, err)
 			}
-			if picked.Structured() {
-				source = ResultField{Type: PrimitiveString, Shape: picked}
-			} else {
-				source = ResultField{Type: picked.Primitive}
-			}
+			source = picked
 		}
-		target := want.Shape
+		target := want.Schema
 		if entry.Append {
 			if !target.IsList() {
-				return fmt.Errorf("assign appends to %q with %q, and %q is declared %s rather than a list. "+
-					"Drop the %q to replace the value, or declare it list[...] so an entry can be added to it",
-					entry.Var, entry.Var+"+:", entry.Var, declaredAs(want), "+")
+				return fmt.Errorf("assign appends to %q with %q, and %q is %s rather than a list. "+
+					"Drop the %q to replace the value, or declare it list[...] in state.py so an entry can be added to it",
+					entry.Var, entry.Var+"+:", entry.Var, target, "+")
 			}
-			target = target.List
-			// An entry that may be absent is legal to append: it means "add one
-			// if there is one this time", which is the shape a step that
-			// concludes nothing needs. The emitted append skips it, so the list
-			// grows only when the step produced something. Without this the step
-			// would have to invent an entry on the turn the caller changed their
-			// mind.
-			source.Shape = withoutOptional(source.Shape)
+			target = target.Items
+			// An entry that may be absent is legal to append: the emitted append
+			// skips it, so the list grows only when the step produced something.
+			if source.Nullable {
+				copied := *source
+				copied.Nullable = false
+				source = &copied
+			}
 		}
-		if err := assignableInto(target, want.Type, source); err != nil {
+		if err := stateschema.Fits(source, target); err != nil {
 			return fmt.Errorf("assign result %q does not fit variable %q: %w", entry.Field, entry.Var, err)
 		}
 	}
 	return nil
-}
-
-// declaredAs names a variable's type the way its author wrote it, for a refusal
-// that has to say what the value is as well as what it is not.
-func declaredAs(variable Variable) string {
-	if variable.Shape != nil {
-		return variable.Shape.String()
-	}
-	return pythonSpelling(variable.Type)
-}
-
-// assignableInto is the one predicate deciding whether a step's result field can
-// be written into a declared value. It replaced a single condition,
-// `field.Schema != nil || field.Type != want.Type`, whose first half is what
-// made a structured result unassignable at all.
-//
-// The three refusals that condition's siblings carry are untouched: an unknown
-// variable, an unresolved result field, and a path not written `result.<field>`.
-func assignableInto(target *TypeRef, targetPrimitive PrimitiveType, field ResultField) error {
-	// A raw JSON Schema result field stays unassignable, and deliberately: it is
-	// provider passthrough with no declared shape to match, so nothing can say
-	// whether it fits. Declaring a shape is what makes it assignable.
-	if field.Schema != nil {
-		return fmt.Errorf("the result field is a raw JSON Schema object, which has no declared shape to match. "+
-			"Declare the fields under %q and name that shape as the result field's type", "shapes:")
-	}
-	if target == nil {
-		// Both sides plain: the check that existed before this feature, byte for
-		// byte, so every package that compiles today keeps compiling.
-		if field.Shape != nil {
-			return fmt.Errorf("the result field is %s and the variable is %s. Declare the variable with the same "+
-				"type as the result field", field.Shape.String(), pythonSpelling(targetPrimitive))
-		}
-		if field.Type != targetPrimitive {
-			return fmt.Errorf("the result field is %s and the variable is %s",
-				pythonSpelling(field.Type), pythonSpelling(targetPrimitive))
-		}
-		return nil
-	}
-	source := field.Shape
-	if source == nil {
-		// A text type with a validated shape accepts plain text, because the
-		// shape is checked where the value enters the state and not in the
-		// schema the model is sent (FR-013). Everything else has to be declared.
-		if target.Shaped != "" && field.Type == PrimitiveString {
-			return nil
-		}
-		// An `enum:` result field and a Literal are the same closed set written
-		// two ways, so the same set assigns. A different set, or a bare string
-		// into a closed set, does not: the model would never be told the set and
-		// the value would be refused on every call.
-		if len(target.Literal) > 0 && len(field.Enum) > 0 {
-			if sameSet(target.Literal, field.Enum) {
-				return nil
-			}
-			return fmt.Errorf("the result field allows %s and the variable allows %s. Give both the same words",
-				strings.Join(field.Enum, ", "), strings.Join(target.Literal, ", "))
-		}
-		return fmt.Errorf("the result field is %s and the variable is %s. Declare the result field with the "+
-			"same type, so the model is told what to produce", pythonSpelling(field.Type), target.String())
-	}
-	// Optional on the target and not on the source is fine: a value that may be
-	// absent accepts one that is present.
-	if source.Equal(target) || (target.Optional && source.Equal(withoutOptional(target))) {
-		return nil
-	}
-	return fmt.Errorf("the result field is %s and the variable is %s", source.String(), target.String())
-}
-
-// withoutOptional is the target type with its nullability dropped, for the one
-// comparison that has to ignore it.
-func withoutOptional(ref *TypeRef) *TypeRef {
-	if ref == nil {
-		return nil
-	}
-	bare := *ref
-	bare.Optional = false
-	return &bare
-}
-
-// sameSet reports whether two closed sets hold the same entries. Order is how a
-// Literal renders and is not what makes two sets equal.
-func sameSet(left, right []string) bool {
-	return slices.Equal(slices.Sorted(slices.Values(left)), slices.Sorted(slices.Values(right)))
 }
 
 func stringValue(value *string) string {
@@ -2488,33 +2350,6 @@ func checkAttachments(pkg *packagespec.Package, list string, names []string) err
 
 func missing(pkg *packagespec.Package, file, kind, name string) error {
 	return fmt.Errorf("%s: %s %q does not resolve", pkg.Location(file, name), kind, name)
-}
-
-// shapeNames is the membership set resolveType needs, which is all it needs.
-func shapeNames(shapes map[string]Shape) map[string]bool {
-	out := make(map[string]bool, len(shapes))
-	for name := range shapes {
-		out[name] = true
-	}
-	return out
-}
-
-// variableOrder is every declared variable in authoring order. A name somehow
-// missed by the parser is appended sorted so generated output stays complete
-// and deterministic.
-func variableOrder(pkg *packagespec.Package) []string {
-	out := make([]string, 0, len(pkg.Agent.Variables))
-	for _, name := range pkg.VariableOrder() {
-		if _, ok := pkg.Agent.Variables[name]; ok && !slices.Contains(out, name) {
-			out = append(out, name)
-		}
-	}
-	for _, name := range sortedKeys(pkg.Agent.Variables) {
-		if !slices.Contains(out, name) {
-			out = append(out, name)
-		}
-	}
-	return out
 }
 
 func sortedKeys[V any](values map[string]V) []string {

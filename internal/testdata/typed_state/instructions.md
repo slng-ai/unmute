@@ -21,7 +21,7 @@ Read the conversation info below rather than re-reading the call. It is the
 record of what this call has already established.
 
 The service most recently booked on this call, if any, is
-{{last_appointment.appointment_type}}.
+{{state.last_appointment.appointment_type}}.
 
-The appointment is under the name {{booked_for.name}}, and the reminder goes to
-{{reminder_email}}.
+The appointment is under the name {{state.booked_for.name}}, and the reminder goes to
+{{state.reminder_email}}.

@@ -33,7 +33,7 @@ func initManifestCommand(t *testing.T, in io.Reader, args ...string) (string, er
 	cmd.SetErr(&out)
 	cmd.SetIn(in)
 	cmd.SetArgs(args)
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(recordedCtx(t))
 	return out.String(), err
 }
 

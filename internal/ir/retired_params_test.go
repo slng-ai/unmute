@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	packagespec "github.com/slng-ai/unmute/internal/spec"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -71,7 +70,7 @@ func withListenParams(t *testing.T, fixture, key, value string) error {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	pkg, err := packagespec.Load(root)
+	pkg, err := loadRecorded(root)
 	if err != nil {
 		t.Fatalf("the fixture itself does not load: %v", err)
 	}

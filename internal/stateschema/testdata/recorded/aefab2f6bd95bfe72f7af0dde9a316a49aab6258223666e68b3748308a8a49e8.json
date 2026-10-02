@@ -1,0 +1,30 @@
+{
+  "source": "internal/stateschema/testdata/models/bad_default.py",
+  "digest": "aefab2f6bd95bfe72f7af0dde9a316a49aab6258223666e68b3748308a8a49e8",
+  "report": {
+    "schema": {
+      "description": "A default its own type refuses.",
+      "properties": {
+        "enquiry": {
+          "default": "",
+          "enum": [
+            "new",
+            "existing"
+          ],
+          "title": "Enquiry",
+          "type": "string"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [
+      {
+        "name": "enquiry",
+        "error": "Input should be 'new' or 'existing'"
+      }
+    ],
+    "aliased": [],
+    "frozen": []
+  }
+}

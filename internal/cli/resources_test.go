@@ -129,7 +129,7 @@ func runResourcesWithStub(t *testing.T, script string) (out, errOut string) {
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
 	root.SetArgs([]string{"resources"})
-	if err := root.Execute(); err != nil {
+	if err := root.ExecuteContext(recordedCtx(t)); err != nil {
 		t.Fatalf("resources: %v\n%s", err, stderr.String())
 	}
 	return stdout.String(), stderr.String()

@@ -193,7 +193,7 @@ def build_{{.Name}}_tts() -> TTSService:
     return {{template "svc" .TTS.Call}}
 {{end}}{{else}}
 def build_{{.Name}}_llm(
-    state: {{if $.Variables}}State | None{{else}}None{{end}} = None{{if $.Slng.Any}},
+    state: {{if $.TypedState}}CallState | None{{else}}None{{end}} = None{{if $.Slng.Any}},
     *,
     slng_session_id: str,{{end}}
 ) -> LLMService[Any]:
@@ -256,7 +256,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 
     def __init__(
         self,
-        state: {{if $.Variables}}State | None{{else}}None{{end}} = None,
+        state: {{if $.TypedState}}CallState | None{{else}}None{{end}} = None,
         context: LLMContext | None = None,
         call_context: dict[str, Any] | None = None,
         dev_metrics: DevReporter | None = None,
@@ -272,8 +272,8 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             dev_metrics: The dev-page reporter, or None outside `unmute dev`.
 {{if $.Slng.Any}}            slng_session_id: This call's SLNG router session id.
 {{end}}        """
-{{if $.Variables}}        # Always supplied when the package declares variables; None only in a test.
-        self.state: State = cast(State, state)
+{{if $.TypedState}}        # Always supplied when the package keeps state; None only in a test.
+        self.state: CallState = cast(CallState, state)
 {{end}}        if context is not None:
             self.context = context
 {{if $.HasColdTransfer}}        self.call_context = call_context if call_context is not None else {}
@@ -282,7 +282,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # header dict has to carry this along with the scope.
         self._slng_session_id = slng_session_id
 {{end}}
-        llm = build_{{.Name}}_llm({{if $.Variables}}state{{end}}{{if $.Slng.Any}}{{if $.Variables}}, {{end}}slng_session_id=slng_session_id{{end}})
+        llm = build_{{.Name}}_llm({{if $.TypedState}}state{{end}}{{if $.Slng.Any}}{{if $.TypedState}}, {{end}}slng_session_id=slng_session_id{{end}})
         tts = build_{{.Name}}_tts()
         self._dev = dev_metrics
         if self._dev:
@@ -619,7 +619,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             for name, confirmed in (
 {{range $d.StepTasks}}                ({{pyq .Name}}, {{if .SkipWhenConfirmed}}{{pyq .SkipWhenConfirmed}}{{else}}""{{end}}),
 {{end}}            )
-            if not (confirmed and _is_confirmed(self.state, confirmed))
+            if not (confirmed and self.state.is_confirmed(confirmed))
         ]
 {{else}}        self._{{$d.MethodName}}_plan = [{{range $i, $t := $d.StepTasks}}{{if $i}}, {{end}}{{pyq $t.Name}}{{end}}]
 {{end}}
@@ -706,7 +706,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}{{if $t.Withdraws}}        # Entered, so whatever it confirms is being decided again. Withdrawn
         # before role_message renders, so this step never reads a confirmation
         # it is about to replace.
-        _withdraw_confirmation(self.state, {{pyq $t.Name}})
+        self.state.withdraw_confirmation({{pyq $t.Name}})
 {{end}}{{if $t.Reset}}        self.context.set_messages([])
 {{else if $t.CtxExpr}}        self.context.set_messages({{$t.CtxExpr}})
 {{end}}{{if and $t.AnnounceChosen $t.SpeaksItsOwnLine}}        # Read once. Alternatives pick a line per call, so the seeded turn and
@@ -903,8 +903,8 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             # because a caller who says the same word twice has said it twice.
             self._{{$d.MethodName}}_carried_turn = _newest_caller_message(_messages)
         try:
-            _values = _save_result({{pyq $t.Name}}, self.state, result)
-        except _StateRefused as refused:
+            _values = self.state.save_result({{pyq $t.Name}}, result)
+        except StateRefused as refused:
             # The action happened and the save did not. The step stays open so
             # the model can repair it, and its mutations stay closed so the
             # repair cannot run the action a second time.
@@ -961,7 +961,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             # Repairing a save the tool already made. The tool's own values win
             # where they validate: the model cannot manufacture a reference, and
             # a repair that retyped one would record an action nobody took.
-            args = _merge_retained({{pyq $t.Name}}, args, self._{{$d.MethodName}}_terminal[1])
+            args = STEP_RESULTS[{{pyq $t.Name}}].retain(args, self._{{$d.MethodName}}_terminal[1])
 {{end}}{{if $t.Typed}}        # Validated before anything is recorded: a value that does not fit its
         # declared type never enters the state, the previous contents stand, and
         # the message goes back to the model so it can correct itself on the next
@@ -969,8 +969,8 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # validates no tool argument itself, so without this the two targets
         # would behave differently on the same package.
         try:
-            _values = _save_result({{pyq $t.Name}}, self.state, dict(args))
-        except _StateRefused as refused:
+            _values = self.state.save_result({{pyq $t.Name}}, dict(args))
+        except StateRefused as refused:
             logger.warning("finish {}: {}", {{pyq $t.Name}}, refused.message)
             return {"refused": f"Not recorded: {refused.message}. Ask again, then call finish with a value that fits."}, None
 {{if $t.Terminals}}        return await self._{{$d.MethodName}}_advance_{{$t.Name}}(_values)
@@ -1132,7 +1132,7 @@ def _flow_visit(
 # re-registered function name always resolves to the same callable.
 {{range .FlowTools}}
 
-async def _flow_tool_{{.Name}}(args: Any, flow_manager: FlowManager{{if .NeedsState}}, state: State{{end}}) -> Any:
+async def _flow_tool_{{.Name}}(args: Any, flow_manager: FlowManager{{if .NeedsState}}, state: CallState{{end}}) -> Any:
     {{flowToolDoc 4 .Description .NeedsState}}
 {{if .Needed}}    refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
     if refusal:

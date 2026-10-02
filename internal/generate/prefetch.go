@@ -168,9 +168,6 @@ func Prefetch(agent *ir.Agent, stateExpr string, request func(entry ir.Prefetch)
 	if block.NeedsSeed {
 		b.WriteString("    call_context = _prefetch_call_facts(call_context)\n")
 	}
-	if block.Unconfirmed {
-		b.WriteString(prefetchUnconfirmedSet)
-	}
 	b.WriteString(prefetchOrderComment)
 	for _, entry := range agent.Prefetch {
 		b.WriteString("\n    if asyncio.get_running_loop().time() >= deadline:\n        return\n    try:\n")
@@ -216,7 +213,7 @@ func writePrefetchSave(b *strings.Builder, agent *ir.Agent, entry ir.Prefetch, v
 	for _, input := range entry.Inputs {
 		inputs = append(inputs, pyQuote(ir.PathRoot(input)))
 	}
-	fmt.Fprintf(b, "%s_save_batch(state, {%s}, inputs=[%s])\n", indent, strings.Join(values, ", "), strings.Join(inputs, ", "))
+	fmt.Fprintf(b, "%sstate.save_batch({%s}, inputs=[%s])\n", indent, strings.Join(values, ", "), strings.Join(inputs, ", "))
 	fmt.Fprintf(b, "%slogger.info(\"prefetch %s: resolved %s%s\")\n", indent, entry.Name, prefetchAssignedNames(entry), prefetchConfirmSuffix(agent, entry))
 }
 
@@ -371,10 +368,10 @@ func prefetchWithheldDigits(word string) string {
 func writePrefetchTool(b *strings.Builder, agent *ir.Agent, entry ir.Prefetch, stateExpr string, request PrefetchRequest) {
 	guards := make([]string, 0, len(entry.Inputs))
 	for _, input := range entry.Inputs {
-		guards = append(guards, "_state_lookup(state, "+pyQuote(input)+")[1] in (None, \"\")")
+		guards = append(guards, "state.lookup("+pyQuote(input)+")[1] in (None, \"\")")
 	}
 	for _, needed := range neededVars(agent.Tools[entry.Tool], agent.Variables, SupplierIndex(agent.Tasks)) {
-		guards = append(guards, pyQuote(ir.PathRoot(needed.Name))+" in getattr(state, \"_unconfirmed\", ())")
+		guards = append(guards, "state.is_unconfirmed("+pyQuote(ir.PathRoot(needed.Name))+")")
 	}
 	indent := "    "
 	if len(guards) > 0 {
@@ -794,7 +791,7 @@ async def _prefetch_wait(work: object, deadline: float) -> dict:
             task.cancel()
 
 
-async def _prefetch(state: STATE_CLASS, call_context: dict | None) -> None:
+async def _prefetch(state: CallState, call_context: dict | None) -> None:
     """Resolve every declared pre-fetch entry, inside one startup budget.
 
     Args:
@@ -802,14 +799,6 @@ async def _prefetch(state: STATE_CLASS, call_context: dict | None) -> None:
         call_context: The facts the carrier or dispatch supplied, if any.
     """
     deadline = asyncio.get_running_loop().time() + _PREFETCH_BUDGET_S
-`
-
-// prefetchUnconfirmedSet marks every confirm value as awaiting agreement.
-const prefetchUnconfirmedSet = `    # Every value awaiting the caller's agreement. The emitted _refusal helper
-    # reads this set, so a tool that injects an unconfirmed value is held back,
-    # and each generated assign write discards its own name as the caller
-    # settles it.
-    state._unconfirmed = set(_STATE_CONFIRM)
 `
 
 // prefetchOrderComment explains why the entries are written in authored order.

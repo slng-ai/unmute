@@ -1,0 +1,53 @@
+{
+  "source": "examples/hotel-concierge/state.py",
+  "digest": "429abfd1b4c75cdf124504ea67acae4ff8e165891156867c33ccb2836efa5245",
+  "report": {
+    "schema": {
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "hotel_name": {
+          "default": "Hotel Lumbre",
+          "description": "The property this deployment answers for. Spoken in the greeting.",
+          "title": "Hotel Name",
+          "type": "string"
+        },
+        "neighbourhood": {
+          "default": "Sol, in the centre of Madrid",
+          "description": "Where the hotel is, in words a places query can use.",
+          "title": "Neighbourhood",
+          "type": "string"
+        },
+        "city": {
+          "default": "Madrid",
+          "description": "The city.",
+          "title": "City",
+          "type": "string"
+        },
+        "hotel_website": {
+          "default": "lumbre-hotels.example",
+          "description": "The hotel's website, spoken on request without a scheme.",
+          "title": "Hotel Website",
+          "type": "string"
+        },
+        "caller_phone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The guest's mobile number for a text message, in international format starting with a plus sign, recorded only after the guest has heard it read back and confirmed it.",
+          "title": "Caller Phone"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

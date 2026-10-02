@@ -237,7 +237,7 @@ The contract fields are shared, with one exception that matters:
 </ParamField>
 
 <ParamField path="inject" type="list of one-key pairs">
-  Hidden argument/value pairs. Values are scalars or strings with `{{variable}}`
+  Hidden argument/value pairs. Values are scalars or strings with `{{state.variable}}`
   placeholders. Omit to inject nothing. Legal on local, webhook, and hosted `slng` tools;
   builtin `send_sms` requires its literal `from_number` setting.
 </ParamField>

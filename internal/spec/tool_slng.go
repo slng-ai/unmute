@@ -106,3 +106,15 @@ func validHostedName(name string) bool {
 	}
 	return true
 }
+
+// fieldText reads one scalar node as text: a plain string, or a block literal
+// with its trailing newline dropped.
+func fieldText(node ast.Node) (string, bool) {
+	switch scalar := node.(type) {
+	case *ast.StringNode:
+		return scalar.Value, true
+	case *ast.LiteralNode:
+		return strings.TrimRight(scalar.Value.Value, "\n"), true
+	}
+	return "", false
+}

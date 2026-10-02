@@ -22,15 +22,19 @@ On this page:
 
 ## Declare a group
 
-```yaml agent.yaml
-variables:
-  customer_id:
-    type: Id
-  selected_slot:
-    type: string
-  booking_status:
-    type: Literal["booked", "cancelled"]
+```python state.py
+from typing import Literal
 
+from pydantic import BaseModel
+
+
+class State(BaseModel):
+    customer_id: str = ""
+    selected_slot: str = ""
+    booking_status: Literal["booked", "cancelled"] | None = None
+```
+
+```yaml agent.yaml
 agents:
   appointment_desk:
     instructions: instructions.md
@@ -182,7 +186,7 @@ the conversation allowed by its history choice, and saved values explicitly
 referenced in its prompt.
 
 ```markdown tasks/select-appointment.md
-Find an available slot for customer {{customer_id}}.
+Find an available slot for customer {{state.customer_id}}.
 ```
 
 The group owner gets its original context back plus `completed` or `unserved`.

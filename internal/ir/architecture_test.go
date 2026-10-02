@@ -16,7 +16,7 @@ import (
 // actually have written rather than a hand-built IR.
 func loadLive(t *testing.T, mutate func(pkg *packagespec.Package)) error {
 	t.Helper()
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "live_model"))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", "live_model"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestAnArchitectureRefusalPointsAtTheKey(t *testing.T) {
 // resolved value is never empty, so no reader downstream has to treat an absent
 // key as a fourth case.
 func TestOmittedArchitectureIsCascade(t *testing.T) {
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "simple-prompt"))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", "simple-prompt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestOmittedArchitectureIsCascade(t *testing.T) {
 // fixture, so the realtime checks have something to run against.
 func realtimeAgent(t *testing.T, mutate func(entry *packagespec.RealtimeDef, agent *packagespec.AgentDef)) *Agent {
 	t.Helper()
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "live_model"))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", "live_model"))
 	if err != nil {
 		t.Fatal(err)
 	}

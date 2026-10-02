@@ -116,25 +116,12 @@ agents:
 [[if .ThenTarget]]    then_target: [[.ThenTarget]]
 [[end]]    merge: results
 [[end]]
-[[end]][[if .Shapes]]# The named groups of fields a value's type: refers to. Each field is one line,
-# `- name: Type`, and grows a block only when it wants a description the model
-# reads.
-shapes:
-[[range .Shapes]]  - name: [[.Name]]
-[[if .Description]]    description: [[yaml .Description]]
-[[end]]    fields:
-[[range .Fields]][[if .Description]]      - name: [[.Name]]
-        type: [[yaml .Type]]
-        description: [[yaml .Description]]
-[[else]]      - [[.Name]]: [[yaml .Type]]
-[[end]][[end]][[end]]
-[[end]][[if .Variables]]variables:
-[[range .Variables]]  [[.Name]]:
-    type: [[.Type]]
-[[if .Default]]    default: [[.Default]]
-[[end]][[if .Source]]    source: [[.Source]]
+[[end]][[if .BehaviourVariables]]# How the values on State in state.py behave: where one comes from, and which
+# step confirms it. A value needs an entry only for one of those.
+variables:
+[[range .BehaviourVariables]]  - name: [[.Name]]
+[[if .Source]]    source: [[.Source]]
 [[end]][[if .Confirm]]    confirm: [[.Confirm]]
-[[end]][[if .Description]]    description: [[quote .Description]]
 [[end]][[end]]
 [[end]][[if .DeclaredSecrets]]# Every runtime value you supply, by environment variable name. A secret has no
 # other fields, and a value never appears in a package file: put the values in

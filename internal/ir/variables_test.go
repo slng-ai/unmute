@@ -1,12 +1,14 @@
 package ir
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -27,7 +29,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			mutet: func(pkg *packagespec.Package) {
 				pkg.Agent.Conversation.Greeting.Text = "Hi {{custmer_id}}"
 			},
-			want: `references {{custmer_id}}, which is not a declared variable`,
+			want: `references {{custmer_id}}, which State in state.py does not declare`,
 		},
 		{
 			name: "a secret may never flow through a template",
@@ -39,25 +41,25 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 		{
 			name: "a sourceless variable has no value when the prompt is built",
 			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["reschedule_to"] = packagespec.Variable{Type: "string"}
-				pkg.Agent.Conversation.Greeting.Text = "Hi {{reschedule_to}}"
+				addState(pkg, optionalField("reschedule_to", stringType))
+				pkg.Agent.Conversation.Greeting.Text = "Hi {{state.reschedule_to}}"
 			},
 			want: "has no value when the prompt is built",
 		},
 		{
 			name: "the same variable is fine once it has a default",
 			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["reschedule_to"] = packagespec.Variable{Type: "string", Default: "later"}
-				pkg.Agent.Conversation.Greeting.Text = "Hi {{reschedule_to}}"
+				addState(pkg, stateschema.Field{Name: "reschedule_to", Type: stringType, Default: json.RawMessage(`"later"`)})
+				pkg.Agent.Conversation.Greeting.Text = "Hi {{state.reschedule_to}}"
 			},
 			want: "",
 		},
 		{
 			name: "a call-time site may name a sourceless variable with no default",
 			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["reschedule_to"] = packagespec.Variable{Type: "string"}
+				addState(pkg, optionalField("reschedule_to", stringType))
 				tool := pkg.Tools["lookup_customer"]
-				tool.Inject = []packagespec.Pair{{Key: "slot", Value: "{{reschedule_to}}"}}
+				tool.Inject = []packagespec.Pair{{Key: "slot", Value: "{{state.reschedule_to}}"}}
 				pkg.Tools["lookup_customer"] = tool
 			},
 			want: "",
@@ -66,7 +68,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			name: "an injected key cannot double as a model parameter",
 			mutet: func(pkg *packagespec.Package) {
 				tool := pkg.Tools["lookup_customer"]
-				tool.Inject = []packagespec.Pair{{Key: "phone", Value: "{{customer_id}}"}}
+				tool.Inject = []packagespec.Pair{{Key: "phone", Value: "{{state.customer_id}}"}}
 				pkg.Tools["lookup_customer"] = tool
 			},
 			want: "which is also an input property",
@@ -76,7 +78,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			mutet: func(pkg *packagespec.Package) {
 				tool := pkg.Tools["lookup_customer"]
 				tool.Webhook, tool.MCP = nil, &packagespec.ToolMCP{URLEnv: "MCP_URL"}
-				tool.Inject = []packagespec.Pair{{Key: "caller", Value: "{{customer_id}}"}}
+				tool.Inject = []packagespec.Pair{{Key: "caller", Value: "{{state.customer_id}}"}}
 				pkg.Tools["lookup_customer"] = tool
 			},
 			want: "inject is legal on webhook, local and slng tools",
@@ -109,9 +111,9 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			// words rather than a hole (_state_text/_render's plain fallback).
 			name: "an agent prompt may name a variable that has no value yet",
 			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["caller_alias"] = packagespec.Variable{Type: "string"}
+				addState(pkg, optionalField("caller_alias", stringType))
 				intake := pkg.Agent.Agents["intake"]
-				pkg.Markdown[intake.Instructions] += "\n\nThe caller goes by {{caller_alias}}."
+				pkg.Markdown[intake.Instructions] += "\n\nThe caller goes by {{state.caller_alias}}."
 			},
 			want: "",
 		},
@@ -120,7 +122,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			pkg := loadSafeCore(t)
 			// Every case needs a variable to point at and a secret to confuse it with.
-			pkg.Agent.Variables["customer_id"] = packagespec.Variable{Type: "string", Source: "call_start", Default: "cus_1"}
+			declareVariable(pkg, stateschema.Field{Name: "customer_id", Type: stringType, Default: json.RawMessage(`"cus_1"`)}, "call_start")
 			pkg.Agent.Secrets = []string{"SALON_API_TOKEN"}
 			if pkg.Agent.Conversation == nil {
 				pkg.Agent.Conversation = &packagespec.Conversation{}
@@ -266,7 +268,7 @@ func TestTelephonyExamplesDeclareEveryNameTheyWrite(t *testing.T) {
 		filepath.Join("..", "voice-agents-tests", "salon-concierge-v2"),
 	} {
 		t.Run(filepath.Base(example), func(t *testing.T) {
-			pkg, err := packagespec.Load(example)
+			pkg, err := loadRecorded(example)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -294,7 +296,7 @@ func TestTelephonyExamplesDeclareEveryNameTheyWrite(t *testing.T) {
 func TestSecretsCheckRunsWithNoBlock(t *testing.T) {
 	load := func(t *testing.T, mutate func(*packagespec.Package)) *Agent {
 		t.Helper()
-		pkg, err := packagespec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+		pkg, err := loadRecorded(filepath.Join("..", "..", "examples", "salon-concierge"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -374,7 +376,7 @@ func TestTemplateParsing(t *testing.T) {
 	if got := TemplateVar("{{ customer_id }}"); got != "customer_id" {
 		t.Fatalf("TemplateVar = %q, want customer_id", got)
 	}
-	if got := TemplateVar("id-{{customer_id}}"); got != "" {
+	if got := TemplateVar("id-{{state.customer_id}}"); got != "" {
 		t.Fatalf("TemplateVar = %q, want empty for a mixed value", got)
 	}
 	if HasTemplate("no tokens here") {
@@ -407,7 +409,7 @@ func attachStep(pkg *packagespec.Package, agent string, task packagespec.Task, b
 // gate. manage_booking here names customer_status without waiting for it.
 func TestTaskPromptMayNameAVariableOnlyAnotherStepAssigns(t *testing.T) {
 	pkg := loadSafeCore(t)
-	pkg.Agent.Variables["customer_status"] = packagespec.Variable{Type: "string"}
+	addState(pkg, stringField("customer_status"))
 	attachStep(pkg, "intake", packagespec.Task{
 		Name: "verify_customer", Instructions: "tasks/verify.md",
 		When:    "Confirm who the caller is.",
@@ -418,7 +420,7 @@ func TestTaskPromptMayNameAVariableOnlyAnotherStepAssigns(t *testing.T) {
 		Name: "manage_booking", Instructions: "tasks/booking.md",
 		When:    "The caller wants a booking.",
 		Context: packagespec.TaskContext{History: "full"},
-	}, "Serve the {{customer_status}} customer.")
+	}, "Serve the {{state.customer_status}} customer.")
 	if _, err := Build(pkg); err != nil {
 		t.Fatalf("a task prompt naming a variable only another step assigns was refused: %v", err)
 	}
@@ -428,7 +430,7 @@ func TestInjectedKeyCannotBeModelRequired(t *testing.T) {
 	pkg := loadSafeCore(t)
 	tool := pkg.Tools["lookup_customer"]
 	tool.Input = map[string]any{"type": "object", "properties": map[string]any{}, "required": []any{"phone"}}
-	tool.Inject = []packagespec.Pair{{Key: "phone", Value: "{{customer_id}}"}}
+	tool.Inject = []packagespec.Pair{{Key: "phone", Value: "{{state.customer_id}}"}}
 	pkg.Tools["lookup_customer"] = tool
 	_, err := Build(pkg)
 	if err == nil || !strings.Contains(err.Error(), "required") {

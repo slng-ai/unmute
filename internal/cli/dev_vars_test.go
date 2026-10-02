@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/stateschema"
 )
 
 // Each declared type parses to its JSON counterpart, so a bot expecting a number
@@ -105,7 +106,7 @@ func TestCallStartPayload(t *testing.T) {
 		want string
 	}{
 		{"not name=value", "dispatched", "must be name=value"},
-		{"undeclared", "nobody=Ada", "no variable"},
+		{"undeclared", "nobody=Ada", "declares no"},
 		{"an unrecognized source", "unrecognized=Ada", "not a source unmute recognizes"},
 		{"the route's own", "from_the_route=Ada", "the runtime supplies it"},
 	} {
@@ -131,9 +132,9 @@ func TestCallStartPayload(t *testing.T) {
 // Text with a checked format stays text: a Phone is not JSON.
 func TestCallStartPayloadDecodesStructuredValues(t *testing.T) {
 	agent := &ir.Agent{Variables: map[string]ir.Variable{
-		"record": {Type: ir.PrimitiveString, Shape: &ir.TypeRef{Shape: "CustomerRecord"}},
-		"notes":  {Type: ir.PrimitiveString, Shape: &ir.TypeRef{List: &ir.TypeRef{Primitive: ir.PrimitiveString}}},
-		"phone":  {Type: ir.PrimitiveString, Shape: &ir.TypeRef{Shaped: ir.ShapedPhone}},
+		"record": {Type: ir.PrimitiveString, Schema: &stateschema.Type{Kind: stateschema.KindObject, Model: "CustomerRecord"}},
+		"notes":  {Type: ir.PrimitiveString, Schema: &stateschema.Type{Kind: stateschema.KindArray, Items: &stateschema.Type{Kind: stateschema.KindString}}},
+		"phone":  {Type: ir.PrimitiveString, Schema: &stateschema.Type{Kind: stateschema.KindString, Format: "phone"}},
 	}}
 	got, err := callStartPayload(agent, []string{
 		`record={"record_id":"R1"}`, `notes=["one","two"]`, "phone=+34600111222",

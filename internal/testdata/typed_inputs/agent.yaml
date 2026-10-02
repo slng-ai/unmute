@@ -12,20 +12,6 @@ secrets:
   - DEEPGRAM_API_KEY
   - SLNG_API_KEY
 
-shapes:
-  - name: Thing
-    description: One thing the caller named.
-    fields:
-      - label: str
-      - name: count
-        type: int
-        description: How many of it.
-
-variables:
-  notes:
-    type: list[Thing]
-    description: What this call has recorded so far.
-
 agents:
   front:
     instructions: instructions.md

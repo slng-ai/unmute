@@ -1,0 +1,192 @@
+{
+  "source": "examples/customer-intake/state.py",
+  "digest": "20c2b05a4bc53c087dcfd702176081ecbad00e0d78a1e5496d2dffa8801d609c",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Contact": {
+          "description": "A person's name and email address, held as two separate parts.\n\nTwo fields rather than Pydantic's NameEmail, which is one string: a prompt\ncan then use the name without saying the address out loud.",
+          "properties": {
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "email": {
+              "format": "email",
+              "title": "Email",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ],
+          "title": "Contact",
+          "type": "object"
+        },
+        "CustomerRecord": {
+          "description": "The record the intake desk opened for this caller.",
+          "properties": {
+            "record_id": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+              "title": "Record Id",
+              "type": "string"
+            },
+            "opened_on": {
+              "format": "date",
+              "title": "Opened On",
+              "type": "string"
+            },
+            "enquiry": {
+              "enum": [
+                "new_customer",
+                "existing_customer",
+                "complaint",
+                "other"
+              ],
+              "title": "Enquiry",
+              "type": "string"
+            }
+          },
+          "required": [
+            "record_id",
+            "opened_on",
+            "enquiry"
+          ],
+          "title": "CustomerRecord",
+          "type": "object"
+        }
+      },
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "caller_phone": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The caller's number in E.164: a plus sign, then digits, with no spaces, brackets or dashes.",
+          "title": "Caller Phone"
+        },
+        "contact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Contact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who the caller is and where their confirmation goes, the name and the email address held as two separate parts."
+        },
+        "caller_email": {
+          "anyOf": [
+            {
+              "format": "email",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The caller's email address on its own, with no name around it.",
+          "title": "Caller Email"
+        },
+        "enquiry": {
+          "anyOf": [
+            {
+              "enum": [
+                "new_customer",
+                "existing_customer",
+                "complaint",
+                "other"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the caller rang about, in one of the four words listed.",
+          "title": "Enquiry"
+        },
+        "callback_time": {
+          "anyOf": [
+            {
+              "format": "time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A good time of day to ring the caller back, on the 24 hour clock. Leave it out when the caller has not named one.",
+          "title": "Callback Time"
+        },
+        "notes": {
+          "default": [],
+          "description": "Anything the caller added that no other field holds, one short entry per thing they said.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "record": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CustomerRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The record create_customer_record wrote, exactly as it came back. Fill it only after that tool succeeded."
+        },
+        "record_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The reference number for this caller's record, on its own.",
+          "title": "Record Id"
+        },
+        "today_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Today's date at the desk, written year-month-day.",
+          "title": "Today Date"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

@@ -18,7 +18,7 @@ func runSkillInstallCommand(t *testing.T, args ...string) (string, string, error
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs(append([]string{"skill", "install"}, args...))
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(recordedCtx(t))
 	return stdout.String(), stderr.String(), err
 }
 
@@ -240,7 +240,7 @@ func TestSkillWithNoSubcommandPrintsHelp(t *testing.T) {
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stdout)
 	cmd.SetArgs([]string{"skill"})
-	if err := cmd.Execute(); err != nil {
+	if err := cmd.ExecuteContext(recordedCtx(t)); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "install") {

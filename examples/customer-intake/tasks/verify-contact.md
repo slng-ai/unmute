@@ -3,7 +3,7 @@
 This is the only prompt in the package that holds the caller's number, and it
 holds it because agreeing it is this step's whole job.
 
-The number the call arrived on: {{caller_phone}}.
+The number the call arrived on: {{state.caller_phone}}.
 
 ## What to do
 

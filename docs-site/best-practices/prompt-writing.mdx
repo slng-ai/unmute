@@ -76,18 +76,18 @@ numbers, booking references, addresses, dates of birth.
 ## Say the format, do not show it
 
 A typed value has one correct spelling and the model needs to know it. Put the
-format in the type's description, where it travels with the value into every
+format in the field's description, where it travels with the value into every
 schema the model sees:
 
-```yaml agent.yaml
-- name: scheduled_time
-  type: Time
-  description: The time the caller agreed to.
+```python state.py
+class State(BaseModel):
+    scheduled_time: time | None = Field(
+        None, description="The time the caller agreed to, on the 24-hour clock, like 09:30 or 17:45."
+    )
 ```
 
-Shaped types carry their own format phrase automatically, so the model is told
-that a `Time` is "a time of day on the 24-hour clock, like 09:30 or 17:45"
-whether or not you write a description of your own.
+Pydantic checks the value where it is saved, but the model only learns the
+spelling from your description.
 
 Without it, a model sends the spelling its own prompt requires out loud. A
 task told to say times as "11:30 AM" to the caller will send `"11:30 AM"` to a
@@ -126,8 +126,8 @@ Saved values reach a prompt only through placeholders you write. Keep those
 references close to the instruction that uses them:
 
 ```md
-Move appointment {{appointment_id}} to {{appointment_date}} at
-{{appointment_time}}.
+Move appointment {{state.appointment_id}} to {{state.appointment_date}} at
+{{state.appointment_time}}.
 ```
 
 Choose who confirms success. A simple pattern is for the task to finish
@@ -139,7 +139,7 @@ Let the owner confirm it to the caller.
 ```
 
 ```markdown instructions.md
-Latest saved appointment: {{appointment}}
+Latest saved appointment: {{state.appointment}}
 When the booking task completes, confirm this appointment once in plain speech.
 ```
 

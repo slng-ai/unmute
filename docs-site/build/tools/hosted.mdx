@@ -95,7 +95,7 @@ stay yours to write, exactly as before:
 </ParamField>
 
 <ParamField path="inject" type="list of one-key pairs">
-  Hidden argument/value pairs. Values are scalars or strings with `{{variable}}`
+  Hidden argument/value pairs. Values are scalars or strings with `{{state.variable}}`
   placeholders. Omit to inject nothing. Legal on local, webhook, and hosted `slng` tools;
   builtin `send_sms` requires its literal `from_number` setting.
 </ParamField>
@@ -119,23 +119,23 @@ stay yours to write, exactly as before:
 slng: search_places_text
 
 inject:
-  - query: "{{customer_name}}"
+  - query: "{{state.customer_name}}"
 ```
 
 This snippet is separate from the phone-ready `hotel-concierge` example. Declare
-`customer_name` under `variables:` with `type: str` and `source: call_start`,
-and supply it when starting a web session. For inbound phone calls, give it a
+`customer_name` as a `str` field on `State` in `state.py`, give it
+`source: call_start` under `variables:`, and supply it when starting a web session. For inbound phone calls, give it a
 valid default or leave `query` to the model: carriers supply no session inputs.
 
 Injected values keep their exact type, including `false` and `0`, and are
-never shown to the model. `{{customer_name}}` is resolved when a call starts;
+never shown to the model. `{{state.customer_name}}` is resolved when a call starts;
 a fixed value such as `- limit: 0` is bound as written. Full rules for the
 last three fields are on
 [the tools overview](/build/tools/overview#the-three-behavior-fields).
 
 A variable does not have to land on a text parameter. SLNG stores the value as
 text and converts it into the parameter's declared type, so `- limit:
-"{{how_many}}"` works on an integer parameter as long as the stored value reads
+"{{state.how_many}}"` works on an integer parameter as long as the stored value reads
 as a number. That conversion happens when the call starts, so `unmute deploy`
 checks the parameter and reports the value as deferred rather than claiming to
 have validated it.

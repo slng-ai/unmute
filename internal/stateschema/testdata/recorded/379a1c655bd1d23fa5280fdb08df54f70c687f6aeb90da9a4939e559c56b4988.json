@@ -1,0 +1,47 @@
+{
+  "source": "internal/testdata/typed_inputs/state.py",
+  "digest": "379a1c655bd1d23fa5280fdb08df54f70c687f6aeb90da9a4939e559c56b4988",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Thing": {
+          "description": "One thing the caller named.",
+          "properties": {
+            "label": {
+              "title": "Label",
+              "type": "string"
+            },
+            "count": {
+              "description": "How many of it.",
+              "title": "Count",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "label",
+            "count"
+          ],
+          "title": "Thing",
+          "type": "object"
+        }
+      },
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "notes": {
+          "default": [],
+          "description": "What this call has recorded so far.",
+          "items": {
+            "$ref": "#/$defs/Thing"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

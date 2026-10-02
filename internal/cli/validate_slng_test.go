@@ -149,7 +149,7 @@ func TestValidateSlngRefusesUnsupportedPackageShapes(t *testing.T) {
 		},
 		{
 			name: "no greeting", file: "agent.yaml",
-			replace: "  greeting:\n    speaks_first: agent\n    text: \"Hi {{customer_name}}, you have reached Acme Support. How can I help?\"\n",
+			replace: "  greeting:\n    speaks_first: agent\n    text: \"Hi {{state.customer_name}}, you have reached Acme Support. How can I help?\"\n",
 			with:    "  greeting:\n    speaks_first: user\n",
 			// speaks_first: user is the honest way to ask for no greeting, and SLNG
 			// requires one, so this is the refusal an author actually meets.

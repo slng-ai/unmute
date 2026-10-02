@@ -93,7 +93,7 @@ func newDeployCmd() *cobra.Command {
 func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 	out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
 	printHeader(out, "deploy "+displayDir(dir))
-	agent, selected, err := loadPackage(dir, opts.targets)
+	agent, selected, err := loadPackage(cmd.Context(), dir, opts.targets)
 	if err != nil {
 		return fmt.Errorf("deploy %s: %w", dir, err)
 	}

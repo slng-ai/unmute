@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -15,7 +16,7 @@ import (
 // the error came from the thing it broke.
 func loadSlngCore(t *testing.T) *packagespec.Package {
 	t.Helper()
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "slng_core"))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", "slng_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -602,83 +603,51 @@ func TestSlngRequiresAnExplicitMCPToolList(t *testing.T) {
 	}
 }
 
-// TestSlngRefusesADeclaredShape is FR-010 on the one target that cannot express
-// declared state, and the message has to say what to write instead.
+// TestSlngRefusesStructuredState is FR-010 on the one target that cannot express
+// typed state, and the message has to say what to write instead.
 //
-// A shape is a generated Pydantic class with a validator, and the validation
-// runs where the value enters the state, which is inside a module this target
-// never writes. So the refusal is about the missing module, not about the
-// missing tasks: an author who flattens the shape into primitives gets a
-// package that deploys.
-func TestSlngRefusesADeclaredShape(t *testing.T) {
-	agent := slngAgent(t)
-	agent.Shapes = map[string]Shape{"Appointment": {
-		Name:   "Appointment",
-		Fields: []Field{{Name: "scheduled_date", Type: &TypeRef{Shaped: ShapedDate}}},
+// A State field that is a model, a list, a closed set, a checked text type or
+// may be None is validated by Pydantic where the value enters the state, which
+// is inside a module this target never writes. So the refusal is about the
+// missing module: an author who keeps the field a plain scalar gets a package
+// that deploys.
+func TestSlngRefusesStructuredState(t *testing.T) {
+	model := &stateschema.Type{Kind: stateschema.KindObject, Model: "Contact", Fields: []stateschema.Field{
+		{Name: "name", Type: stringType},
 	}}
-	variable := agent.Variables["caller_phone"]
-	variable.Shape = &TypeRef{List: &TypeRef{Shape: "Appointment"}}
-	agent.Variables["caller_phone"] = variable
-
-	row := validateSlng(t, agent)
-	wantSlngError(t, row, "slng target pushes a spec and emits no module of its own",
-		"has nowhere to be declared or checked", "compile to livekit or pipecat")
-}
-
-// TestSlngRefusesAShapedTextType is the second row, refused for the same reason
-// and fixed differently: this one asks the author to give up a check rather
-// than to flatten a group of fields, so it says so separately.
-func TestSlngRefusesAShapedTextType(t *testing.T) {
-	agent := slngAgent(t)
-	variable := agent.Variables["caller_phone"]
-	variable.Shape = &TypeRef{Shaped: ShapedPhone}
-	agent.Variables["caller_phone"] = variable
-
-	row := validateSlng(t, agent)
-	wantSlngError(t, row, "a value whose text has a validated shape",
-		"declare the value as one of the primitive types")
-}
-
-// TestSlngRefusesAnEmailType is the same pair of rows reached by the two email
-// types, and it is separate because each arrives by its own route.
-//
-// EmailStr is a text type with a validated shape, so it rides the shaped row.
-// NameEmail is a shape the compiler supplies, and the only reason it rides the
-// declared-shape row is that internal/ir seeds it into the catalog when a type
-// names it: a reference with no entry there would leave the catalog empty, and
-// the row that starts from whether the catalog is empty would pass a package
-// this target cannot emit.
-func TestSlngRefusesAnEmailType(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		shapes  map[string]Shape
-		ref     *TypeRef
-		phrases []string
+		name string
+		typ  *stateschema.Type
 	}{
-		{
-			name:    "the plain address",
-			ref:     &TypeRef{Shaped: ShapedEmail},
-			phrases: []string{"a value whose text has a validated shape", "declare the value as one of the primitive types"},
-		},
-		{
-			name:    "the name and address pair",
-			shapes:  map[string]Shape{"NameEmail": builtinShapes["NameEmail"]},
-			ref:     &TypeRef{Shape: "NameEmail"},
-			phrases: []string{"a value with a declared shape", "compile to livekit or pipecat"},
-		},
+		{"a model", model},
+		{"a list", listOf(stringType)},
+		{"a closed set", &stateschema.Type{Kind: stateschema.KindString, Enum: []string{"a", "b"}}},
+		{"a checked text type", &stateschema.Type{Kind: stateschema.KindString, Format: "email"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			agent := slngAgent(t)
-			if tc.shapes != nil {
-				agent.Shapes = tc.shapes
-			}
 			variable := agent.Variables["caller_phone"]
-			variable.Shape = tc.ref
+			variable.Schema = tc.typ
 			agent.Variables["caller_phone"] = variable
 
 			row := validateSlng(t, agent)
-			wantSlngError(t, row, tc.phrases...)
+			wantSlngError(t, row, "slng target pushes a spec and emits no module of its own",
+				"more than a plain str, int, float or bool", "compile to livekit or pipecat")
 		})
+	}
+}
+
+// TestSlngAcceptsAPlainValueThatMayBeNone: None on a plain field is only "no
+// value yet", which a hosted agent renders as it renders an empty string.
+func TestSlngAcceptsAPlainValueThatMayBeNone(t *testing.T) {
+	agent := slngAgent(t)
+	variable := agent.Variables["caller_phone"]
+	variable.Schema = nullable(stringType)
+	agent.Variables["caller_phone"] = variable
+	for _, message := range validateSlng(t, agent).Errors {
+		if strings.Contains(message, "emits no module of its own") {
+			t.Errorf("a plain str | None was refused: %q", message)
+		}
 	}
 }
 
@@ -784,7 +753,7 @@ func TestSlngAcceptsTheValuesAnOverrideIsMadeOf(t *testing.T) {
 // package targeting a code target could write, which is the opposite of what
 // this feature is for.
 func TestCodeTargetsKeepTheirOwnExpressionRules(t *testing.T) {
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "slng_hosted_code"))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", "slng_hosted_code"))
 	if err != nil {
 		t.Fatal(err)
 	}

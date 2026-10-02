@@ -39,7 +39,7 @@ func knowledgeAgent(t *testing.T) *ir.Agent {
 	tool.Description = "Look up the salon's refund and complaints policy."
 	tool.Announce = spec.Announce{"Let me check the policy."}
 	pkg.Tools["lookup_customer"] = tool
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
