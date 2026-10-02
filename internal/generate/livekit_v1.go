@@ -916,6 +916,7 @@ var livekitModules = []struct{ tmpl, path string }{
 	{"utils_auth.py", "utils/auth.py"},
 	{"utils_context.py", "utils/context.py"},
 	{"utils_mcp.py", "utils/mcp.py"},
+	{"state.py", "state.py"},
 	{"session.py", "session.py"},
 	{"utils_telephony.py", "utils/telephony.py"},
 	{"utils_router.py", "utils/router.py"},

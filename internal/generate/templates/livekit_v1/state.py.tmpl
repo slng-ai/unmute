@@ -1,0 +1,37 @@
+"""The call's declared state: its types, the state class, and the one way a value is saved."""
+
+{{- if .TypedState}}
+{{.TypedState.Source}}
+{{end}}
+{{- if .HasUserdata}}
+# --- shared state ------------------------------------------------------------
+# Typed session state: tasks assign into it, transfers read it.
+@dataclass
+class Userdata:
+    """The session state every agent and task of one call shares."""
+
+{{- if .NeedsPrefetchUnconfirmed}}
+    _unconfirmed: set[str] = field(default_factory=lambda: set(_STATE_CONFIRM))
+{{- end}}
+{{- range .Vars}}
+{{- if .Description}}
+    # {{.Description}}
+{{- end}}
+    {{.Name}}: {{.Anno}} = {{.Default}}{{if .LiteralDefault}}  # ty: ignore[invalid-assignment]{{end}}
+{{- end}}
+{{- if .Slng.Any}}
+    # One value per call, set where the call begins. It groups this call's think
+    # requests for support and scopes nothing: the cache scope is the agent id
+    # header, so this may differ freely between calls. It lives here rather than
+    # in an entrypoint local because the header set now travels per request, so
+    # every agent and task class has to be able to reach it from a method body.
+    {{.Slng.SessionIDField}}: str = ""
+{{- if .Slng.ClientBaseURL}}
+    # And the router client, for the same reason: the summarizer is built inside
+    # an agent method, where the entrypoint's local is out of scope. One client
+    # per call, so the pool and its response hook are the call's own.
+    slng_client: AsyncOpenAI | None = None
+{{- end}}
+{{- end}}
+
+{{end}}

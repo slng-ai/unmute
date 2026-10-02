@@ -168,6 +168,10 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // be string", a Phone was never checked) and Pipecat checked nothing. A bad
 // dispatched value still stops the call start; a fact that does not fit, such
 // as "anonymous" for a Phone, is now treated as missing instead of saved.
+// The same day, the declared state moved out of session.py into its own
+// state.py on both code targets. The code moved and did not change: apart from
+// imports, module docstrings and the generated-file list, every line of every
+// golden is the same multiset of lines before and after.
 //
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.

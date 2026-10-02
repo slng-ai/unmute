@@ -118,16 +118,12 @@ def _settle_task_call(messages: list[Any], name: str, status: Any) -> None:
             and reply.get("tool_call_id") == running["id"]
         ):
             reply["content"] = json.dumps(status)
-"""The call's state: its typed variables, how they are read, and what is known first."""
+"""The call's declared state: its types, the state class, and the one way a value is saved."""
 
 from __future__ import annotations
 
 import json
-import os
-import re
 from dataclasses import dataclass
-from typing import Any
-from urllib.parse import quote
 
 from loguru import logger
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -600,6 +596,17 @@ class State:
     caller_alias: str | None = None
     customer_id: str | None = None
     verified: bool = False
+"""How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from typing import Any
+from urllib.parse import quote
+
+from state import State, _prompt_value, _save_call_start, _state_text
 
 
 def _dispatched_call_start(call_context: dict[str, Any] | None) -> dict[str, Any]:
@@ -692,8 +699,8 @@ from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.utils.http import connection_limits
 
-from session import _prompt_value, _state_text
 from settings import ROUTER_KEEPALIVE_CONNECTIONS, ROUTER_MAX_CONNECTIONS
+from state import _prompt_value, _state_text
 
 # --- SLNG Context Router ----------------------------------------------------
 # The router answers a repeated turn from its cache instead of calling the model.
@@ -941,7 +948,8 @@ from prompts import (
     RUN_TRIAGE_COLLECT_TASK_PROMPT,
     RUN_TRIAGE_CONFIRM_TASK_PROMPT,
 )
-from session import (
+from settings import WEBHOOK_TIMEOUT_SECS
+from state import (
     State,
     _group_status,
     _save_result,
@@ -949,7 +957,6 @@ from session import (
     _StateRefused,
     _task_status,
 )
-from settings import WEBHOOK_TIMEOUT_SECS
 from utils.context import _caller_turns, _settle_task_call
 from utils.dev_metrics import DevReporter
 from utils.router import _slng_config_fast_reasoning, _SlngRouterLLMService

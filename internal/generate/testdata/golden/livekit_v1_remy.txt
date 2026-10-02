@@ -500,8 +500,8 @@ from prompts import (
     QUALIFY_EVENT_PROMPT,
     RESERVATIONS_PROMPT,
 )
-from session import _group_status, _save_result, _StateRefused, _task_status
 from settings import _TASK_MAX_ATTEMPTS, logger
+from state import _group_status, _save_result, _StateRefused, _task_status
 from utils import dev_metrics
 from utils.context import _caller_turns
 from utils.dev_metrics import dev_llm_node, dev_say
@@ -1324,13 +1324,9 @@ from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import openai, silero, slng
 
 from agents import Greeter
-from session import (
-    Userdata,
-    _dispatched_call_start,
-    _hydrate_call_start,
-    _livekit_job_metadata,
-)
+from session import _dispatched_call_start, _hydrate_call_start, _livekit_job_metadata
 from settings import require_env
+from state import Userdata
 from utils.dev_metrics import install_dev_metrics
 from utils.tracing import setup_langfuse
 
@@ -1488,6 +1484,7 @@ async def run_call(ctx: JobContext) -> None:
     "pyproject.toml",
     "session.py",
     "settings.py",
+    "state.py",
     "utils/__init__.py",
     "utils/context.py",
     "utils/dev_metrics.py",
@@ -1823,12 +1820,151 @@ convention = "google"
 [tool.ty.environment]
 python-version = "3.11"
 === session.py ===
-"""The call's state: its typed variables, how they are read, and what is known first."""
+"""How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
 
 from __future__ import annotations
 
 import json
 import os
+
+from state import Userdata, _save_call_start
+
+
+# --- job metadata ------------------------------------------------------------
+def _livekit_job_metadata(raw: str) -> dict:
+    """Parse the job metadata LiveKit hands to this worker.
+
+    Args:
+        raw: The metadata string, possibly empty.
+
+    Returns:
+        The metadata object, empty when none was sent.
+
+    Raises:
+        RuntimeError: The metadata is not a JSON object.
+    """
+    if not raw:
+        return {}
+    try:
+        metadata = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("LiveKit job metadata must be valid JSON") from exc
+    if not isinstance(metadata, dict):
+        raise RuntimeError("LiveKit job metadata must be a JSON object")
+    return metadata
+
+
+# --- dispatched input variables ----------------------------------------------
+def _dispatched_call_start(metadata: dict | None = None) -> dict:
+    """Read the input variables that arrive with the dispatch.
+
+    They come in the job metadata in production, or in UNMUTE_CALL_START for a
+    local `unmute dev --var` session.
+
+    Args:
+        metadata: The parsed job metadata, if any.
+
+    Returns:
+        The variables. Their types are checked when _hydrate_call_start saves
+        them.
+
+    Raises:
+        RuntimeError: A required value is missing, or UNMUTE_CALL_START is not a
+            JSON object.
+    """
+    values = dict((metadata or {}).get("call_start", {}))
+    raw = os.getenv("UNMUTE_CALL_START")
+    if raw:
+        try:
+            supplied = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("UNMUTE_CALL_START must be valid JSON") from exc
+        if not isinstance(supplied, dict):
+            raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
+        # The dispatch wins: env is the local stand-in for it.
+        values = supplied | values
+    missing: list[str] = []
+    if missing:
+        raise RuntimeError("Missing call_start fields: " + ", ".join(missing))
+    return values
+
+
+def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
+    """Save the dispatched input variables onto the session state.
+
+    Args:
+        userdata: The state to fill.
+        values: The variables from _dispatched_call_start.
+
+    Raises:
+        RuntimeError: A value does not fit its declared type.
+    """
+    _save_call_start(userdata, values, ("caller_phone",))
+=== settings.py ===
+"""Every fixed value this agent runs with, in one place.
+
+Compiled from the package: names, limits, timeouts, the environment variables
+each kind of session needs, and the logger every module writes to. Nothing here
+reads a secret.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+
+logger = logging.getLogger("remy-fixture")
+logger.setLevel(logging.INFO)
+
+
+# --- required environment ----------------------------------------------------
+# Everything this agent needs to run: the model providers' keys, the connection
+# to the orchestrator, every address and token a tool or MCP source names, and
+# anything else the package declared. Derived from what the compiler knows it
+# requires rather than from the author's `secrets:` block, so a package that
+# declares nothing still refuses to start without them. A missing one fails the
+# session before the agent answers, rather than at the first tool call.
+#
+# The phone route's own credentials are deliberately absent: one file serves
+# every channel, and demanding carrier credentials would refuse a browser
+# session on a phone package. They are listed in .env.example and the runbook.
+REQUIRED_ENV = [
+    "CHECK_AVAILABILITY_URL",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "LIVEKIT_API_KEY",
+    "LIVEKIT_API_SECRET",
+    "LIVEKIT_URL",
+    "OPENAI_API_KEY",
+    "SEND_CONFIRMATION_URL",
+    "SLNG_API_KEY",
+]
+
+
+def require_env() -> None:
+    """Refuse to start a session when a required variable is unset.
+
+    Raises:
+        RuntimeError: Naming every unset variable in REQUIRED_ENV.
+    """
+    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
+
+
+# The first request plus two retries, when a task's model answers with nothing.
+_TASK_MAX_ATTEMPTS = 3
+
+
+# How long a warm process may take to start, knowledge indexing included.
+LOCAL_INIT_TIMEOUT_SECS = 60.0
+=== state.py ===
+"""The call's declared state: its types, the state class, and the one way a value is saved."""
+
+from __future__ import annotations
+
+import json
 from dataclasses import dataclass
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -2301,137 +2437,6 @@ def _state_lookup(state: Userdata | None, name: str) -> tuple[str, object]:
 class Userdata:
     """The session state every agent and task of one call shares."""
     caller_phone: str | None = None
-
-
-# --- job metadata ------------------------------------------------------------
-def _livekit_job_metadata(raw: str) -> dict:
-    """Parse the job metadata LiveKit hands to this worker.
-
-    Args:
-        raw: The metadata string, possibly empty.
-
-    Returns:
-        The metadata object, empty when none was sent.
-
-    Raises:
-        RuntimeError: The metadata is not a JSON object.
-    """
-    if not raw:
-        return {}
-    try:
-        metadata = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("LiveKit job metadata must be valid JSON") from exc
-    if not isinstance(metadata, dict):
-        raise RuntimeError("LiveKit job metadata must be a JSON object")
-    return metadata
-
-
-# --- dispatched input variables ----------------------------------------------
-def _dispatched_call_start(metadata: dict | None = None) -> dict:
-    """Read the input variables that arrive with the dispatch.
-
-    They come in the job metadata in production, or in UNMUTE_CALL_START for a
-    local `unmute dev --var` session.
-
-    Args:
-        metadata: The parsed job metadata, if any.
-
-    Returns:
-        The variables. Their types are checked when _hydrate_call_start saves
-        them.
-
-    Raises:
-        RuntimeError: A required value is missing, or UNMUTE_CALL_START is not a
-            JSON object.
-    """
-    values = dict((metadata or {}).get("call_start", {}))
-    raw = os.getenv("UNMUTE_CALL_START")
-    if raw:
-        try:
-            supplied = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("UNMUTE_CALL_START must be valid JSON") from exc
-        if not isinstance(supplied, dict):
-            raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
-        # The dispatch wins: env is the local stand-in for it.
-        values = supplied | values
-    missing: list[str] = []
-    if missing:
-        raise RuntimeError("Missing call_start fields: " + ", ".join(missing))
-    return values
-
-
-def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
-    """Save the dispatched input variables onto the session state.
-
-    Args:
-        userdata: The state to fill.
-        values: The variables from _dispatched_call_start.
-
-    Raises:
-        RuntimeError: A value does not fit its declared type.
-    """
-    _save_call_start(userdata, values, ("caller_phone",))
-=== settings.py ===
-"""Every fixed value this agent runs with, in one place.
-
-Compiled from the package: names, limits, timeouts, the environment variables
-each kind of session needs, and the logger every module writes to. Nothing here
-reads a secret.
-"""
-
-from __future__ import annotations
-
-import logging
-import os
-
-logger = logging.getLogger("remy-fixture")
-logger.setLevel(logging.INFO)
-
-
-# --- required environment ----------------------------------------------------
-# Everything this agent needs to run: the model providers' keys, the connection
-# to the orchestrator, every address and token a tool or MCP source names, and
-# anything else the package declared. Derived from what the compiler knows it
-# requires rather than from the author's `secrets:` block, so a package that
-# declares nothing still refuses to start without them. A missing one fails the
-# session before the agent answers, rather than at the first tool call.
-#
-# The phone route's own credentials are deliberately absent: one file serves
-# every channel, and demanding carrier credentials would refuse a browser
-# session on a phone package. They are listed in .env.example and the runbook.
-REQUIRED_ENV = [
-    "CHECK_AVAILABILITY_URL",
-    "LANGFUSE_BASE_URL",
-    "LANGFUSE_PUBLIC_KEY",
-    "LANGFUSE_SECRET_KEY",
-    "LIVEKIT_API_KEY",
-    "LIVEKIT_API_SECRET",
-    "LIVEKIT_URL",
-    "OPENAI_API_KEY",
-    "SEND_CONFIRMATION_URL",
-    "SLNG_API_KEY",
-]
-
-
-def require_env() -> None:
-    """Refuse to start a session when a required variable is unset.
-
-    Raises:
-        RuntimeError: Naming every unset variable in REQUIRED_ENV.
-    """
-    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
-    if missing:
-        raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
-
-
-# The first request plus two retries, when a task's model answers with nothing.
-_TASK_MAX_ATTEMPTS = 3
-
-
-# How long a warm process may take to start, knowledge indexing included.
-LOCAL_INIT_TIMEOUT_SECS = 60.0
 === utils/__init__.py ===
 """Helpers the agent's modules share."""
 === utils/context.py ===

@@ -106,12 +106,11 @@ def _caller_turns(chat_ctx: llm.ChatContext) -> int:
         The number of caller messages.
     """
     return sum(1 for message in chat_ctx.messages() if message.role == "user")
-"""The call's state: its typed variables, how they are read, and what is known first."""
+"""The call's declared state: its types, the state class, and the one way a value is saved."""
 
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -584,6 +583,14 @@ def _state_lookup(state: Userdata | None, name: str) -> tuple[str, object]:
 class Userdata:
     """The session state every agent and task of one call shares."""
     caller_phone: str | None = None
+"""How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
+
+from __future__ import annotations
+
+import json
+import os
+
+from state import Userdata, _save_call_start
 
 
 # --- job metadata ------------------------------------------------------------
@@ -693,8 +700,8 @@ from prompts import (
     QUALIFY_EVENT_PROMPT,
     RESERVATIONS_PROMPT,
 )
-from session import _group_status, _save_result, _StateRefused, _task_status
 from settings import _TASK_MAX_ATTEMPTS, logger
+from state import _group_status, _save_result, _StateRefused, _task_status
 from utils import dev_metrics
 from utils.context import _caller_turns
 from utils.dev_metrics import dev_llm_node, dev_say
@@ -1516,13 +1523,9 @@ from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import openai, silero, slng
 
 from agents import Greeter
-from session import (
-    Userdata,
-    _dispatched_call_start,
-    _hydrate_call_start,
-    _livekit_job_metadata,
-)
+from session import _dispatched_call_start, _hydrate_call_start, _livekit_job_metadata
 from settings import require_env
+from state import Userdata
 from utils.dev_metrics import install_dev_metrics
 
 # The loop keeps only a weak reference to a task, so a timer nobody holds can be

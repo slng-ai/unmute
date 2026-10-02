@@ -108,52 +108,17 @@ def _caller_turns(chat_ctx: llm.ChatContext) -> int:
         The number of caller messages.
     """
     return sum(1 for message in chat_ctx.messages() if message.role == "user")
-"""The call's state: its typed variables, how they are read, and what is known first."""
+"""The call's declared state: its types, the state class, and the one way a value is saved."""
 
 from __future__ import annotations
 
 import json
-import os
-import re
 from dataclasses import dataclass
-from urllib.parse import quote
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from settings import logger
-
-# --- templates ---------------------------------------------------------------
-_TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
-
-
-def _render(text: str, userdata: Userdata | None, *, quote_values: bool = False, site: str = "") -> str:
-    """Substitute each variable token from the session userdata.
-
-    Only substituted values are URL-encoded, never the surrounding literal.
-
-    Args:
-        text: The text holding `{{name}}` tokens.
-        userdata: The session state to read them from, or None to leave the text alone.
-        quote_values: URL-encode each substituted value.
-        site: Where the text is used, for saved-value path lookups.
-
-    Returns:
-        The text with each token replaced.
-    """
-    if userdata is None:
-        return text
-
-    def _one(match: re.Match[str]) -> str:
-        # Through _state_lookup, which walks a path emitted as one flat name, and
-        # _state_text, so a declared value renders as compact JSON and an empty
-        # one as words. Anything not declared structured comes back exactly as
-        # str() gave it.
-        value = _state_text(*_prompt_value(userdata, match.group(1), site))
-        return quote(value, safe="") if quote_values else value
-
-    return _TEMPLATE.sub(_one, text)
-
 
 # --- declared state ----------------------------------------------------------
 # Generated from the `shapes:` and the typed `variables:` in agent.yaml. Both
@@ -634,6 +599,47 @@ class Userdata:
     # an agent method, where the entrypoint's local is out of scope. One client
     # per call, so the pool and its response hook are the call's own.
     slng_client: AsyncOpenAI | None = None
+"""How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from urllib.parse import quote
+
+from state import Userdata, _prompt_value, _save_call_start, _state_text
+
+# --- templates ---------------------------------------------------------------
+_TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
+
+
+def _render(text: str, userdata: Userdata | None, *, quote_values: bool = False, site: str = "") -> str:
+    """Substitute each variable token from the session userdata.
+
+    Only substituted values are URL-encoded, never the surrounding literal.
+
+    Args:
+        text: The text holding `{{name}}` tokens.
+        userdata: The session state to read them from, or None to leave the text alone.
+        quote_values: URL-encode each substituted value.
+        site: Where the text is used, for saved-value path lookups.
+
+    Returns:
+        The text with each token replaced.
+    """
+    if userdata is None:
+        return text
+
+    def _one(match: re.Match[str]) -> str:
+        # Through _state_lookup, which walks a path emitted as one flat name, and
+        # _state_text, so a declared value renders as compact JSON and an empty
+        # one as words. Anything not declared structured comes back exactly as
+        # str() gave it.
+        value = _state_text(*_prompt_value(userdata, match.group(1), site))
+        return quote(value, safe="") if quote_values else value
+
+    return _TEMPLATE.sub(_one, text)
 
 
 # --- job metadata ------------------------------------------------------------
@@ -719,8 +725,8 @@ from livekit.agents import NOT_GIVEN, ChatContext, FlushSentinel, ModelSettings,
 from livekit.agents.llm import ChatChunk, Tool
 from openai import AsyncOpenAI
 
-from session import Userdata, _prompt_value, _state_text
 from settings import logger
+from state import Userdata, _prompt_value, _state_text
 from utils.dev_metrics import dev_llm_node
 
 # --- SLNG Context Router ----------------------------------------------------
@@ -992,8 +998,8 @@ from livekit.plugins import elevenlabs
 from pydantic import Field
 
 from prompts import BILLING_PROMPT, COLLECT_PROMPT, CONFIRM_PROMPT, INTAKE_PROMPT
-from session import _group_status, _save_result, _StateRefused, _task_status
 from settings import _TASK_MAX_ATTEMPTS, IGNORE_PHRASES, logger
+from state import _group_status, _save_result, _StateRefused, _task_status
 from utils import dev_metrics
 from utils.context import _caller_turns
 from utils.dev_metrics import dev_llm_node, dev_say
@@ -1591,13 +1597,9 @@ from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import deepgram, elevenlabs, openai, silero
 
 from agents import Intake
-from session import (
-    Userdata,
-    _dispatched_call_start,
-    _hydrate_call_start,
-    _livekit_job_metadata,
-)
+from session import _dispatched_call_start, _hydrate_call_start, _livekit_job_metadata
 from settings import require_env
+from state import Userdata
 from utils.dev_metrics import install_dev_metrics
 from utils.router import _slng_router_client
 

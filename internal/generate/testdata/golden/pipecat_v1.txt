@@ -481,8 +481,8 @@ from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat_slng import SlngTTSService
 
 from prompts import BILLING_PROMPT, INTAKE_PROMPT
-from session import State
 from settings import WEBHOOK_TIMEOUT_SECS
+from state import State
 from utils.dev_metrics import DevReporter
 
 
@@ -1279,6 +1279,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     "pyproject.toml",
     "session.py",
     "settings.py",
+    "state.py",
     "utils/__init__.py",
     "utils/dev_metrics.py"
   ],
@@ -1528,14 +1529,107 @@ convention = "google"
 [tool.ty.environment]
 python-version = "3.11"
 === session.py ===
-"""The call's state: its typed variables, how they are read, and what is known first."""
+"""How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
 
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 from typing import Any
+
+from state import State, _save_call_start
+
+
+def _dispatched_call_start(call_context: dict[str, Any] | None) -> dict[str, Any]:
+    """Read the input variables that arrived with the dispatch.
+
+    They come in the call context on a telephony route, or in UNMUTE_CALL_START
+    for a local `unmute dev --var` session.
+
+    Args:
+        call_context: The call's context, or None when there is none.
+
+    Returns:
+        The dispatched values, the dispatch winning over the environment.
+
+    Raises:
+        RuntimeError: When UNMUTE_CALL_START is not a JSON object.
+    """
+    values = dict((call_context or {}).get("call_start", {}))
+    raw = os.getenv("UNMUTE_CALL_START")
+    if raw:
+        try:
+            supplied = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("UNMUTE_CALL_START must be valid JSON") from exc
+        if not isinstance(supplied, dict):
+            raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
+        # The dispatch wins: env is the local stand-in for it.
+        values |= {name: value for name, value in supplied.items() if name not in values}
+    return values
+
+
+def build_state(call_context: dict[str, Any] | None = None) -> State:
+    """Build the call's typed variables from the dispatch and the call's own facts.
+
+    Args:
+        call_context: The call's context, or None when there is none.
+
+    Returns:
+        The state every agent on the call shares.
+
+    Raises:
+        RuntimeError: When a required input variable was not dispatched, or a
+            dispatched value does not fit its declared type.
+    """
+    state = State()
+    call_start = _dispatched_call_start(call_context)
+    _save_call_start(state, call_start, ("customer_id", "verified"))
+    return state
+=== settings.py ===
+"""Every fixed value this agent runs with, in one place.
+
+Compiled from the package: names, limits, timeouts, and the environment
+variables each kind of session needs. Nothing here reads a secret.
+"""
+
+from __future__ import annotations
+
+import os
+
+MAIN_NAME = "main"
+# The longest a webhook tool waits for its endpoint before the call fails.
+WEBHOOK_TIMEOUT_SECS = 30.0
+
+# Provider credentials only. The telephony route's environment (Redis, carrier
+# keys, the public URL) is required by telephony.py, not here, so a telephony
+# package still runs in the browser with nothing but model keys (V10/B3).
+REQUIRED_ENV = [
+    "DEEPGRAM_API_KEY",
+    "GET_INVOICE_URL",
+    "LOOKUP_CUSTOMER_URL",
+    "OPENAI_API_KEY",
+    "SLNG_API_KEY",
+]
+IGNORE_PHRASES = ["okay", "right", "uh-huh"]
+
+
+def require_env() -> None:
+    """Fail at startup, naming every required environment variable that is unset.
+
+    Raises:
+        RuntimeError: When at least one name in REQUIRED_ENV has no value.
+    """
+    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+=== state.py ===
+"""The call's declared state: its types, the state class, and the one way a value is saved."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
 
 from loguru import logger
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -1995,91 +2089,6 @@ class State:
 
     customer_id: str | None = None
     verified: bool = False
-
-
-def _dispatched_call_start(call_context: dict[str, Any] | None) -> dict[str, Any]:
-    """Read the input variables that arrived with the dispatch.
-
-    They come in the call context on a telephony route, or in UNMUTE_CALL_START
-    for a local `unmute dev --var` session.
-
-    Args:
-        call_context: The call's context, or None when there is none.
-
-    Returns:
-        The dispatched values, the dispatch winning over the environment.
-
-    Raises:
-        RuntimeError: When UNMUTE_CALL_START is not a JSON object.
-    """
-    values = dict((call_context or {}).get("call_start", {}))
-    raw = os.getenv("UNMUTE_CALL_START")
-    if raw:
-        try:
-            supplied = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("UNMUTE_CALL_START must be valid JSON") from exc
-        if not isinstance(supplied, dict):
-            raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
-        # The dispatch wins: env is the local stand-in for it.
-        values |= {name: value for name, value in supplied.items() if name not in values}
-    return values
-
-
-def build_state(call_context: dict[str, Any] | None = None) -> State:
-    """Build the call's typed variables from the dispatch and the call's own facts.
-
-    Args:
-        call_context: The call's context, or None when there is none.
-
-    Returns:
-        The state every agent on the call shares.
-
-    Raises:
-        RuntimeError: When a required input variable was not dispatched, or a
-            dispatched value does not fit its declared type.
-    """
-    state = State()
-    call_start = _dispatched_call_start(call_context)
-    _save_call_start(state, call_start, ("customer_id", "verified"))
-    return state
-=== settings.py ===
-"""Every fixed value this agent runs with, in one place.
-
-Compiled from the package: names, limits, timeouts, and the environment
-variables each kind of session needs. Nothing here reads a secret.
-"""
-
-from __future__ import annotations
-
-import os
-
-MAIN_NAME = "main"
-# The longest a webhook tool waits for its endpoint before the call fails.
-WEBHOOK_TIMEOUT_SECS = 30.0
-
-# Provider credentials only. The telephony route's environment (Redis, carrier
-# keys, the public URL) is required by telephony.py, not here, so a telephony
-# package still runs in the browser with nothing but model keys (V10/B3).
-REQUIRED_ENV = [
-    "DEEPGRAM_API_KEY",
-    "GET_INVOICE_URL",
-    "LOOKUP_CUSTOMER_URL",
-    "OPENAI_API_KEY",
-    "SLNG_API_KEY",
-]
-IGNORE_PHRASES = ["okay", "right", "uh-huh"]
-
-
-def require_env() -> None:
-    """Fail at startup, naming every required environment variable that is unset.
-
-    Raises:
-        RuntimeError: When at least one name in REQUIRED_ENV has no value.
-    """
-    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
-    if missing:
-        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 === utils/__init__.py ===
 """Helpers the agent's modules share."""
 === utils/dev_metrics.py ===

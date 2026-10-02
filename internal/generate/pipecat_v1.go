@@ -934,6 +934,7 @@ var pipecatModules = []struct{ tmpl, path string }{
 	{"utils_context.py", "utils/context.py"},
 	{"utils_mcp.py", "utils/mcp.py"},
 	{"utils_telephony.py", "utils/telephony.py"},
+	{"state.py", "state.py"},
 	{"session.py", "session.py"},
 	{"utils_router.py", "utils/router.py"},
 	{"agents.py", "agents.py"},
@@ -1268,7 +1269,7 @@ var (
 	// beside its entry file, which ruff files apart from third-party imports.
 	firstPartyModules = map[string]bool{
 		"agents": true, "brain": true, "call": true, "dev_metrics": true, "handoff": true,
-		"knowledge": true, "logic": true, "prompts": true, "session": true, "settings": true,
+		"knowledge": true, "logic": true, "prompts": true, "session": true, "settings": true, "state": true,
 		"telephony_helper": true, "tool_runner": true, "tools": true, "tracing": true, "utils": true,
 	}
 )

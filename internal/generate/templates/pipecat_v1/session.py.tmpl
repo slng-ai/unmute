@@ -1,17 +1,6 @@
-"""The call's state: its typed variables, how they are read, and what is known first."""
+"""How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
 
-{{if .TypedState}}
-{{.TypedState.Source}}
-{{end}}{{if .Variables}}
-@dataclass
-class State:
-    """Typed call variables, shared across agents."""
-{{if .NeedsPrefetchUnconfirmed}}    _unconfirmed: set[str] = field(default_factory=lambda: set(_STATE_CONFIRM))
-{{end}}
-{{range .Variables}}{{if .Description}}    # {{.Description}}
-{{end}}    {{.Name}}: {{.PyType}} = {{.Default}}{{if .LiteralDefault}}  # ty: ignore[invalid-assignment]{{end}}
-{{end}}
-{{if .CallStartVars}}
+{{if .Variables}}{{if .CallStartVars}}
 def _dispatched_call_start(call_context: dict[str, Any] | None) -> dict[str, Any]:
     """Read the input variables that arrived with the dispatch.
 
