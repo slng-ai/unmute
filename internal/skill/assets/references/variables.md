@@ -150,11 +150,14 @@ and one target sends its schema with strict mode on, where both are rejected.
 That failure appears on the first real call and in no local check, so the format
 lives in the description instead.
 
-**The value is checked where it is saved.** The generated project validates
-every declared field before anything enters call state. A value that does not
-fit is refused, nothing is written, the previous contents stand, and the format
-sentence goes back to the model as the tool result, so it corrects itself on the
-next turn. The sentence the model reads and the sentence it gets back on a
+**The value is checked where it is saved.** The call state is a Pydantic
+model, and its field types are the check every save goes through: a step's
+result, a pre-fetched value, a dispatched one and a carrier fact. The values of
+one save are checked together. A value that does not fit is refused, nothing is
+written, the previous contents stand, and the format sentence goes back to the
+model as the tool result, so it corrects itself on the next turn. A variable
+with no `default:` starts as `None`, meaning no value yet; one with a
+`default:` never holds `None`. The sentence the model reads and the sentence it gets back on a
 refusal come from one place and cannot disagree.
 
 Three families behave differently:
@@ -277,6 +280,12 @@ only `connector` grants `stream_id`. A variable's own `source:` and a
 `prefetch: source:` entry read this same grid, so the same fact hydrates
 either way on a route that grants it. An inbound code-target phone channel
 also requires a default for every `call_start` variable.
+
+A value from the dispatch or from the phone adapter is checked against the
+variable's type when it is saved, the same check a step's `assign:` gets. A
+dispatched value that does not fit stops the call before the greeting, and the
+error names the field. A phone-adapter fact that does not fit, such as
+`anonymous` for a `Phone`, is treated as a fact that never arrived.
 
 ## Resolving a value before the call starts
 
@@ -733,7 +742,8 @@ share no earlier speech.
 unmute dev ./my-agent --var customer_name=Ada --var customer_id=cus_2002
 ```
 
-Repeatable, and each value is parsed against the declared type. `--var` is the
+Repeatable, and each value is parsed against the declared type: pass JSON for an
+object or a list. `--var` is the
 local stand-in for the dispatch payload, so it accepts the two kinds of variable
 that payload fills: `source: call_start`, and a variable that declares no
 `source:` at all. It refuses a runtime-owned source, because that one arrives

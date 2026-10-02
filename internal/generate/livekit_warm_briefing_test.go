@@ -394,7 +394,8 @@ func TestWarmBriefingInstructionsHook(t *testing.T) {
 	if !strings.Contains(plainPy, "persona=_BRIEFING_PERSONA,") {
 		t.Error("a warm transfer with no authored briefing lost its persona too")
 	}
-	if strings.Contains(plainPy, "extra=") {
+	// The state model's own config also says extra=, which is not a briefing.
+	if strings.Count(plainPy, "extra=") != strings.Count(plainPy, "ConfigDict(extra=") {
 		t.Error("a warm transfer with no authored briefing passes extra=, which deletes the platform's own section")
 	}
 

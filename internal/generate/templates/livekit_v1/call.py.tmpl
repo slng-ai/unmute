@@ -75,7 +75,7 @@ async def run_call(ctx: JobContext) -> None:
     # client it built itself. Without this a worker leaks one connection pool per
     # call it serves.
     slng_client = _slng_router_client()
-    slng_state.slng_client = slng_client
+    slng_state._slng_client = slng_client
 
     async def _close_slng_client() -> None:
         await slng_client.close()

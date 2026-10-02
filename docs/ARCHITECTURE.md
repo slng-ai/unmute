@@ -86,7 +86,7 @@ The source package describes durable behavior. A target driver owns how that
 behavior is expressed in one framework.
 
 - **LiveKit** emits `agent.py` (the entry point, with `call.py`, `agents.py`,
-  `session.py`, `settings.py`, `prompts/` and `utils/` beside it) and uses a separate LiveKit Server for media,
+  `session.py`, `state.py`, `settings.py`, `prompts/` and `utils/` beside it) and uses a separate LiveKit Server for media,
   rooms, and job dispatch.
 - **Pipecat** emits `bot.py` (the entry point, with the same modules beside
   it). The generated process owns both its network

@@ -161,6 +161,29 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // moves their LiveKit bytes (slng_base_url). LiveKit output for a package that
 // did not change is the same.
 //
+// And on 2026-10-02, for every package a dispatch or a carrier can fill: a
+// call-start value and a call fact are saved through _save_batch, so the
+// declared type checks them like every other value entering the state. Before,
+// LiveKit checked only the primitive (an object or a list was refused as "must
+// be string", a Phone was never checked) and Pipecat checked nothing. A bad
+// dispatched value still stops the call start; a fact that does not fit, such
+// as "anonymous" for a Phone, is now treated as missing instead of saved.
+// The same day, the declared state moved out of session.py into its own
+// state.py on both code targets. The code moved and did not change: apart from
+// imports, module docstrings and the generated-file list, every line of every
+// golden is the same multiset of lines before and after. Then the state class
+// became a Pydantic BaseModel on both targets instead of a dataclass: the same
+// fields, one annotation rule on both (a value with a default holds its type,
+// one without may be None), list defaults written as [] because Pydantic copies
+// them per call, and the confirmation and provenance records declared as
+// private attributes rather than set onto the object at run time. Last, the
+// model became the check: _STATE_TYPES and _plain are gone, a save is checked
+// once by building the batch into the state model, the state holds models
+// rather than dicts, plain data is made only at the edges (pydantic_core's
+// to_jsonable_python for a tool result or an injected object, to_json for a
+// prompt, which renders the same bytes json.dumps did), and an invalidated
+// pre-fetched value goes back to its default instead of to None.
+//
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {

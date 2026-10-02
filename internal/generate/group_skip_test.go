@@ -73,7 +73,7 @@ func TestWithdrawalClearsDerivedValuesToo(t *testing.T) {
 			"_STATE_CONFIRM.items()",
 			"for name, reads in _STATE_DEPENDENCIES.items():",
 			"if any(source in unconfirmed for source in reads):",
-			`setattr(state, "_unconfirmed", unconfirmed)`,
+			"state._unconfirmed = unconfirmed",
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s: _withdraw_confirmation missing %q", name, want)

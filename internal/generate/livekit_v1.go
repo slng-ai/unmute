@@ -284,19 +284,11 @@ type livekitTelephony struct {
 	HasWarm       bool
 	Greeting      *livekitGreeting
 	SystemSources []livekitSystemSource
-	CallStart     []livekitCallStart
 }
 
 type livekitSystemSource struct {
 	Variable string
 	Source   string
-}
-
-type livekitCallStart struct {
-	Name      string
-	Type      string
-	TypeCheck string
-	Required  bool
 }
 
 // livekitDelegate lowers a delegate control. A single task awaits its
@@ -381,10 +373,11 @@ type livekitVar struct {
 // livekitCallStartVar is one dispatched input variable, hydrated from the job
 // metadata or the dev UNMUTE_CALL_START payload before the greeting.
 type livekitCallStartVar struct {
-	Name      string
-	Type      string
-	TypeCheck string
-	Required  bool
+	Name string
+	// Type is the authored type, `CustomerRecord` rather than `string`, because
+	// the runbook lists it and the dispatched value is checked against it.
+	Type     string
+	Required bool
 }
 
 type livekitStep struct {
@@ -653,9 +646,6 @@ type livekitData struct {
 	TypingImports      string     // `from typing import ...` names (Annotated/Literal), "" if none (V2)
 	NeedsField         bool       // any tool arg carries a description (V2)
 	PydanticImports    string     // the whole `from pydantic import ...` line, "" if none
-	// NeedsDataclassField is `field` beside `dataclass`, wanted only by a
-	// declared list, which starts empty through a default_factory.
-	NeedsDataclassField bool
 	// TypedState is the declared-shape block, rendered once in shapes.go for
 	// both targets, or nil for a package that declares nothing structured. That
 	// nil is what makes such a package byte-identical (FR-015).
@@ -923,6 +913,7 @@ var livekitModules = []struct{ tmpl, path string }{
 	{"utils_auth.py", "utils/auth.py"},
 	{"utils_context.py", "utils/context.py"},
 	{"utils_mcp.py", "utils/mcp.py"},
+	{"state.py", "state.py"},
 	{"session.py", "session.py"},
 	{"utils_telephony.py", "utils/telephony.py"},
 	{"utils_router.py", "utils/router.py"},
@@ -1099,6 +1090,15 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 		return wrapLongImports(buf.Bytes()), nil
 	}
 	return buf.Bytes(), nil
+}
+
+// CallStartNames is the Python tuple of variables a dispatch may fill.
+func (d livekitData) CallStartNames() string {
+	names := make([]string, len(d.CallStartVars))
+	for i, v := range d.CallStartVars {
+		names[i] = v.Name
+	}
+	return "(" + pyTuple(names) + ")"
 }
 
 // livekitFuncs are the functions every LiveKit template can call.

@@ -217,19 +217,26 @@ asyncio.run(check_finish_handler())
 state = generated.` + stateExpr + `
 
 from copy import deepcopy
-before_escape = deepcopy(vars(state))
+
+
+def snapshot(s):
+    """Everything a save may change: the fields, and the two private records."""
+    return deepcopy((vars(s), s._unconfirmed, s._prefetch_provenance))
+
+
+before_escape = snapshot(state)
 assert generated._save_result("confirm_number", state, {"unserved_request": "another request"}) == {"unserved_request": "another request"}
-assert vars(state) == before_escape
+assert snapshot(state) == before_escape
 
 assert generated._save_result("no_output", state, {}) == {}
-assert vars(state) == before_escape
+assert snapshot(state) == before_escape
 try:
     generated._save_result("record_flags", state, {"count": 4, "accepted": "not-a-boolean"})
 except generated._StateRefused:
     pass
 else:
     raise AssertionError("invalid primitive result was accepted")
-assert vars(state) == before_escape
+assert snapshot(state) == before_escape
 generated._save_result("record_flags", state, {"count": 0, "accepted": False})
 assert state.count == 0 and state.accepted is False
 
@@ -238,27 +245,21 @@ assert generated._state_text("caller_phone", None) == "none recorded yet."
 assert generated._state_text("caller_reason", False) == "false"
 assert generated._state_text("caller_reason", 0) == "0"
 
-# A later invalid destination cannot leave an earlier append behind. A retry
-# uses the same call state and only commits once all destinations fit.
-from copy import deepcopy
-from pydantic import TypeAdapter
-
-original_adapter = generated._STATE_TYPES["last_appointment"]
-generated._STATE_TYPES["last_appointment"] = TypeAdapter(int)
-before_batch = deepcopy(vars(state))
+# A batch is all or nothing: a valid list beside a value its field refuses
+# leaves nothing behind. A retry uses the same call state and only commits once
+# every value fits.
+before_batch = snapshot(state)
 try:
-    generated._save_result("book", state, {
-        "reason": "create_booking",
-        "appointment": {"scheduled_date": "2026-03-19", "scheduled_time": "09:30",
-                        "appointment_type": "haircut"},
-        "summary": "recorded",
+    generated._save_batch(state, {
+        "appointments": [{"scheduled_date": "2026-03-19", "scheduled_time": "09:30",
+                          "appointment_type": "haircut"}],
+        "count": "not-a-number",
     })
-except generated._StateRefused:
-    pass
+except generated._StateRefused as refused:
+    assert refused.message.startswith("count: "), refused.message
 else:
-    raise AssertionError("invalid final destination was saved")
-assert vars(state) == before_batch, (vars(state), before_batch)
-generated._STATE_TYPES["last_appointment"] = original_adapter
+    raise AssertionError("a batch with one bad value saved the rest")
+assert snapshot(state) == before_batch, (snapshot(state), before_batch)
 generated._save_result("book", state, {
     "reason": "create_booking",
     "appointment": {"scheduled_date": "2026-03-19", "scheduled_time": "09:30",
@@ -301,23 +302,23 @@ for day, at, service, reason in booked:
             "summary": "recorded",
         },
     )
-    # Plain data, not a model: one framework refuses a BaseModel outright and
-    # drops the whole tool result, the other cannot serialise one at all.
-    assert isinstance(values["appointment"], dict), type(values["appointment"])
+    # The validated model, which is what the state holds. Plain data is made only
+    # where a value leaves for a framework, by _save_result.
+    assert type(values["appointment"]).__name__ == "Appointment", type(values["appointment"])
     state.appointments.append(values["appointment"])
     state.caller_reason.append(values["reason"])
 
 assert len(state.appointments) == 2, state.appointments
-assert state.appointments[0]["scheduled_date"] == "2026-03-19", state.appointments
+assert state.appointments[0].scheduled_date == "2026-03-19", state.appointments
 
 # A value outside the declared set. Refused where it enters, the message names
 # the field and lists what was allowed, and the previous contents survive.
 before = json.dumps(
-    {
+    generated.to_jsonable_python({
         "appointments": state.appointments,
         "caller_phone": state.caller_phone,
         "caller_reason": state.caller_reason,
-    },
+    }),
     sort_keys=True,
 )
 for bad, field, allowed in (
@@ -370,11 +371,11 @@ for bad, field, allowed in (
         raise AssertionError("a value outside its declared type entered the state: " + repr(bad))
 
 after = json.dumps(
-    {
+    generated.to_jsonable_python({
         "appointments": state.appointments,
         "caller_phone": state.caller_phone,
         "caller_reason": state.caller_reason,
-    },
+    }),
     sort_keys=True,
 )
 assert after == before, "a refused value changed the state"
@@ -405,12 +406,12 @@ generated._save_result(
 # Normalized on the way in, which is what makes the saved value plain text a
 # later tool can use as it stands.
 assert state.reminder_email == "Fred.Bloggs@example.com", state.reminder_email
-assert generated._plain(state.booked_for)["email"] == "Fred.Bloggs@example.com", state.booked_for
+assert state.booked_for.email == "Fred.Bloggs@example.com", state.booked_for
 
 # A wrong address is refused where it enters, naming the field and the format,
 # with the library's own reason after it so the model can correct itself. And the
 # previous contents survive.
-kept = (state.reminder_email, generated._plain(state.booked_for))
+kept = (state.reminder_email, generated.to_jsonable_python(state.booked_for))
 try:
     generated._save_result(
         "take_contact",
@@ -423,7 +424,7 @@ except generated._StateRefused as refused:
     assert "an email address" in refused.message, refused.message
 else:
     raise AssertionError("a value that is not an email address entered the state")
-assert (state.reminder_email, generated._plain(state.booked_for)) == kept
+assert (state.reminder_email, generated.to_jsonable_python(state.booked_for)) == kept
 
 # Then the value the run ends with, so the expected state below is one the
 # conversation produced.
@@ -531,12 +532,12 @@ for adapters in generated._FINISH_TYPES.values():
 # And the whole declared state, field for field, against the one expectation
 # both targets read.
 final = {
-    "appointments": state.appointments,
+    "appointments": generated.to_jsonable_python(state.appointments),
     "caller_phone": state.caller_phone,
     "caller_reason": state.caller_reason,
     "reminder_email": state.reminder_email,
     # The pair is a model, so it is compared the way a prompt renders it.
-    "booked_for": generated._plain(state.booked_for),
+    "booked_for": generated.to_jsonable_python(state.booked_for),
 }
 assert final == EXPECTED, json.dumps(final, indent=2, sort_keys=True)
 print("typed state: the scripted conversation ends with the expected state")

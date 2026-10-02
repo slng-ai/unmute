@@ -230,7 +230,7 @@ async def check_two_steps_one_acknowledgement():
     assert model.requests == [("owner", False), ("verify", False), ("book", False), ("owner", True)], model.requests
     assert speaker.spoken == ["All set, your haircut is booked."], speaker.spoken
     assert userdata.customer_phone == "+5550101010", userdata.customer_phone
-    assert userdata.booking["reference"] == "bkg_0001", userdata.booking
+    assert userdata.booking.reference == "bkg_0001", userdata.booking
     assert owner_output(items, "do_book") == {"status": "completed"}
 
 
@@ -242,7 +242,7 @@ async def check_interrupted_step_still_one_acknowledgement():
         ("owner", False), ("verify", False), ("book", False), ("book", False), ("owner", True)
     ], model.requests
     assert speaker.spoken == ["Which service would you like?", "All set, your haircut is booked."], speaker.spoken
-    assert userdata.booking["reference"] == "bkg_0001", userdata.booking
+    assert userdata.booking.reference == "bkg_0001", userdata.booking
     assert owner_output(items, "do_book") == {"status": "completed"}
 
 

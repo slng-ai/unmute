@@ -415,7 +415,8 @@ unmute dev my-agent --var caller_name=Priya
 
 `--var` works for a declared variable with `source: call_start` or no `source:`
 at all. Values are parsed against the variable's type; pass JSON for an object
-or a list, quoted for your shell.
+or a list, quoted for your shell. A value that does not fit its type stops the
+call start, and the error names the field.
 
 A system source such as `from_number` comes from the phone route instead, and
 your machine is not one. To exercise prefetch and confirmation locally, stand

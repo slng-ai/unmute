@@ -183,8 +183,11 @@ checked as `EmailStr`.
 - To group lists inside a list, define a shape with a list field and use that
   shape as the outer list's element type.
 
-Any variable may be unset before it is filled. Successful assignments must
-match its declared type, including `| None` when the result is `null`.
+A variable with no `default:` starts unset, and a save of `null` leaves it
+unset. A variable with a `default:` always holds a value of its type, so a save
+of `null` to it is refused. Every other saved value must match the declared
+type. A task's own result must also allow `null` with `| None` before the task
+may report one.
 
 ### Defaults
 
@@ -285,6 +288,12 @@ each route grants, fact by fact and direction by direction.
 For an inbound LiveKit or Pipecat telephony channel, every `call_start` variable
 needs a default. There is no dispatch payload to supply an unsolicited incoming
 call before its greeting.
+
+A value from the dispatch or from the phone adapter is checked against the
+variable's type when it is saved, the same check a step's `assign:` gets. A
+dispatched value that does not fit stops the call before the greeting, and the
+error names the field. A phone-adapter fact that does not fit, such as
+`anonymous` for a `Phone`, is treated as a fact that never arrived.
 
 ## `prefetch:` resolves a value before the call starts
 

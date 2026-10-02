@@ -1,4 +1,4 @@
-"""The call's state: its typed variables, how they are read, and what is known first."""
+"""How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
 
 {{- if .NeedsRender}}
 # --- templates ---------------------------------------------------------------
@@ -74,41 +74,6 @@ def _refusal(tool: str, userdata: Userdata, needed: list[tuple[str, str]]) -> st
 {{- if .NeedsPrefetch}}
 {{.Prefetch}}
 {{end}}
-{{- if .TypedState}}
-{{.TypedState.Source}}
-{{end}}
-{{- if .HasUserdata}}
-# --- shared state ------------------------------------------------------------
-# Typed session state: tasks assign into it, transfers read it.
-@dataclass
-class Userdata:
-    """The session state every agent and task of one call shares."""
-
-{{- if .NeedsPrefetchUnconfirmed}}
-    _unconfirmed: set[str] = field(default_factory=lambda: set(_STATE_CONFIRM))
-{{- end}}
-{{- range .Vars}}
-{{- if .Description}}
-    # {{.Description}}
-{{- end}}
-    {{.Name}}: {{.Anno}} = {{.Default}}{{if .LiteralDefault}}  # ty: ignore[invalid-assignment]{{end}}
-{{- end}}
-{{- if .Slng.Any}}
-    # One value per call, set where the call begins. It groups this call's think
-    # requests for support and scopes nothing: the cache scope is the agent id
-    # header, so this may differ freely between calls. It lives here rather than
-    # in an entrypoint local because the header set now travels per request, so
-    # every agent and task class has to be able to reach it from a method body.
-    {{.Slng.SessionIDField}}: str = ""
-{{- if .Slng.ClientBaseURL}}
-    # And the router client, for the same reason: the summarizer is built inside
-    # an agent method, where the entrypoint's local is out of scope. One client
-    # per call, so the pool and its response hook are the call's own.
-    slng_client: AsyncOpenAI | None = None
-{{- end}}
-{{- end}}
-
-{{end}}
 {{- if or .CallStartVars .Telephony}}
 # --- job metadata ------------------------------------------------------------
 def _livekit_job_metadata(raw: str) -> dict:
@@ -146,11 +111,12 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
         metadata: The parsed job metadata, if any.
 
     Returns:
-        The variables, checked against their declared types.
+        The variables. Their types are checked when _hydrate_call_start saves
+        them.
 
     Raises:
-        RuntimeError: A value has the wrong type, a required one is missing, or
-            UNMUTE_CALL_START is not a JSON object.
+        RuntimeError: A required value is missing, or UNMUTE_CALL_START is not a
+            JSON object.
     """
     values = dict((metadata or {}).get("call_start", {}))
     raw = os.getenv("UNMUTE_CALL_START")
@@ -164,32 +130,25 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
         # The dispatch wins: env is the local stand-in for it.
         values = supplied | values
     missing: list[str] = []
-{{- range .CallStartVars}}
-    if {{pyq .Name}} in values:
-        value = values[{{pyq .Name}}]
-        if not ({{.TypeCheck}}):
-            raise RuntimeError({{pyq (printf "call_start.%s must be %s" .Name .Type)}})
-{{- if .Required}}
-    else:
+{{- range .CallStartVars}}{{if .Required}}
+    if {{pyq .Name}} not in values:
         missing.append({{pyq .Name}})
-{{- end}}
-{{- end}}
+{{- end}}{{end}}
     if missing:
         raise RuntimeError("Missing call_start fields: " + ", ".join(missing))
     return values
 
 
 def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
-    """Copy the dispatched input variables onto the session state.
+    """Save the dispatched input variables onto the session state.
 
     Args:
         userdata: The state to fill.
         values: The variables from _dispatched_call_start.
+
+    Raises:
+        RuntimeError: A value does not fit its declared type.
     """
-{{- range .CallStartVars}}
-    if {{pyq .Name}} in values:
-        userdata.{{.Name}} = values[{{pyq .Name}}]
-{{- end}}
-    return None
+    _save_call_start(userdata, values, {{.CallStartNames}})
 
 {{end}}

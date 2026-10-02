@@ -999,7 +999,7 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 		"async def do_find(self, ctx: RunContext) -> dict:",
 		"result = await FindSlot(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))",
 		`_values = _save_result("find_slot", ctx.userdata, {"date": date, "unserved_request": unserved_request})`,
-		"@dataclass\nclass Userdata:",
+		"class Userdata(BaseModel):",
 		"caller_phone: str | None = None",
 		"session = AgentSession[Userdata](",
 		"userdata=Userdata(),",
@@ -2148,9 +2148,11 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		`"call_id": attributes.get("sip.callID")`,
 		`"from_number": trunk_number if direction == "outbound" else remote_number`,
 		`raise RuntimeError("phone_number must be an E.164 number")`,
-		`raise RuntimeError("call_start.campaign_id must be string")`,
-		`userdata.provider_call_id = value`,
-		`userdata.call_direction = value`,
+		// A dispatched value and a carrier fact are both saved through the
+		// typed check, never assigned straight onto the state.
+		`_save_call_start(userdata, values, ("campaign_id", "customer_id", "verified"))`,
+		`not _save_fact(userdata, "provider_call_id", value)`,
+		`not _save_fact(userdata, "call_direction", value)`,
 		// System sources and dispatched input variables hydrate through their own
 		// call, so one path serves telephony and a plain `dev --var` session alike.
 		`_hydrate_livekit_context(session.userdata, call_context)`,
