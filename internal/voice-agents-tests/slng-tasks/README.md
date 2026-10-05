@@ -135,9 +135,9 @@ An old voiceai must be refused before anything is written:
 
 ```sh
 PATH="/opt/homebrew/bin:$PATH" bin/unmute deploy "$PKG" --dry-run
-# Expected, with voiceai 0.1.18: "does not write attachment ids into tasks,
-# so SLNG would refuse this agent's tasks: upgrade it with
-# `brew install slng-ai/tap/voiceai`".
+# Expected, with voiceai 0.1.18: "cannot push, the installed `voiceai` is too
+# old for tasks ... Nothing was changed: upgrade with
+# `brew upgrade slng-ai/tap/voiceai`, then deploy again", and exit 1.
 ```
 
 Release voiceai once 1 to 3 pass.

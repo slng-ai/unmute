@@ -1533,7 +1533,7 @@ func TestDeployRefusesAPushToolThatLeavesTaskToolsAsNames(t *testing.T) {
 esac`
 	}
 	_, _, _, err := deployFixture(t, "slng_tasks", "", stub(""), "--dry-run")
-	if err == nil || !strings.Contains(err.Error(), "does not write attachment ids into tasks") {
+	if err == nil || !strings.Contains(err.Error(), "cannot push, the installed `voiceai` is too old for tasks") {
 		t.Fatalf("a push tool with no task_tools was accepted for a package with tasks: %v", err)
 	}
 	if _, _, _, err := deployFixture(t, "slng_tasks", "", stub(`,"task_tools":1`), "--dry-run"); err != nil {

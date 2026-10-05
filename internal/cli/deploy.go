@@ -272,8 +272,10 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 			taskTools = taskTools || len(task.Tools) > 0
 		}
 		if taskTools && planned.TaskTools < 1 {
-			return fmt.Errorf("deploy %s: slng target %q: the installed `%s` does not write attachment ids into tasks, so SLNG would refuse this agent's tasks: upgrade it with `%s`",
-				dir, resolved.Name, deployPushBinary, target.SlngPushInstall)
+			return fmt.Errorf("deploy %s: slng target %q: cannot push, the installed `%s` is too old for tasks. "+
+				"It sends a task's tool names where SLNG wants attachment ids, so SLNG would refuse the agent. "+
+				"Nothing was changed: upgrade with `brew upgrade slng-ai/tap/%s`, then deploy again",
+				dir, resolved.Name, deployPushBinary, deployPushBinary)
 		}
 		readBaseline(runner, cache, &deployment, planned.Agent.ID)
 
