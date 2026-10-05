@@ -265,6 +265,16 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		if err := checkResolutionContract(planned); err != nil {
 			return fmt.Errorf("deploy %s: slng target %q: %w", dir, resolved.Name, err)
 		}
+		// Only a task that lists a tool needs it: a package whose tasks list
+		// none pushes the same through any push tool.
+		taskTools := false
+		for _, task := range agent.Tasks {
+			taskTools = taskTools || len(task.Tools) > 0
+		}
+		if taskTools && planned.TaskTools < 1 {
+			return fmt.Errorf("deploy %s: slng target %q: the installed `%s` does not write attachment ids into tasks, so SLNG would refuse this agent's tasks: upgrade it with `%s`",
+				dir, resolved.Name, deployPushBinary, target.SlngPushInstall)
+		}
 		readBaseline(runner, cache, &deployment, planned.Agent.ID)
 
 		writeReport := func(report deployReport) {
@@ -532,6 +542,12 @@ type pushResult struct {
 	// that does not honour `--require-resolved` resolves every name again and
 	// attaches whatever is newest, which is not the version this run checked.
 	ResolutionContract int `json:"resolution_contract"`
+
+	// TaskTools is 1 when the push writes the attachment ids it chose into the
+	// body's tasks. Zero is an older tool, which sends a task's tool names
+	// as they are, and SLNG refuses an agent whose task names a tool by name.
+	// A task with no tools is unaffected.
+	TaskTools int `json:"task_tools"`
 }
 
 // runPush shells out and returns the parsed document. A non-zero exit is not an

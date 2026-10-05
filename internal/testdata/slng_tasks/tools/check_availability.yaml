@@ -1,0 +1,6 @@
+# A tool SLNG hosts, listed by a task and by no agent, so it reaches SLNG
+# hidden from the main agent.
+description: Check whether a day has a free slot for a service.
+slng: check_availability
+interruption: provider_default
+effect: returns_data

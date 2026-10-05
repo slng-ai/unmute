@@ -289,7 +289,10 @@ Compile from the package instead. That is the shape this file is.
     "customer_name": {
       "required": true
     }
-  }
+  },
+  "shapes": [],
+  "tasks": [],
+  "task_groups": []
 }
 === compile-report.json ===
 {

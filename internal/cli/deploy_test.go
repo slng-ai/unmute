@@ -1516,6 +1516,31 @@ esac`
 	}
 }
 
+// TestDeployRefusesAPushToolThatLeavesTaskToolsAsNames. SLNG wants a task's
+// tools as attachment ids, which only the push knows, so a package with tasks
+// needs a push that writes them. One that answers no task_tools would send the
+// names as they are and SLNG would refuse the agent after the push began.
+func TestDeployRefusesAPushToolThatLeavesTaskToolsAsNames(t *testing.T) {
+	stub := func(marker string) string {
+		return `case "$*" in
+  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1` + marker + `,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
+  *"agents push"*"--require-resolved"*) printf '{"ok":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"},"version":"unchanged"}' ;;
+  *"tool list"*) printf '[{"id":"t-end_call","scope":"global","name":"end_call","tool_type":"end_call","latest_version":1},{"id":"t-check","scope":"organisation","name":"check_availability","tool_type":"code","latest_version":1}]' ;;
+` + resolvedToolStubIn("o", "check_availability", "t-check", "1", openSchema) + `
+  *"agents get"*) printf '{"id":"agent-1","organisation_id":"o","name":"slng-tasks-fixture-slng","tool_refs":[],"mcp_refs":[]}' ;;
+  *) printf '[]' ;;
+esac`
+	}
+	_, _, _, err := deployFixture(t, "slng_tasks", "", stub(""), "--dry-run")
+	if err == nil || !strings.Contains(err.Error(), "does not write attachment ids into tasks") {
+		t.Fatalf("a push tool with no task_tools was accepted for a package with tasks: %v", err)
+	}
+	if _, _, _, err := deployFixture(t, "slng_tasks", "", stub(`,"task_tools":1`), "--dry-run"); err != nil {
+		t.Fatalf("a push tool answering task_tools: 1 was refused: %v", err)
+	}
+}
+
 // TestDeployReadsTheAgentBeforeItReplacesIt.
 //
 // The bug this exists to stop was in the first version of this flow: the live

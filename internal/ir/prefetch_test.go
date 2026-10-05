@@ -726,8 +726,6 @@ func TestValidatePrefetchRefusedOnSlng(t *testing.T) {
 		want  []string
 	}{
 		{targetcap.FieldPrefetch, []string{"no seam to run in", "compile to livekit or pipecat"}},
-		{targetcap.FieldVariableConfirm, []string{"nowhere to go", "compile to livekit or pipecat"}},
-		{targetcap.FieldDelegateAnnounce, []string{"nowhere to go", "compile to livekit or pipecat"}},
 	} {
 		t.Run(string(tc.field), func(t *testing.T) {
 			capability := targetcap.Default().Capability(tc.field, targetcap.Slng)

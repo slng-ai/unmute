@@ -71,14 +71,18 @@ tool reports it.
 ## What a push replaces, and what it leaves alone
 
 A push replaces rather than merges, but only over what a package can express.
-These fourteen fields are the whole compiled body, so every one of them is
+These seventeen fields are the whole compiled body, so every one of them is
 overwritten on every push:
 
 ```text
 enable_interruptions, greeting, language, mcp_refs, models, name, region,
-runtime_variables, schema_version, system_prompt, template_defaults,
-template_variable_options, tool_mode, tool_refs
+runtime_variables, schema_version, shapes, system_prompt, task_groups, tasks,
+template_defaults, template_variable_options, tool_mode, tool_refs
 ```
+
+A package with no tasks still sends `tasks: []` and `task_groups: []`, so a
+push removes tasks somebody built in the dashboard. The dry run lists `tasks`
+under the fields it would overwrite when the live agent has different ones.
 
 Everything else on the live agent is not expressible in a package and survives
 untouched. Observed across four pushes on 2026-09-17:

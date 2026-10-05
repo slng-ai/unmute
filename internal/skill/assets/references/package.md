@@ -574,12 +574,24 @@ them when it writes the body; a model name that already carries a slash is
 passed through whole. SLNG owns its model list, so no vendor or model name is
 checked on this target.
 
+Tasks and task groups compile to SLNG's own tasks: `when:`, `tools`,
+`assign:` (with `+`), one `announce:`, `opening: listen`, a history of
+`messages`, `full`, `last_n` or `reset`, `skip_when_confirmed`,
+`context_scope`, and `confirm:` on a value whose confirming task has its own
+`when:`. A task names its tools by name and the push writes the attachment
+ids. A tool only a task lists is attached hidden from the agent. Every value a
+task saves is a runtime variable and needs `Field(description=...)`.
+
 **Do not write a package for slng that uses any of these.** Each is refused at
 validate, by name, with what to do instead:
 
 | Feature | Why |
 |---|---|
-| tasks, task groups, agent transfers | the create body carries one prompt and one greeting |
+| agent transfers | the create body carries one agent |
+| a task's `think:`, `finish:`, `history: summary` or `include_tool_calls: false` | one model per agent, no summary, and no `output:` for a success rule to read |
+| a second `announce:` line, an optional `result.x?`, a group `then:` other than `return` | SLNG speaks one line, saves every assigned value, and returns to the agent |
+| a task that lists another task or a handoff | a SLNG task cannot start another one |
+| a typed `state.py` value the dispatch fills; `datetime`, `dict`, a pattern other than `Id` | SLNG checks types only on values a task saves, in a grammar without those words |
 | a `turn:` section, `semantic_endpointing`, `endpointing_delay` | SLNG owns its own turn taking |
 | `placement: local` on any model | SLNG runs the pipeline |
 | `conversation.inactivity` | SLNG's idle nudges need three spoken texts a package does not carry |

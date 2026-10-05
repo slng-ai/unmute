@@ -29,6 +29,7 @@ func validateSlngTarget(agent *Agent, resolved Target, row *TargetValidation) {
 	validateSlngRegions(resolved, row)
 	validateSlngFallbacks(agent, row)
 	validateSlngVariables(agent, row)
+	validateSlngTasks(agent, row)
 	for _, name := range slices.Sorted(maps.Keys(agent.Tools)) {
 		validateSlngTool(name, agent.Tools[name], row)
 		validateSlngInject(agent, name, agent.Tools[name], row)
@@ -171,9 +172,12 @@ func validateSlngFallbacks(agent *Agent, row *TargetValidation) {
 // the map is dict[str, str] (voice_agent.py:968), and a default may not itself
 // carry a {{ }} reference (:985-994).
 func validateSlngVariables(agent *Agent, row *TargetValidation) {
+	// A runtime variable has no default slot on SLNG: it starts unset, which is
+	// what a step reads as "no value yet".
+	runtime := SlngRuntimeVariables(agent)
 	for _, name := range slices.Sorted(maps.Keys(agent.Variables)) {
 		variable := agent.Variables[name]
-		if variable.Default == nil {
+		if variable.Default == nil || runtime[name] {
 			continue
 		}
 		text, ok := variable.Default.(string)

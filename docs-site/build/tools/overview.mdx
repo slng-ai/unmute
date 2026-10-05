@@ -149,14 +149,15 @@ a decision rather than a bug.
 |---|---|---|---|
 | `mcp:` | yes | yes | **no**, list it on the agent |
 | `knowledge:` | **no** | yes | **no**, list it on the agent |
-| everything else | no tasks at all | yes | yes |
+| everything else | yes | yes | yes |
 
 A tool listed on a task rather than on an agent is a narrower thing, and two kinds
 are not available everywhere.
 
 Pipecat's reason is the same for both: a task tool there is a flows handler holding
-a `FlowManager`, not a decorated function holding `FunctionCallParams`. The SLNG
-target writes one agent with one prompt, so it has no tasks to scope anything to.
+a `FlowManager`, not a decorated function holding `FunctionCallParams`. SLNG takes
+no `knowledge:` tool anywhere. On SLNG a tool that only a task lists is attached
+hidden from the main agent.
 
 ### The behavior fields
 

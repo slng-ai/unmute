@@ -1,0 +1,83 @@
+{
+  "source": "internal/testdata/slng_tasks/state.py",
+  "digest": "6d0785467ce3d8f3b95d8a057c3f9b1c424054ea6a3f60d7031a624e19135b4d",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Booking": {
+          "description": "One appointment the caller asked for.",
+          "properties": {
+            "day": {
+              "description": "The day of the appointment, written year-month-day.",
+              "format": "date",
+              "title": "Day",
+              "type": "string"
+            },
+            "service": {
+              "enum": [
+                "cut",
+                "colour"
+              ],
+              "title": "Service",
+              "type": "string"
+            }
+          },
+          "required": [
+            "day",
+            "service"
+          ],
+          "title": "Booking",
+          "type": "object"
+        }
+      },
+      "description": "What one call knows, shared by the agent and its tasks.",
+      "properties": {
+        "customer_name": {
+          "default": "there",
+          "title": "Customer Name",
+          "type": "string"
+        },
+        "phone_number": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The caller's number in E.164, confirmed with them.",
+          "title": "Phone Number"
+        },
+        "booking": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Booking"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The appointment the caller asked for."
+        },
+        "notes": {
+          "default": [],
+          "description": "Anything the caller asked us to pass on, one entry each.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

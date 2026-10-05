@@ -820,7 +820,9 @@ Used by tasks and by handoffs.
 `include_tool_calls: true` does not add tool records to `messages` or `reset`.
 To keep old tool results, use `full` or `last_n`. Pipecat supports those two
 modes plus `messages` and `reset`; it refuses `summary` and explicit
-`include_tool_calls: false`. SLNG refuses task and handoff context settings.
+`include_tool_calls: false`. SLNG takes `messages`, `full`, `last_n` and
+`reset` on a task, refuses `summary` and `include_tool_calls: false`, and has
+no handoffs.
 
 For example, these are two separate context blocks:
 

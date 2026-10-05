@@ -13,11 +13,12 @@ the agent looks it up and says when the parcel is due. It is small on purpose.
 The shape is what matters, and you will swap the parcel for your own thing.
 
 <Note>
-  **Tasks need a code target: Pipecat or LiveKit.** The package `unmute init`
-  writes targets LiveKit, so you are ready.
+  **Tasks run on LiveKit, Pipecat and SLNG.** The package `unmute init`
+  writes targets LiveKit, so you are ready. SLNG takes most task features;
+  [the SLNG page](/targets/slng#tasks-and-task-groups) lists them.
 
-  SLNG and Twilio compile one agent with one prompt and refuse tasks. Fold
-  the step into the agent's instructions or use LiveKit or Pipecat.
+  Twilio compiles one agent with one prompt and refuses tasks. Fold the step
+  into the agent's instructions or use another target.
 </Note>
 
 ## What a task is
