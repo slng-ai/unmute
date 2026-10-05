@@ -1065,7 +1065,9 @@ with the tool's name in `gen_ai.tool.name`.
 
 The call also shows on Logfire's **Agents** page, one run per agent turn, with
 its model calls, tokens, messages and tool calls. Every row is labelled, such as
-`chat <model>` or `tool <name>`.
+`chat <model>` or `tool <name>`. livekit's wrapper spans (`llm_node`,
+`tts_node` and the spans inside them) are not sent, because each one only
+repeats a row the trace keeps.
 
 Spans go to Logfire as plain OpenTelemetry over HTTP. The project does not use
 the Logfire SDK, so `logfire.configure()` is not needed.
@@ -1083,9 +1085,10 @@ Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
 session ID.
 
 Starting the worker or exporting a synthetic span proves connectivity only.
-Complete at least one user turn before reviewing the trace. A traced request
-contains `llm_node` and `llm_request` generation observations in addition to
-the session and agent spans.
+Complete at least one user turn before reviewing the trace. Each model call is
+one `llm_request` generation observation, beside the session and agent spans.
+livekit's wrapper spans (`llm_node`, `tts_node` and the spans inside them) are
+not sent, because each one only repeats a row the trace keeps.
 
 Each tool call is its own observation, typed as a tool and named after the tool
 that ran. The framework names every span `function_tool` and carries the real

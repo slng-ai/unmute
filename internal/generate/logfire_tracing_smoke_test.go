@@ -128,7 +128,7 @@ with tracer.start_as_current_span("conversation", attributes={"session.id": "s1"
             "function_tool",
             attributes={"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "lookup"},
         ).end()
-        tracer.start_span("tts_node").end()
+        tracer.start_span("agent_speaking").end()
 
 shaped = {span.name: span for span in memory.get_finished_spans()}
 labels = {name: span.attributes.get("logfire.msg") for name, span in shaped.items()}
@@ -138,7 +138,7 @@ assert labels == {
     "llm": "chat gpt-probe",
     "llm_request": "chat gpt-probe",
     "function_tool": "tool lookup",
-    "tts_node": None,
+    "agent_speaking": None,
 }, labels
 
 # Pipecat's own attributes become the GenAI messages, with the system prompt

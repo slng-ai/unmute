@@ -81,7 +81,13 @@ Every row is labelled the way Logfire's own integrations label theirs:
 | Target | The tree of one call |
 |---|---|
 | `pipecat` | `conversation`, then a `turn` per exchange, then `stt`, `llm` and `tts` |
-| `livekit` | `agent_session`, then a `turn` per exchange, then `user_turn` and `agent_turn` with `llm_node`, `llm_request`, `stt` and `tts` under them |
+| `livekit` | `agent_session`, then a `turn` per exchange, then `user_turn` and `agent_turn` with `llm_request`, `stt` and `tts` under them |
+
+LiveKit wraps each model and speech call in spans of its own: `llm_node`,
+`llm_request_run`, `tts_node`, `tts_request` and `tts_request_run`. The emitted
+project does not send them. Each one only repeats a row the trace keeps, and
+Logfire would count `llm_node` as a second model call. A span started inside
+one is moved up to that wrapper's parent.
 
 Every tool call is its own span, with the tool's name in `gen_ai.tool.name`, its
 arguments, and, once the call finishes, its result.
@@ -97,7 +103,7 @@ span. The emitted project arranges that on each target:
 
 | Target | The agent run | What changes for Logfire |
 |---|---|---|
-| `livekit` | livekit's `agent_turn` | the model call is started under `agent_turn` itself, not under livekit's `llm_node` |
+| `livekit` | livekit's `agent_turn` | the model call sits right under `agent_turn`, because livekit's `llm_node` wrapper is not sent |
 | `pipecat` | each `turn` | Pipecat opens no agent span, so each `turn` is marked as the run |
 
 Pipecat keeps a model call's messages under its own `input` and `output`

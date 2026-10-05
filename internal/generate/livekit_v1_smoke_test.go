@@ -1360,12 +1360,19 @@ async def main() -> None:
         assert by_id[by_name[name].parent.span_id].name == "turn", name
     assert turn.attributes[input_key] == "trace this request"
     assert turn.attributes[output_key] == "traced"
-    # A backend that reads through llm_node gets the model call right under the
-    # agent's turn, which is where Logfire looks for it. Every other backend
-    # keeps livekit's own nesting.
+    # livekit opens its wrapper spans (required above), and none is exported.
+    # Their children start one level up, so the model call sits right under the
+    # agent's turn, where Logfire looks for it, and nothing exported points at a
+    # parent the filter refused. (A turn this harness leaves open is never
+    # exported either, so "every parent was exported" is not the claim.)
+    exported = [span for span in call_spans if tracing._export_call_spans(span)]
+    refused = {span.context.span_id for span in call_spans} - {span.context.span_id for span in exported}
+    leaked = sorted({span.name for span in exported} & tracing.WRAPPER_SPANS)
+    assert not leaked, leaked
+    orphans = sorted(span.name for span in exported if span.parent and span.parent.span_id in refused)
+    assert not orphans, orphans
     llm_parent = by_id[by_name["llm_request"].parent.span_id].name
-    want_parent = "agent_turn" if "llm_node" in backend.transparent_spans else "llm_node"
-    assert llm_parent == want_parent, (llm_parent, want_parent)
+    assert llm_parent == "agent_turn", llm_parent
     # Lifecycle hangs off the session directly, not off a turn.
     for name in ("start_agent_activity",):
         assert by_id[by_name[name].parent.span_id].name == "agent_session", name
@@ -1498,8 +1505,9 @@ func TestSmokeV22LiveKitSpeechTracing(t *testing.T) {
 }
 
 // The same session on Logfire, where the model call has to land right under
-// the agent's turn for Logfire to count it toward the run.
-func TestSmokeLiveKitLogfireReadsThroughLLMNode(t *testing.T) {
+// the agent's turn for Logfire to count it toward the run. Both runs prove the
+// wrapper spans are dropped without orphaning a child.
+func TestSmokeLiveKitLogfireDropsWrapperSpans(t *testing.T) {
 	runLiveKitSmokeScript(t, "simple-prompt", nil, enableLogfire, livekitRequestTracingSmokeScript)
 }
 

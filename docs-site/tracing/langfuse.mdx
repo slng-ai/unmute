@@ -80,7 +80,13 @@ exchange, since `user_turn` closes when the caller stops speaking and
 | Target | The tree of one call |
 |---|---|
 | `pipecat` | `conversation`, then a `turn` per exchange, then `stt`, `llm` and `tts` generation observations |
-| `livekit` | `agent_session`, then a `turn` per exchange, then `user_turn` and `agent_turn` with `llm_node`, `llm_request`, `stt` and `tts` under them |
+| `livekit` | `agent_session`, then a `turn` per exchange, then `user_turn` and `agent_turn` with `llm_request`, `stt` and `tts` under them |
+
+LiveKit wraps each model and speech call in spans of its own: `llm_node`,
+`llm_request_run`, `tts_node`, `tts_request` and `tts_request_run`. The emitted
+project does not send them. Each one only repeats a row the trace keeps, and
+Langfuse would list `llm_node` as a second generation for the same model call.
+A span started inside one is moved up to that wrapper's parent.
 
 Agent lifecycle on LiveKit, the starting, handing over and shutting down, hangs
 off `agent_session` beside the turns rather than inside one.

@@ -101,12 +101,14 @@ func TestLiveKitExportHookKeepsTheWholeCall(t *testing.T) {
 	}
 
 	hook := pipecatMethodBody(t, tracing, "def _export_call_spans(", "\n\n\ndef ")
-	// The hook drops exactly one thing: the loop monitor's stall span when it has
-	// no parent, which otherwise arrives as a trace of its own. Anything wider
-	// would drop part of the call for no reason a reader can see.
-	const keep = `return not (span.name == "event_loop_blocked" and span.parent is None)`
-	if !strings.HasSuffix(strings.TrimSpace(hook), keep) {
-		t.Errorf("the filter hook must export every span but a parentless event_loop_blocked:\n%s", hook)
+	// The hook drops exactly two things: the loop monitor's stall span when it
+	// has no parent, which otherwise arrives as a trace of its own, and the
+	// wrapper spans that only repeat a row the trace keeps. Anything wider would
+	// drop part of the call for no reason a reader can see.
+	const keep = `    stall = span.name == "event_loop_blocked" and span.parent is None
+    return not stall and span.name not in WRAPPER_SPANS`
+	if !strings.HasSuffix(strings.TrimRight(hook, "\n"), keep) {
+		t.Errorf("the filter hook must export every span but a parentless event_loop_blocked and the wrapper spans:\n%s", hook)
 	}
 	if strings.Contains(hook, "return False") {
 		t.Errorf("this hook drops nothing else:\n%s", hook)

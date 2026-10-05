@@ -78,7 +78,7 @@ Pipecat creates one trace for the full conversation.
 
 Starting a worker or exporting a synthetic span only proves that credentials
 and transport work. Complete at least one user turn before reviewing traces.
-LiveKit then records `llm_node` and `llm_request` generation observations;
+LiveKit then records one `llm_request` generation observation per model call;
 Pipecat records `llm` and `tts` generation observations under its conversation
 and turn spans.
 

@@ -90,9 +90,9 @@ func TestTracingOffEmitsNoTelemetry(t *testing.T) {
 }
 
 // Logfire groups a call into agent runs and counts a model call toward one only
-// when it sits directly under the run's span. The Logfire build reads through
-// LiveKit's llm_node, makes Pipecat's turn a run, and labels every row; the
-// Langfuse build does none of it, so a Langfuse trace keeps its proven shape.
+// when it sits directly under the run's span. The Logfire build makes Pipecat's
+// turn a run and labels every row; the Langfuse build does neither, so a
+// Langfuse trace keeps its proven shape.
 func TestLogfireShapesTheAgentBreakdown(t *testing.T) {
 	for _, tc := range []struct {
 		provider string
@@ -102,15 +102,12 @@ func TestLogfireShapesTheAgentBreakdown(t *testing.T) {
 	}{
 		{"logfire", enableLogfire, []string{
 			"class LogfireExporter(SpanExporter):",
-			`transparent_spans: ClassVar[frozenset[str]] = frozenset({"llm_node"})`,
 			`return {"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": agent_name}`,
 			`attributes["gen_ai.conversation.id"] = session_id`,
 			`attributes["logfire.msg"] = message`,
 			"def genai_messages(",
 		}, nil},
-		{"langfuse", enableLangfuse, []string{
-			"transparent_spans: ClassVar[frozenset[str]] = frozenset()",
-		}, []string{"LogfireExporter", "logfire.msg", `frozenset({"llm_node"})`}},
+		{"langfuse", enableLangfuse, nil, []string{"LogfireExporter", "logfire.msg"}},
 	} {
 		for _, driver := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 			pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
@@ -137,13 +134,56 @@ func TestLogfireShapesTheAgentBreakdown(t *testing.T) {
 					t.Errorf("%s on %s carries Logfire shaping %q", tc.provider, driver, forbid)
 				}
 			}
-			// The two seams each target uses to give Logfire its agent runs.
+			// The two seams each target uses to give Logfire its agent runs. On
+			// LiveKit it is the lift out of the wrapper spans, which every
+			// backend gets.
 			seam := map[ir.Provider]string{
 				ir.ProviderLiveKit: "return self._lifted.get(parent, context)",
 				ir.ProviderPipecat: "span.set_attributes(self._backend.agent_run(TRACE_NAME))",
 			}[driver]
 			if !strings.Contains(source, seam) {
 				t.Errorf("%s on %s missing %q", tc.provider, driver, seam)
+			}
+		}
+	}
+}
+
+// LiveKit wraps each model and speech call in spans that only repeat another
+// row, and Logfire and Langfuse each counted llm_node as a second model call.
+// Both backends drop them and start their children one level up. Pipecat opens
+// none of them, and Coval on LiveKit never receives livekit's spans.
+func TestLiveKitDropsItsWrapperSpansOnEveryBackend(t *testing.T) {
+	enable := map[string]func(*ir.Agent){"langfuse": enableLangfuse, "logfire": enableLogfire, "coval": enableCoval}
+	for provider, on := range enable {
+		for _, driver := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+			pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := buildWithState(t, pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			on(agent)
+			artifact, err := Generate(agent, targetByProvider(t, agent, driver), target.Default())
+			if err != nil {
+				t.Fatal(err)
+			}
+			tracing := artifactFile(t, artifact, "utils/tracing.py")
+			if driver == ir.ProviderLiveKit && provider != "coval" {
+				for _, want := range []string{
+					`WRAPPER_SPANS = frozenset({"llm_node", "llm_request_run", "tts_node", "tts_request", "tts_request_run"})`,
+					"if span.name in WRAPPER_SPANS:",
+					"return not stall and span.name not in WRAPPER_SPANS",
+				} {
+					if !strings.Contains(tracing, want) {
+						t.Errorf("%s on %s missing %q", provider, driver, want)
+					}
+				}
+				continue
+			}
+			if strings.Contains(tracing, "WRAPPER_SPANS") {
+				t.Errorf("%s on %s filters livekit wrapper spans it never receives", provider, driver)
 			}
 		}
 	}
