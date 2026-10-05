@@ -90,7 +90,8 @@ session.
 
 | Path | What it holds |
 |---|---|
-| `agent.yaml` | the package: agents and the tasks they run, handoffs, escalations, variables, pre-fetch, knowledge and secrets |
+| `agent.yaml` | the package: agents and the tasks they run, handoffs, escalations, the `variables:` list, pre-fetch, knowledge and secrets |
+| `state.py` | the `State` class: every saved value's type, default and description, and the `Appointment` model. Read by `validate` and `compile` through `uv` |
 | `targets.yaml` | the two targets, one per telephony plane |
 | `instructions.md` | the concierge prompt |
 | `agents/complaint-specialist.md` | the customer care prompt |
@@ -290,9 +291,9 @@ and assistant speech available at entry, without tool calls and results.
 Returning from a task restores the owner's earlier conversation and gives only
 a completed or unserved status. It does not copy the task's conversation back.
 
-**Typed values shared on purpose.** Booking saves `appointment` only after a
-book, move or cancellation succeeds. The owner and customer care read it through
-explicit prompt references, so a later complaint can refer to the updated date
+**Typed values shared on purpose.** Booking saves `appointment`, a Pydantic model
+in `state.py`, only after a book, move or cancellation succeeds. The owner and
+customer care read it through explicit `{{state.appointment}}` prompt references, so a later complaint can refer to the updated date
 without asking again. Tools inject the confirmed phone number. No value is
 automatically added to a prompt.
 

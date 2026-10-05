@@ -14,7 +14,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
@@ -184,6 +183,26 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // prompt, which renders the same bytes json.dumps did), and an invalidated
 // pre-fetched value goes back to its default instead of to None.
 //
+// Finally, the same day, the author took the state over: it is written as a
+// Pydantic state.py, copied into the project as written, and the compiler no
+// longer writes a Python type of its own. The generated half is one module,
+// call_state.py, the same text on both targets: CallState subclasses the
+// author's State and carries the save, the confirmation record and the prompt
+// rendering as methods (the helper functions _save_result, _save_batch,
+// _state_text and the rest are gone), and StepResult builds each step's finish
+// model from State's own annotations, so a LiveKit finish is one raw schema
+// rather than a signature with a parameter per field. LiveKit's Userdata and
+// Pipecat's State are both CallState now. A package with no state.py and no
+// step emits no call_state.py, and moves only by the template comments that
+// named the old helpers. Behaviour is unchanged: the same refusal wording, the
+// same bound on a rendered value, the same all-or-nothing save. A text run of
+// customer-intake on both targets completed end to end. The runbook's
+// "Declared state" and "Input variables" sections were rewritten the same day to
+// describe that: state.py as the author's own file, call_state.py, CallState,
+// the ? mark on an assign, and JSON for a model or a list in --var. That moves
+// the README bytes of every package that keeps state or runs a step, and
+// nothing else.
+//
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {
@@ -201,7 +220,7 @@ func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: load: %v", name, err)
 		}
-		agent, err := ir.Build(pkg)
+		agent, err := buildWithState(t, pkg)
 		if err != nil {
 			t.Fatalf("%s: build: %v", name, err)
 		}

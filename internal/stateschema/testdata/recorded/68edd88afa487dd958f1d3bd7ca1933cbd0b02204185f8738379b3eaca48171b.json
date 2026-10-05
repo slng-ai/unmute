@@ -1,0 +1,26 @@
+{
+  "source": "internal/testdata/slng_mcp_server/state.py",
+  "digest": "68edd88afa487dd958f1d3bd7ca1933cbd0b02204185f8738379b3eaca48171b",
+  "report": {
+    "schema": {
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "customer_name": {
+          "default": "there",
+          "title": "Customer Name",
+          "type": "string"
+        },
+        "customer_id": {
+          "default": "unknown",
+          "title": "Customer Id",
+          "type": "string"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

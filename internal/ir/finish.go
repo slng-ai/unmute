@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 )
 
 // TerminalTool is one resolved `finish:` entry: a tool of the task, and the
@@ -92,7 +93,7 @@ func terminalTools(taskName string, raw packagespec.Task, agent *Agent, result m
 			return nil, fmt.Errorf("finish names %q with no success:; a step cannot end on a result nothing checks", entry.Tool)
 		}
 		for _, field := range sortedKeys(result) {
-			if err := terminalResultFits(entry.Tool, properties, field, result[field], agent); err != nil {
+			if err := terminalResultFits(entry.Tool, properties, field, result[field]); err != nil {
 				return nil, err
 			}
 		}
@@ -122,7 +123,14 @@ func declaredEnum(tool string, properties map[string]any, field string) ([]strin
 // between, so a field the tool does not return is a save that silently records
 // nothing, and a field of the wrong type is a save the validator refuses on a
 // live call.
-func terminalResultFits(tool string, properties map[string]any, field string, want ResultField, agent *Agent) error {
+//
+// The fit rule is the one a step's assign: and a pre-fetch are held to. It
+// reads the tool's output as JSON Schema and the destination as the schema
+// Pydantic wrote for it, so the two compare as like with like. A closed set
+// the tool declares fits inside a larger one the variable allows: a tool that
+// only ever returns `create` fits a variable allowing create, modify or
+// cancel.
+func terminalResultFits(tool string, properties map[string]any, field string, want ResultField) error {
 	// The reserved escape is the model's own, never a tool's.
 	if field == UnservedResultField {
 		return nil
@@ -131,101 +139,14 @@ func terminalResultFits(tool string, properties map[string]any, field string, wa
 	if !ok {
 		return fmt.Errorf("%s returns no %s; every tool under finish: has to return what assign: saves", tool, field)
 	}
-	return terminalPropertyFits(tool, field, property, want.Shape, want.Type, agent)
-}
-
-// terminalPropertyFits walks a declared shape against the tool's own JSON
-// Schema, field by field. assignableInto answers the plain cases and is reused
-// rather than copied; the walk is the part it has no vocabulary for, because a
-// tool's `object` property has no name to match a shape by.
-func terminalPropertyFits(tool, field string, property map[string]any, want *TypeRef, wantPrimitive PrimitiveType, agent *Agent) error {
-	if want != nil && want.List != nil {
-		items, ok := property["items"].(map[string]any)
-		if word, _ := property["type"].(string); word != "array" || !ok {
-			return fmt.Errorf("%s returns %s as %s; the variable is %s, so the tool has to return a list of them",
-				tool, field, describeProperty(property), want.String())
-		}
-		return terminalPropertyFits(tool, field, items, want.List, want.List.Primitive, agent)
+	returned, err := stateschema.ParseProperty(property)
+	if err == nil {
+		err = stateschema.Fits(returned, want.Type)
 	}
-	if want != nil && want.Shape != "" {
-		shape, ok := agent.Shapes[want.Shape]
-		if !ok {
-			return fmt.Errorf("%s is declared as %s, which no shapes: entry declares", field, want.Shape)
-		}
-		nested, _ := property["properties"].(map[string]any)
-		if word, _ := property["type"].(string); word != "object" || nested == nil {
-			return fmt.Errorf("%s returns %s as %s; the shape %s is an object, so the tool has to return one with a property per field",
-				tool, field, describeProperty(property), want.Shape)
-		}
-		for _, member := range shape.Fields {
-			child, ok := nested[member.Name].(map[string]any)
-			if !ok {
-				return fmt.Errorf("%s returns %s without %s; the shape %s declares it, and every tool under finish: has to return what assign: saves",
-					tool, field, member.Name, want.Shape)
-			}
-			if err := terminalPropertyFits(tool, field+"."+member.Name, child, member.Type, member.Type.Primitive, agent); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	// A closed set the tool declares that sits inside the one the variable
-	// allows is assignable, which is where this parts company with a step's own
-	// `assign:`. There the model produces the value and has to be told the whole
-	// set; here the tool produces it, and a tool that can only ever return
-	// `create` fits a variable allowing create, modify or cancel. Requiring the
-	// same set would make one mutation per action impossible to declare.
-	if want != nil && len(want.Literal) > 0 {
-		declared := propertyResultField(property)
-		if len(declared.Enum) == 0 {
-			return fmt.Errorf("%s returns %s as %s; the variable allows %s, so the tool has to declare its own enum",
-				tool, field, describeProperty(property), strings.Join(want.Literal, ", "))
-		}
-		for _, value := range declared.Enum {
-			if !slices.Contains(want.Literal, value) {
-				return fmt.Errorf("%s can return %s as %s, which the variable does not allow; it allows %s",
-					tool, field, value, strings.Join(want.Literal, ", "))
-			}
-		}
-		return nil
-	}
-	// A shape field's type is always a TypeRef, so a bare primitive one arrives
-	// here wrapped. assignableInto reads a non-nil target as a structured type
-	// and would refuse `str` against `str`, so the wrapper comes off first.
-	if want != nil && want.Shape == "" && want.List == nil && want.Shaped == "" && len(want.Literal) == 0 {
-		want, wantPrimitive = nil, want.Primitive
-	}
-	// Everything from here down holds one plain value. propertyResultField
-	// types an output as text unless the schema says integer, number or
-	// boolean, so an object or an array read as text and passed: the mismatch
-	// surfaced only after the business tool had already run.
-	if word, _ := property["type"].(string); word == "object" || word == "array" {
-		return fmt.Errorf("%s returns %s as %s; the destination holds one plain value, so the tool has to return one",
-			tool, field, word)
-	}
-	// Plain: the same predicate a step's assign: and a pre-fetch are held to, so
-	// three checks cannot drift into three answers.
-	if err := assignableInto(want, wantPrimitive, propertyResultField(property)); err != nil {
+	if err != nil {
 		return fmt.Errorf("%s returns %s as %s: %w", tool, field, describeProperty(property), err)
 	}
 	return nil
-}
-
-// propertyResultField types one output property the way prefetchResultField
-// types one pre-fetch field: plain text unless the schema says otherwise, with a
-// closed set carried through so a Literal destination can be matched.
-func propertyResultField(property map[string]any) ResultField {
-	out := ResultField{Type: PrimitiveString}
-	if word, ok := property["type"].(string); ok {
-		switch PrimitiveType(word) {
-		case PrimitiveInteger, PrimitiveNumber, PrimitiveBoolean:
-			out.Type = PrimitiveType(word)
-		}
-	}
-	if values, err := stringSlice(property["enum"]); err == nil {
-		out.Enum = values
-	}
-	return out
 }
 
 // describeProperty names a schema property the way its author wrote it, so a

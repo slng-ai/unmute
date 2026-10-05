@@ -78,7 +78,7 @@ func TestValidateTaskMayAttachAHandoff(t *testing.T) {
 	agent.Tasks["routing"] = Task{
 		Instructions: "Route the caller.",
 		Tools:        []string{"to_billing"},
-		Result:       map[string]ResultField{"done": {Type: PrimitiveBoolean}},
+		Result:       map[string]ResultField{"done": {Type: boolType}},
 		Context:      TaskContext{History: HistoryFull},
 	}
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
@@ -227,7 +227,7 @@ func TestValidateTaskGroupKeepsMemberContext(t *testing.T) {
 	agent := safeAgent(t)
 	agent.Models["group_only_summarizer"] = ModelDef{Kind: KindThink, Placement: PlacementAPI}
 	agent.Tasks["collect"] = Task{
-		Instructions: "collect", Result: map[string]ResultField{"done": {Type: PrimitiveBoolean}},
+		Instructions: "collect", Result: map[string]ResultField{"done": {Type: boolType}},
 		Context: TaskContext{History: HistorySummary, Summarizer: "group_only_summarizer"},
 	}
 	agent.TaskGroups["collect_then_end"] = TaskGroup{
@@ -752,25 +752,6 @@ func TestValidateBuiltinRejectsConflictingEffect(t *testing.T) {
 	}
 }
 
-// The "every configured target is checked, not just the one being validated"
-// property used to be shown by a nested result gated on the vapi instance in
-// the fixture. TestValidateNestedResultRejectsUnknownConfiguredProvider below
-// shows the same property with a provider name that cannot go stale.
-
-func TestValidateNestedResultRejectsUnknownConfiguredProvider(t *testing.T) {
-	agent := safeAgent(t)
-	agent.Tasks["nested"] = Task{
-		Instructions: "nested", Result: map[string]ResultField{"payload": {Schema: map[string]any{"type": "object"}}},
-		Context: TaskContext{History: HistoryFull},
-	}
-	livekit := targetFor(agent, ProviderLiveKit)
-	agent.Targets = map[string]Target{"unknown": {Name: "unknown", Provider: "other"}}
-	report, err := Validate(agent, []Target{livekit}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `configured target "unknown" has unknown provider "other"`) {
-		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
-	}
-}
-
 func TestT16_ListenFallbackGatesPerTarget(t *testing.T) {
 	build := func(t *testing.T) *Agent {
 		t.Helper()
@@ -1102,20 +1083,6 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 			},
 			want: `livekit speak binding provider "deepgram": voice has no slot here`,
 		},
-		{
-			// A structured variable's Type is always the primitive it renders as
-			// in a prompt (compiler.go), never its declared shape, so the old
-			// message ("default does not match type \"string\"") named a type the
-			// author never wrote. The fix names the shape instead and says there
-			// is no fix but removal: a structured value starts empty and a
-			// default is not a thing it can hold.
-			name:     "structured variable with a default",
-			provider: "livekit",
-			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["reasons"] = packagespec.Variable{Type: "list[string]", Default: []any{}}
-			},
-			want: `variable "reasons" is list[str], which starts empty and takes no default: remove default:`,
-		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			pkg := loadSafeCore(t)
@@ -1340,39 +1307,6 @@ func TestValidateToolSchemaWarnsOnUnrecognisedKey(t *testing.T) {
 	}
 }
 
-// TestValidateTaskResultSchemaKeysReported: a nested task result field carries a
-// raw schema (build.go stashes any unrecognised map as ResultField.Schema) and
-// the Pipecat driver serialises it through resultProperties/pyLiteral exactly as
-// it serialises tool properties. Same unvalidated surface, so the same walk has
-// to reach it, named for the field rather than for a tool.
-func TestValidateTaskResultSchemaKeysReported(t *testing.T) {
-	agent := safeAgent(t)
-	agent.Tasks["collect"] = Task{
-		Instructions: "Collect the caller's account details.",
-		Result: map[string]ResultField{"details": {Schema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{"city": map[string]any{"type": "string", "descriptoin": "typo"}},
-		}}},
-		Context: TaskContext{History: HistoryFull},
-	}
-	agent.Controls["run_collect"] = &Delegate{Kind: ControlDelegate, Task: "collect", When: "Collect details."}
-	intake := agent.Agents["intake"]
-	intake.Tools = append(intake.Tools, "run_collect")
-	agent.Agents["intake"] = intake
-
-	// safe_core also declares Vapi, which gates nested task results, so the run
-	// fails for that unrelated reason. What matters here is that the schema key
-	// lands in Warnings and never in Errors.
-	report, _ := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
-	want := `task "collect" result "details" has unrecognised schema key "descriptoin" at schema.properties.city`
-	if !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), want) {
-		t.Fatalf("want warning %q, got %#v", want, report.PerTarget[0].Warnings)
-	}
-	if strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "schema key") {
-		t.Fatalf("a schema key must never become an error: %#v", report.PerTarget[0].Errors)
-	}
-}
-
 func reportFor(report ValidateReport, provider Provider) TargetValidation {
 	for _, row := range report.PerTarget {
 		if row.Provider == provider {
@@ -1489,7 +1423,7 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 
 func dailyCarrierPackage(t *testing.T) *packagespec.Package {
 	t.Helper()
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "daily_carrier"))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", "daily_carrier"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1639,8 +1573,8 @@ func TestValidatePipecatDailyCarrierCallSources(t *testing.T) {
 	} {
 		t.Run(string(tc.source), func(t *testing.T) {
 			pkg := dailyCarrierPackage(t)
-			pkg.Agent.Variables = map[string]packagespec.Variable{}
-			pkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(tc.source)}
+			pkg.Agent.Variables = nil
+			declareVariable(pkg, stringField("caller_fact"), string(tc.source))
 			agent, err := Build(pkg)
 			if err != nil {
 				t.Fatal(err)
@@ -1671,8 +1605,8 @@ func TestValidatePipecatDailyCarrierCallSources(t *testing.T) {
 			// these two is still LiveKit only.
 			cwPkg := loadSafeCore(t)
 			enableTelephony(cwPkg)
-			cwPkg.Agent.Variables = map[string]packagespec.Variable{}
-			cwPkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(tc.source)}
+			cwPkg.Agent.Variables = nil
+			declareVariable(cwPkg, stringField("caller_fact"), string(tc.source))
 			routeTarget(cwPkg, "livekit", "primary_phone", "connector", "twilio")
 			cwPkg.Connections["primary_phone"] = packagespec.Connection{
 				Transport: "connector", Carrier: "twilio", Environment: map[string]string{
@@ -2062,7 +1996,7 @@ func TestValidatePipecatCloudWebsocketCallSources(t *testing.T) {
 	} {
 		t.Run(string(tc.source), func(t *testing.T) {
 			pkg := cloudWebsocketPackage(t)
-			pkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(tc.source)}
+			declareVariable(pkg, stringField("caller_fact"), string(tc.source))
 			agent, err := Build(pkg)
 			if err != nil {
 				t.Fatal(err)
@@ -2198,7 +2132,7 @@ func TestValidateToolAnnounceOnTaskScopePerTarget(t *testing.T) {
 		agent.Tasks["verify_caller"] = Task{
 			Instructions: "Confirm who is calling.",
 			Tools:        []string{"lookup_customer"},
-			Result:       map[string]ResultField{"confirmed": {Type: PrimitiveBoolean}},
+			Result:       map[string]ResultField{"confirmed": {Type: boolType}},
 			Context:      TaskContext{History: HistoryFull},
 		}
 
@@ -2692,8 +2626,8 @@ func TestValidateRejectsReservedTaskResultField(t *testing.T) {
 	agent.Tasks["collect"] = Task{
 		Instructions: "collect",
 		Result: map[string]ResultField{
-			"done":              {Type: PrimitiveBoolean},
-			UnservedResultField: {Type: PrimitiveString},
+			"done":              {Type: boolType},
+			UnservedResultField: {Type: stringType},
 		},
 		Context: TaskContext{History: HistoryFull},
 	}

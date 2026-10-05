@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
@@ -28,7 +27,7 @@ func dailyCarrierArtifact(t *testing.T, carrier string, outbound bool) Artifact 
 	connection := pkg.Connections["twilio_sip_daily"]
 	connection.Carrier = carrier
 	pkg.Connections["twilio_sip_daily"] = connection
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +474,7 @@ func dailyCarrierArtifactWithoutTransfer(t *testing.T) Artifact {
 			"sip_address": "SIP_TRUNK_HOSTNAME", "from_number": "SIP_FROM_NUMBER",
 		},
 	}}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,7 +624,7 @@ func carrierRenderData(t *testing.T) pipecatData {
 			"sip_address": "SIP_TRUNK_HOSTNAME", "from_number": "SIP_FROM_NUMBER",
 		},
 	}}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

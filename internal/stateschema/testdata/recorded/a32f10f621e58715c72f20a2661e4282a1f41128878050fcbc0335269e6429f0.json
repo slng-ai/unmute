@@ -1,0 +1,28 @@
+{
+  "source": "internal/stateschema/testdata/models/union.py",
+  "digest": "a32f10f621e58715c72f20a2661e4282a1f41128878050fcbc0335269e6429f0",
+  "report": {
+    "schema": {
+      "description": "A field that may be two types.",
+      "properties": {
+        "either": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": 0,
+          "title": "Either"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

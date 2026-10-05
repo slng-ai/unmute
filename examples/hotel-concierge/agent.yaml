@@ -52,34 +52,11 @@ models:
       model: deepgram/nova:3
       language: en
 
-# Template variables. Every one has a default, so an inbound phone call, which
-# supplies no arguments, gets the default hotel. A web session may override any
-# of them in its `arguments`.
+# How the values on State in state.py behave: where one comes from, and
+# which step confirms it. A value needs an entry only for one of those.
 variables:
-  hotel_name:
-    type: string
-    default: Hotel Lumbre
-    description: The property this deployment answers for. Spoken in the greeting.
-  neighbourhood:
-    type: string
-    default: Sol, in the centre of Madrid
-    description: Where the hotel is, in words a places query can use.
-  city:
-    type: string
-    default: Madrid
-    description: The city.
-  hotel_website:
-    type: string
-    default: lumbre-hotels.example
-    description: The hotel's website, spoken on request without a scheme.
-  # A value the model records during the call, not one a session supplies. No
-  # default, because nothing knows it before the guest says it. SLNG fills it
-  # through its own set_runtime_variables tool once the guest has confirmed
-  # the number, and the call record returns it under memory_variables.
-  caller_phone:
-    type: string
+  - name: caller_phone
     source: conversation
-    description: The guest's mobile number for a text message, in international format starting with a plus sign, recorded only after the guest has heard it read back and confirmed it.
 
 # There is no `secrets:` block. The places tool's credential is SLNG's, held
 # in its Vault under the name the published tool records, and `unmute deploy`
@@ -99,7 +76,7 @@ tools:
 conversation:
   greeting:
     speaks_first: agent
-    text: "Good day, this is the concierge desk at {{hotel_name}}. How can I help with your stay?"
+    text: "Good day, this is the concierge desk at {{state.hotel_name}}. How can I help with your stay?"
   interruption:
     enabled: true
 

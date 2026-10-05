@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	packagespec "github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -13,7 +13,7 @@ import (
 // test that breaks one thing knows the error came from the thing it broke.
 func twilioAgent(t *testing.T) *Agent {
 	t.Helper()
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "twilio"))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", "twilio"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,8 @@ func TestTwilioRefusesWhatItDoesNotRun(t *testing.T) {
 			a.Controls = map[string]Control{"to_sales": &AgentTransfer{}}
 		}, "emits no handoff"},
 		{"variable", func(a *Agent, _ *Target) {
-			a.Variables = map[string]Variable{"caller": {Type: PrimitiveString}}
+			a.State = &stateschema.Model{Fields: []stateschema.Field{stringField("caller")}}
+			a.VariableOrder = []string{"caller"}
 		}, "has no session state"},
 		{"outbound channel", func(a *Agent, _ *Target) {
 			a.Channels["phone"] = Channel{Kind: ChannelTelephony, Inbound: &yes, Outbound: &yes}
@@ -236,7 +237,7 @@ func TestTwilioRegionReachesThePlan(t *testing.T) {
 		{"eu", "", `region "eu" is not a Twilio Region; use one of us1, ie1, au1`},
 	} {
 		t.Run(tc.region, func(t *testing.T) {
-			pkg, err := packagespec.Load(filepath.Join("..", "testdata", "twilio"))
+			pkg, err := loadRecorded(filepath.Join("..", "testdata", "twilio"))
 			if err != nil {
 				t.Fatal(err)
 			}

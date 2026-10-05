@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
@@ -115,7 +114,7 @@ func telephonyRouteArtifact(t *testing.T, key target.TelephonyKey) (Artifact, er
 	configured.Connection = "route_under_test"
 	pkg.Targets = map[string]spec.Target{instance: configured}
 
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		return Artifact{}, fmt.Errorf("build %+v: %w", key, err)
 	}

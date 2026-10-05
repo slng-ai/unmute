@@ -12,10 +12,10 @@ input:
     - confirmed
 
 inject:
-  - customer_phone: "{{customer_phone}}"
-  - booking_id: "{{appointment_id}}"
-  - service: "{{appointment_service}}"
-  - slot_id: "{{appointment_slot_id}}"
+  - customer_phone: "{{state.customer_phone}}"
+  - booking_id: "{{state.appointment_id}}"
+  - service: "{{state.appointment_service}}"
+  - slot_id: "{{state.appointment_slot_id}}"
 
 output:
   type: object

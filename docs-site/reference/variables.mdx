@@ -1,54 +1,230 @@
 ---
 title: "Variables reference"
-description: "Types, sources, where a variable can be used, and how it reaches a tool."
+description: "state.py, sources, where a variable can be used, and how it reaches a tool."
 sidebarTitle: "Variables"
 ---
 
-A variable is a named value that lives for one call. This is the complete field
-reference. For an introduction, start with [Variables](/build/variables).
+A variable is a named value that lives for one call. Its type, default and
+description are written once, as a field on the `State` class in `state.py`.
+`agent.yaml` says only where a value comes from and which step confirms it.
+This is the complete reference. For an introduction, start with
+[Variables](/build/variables).
 
 ## How a value moves
 
 Values are supplied at session start, filled by `prefetch:`, or saved when
 a task finishes through `assign:`. Prompts and tools read them through
-explicit variable references. Conversation sharing is controlled separately
-by `context.history`.
+explicit `{{state.name}}` references. Conversation sharing is controlled
+separately by `context.history`.
+
+```python state.py
+from pydantic import BaseModel, Field
+
+
+class State(BaseModel):
+    caller_name: str = Field("there", description="Caller's first name, used in the greeting.")
+```
 
 ```yaml agent.yaml
 variables:
-  caller_name:
-    type: string
+  - name: caller_name
     source: call_start
-    default: there
-    description: Caller's first name, used in the greeting and the prompt.
 ```
 
-<ParamField path="type" type="string" required>
-  A single-line Python type expression. Accepts `str`, `int`, `float`, `bool`, `Phone`,
-  `Date`, `Time`, `Id`, `EmailStr`, `NameEmail`, a declared shape name, `Literal[...]`,
-  `list[T]`, or `T | None`. The aliases `string`, `integer`, `number`, and `boolean` also
-  work. See the [type grammar](/reference/variables#the-type-grammar) for composition
-  rules and target limits.
-</ParamField>
+## The State class holds the types
 
-<ParamField path="description" type="string">
-  A sentence explaining what the value means. Used to describe the task finish argument
-  derived from this variable. Required for `source: conversation`; otherwise omit for no
-  extra description. The saved value is still shared only through placeholders.
-</ParamField>
+`state.py` sits next to `agent.yaml`. It holds one class named `State`, a
+Pydantic `BaseModel`. Each field is one variable. The field's type says what
+the value is, its default says what it starts as, and `Field(description=...)`
+is what the model reads when a task asks it for that value.
 
-<ParamField path="default" type="matching the declared type">
-  A scalar starting value, checked against `type`. Shapes, lists, and `NameEmail` take no
-  authored default. If omitted, a scalar or shape starts unset and a list starts as `[]`.
-  An unset value renders as `none recorded yet.` in a prompt.
+```python state.py
+from datetime import date
+from typing import Literal
+
+from pydantic import BaseModel, EmailStr, Field
+
+
+class Booking(BaseModel):
+    service: Literal["haircut", "colour"]
+    day: date
+
+
+class State(BaseModel):
+    booking: Booking | None = None
+    caller_email: EmailStr | None = Field(None, description="The caller's email address.")
+    notes: list[str] = []
+```
+
+Other classes in the file, such as `Booking` above, are plain Pydantic models.
+Use one as a field type to keep values that travel together in one object.
+
+### What a field can be
+
+| Type | Accepted value |
+|---|---|
+| `str`, `int`, `float`, `bool` | Text, a whole number, a number, `true` or `false` |
+| `date`, `time` | A calendar date, a time of day. A prompt shows them as `2026-10-02` and `16:30:00` |
+| `Literal["a", "b"]` | One of the strings you list |
+| `list[T]` | An array whose items have type `T` |
+| A `BaseModel` class | An object with the fields that class declares. Models may hold other models and lists |
+| `T \| None` | A value of type `T` or `null` |
+| `EmailStr` | A valid email address |
+| `Annotated[str, StringConstraints(pattern=...)]` | Text that matches the pattern |
+
+Core Pydantic and the standard library types it supports are open to you. So
+are three `pydantic_extra_types` modules, and no others:
+
+| Module | Types | Installed with |
+|---|---|---|
+| `pydantic_extra_types.phone_numbers` | `PhoneNumber`, `PhoneNumberValidator` | `phonenumbers` |
+| `pydantic_extra_types.currency_code` | `ISO4217`, `Currency` | `pycountry` |
+| `pydantic_extra_types.language_code` | `LanguageAlpha2`, `LanguageName`, `ISO639_3`, `ISO639_5` | `pycountry` |
+
+An import from any other `pydantic_extra_types` module is refused, so the
+generated project's dependency list stays known.
+
+### A phone number in E.164
+
+`PhoneNumber` on its own saves the RFC 3966 form, `tel:+34-600-111-222`, which
+no prompt or tool expects. Wrap it so the saved value is E.164:
+
+```python state.py
+from typing import Annotated
+
+import phonenumbers
+from pydantic_extra_types.phone_numbers import PhoneNumberValidator
+
+Phone = Annotated[
+    str | phonenumbers.PhoneNumber, PhoneNumberValidator(number_format="E164")
+]
+```
+
+Then declare `caller_phone: Phone | None = None`. The saved value reads
+`+34600111222`.
+
+### A name and an email address
+
+Pydantic's own `NameEmail` is one string in the schema, so a prompt cannot read
+`.name` from it. Use a model with two fields:
+
+```python state.py
+class Contact(BaseModel):
+    name: str
+    email: EmailStr
+```
+
+A prompt then writes `{{state.contact.name}}` and `{{state.contact.email}}`.
+
+### Every field has a default
+
+Every field on `State` needs a default. Use `= None` with `| None`, `= ""` for
+text and `= []` for a list. A default that its own type refuses is refused too.
+`Literal["a", "b"] = ""` fails, because an empty string is not one of the two
+words. Write `Literal["a", "b"] | None = None` instead.
+
+An unset value renders as `none recorded yet.` in a prompt.
+
+### What is refused
+
+`unmute validate` names the field and the fix for each of these:
+
+- An alias, or a frozen model.
+- A `dict` field. Declare its keys as a model instead.
+- A union of two types that are not `None`.
+- A model that holds itself.
+- A field name that shadows a `BaseModel` attribute, starts with `model_`, or
+  is `state`.
+- A field name the generated class uses: `initial_value`, `is_confirmed`,
+  `is_unconfirmed`, `lookup`, `plain`, `render`, `save_batch`,
+  `save_call_start`, `save_fact`, `save_result`, `slng_session_id` and
+  `withdraw_confirmation`.
+- A name that is not lowercase words joined by single underscores. This applies
+  at every depth, to the fields of a model inside a model too.
+
+### How a type is enforced
+
+A declared type does two jobs, in two different places.
+
+**The model is told, not constrained.** A task's finish call takes one argument
+for each value it assigns. Its schema is built from the field's type and
+description. Format and pattern keywords are not sent, because one target sends
+its schema with strict mode on and rejects them. The rule travels as words in
+the description instead.
+
+**The value is checked where it is saved.** The generated project validates a
+value against your model before anything enters call state. A value that does
+not fit is refused, nothing is written, and the previous contents stand. The
+reason goes back to the model as the tool result. The model reads what was
+wrong and corrects itself on the next turn.
+
+Checking runs inside the process and makes no network request. The one thing
+that costs a model request is a refusal, because the caller waits through the
+retry. A type that refuses something a caller can legitimately say is worth
+changing.
+
+These checks validate format. Use tools to check calendar validity, record
+existence, phone ownership, and other business rules. Use `str` for an external
+identifier that needs other characters, and keep the exact value a tool
+returned.
+
+### How unmute reads state.py
+
+`unmute validate` and `unmute compile` run `state.py` through `uv` with pinned
+Pydantic packages on Python 3.12, and read the JSON Schema Pydantic writes for
+`State`. A warm run takes about 0.2 seconds.
+
+- `uv` must be on `PATH` for a package with a `state.py`, an SLNG-only package
+  included. The first run needs network to fetch the pinned packages.
+- A package without a `state.py` needs no `uv`.
+- `state.py` may import `pydantic`, `phonenumbers`, the three modules above
+  and the standard library. A sibling import is refused.
+
+The generated project gets your `state.py` as written. A generated
+`call_state.py` adds `CallState`, a subclass of your `State` that holds the one
+way a value is saved, the confirmation marks and the rendering. It also builds
+one result model per task step from your field types. The project's dependencies
+include `email-validator` when you use an email type, and
+`pydantic-extra-types` when you import one of its modules.
+
+## Target support
+
+| Target | What `state.py` may hold |
+|---|---|
+| SLNG | Plain `str`, `int`, `float` and `bool` fields. A model, a list, a `Literal` or a checked format is refused, because SLNG runs no code from your package and has nowhere to check one. `str \| None` is fine. Also the only target that takes `source: conversation`, a value the model records mid-call |
+| LiveKit and Pipecat | Everything on this page |
+| Twilio | No `state.py`. A package that has one is refused |
+
+## variables: says where a value comes from
+
+A field on `State` is a variable whether or not it appears in `agent.yaml`.
+List it under `variables:` only when it needs a `source:` or a `confirm:`.
+The block is a list, one entry per value.
+
+```yaml agent.yaml
+variables:
+  - name: caller_name
+    source: call_start
+
+  - name: customer_phone
+    confirm: verify_customer
+```
+
+The old map form, and a `type:`, `default:` or `description:` key, are refused
+with a pointer to `state.py`. So is a `shapes:` block, which is a model in
+`state.py` now. An entry with neither `source:` nor `confirm:` is refused too.
+
+<ParamField path="name" type="string" required>
+  The field on `State` this entry configures. An entry naming no field is refused.
 </ParamField>
 
 <ParamField path="source" type="string">
   Accepts `call_start`, `conversation` (SLNG only), or a [system call
   fact](/reference/variables#sources). If omitted, the variable has no automatic call-fact
   source; a task, pre-fetch, or session payload can still fill it. Route support is
-  checked for system sources. `conversation` requires a description and forbids a default;
-  inbound code-target calls require a default for `call_start`.
+  checked for system sources. `conversation` requires a `Field(description=...)` and an
+  `= None` default in `state.py`. Inbound code-target calls require a default for
+  `call_start`.
 </ParamField>
 
 <ParamField path="confirm" type="string">
@@ -57,205 +233,13 @@ variables:
   omitted, the value is usable as soon as it arrives.
 </ParamField>
 
-## The type grammar
-
-The `type:` field accepts a single-line Python type expression. Names are
-case-sensitive. Choose a built-in type or compose a type using the forms below.
-
-### Built-in types
-
-| Type | Accepted value |
-|---|---|
-| `str` | Text |
-| `int` | A whole number |
-| `float` | A number that may have a decimal part |
-| `bool` | `true` or `false` |
-| `Phone` | Phone number text with the format below |
-| `Date` | Date text with the format below |
-| `Time` | Time text with the format below |
-| `Id` | Identifier text with the format below |
-| `EmailStr` | Email address text, checked as described below |
-| `NameEmail` | An object with a `name` field and an `email` field |
-
-Aliases: `string` means `str`, `integer` means `int`, `number` means `float`,
-and `boolean` means `bool`.
-
-### Custom types and combinations
-
-| Form | Accepted value |
-|---|---|
-| `Literal["value1", "value2"]` | One of the distinct, double-quoted strings you list |
-| Your shape's name | An object matching the fields declared under that name in `shapes:` |
-| `list[T]` | An array whose items have type `T` |
-| `T \| None` | A value of type `T` or `null`; also written `None \| T` |
-
-`T` stands for the element or value type. Replace it with a built-in type,
-a `Literal` expression, or a shape name. A shape name refers to an object type
-you define in the package; see [`shapes:`](#shapes-groups-fields-into-a-named-type).
-
-`NameEmail` is a supplied object type. Read one part with a dotted placeholder
-or a dotted assignment, the same way you read a field of a shape you declared.
-It cannot be declared under `shapes:`: the name is refused, because a second
-declaration would produce a second type of the same name.
-
-### How a type is enforced
-
-A declared type does two jobs, in two different places.
-
-**The model is told, not constrained.** Every text type reaches the model as a
-plain string carrying a sentence about the format. This is the whole schema the
-model receives for a `Phone`:
-
-```json
-{
-  "description": "a phone number in E.164, one leading plus and 7 to 15 digits, like +34600111222",
-  "type": "string"
-}
-```
-
-There is no `pattern` and no `format` keyword. Either one would travel to the
-provider, and one target sends its schema with strict mode on, where both are
-rejected. That failure shows up on your first real call and in no local check,
-so the format lives in the description instead.
-
-**The value is checked where it is saved.** The generated project validates
-every declared field before anything enters call state. A value that does not
-fit is refused, nothing is written, the previous contents stand, and the format
-sentence goes back to the model as the tool result. The model reads what was
-wrong and corrects itself on the next turn.
-
-The sentence the model reads and the sentence it gets back on a refusal come
-from one place, so the two cannot describe different formats.
-
-The three families of type behave differently:
-
-| Family | What the model receives | Where it is checked |
-|---|---|---|
-| `Phone`, `Date`, `Time`, `Id`, `EmailStr` | `type: string` plus the format sentence | When the value is saved |
-| `Literal[...]` | An `enum` holding your exact values | The provider limits what it can generate, and it is checked again on save |
-| A shape, `NameEmail`, `list[...]` | The real object or array, each field carrying its own format sentence | On save, field by field |
-
-### What checking costs
-
-Nothing you can hear. Checking runs inside the process and makes no network
-request: roughly 0.2 microseconds for the pattern types and 18 microseconds for
-`EmailStr`, which calls a library instead of matching a pattern. No model
-request is made to check anything.
-
-The one thing that does cost a model request is a refusal. The tool result goes
-back, the model rereads the format and tries again, and the caller waits through
-that turn. So a type that refuses something a caller can legitimately say is a
-type worth changing, not a prompt worth rewording.
-
-### Text types and their limits
-
-| Type | Format checked when saving |
-|---|---|
-| `Phone` | One leading `+`, followed by 7 to 15 digits; the first digit is nonzero |
-| `Date` | Four digits, a hyphen, two digits, a hyphen, two digits (`YYYY-MM-DD`) |
-| `Time` | Hours `00` to `23`, a colon, and minutes `00` to `59` |
-| `Id` | 1 to 64 characters; starts with an ASCII letter or digit; subsequent characters may also be `.`, `-`, `_`, or `:` |
-| `EmailStr` | A valid email address. The saved value is the normalized form |
-
-These checks validate text format. Use tools to check calendar validity,
-record existence, phone ownership, and other business rules. Store timezone
-separately from date and time. Use `str` for external identifiers requiring
-other characters, and preserve the exact value returned by the tool.
-
-An address is checked with the `email-validator` package, which the generated
-project declares when your package uses either email type. The check reads the
-address only. It does not look up whether the domain accepts mail, because the
-check runs while the caller is on the line.
-
-`NameEmail` accepts the two fields, and also a single string in either of two
-forms: `Fred Bloggs <fred.bloggs@example.com>`, or the address on its own, in
-which case `name` becomes the part before the at sign. The `email` field is
-checked as `EmailStr`.
-
-### Lists and absent values
-
-- Lists hold one element type and start as `[]`. Use an empty list to
-  represent no recorded items.
-- `T | None` applies to scalar types and shapes. Use it when `null` is a
-  valid result for a successful task to save.
-- Shapes may contain other shapes and lists. Nested shapes must form a
-  finite structure, with each path ending in a value or list.
-- To group lists inside a list, define a shape with a list field and use that
-  shape as the outer list's element type.
-
-A variable with no `default:` starts unset, and a save of `null` leaves it
-unset. A variable with a `default:` always holds a value of its type, so a save
-of `null` to it is refused. Every other saved value must match the declared
-type. A task's own result must also allow `null` with `| None` before the task
-may report one.
-
-### Defaults
-
-Scalar variables may have a `default:` matching their type. Use a default
-when an initial value is useful. Otherwise leave the variable unset until
-call-start data, prefetch, or a task supplies it.
-
-Shapes start unset and lists start empty, and so does `NameEmail`. Fill them
-through call-start data or task assignments. An empty text value is treated as missing; a successful
-assignment must satisfy the declared type's format.
-
-## Target support
-
-| Target | Supported variable types |
-|---|---|
-| SLNG | Basic scalars: `str`, `int`, `float`, `bool`, and their aliases. A text type with a checked format, a shape and `NameEmail` are all refused, because SLNG runs no code from your package and has nowhere to check one. Also the only target that takes `source: conversation`, a value the model records mid-call |
-| LiveKit and Pipecat | All types and task assignments on this page |
-
-## `shapes:` groups fields into a named type
-
-A pre-fetch cannot fill a shape or a list. Use a task to produce grouped fields;
-use separate scalar variables for clock and lookup pre-fetch results. A single
-pre-fetch may assign several scalar variables from one result.
-
-A top-level list of reusable object types. Each entry defines a name and
-typed fields. Use that name in a variable's `type:` to store an object with
-those fields. The name in this example, `Appointment`, is chosen by the author.
-
-```yaml agent.yaml
-shapes:
-  - name: Appointment
-    description: One thing being booked, moved or cancelled.
-    fields:
-      - scheduled_date: Date
-      - scheduled_time: Time
-      - name: appointment_type
-        type: Literal["haircut", "haircolor", "dry_cut"]
-        description: The service the caller asked for, in the salon's own words.
-```
-
-<ParamField path="name" type="string" required>
-  A unique `CapWords` type name, used by `type:`. Built-in type names are reserved. There
-  is no inferred name.
-</ParamField>
-
-<ParamField path="description" type="string">
-  Description of the shape, used as its class docstring. Omit it for no extra description.
-</ParamField>
-
-<ParamField path="fields" type="list of field definitions" required>
-  One or more fields. Each item is a one-key `field_name: Type` pair, or an object with
-  `name`, `type`, and optional `description`. Names and types are required in the long
-  form; omitted descriptions add no extra model guidance.
-</ParamField>
-
-Fields use either the short form, `- field_name: Type`, or a block with
-`name:`, `type:`, and an optional `description:`, as shown above.
-
-Set `confirm:` on the variable to apply confirmation to the whole object,
-including its fields.
-
 ## Sources
 
 | Source | Who supplies it | Availability |
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
-| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so write the prompt to read whole while it is still empty, or give it a `default:` |
-| `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only. It becomes one of the agent's runtime variables, filled through SLNG's own `set_runtime_variables` tool and returned on the call record under `memory_variables`. It takes no `default:` and needs a `description:`, which the model reads. It takes no `{{placeholder}}` in any prompt or the greeting. On `livekit` and `pipecat` a step's `assign:` records such a value instead |
+| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so write the prompt to read whole while it is still empty, or give its field a default in `state.py` |
+| `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only. It becomes one of the agent's runtime variables, filled through SLNG's own `set_runtime_variables` tool and returned on the call record under `memory_variables`. Its field in `state.py` is `= None` and has a `Field(description=...)`, which the model reads. It takes no `{{placeholder}}` in any prompt or the greeting. On `livekit` and `pipecat` a step's `assign:` records such a value instead |
 
 A value the model records during the call reaches no prompt. It has no value
 when the prompt is built, and SLNG rejects a prompt that names one:
@@ -266,8 +250,8 @@ agent.yaml:41: conversation.greeting.text references {{caller_email}}, a value t
   description: and name it in prose here instead
 ```
 
-That is how one is meant to work. Put the detail in `description:`, which the
-model reads as it fills the value, and refer to the thing in prose instead of
+That is how one is meant to work. Put the detail in the field's
+`Field(description=...)`, which the model reads as it fills the value, and refer to the thing in prose instead of
 with a placeholder.
 | `session_id` | the phone adapter | LiveKit `sip` or `connector` |
 | `call_id` | the phone adapter | LiveKit `sip` or `connector`, and both Pipecat Twilio routes |
@@ -290,10 +274,10 @@ needs a default. There is no dispatch payload to supply an unsolicited incoming
 call before its greeting.
 
 A value from the dispatch or from the phone adapter is checked against the
-variable's type when it is saved, the same check a step's `assign:` gets. A
-dispatched value that does not fit stops the call before the greeting, and the
-error names the field. A phone-adapter fact that does not fit, such as
-`anonymous` for a `Phone`, is treated as a fact that never arrived.
+field's type in `state.py` when it is saved, the same check a step's `assign:`
+gets. A dispatched value that does not fit stops the call before the greeting,
+and the error names the field. A phone-adapter fact that does not fit, such as
+`anonymous` for an E.164 phone field, is treated as a fact that never arrived.
 
 ## `prefetch:` resolves a value before the call starts
 
@@ -322,7 +306,7 @@ prefetch:
     tool: look_up_account
     writes: false
     args:
-      - phone: "{{customer_phone}}"
+      - phone: "{{state.customer_phone}}"
     assign:
       - account_name: result.name
       - account_on_file: result.status
@@ -398,11 +382,11 @@ with its line number.
 
 A tool entry reads fields from the tool's declared `output:` schema. Its
 arguments may be fixed scalars or reference values saved by earlier entries.
-The receiving variables must already be declared, with no `source:` of their
-own. Prefetch fills scalar values, including `Phone`, `Date`, `Time`, `Id`,
-`EmailStr`, and a compatible `Literal`. Shapes, `NameEmail`, lists, and nullable
-bare scalars such as `str | None` must be saved through a task; for prefetched
-text, leave a `str` variable unset until the value is available.
+The receiving fields must already be declared on `State`, with no `source:` of
+their own. Prefetch fills scalar values, including `date`, `time`, a checked
+phone number, an email address and a compatible `Literal`. A model, a list and a
+nullable bare scalar such as `str | None` must be saved through a task. For
+prefetched text, give the field `= ""` until the value is available.
 
 A reference to a variable assigned by a later prefetch entry is refused.
 Entries run in authored order. `writes: true` entries appear in the compile
@@ -464,9 +448,7 @@ may be ringing from a friend's phone, or may hold a second account.
 
 ```yaml agent.yaml
 variables:
-  customer_phone:
-    type: string
-    default: ""
+  - name: customer_phone
     confirm: verify_customer   # names the task itself
 ```
 
@@ -496,8 +478,10 @@ See the [confirmation walkthrough](/build/prefetch#always-check-a-value-with-the
 
 ## How a variable reaches a prompt
 
-A saved value enters a prompt only where you write `{{variable}}` or
-`{{variable.field}}`. This applies to every type, including shapes and lists.
+A saved value enters a prompt only where you write `{{state.variable}}` or
+`{{state.variable.field}}`. This applies to every type, including models and
+lists. A bare `{{variable}}` naming a field on `State` is refused with the fix,
+`write {{state.variable}}`. A `$NAME` Vault token is unchanged.
 
 | Site | When the value is read |
 |---|---|
@@ -514,17 +498,18 @@ Undeclared variable names are compile errors at every site.
 
 ### Naming one part of a value
 
-`{{variable.field}}` reads one field from an object. `{{variable}}` reads the
-whole object. Dotted paths can follow nested shapes. To read a list item's
+`{{state.variable.field}}` reads one field from an object. `{{state.variable}}`
+reads the whole object. Dotted paths can follow nested models. To read a list item's
 fields, first save the selected item in its own variable.
 
 | Referenced value | Prompt text |
 |---|---|
-| Text, including `Phone`, `Date`, `Time`, `Id`, and `EmailStr` | The text itself |
+| Text, including an email address or a phone number | The text itself |
+| A `date` or a `time` | `2026-10-02`, `16:30:00` |
 | Number or boolean | JSON text, such as `2` or `true` |
-| Shape, `NameEmail`, or list | Compact JSON; an empty list renders as `[]` |
+| A model or a list | Compact JSON; an empty list renders as `[]` |
 | Unset, `null`, or empty string | `none recorded yet.` |
-| A field inside an absent shape | `none recorded yet.` |
+| A field inside an absent model | `none recorded yet.` |
 
 Write a label followed by an instruction for the missing case. These
 placeholders do not support conditions, filters, indexing, or function calls.
@@ -547,8 +532,9 @@ step](/best-practices/context-scope) to choose exactly what crosses a boundary.
 unmute dev ./agent --var caller_name=Ada --var customer_id=cus_2002
 ```
 
-Repeatable. Each value is parsed against the declared type, so an `integer`
-variable receives a number and not a quoted string. `--var` is the local stand
+Repeatable. Each value is parsed against the field's type in `state.py`, so an
+`int` field receives a number and not a quoted string. Pass JSON for a model or
+a list, quoted for your shell: `--var 'contact={"name": "Ada", "email": "ada@example.com"}'`. `--var` is the local stand
 in for the dispatch payload production sends, so it accepts the two kinds of
 variable that payload fills: `source: call_start`, and a variable that declares
 no `source:` at all. It refuses a runtime-owned source, because that one
@@ -593,8 +579,8 @@ input:
     - slot_id
 
 inject:
-  - customer_id: "{{customer_id}}"
-  - service: "{{requested_service}}"
+  - customer_id: "{{state.customer_id}}"
+  - service: "{{state.requested_service}}"
 
 local:
   handler: tools/book_appointment.py
@@ -605,8 +591,8 @@ see them nor overwrite them. An `inject` key that also names an `input`
 property is a compile error, for exactly that reason.
 
 Each authored injected value must be a scalar, such as a string containing
-`{{variable}}`. An exact placeholder passes the value with its native type,
-including a referenced object or list. Mixed text such as `"Booking {{booking_id}}"`
+`{{state.variable}}`. An exact placeholder passes the value with its native type,
+including a referenced object or list. Mixed text such as `"Booking {{state.booking_id}}"`
 produces a string. An authored map or list is refused.
 
 Keep injected keys out of both `input.properties` and `input.required`.
@@ -639,7 +625,7 @@ agents:
           - customer_id: result.customer_id
 ```
 
-The variable declaration supplies the finish field's type and description. The
+The field on `State` supplies the finish argument's type and description. The
 task validates all assigned values before saving any of them. A failed
 validation keeps the task open so the model can correct the result. Finishing
 with a non-empty `unserved_request` saves no assignments.
@@ -651,7 +637,7 @@ A `+` on the key appends one entry instead of replacing the value:
           - appointments+: result.appointment
 ```
 
-Use append with a `list[T]` variable. It accepts one item of type `T` or
+Use append with a `list[T]` field. It accepts one item of type `T` or
 `null`, which adds nothing. Identical structured items are saved once; plain
 values may repeat. A changed object is a new item. Without `+`, the assignment
 replaces the variable's value.
@@ -659,8 +645,8 @@ replaces the variable's value.
 ### Picking one part of a structured result
 
 The right side of an `assign:` pair does not have to be the whole result. It
-can be `result.<field>`, or a dotted path into a declared shape,
-`result.<field>.<subfield>`, as deep as the shape goes:
+can be `result.<field>`, or a dotted path into a model from `state.py`,
+`result.<field>.<subfield>`, as deep as the model goes:
 
 ```yaml agent.yaml
 agents:
@@ -675,49 +661,57 @@ agents:
 ```
 
 with `appointments` declared `list[Appointment]` and `last_booking_day`
-declared `Date | None`. The whole-object assignment establishes the
+declared `date | None`. The whole-object assignment establishes the
 `appointment` result field as `Appointment | None`; the second line can then
 project its date.
 
-The picked part's type has to fit the variable it lands in: a `Date` field
-into a `Date` variable, a `Literal` into the same `Literal`, a whole shape
-into a variable declared with that shape.
+The picked part's type has to fit the field it lands in: a `date` into a
+`date`, a `Literal` into the same `Literal`, a whole model into a field
+declared with that model.
 
 Two paths are refused rather than silently accepted:
 
 - **a path through a list.** Nothing says which entry to take, so
   `result.appointments.scheduled_date` is refused.
-- **a path into a field with no declared shape.** Once the path reaches a
+- **a path into a field that is not a model.** Once the path reaches a
   scalar, going one level deeper has nothing left to read.
 
 If a field on the way is optional, `Appointment | None` above, the picked
-value may be absent for a visit where the task left it out. Give the variable
-the same option, `Date | None`, so an absent pick is a legal value, or use an
+value may be absent for a visit where the task left it out. Give the field
+the same option, `date | None`, so an absent pick is a legal value, or use an
 appending assign, `name+:`, which already skips an absent entry instead of
 writing one into the list.
 
 The same path form works in a prompt placeholder too: see [Naming one part of
 a value](#naming-one-part-of-a-value).
 
-### A value the caller may not give is declared `| None`
+### A value the caller may not give ends in `?`
 
-Every field a step assigns goes through its declared type whether the model
-sent it or not. A field the model leaves out arrives as `None`, and so does one
-it sends as an explicit null. A type without `| None` refuses both, which
-refuses the whole finish call: nothing is saved, the model is told why and gets
-another go, and the caller waits through that round trip.
+A step must return every whole value it assigns. A finish that leaves one out,
+or sends an explicit null for it, is refused: nothing is saved, the model is
+told why and gets another go, and the caller waits through that round trip.
 
-Declare the option in the type, `Time | None`, for any value the caller may
-simply not give. Do not try to solve it in the description: no wording reliably
+When the caller may simply not give a value, mark it with `?` after the result
+field:
+
+```yaml agent.yaml
+        assign:
+          - callback_time: result.callback_time?
+```
+
+The finish call then accepts that value left out, and saves nothing for it.
+Declare the field `time | None = None` in `state.py` as well, so an empty value
+is a legal state. Do not try to solve it in the description: no wording reliably
 stops a model saying "nothing" when there is nothing.
 
-An empty string is still right for a value that is always asked for and may not
-be known yet, which is why every text type accepts one. The difference is
-whether absence is a legal outcome of the step. If it is, say so in the type.
+An empty string is still right for a text value that is always asked for and may
+not be known yet. The difference is whether absence is a legal outcome of the
+step. If it is, say so with `?`.
 
 Absence is already legal in one other place, and needs nothing: an appending
-assign, `name+:`, whose field is optional on its own and drops an absent entry
-instead of writing it into the list.
+assign, `name+:`, drops an absent entry instead of writing it into the list.
+A finish with a non-empty `unserved_request` is never refused for a missing
+value, because it saves nothing.
 
 ## A handoff can read selected declared values
 
@@ -725,7 +719,7 @@ Declared values stay in call state across a handoff. The receiving model sees
 only the ones its prompt names.
 
 ```markdown agents/appointment-manager.md
-You are handling appointment {{appointment_id}}.
+You are handling appointment {{state.appointment_id}}.
 ```
 
 With `history: reset`, this explicit reference still resolves but no prior

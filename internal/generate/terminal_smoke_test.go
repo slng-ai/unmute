@@ -13,7 +13,7 @@ import "testing"
 // One script, run against both emitted modules, so the two targets cannot
 // diverge on the thing the whole feature turns on. Nothing reaches a provider.
 func TestSmokeTerminalOutcomesLiveKit(t *testing.T) {
-	runLiveKitSmokeScript(t, "terminal_step", nil, nil, terminalSmokeScript("agent", "Userdata()"))
+	runLiveKitSmokeScript(t, "terminal_step", nil, nil, terminalSmokeScript("agent", "CallState()"))
 }
 
 func TestSmokeTerminalOutcomesPipecat(t *testing.T) {
@@ -56,28 +56,29 @@ def check_success_predicate():
 
 def check_confirmation_helpers():
     fresh = generated.` + stateExpr + `
-    assert not generated._is_confirmed(fresh, "customer_phone")
-    generated._save_result("verify", fresh, {"customer_phone": "+15550101010", "customer_status": "existing"})
-    assert generated._is_confirmed(fresh, "customer_phone")
+    assert not fresh.is_confirmed("customer_phone")
+    fresh.save_result("verify", {"customer_phone": "+34600111222", "customer_status": "existing"})
+    assert fresh.is_confirmed("customer_phone")
     # Entering the step that confirms it withdraws it again, which is what stops
     # a group skipping a step that is about to replace the value.
-    generated._withdraw_confirmation(fresh, "verify")
-    assert not generated._is_confirmed(fresh, "customer_phone")
-    assert fresh.customer_phone == "+15550101010"
+    fresh.withdraw_confirmation("verify")
+    assert not fresh.is_confirmed("customer_phone")
+    assert fresh.customer_phone == "+34600111222"
     # A step that confirms nothing withdraws nothing.
-    generated._save_result("verify", fresh, {"customer_phone": "+15550101010", "customer_status": "existing"})
-    generated._withdraw_confirmation(fresh, "book")
-    assert generated._is_confirmed(fresh, "customer_phone")
+    fresh.save_result("verify", {"customer_phone": "+34600111222", "customer_status": "existing"})
+    fresh.withdraw_confirmation("book")
+    assert fresh.is_confirmed("customer_phone")
 
 
 def check_repair_merge():
     """The tool's own value wins where it validates; the model's stands where it does not."""
     retained = {"booking": {"reference": "bkg_0001", "service": "haircut", "action": "create"}}
-    merged = generated._merge_retained("book", {"booking": None}, retained)
+    result = generated.STEP_RESULTS["book"]
+    merged = result.retain({"booking": None}, retained)
     assert merged["booking"] == retained["booking"]
     # A retained value that does not validate is left to the model.
     broken = {"booking": {"reference": "bkg_0001", "service": "haircut", "action": "invented"}}
-    kept = generated._merge_retained("book", {"booking": None}, broken)
+    kept = result.retain({"booking": None}, broken)
     assert kept["booking"] is None
 
 
@@ -88,7 +89,7 @@ def verified_state():
     which is the guard this feature deliberately leaves alone.
     """
     fresh = generated.` + stateExpr + `
-    generated._save_result("verify", fresh, {"customer_phone": "+15550101010", "customer_status": "existing"})
+    fresh.save_result("verify", {"customer_phone": "+34600111222", "customer_status": "existing"})
     return fresh
 
 
@@ -111,12 +112,12 @@ async def check_livekit():
     assert step._terminal_settled.is_set() and not step._terminal_pending
     # Delivered again after completion: nothing is saved a second time.
     saves = []
-    original_save = generated._save_result
-    generated._save_result = lambda *args: saves.append(args) or original_save(*args)
+    original_save = generated.CallState.save_result
+    generated.CallState.save_result = lambda self, *args: saves.append(args) or original_save(self, *args)
     try:
         assert await step._end_on_book_it(ctx, BOOKED) is None
     finally:
-        generated._save_result = original_save
+        generated.CallState.save_result = original_save
     assert saves == [], saves
     # A non-success is an ordinary result, the step stays open, and the call
     # still settles: a handoff waiting beside it stops waiting.
@@ -183,12 +184,12 @@ async def check_pipecat():
     # A success saves once, without the model in between, and carries the
     # caller turn the owner never saw.
     saves = []
-    original_save = generated._save_result
-    generated._save_result = lambda *args: saves.append(args) or original_save(*args)
+    original_save = generated.CallState.save_result
+    generated.CallState.save_result = lambda self, *args: saves.append(args) or original_save(self, *args)
     try:
         result, node = await wrapper(worker, {"confirmed": True, "service": "haircut"}, None)
     finally:
-        generated._save_result = original_save
+        generated.CallState.save_result = original_save
     assert len(saves) == 1, saves
     assert fresh.booking.reference == "bkg_0001"
     assert worker._do_book_terminal is not None
@@ -203,13 +204,14 @@ async def check_pipecat():
     # A repair after a refused save puts the tool's own values back before it
     # saves: the model cannot manufacture a reference.
     merges = []
-    original_merge = generated._merge_retained
-    generated._merge_retained = lambda *args: merges.append(args) or original_merge(*args)
+    step_result = generated.STEP_RESULTS["book"]
+    original_retain = step_result.retain
+    step_result.retain = lambda *args: merges.append(args) or original_retain(*args)
     try:
         await worker._do_book_finish_book({"booking": None}, None)
     finally:
-        generated._merge_retained = original_merge
-    assert len(merges) == 1 and merges[0][2] is worker._do_book_terminal[1], merges
+        step_result.retain = original_retain
+    assert len(merges) == 1 and merges[0][1] is worker._do_book_terminal[1], merges
     # Entering a step leaves the previous step's ending behind: the salon's
     # Pipecat journeys prove that through the real delegate entry, where the
     # first live failure of this feature lived.

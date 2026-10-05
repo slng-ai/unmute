@@ -1,0 +1,26 @@
+{
+  "source": "internal/testdata/history_core/state.py",
+  "digest": "92941b9a88e39ff614a75db204eada5f1d9616aec91693be71b78a8ab8038217",
+  "report": {
+    "schema": {
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "caller_phone": {
+          "default": "",
+          "title": "Caller Phone",
+          "type": "string"
+        },
+        "verified": {
+          "default": false,
+          "title": "Verified",
+          "type": "boolean"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

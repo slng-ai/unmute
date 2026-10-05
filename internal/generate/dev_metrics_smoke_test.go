@@ -318,7 +318,7 @@ class QuietGreeter(agent.Greeter):
 
 def make_session(model, speaker, *, recognizer=None, turn_detection="manual"):
     session = AgentSession(
-        userdata=agent.Userdata(),
+        userdata=agent.CallState(),
         stt=recognizer,
         llm=model,
         tts=speaker,
@@ -516,7 +516,7 @@ async def collect_early_metrics(capture):
     response = Response(["An early answer."])
     model, speaker, recognizer = Model([response]), Speaker(), Recognizer()
     session = AgentSession(
-        userdata=agent.Userdata(), stt=recognizer, llm=model, tts=speaker,
+        userdata=agent.CallState(), stt=recognizer, llm=model, tts=speaker,
         turn_handling={"turn_detection": "stt", "interruption": {"enabled": False}},
     )
     session.output.audio = AudioOutput()
@@ -924,7 +924,7 @@ async def collect_cancel_and_error(capture):
     response = Response(["An unfinished answer."], held=True, request_id="repeated-request")
     model, speaker = Model([response]), Speaker()
     session = AgentSession(
-        userdata=agent.Userdata(), llm=model, tts=speaker,
+        userdata=agent.CallState(), llm=model, tts=speaker,
         conn_options=SessionConnectOptions(max_unrecoverable_errors=0),
         turn_handling={"turn_detection": "manual", "interruption": {"enabled": False}},
     )
@@ -1067,7 +1067,7 @@ async def collect_accepted_speculation(capture):
         async def on_user_turn_completed(self, chat_ctx, new_message):
             temporary_ids.append(new_message.id)
 
-    session = AgentSession(userdata=agent.Userdata(), stt=recognizer, llm=model, tts=speaker,
+    session = AgentSession(userdata=agent.CallState(), stt=recognizer, llm=model, tts=speaker,
         turn_handling={"turn_detection": "stt", "preemptive_generation": {"enabled": True},
                        "interruption": {"enabled": False}})
     session.input.audio, session.output.audio = AudioInput(), AudioOutput()

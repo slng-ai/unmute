@@ -187,11 +187,12 @@ type Data struct {
 	Listen        Binding
 	Reason        Binding
 	Speak         Binding
-	// Shapes is the package's shapes: section. The console does not edit it, and
-	// it has to be here anyway: maintain rewrites agent.yaml from this struct, so
-	// a field absent here is a field deleted from the author's file, and what
-	// would be deleted is every declared shape and the types that name them.
-	Shapes    []Shape
+	// State is the package's own state.py, written back as it was read. Nil for
+	// a package with none, which is then written one made from Variables.
+	State []byte
+	// Variables are the console's simple variables. A package with its own
+	// state.py carries only its variables: entries here, the ones with source:
+	// or confirm:, because its types live in that file.
 	Variables []Variable
 	// Knowledge is the package's knowledge: section. The console does not edit
 	// it, but it has to carry it: maintain rewrites agent.yaml from this struct,
@@ -257,22 +258,6 @@ type Variable struct {
 	// skippable group step into a compile refusal on the next build.
 	Confirm string
 	// Description is what the model reads about the value. Same reason.
-	Description string
-}
-
-// Shape is one declared shape: a named group of fields a variable's type:
-// refers to. Carried so the console's rewrite keeps it.
-type Shape struct {
-	Name        string
-	Description string
-	Fields      []ShapeField
-}
-
-// ShapeField is one member of a shape. Description is what decides which of the
-// two authored forms it is written back as: one line without, a block with.
-type ShapeField struct {
-	Name        string
-	Type        string
 	Description string
 }
 
@@ -1116,6 +1101,13 @@ func Write(dir string, d Data) ([]string, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("scaffold: %w", err)
+	}
+	if source := statePy(d); source != nil {
+		path := filepath.Join(dir, spec.StateFile)
+		if err := os.WriteFile(path, source, 0o644); err != nil {
+			return nil, fmt.Errorf("scaffold state: %w", err)
+		}
+		created = append(created, path)
 	}
 	if len(d.Manifest) > 0 {
 		path := filepath.Join(dir, spec.ManifestFileName)

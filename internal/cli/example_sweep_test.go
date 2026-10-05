@@ -205,7 +205,7 @@ func discoverExamples(t *testing.T, root string) []sweepExample {
 		if len(only) > 0 && !only[entry.Name()] {
 			continue
 		}
-		agent, targets, err := loadPackage(dir, nil)
+		agent, targets, err := loadPackage(recordedCtx(t), dir, nil)
 		if err != nil {
 			t.Fatalf("load %s: %v", dir, err)
 		}

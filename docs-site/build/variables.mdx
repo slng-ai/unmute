@@ -1,19 +1,20 @@
 ---
 title: "Variables"
-description: "Declare a value once, fill it during the call, and read it only where it is needed."
+description: "Declare a value once in state.py, fill it during the call, and read it only where it is needed."
 ---
 
-A variable is a named value the call holds onto. You declare what it holds,
-something fills it during the call, and the prompts that need it name it.
+A variable is a named value the call holds onto. You declare what it holds in
+`state.py`, something fills it during the call, and the prompts that need it
+name it.
 
 On this page:
 
 - [Quickstart](#quickstart) - declare, fill and read one value
-- [Declare it](#1-declare-it) - every key a variable takes
+- [Declare it](#1-declare-it) - the `State` class, and the `variables:` list
 - [Fill it](#2-fill-it) - a task, a pre-fetch, or the call itself
 - [Read it](#3-read-it-where-it-is-needed) - placeholders, and the greeting
-- [The types you can declare](#the-types-you-can-declare) - ten built in, plus lists and your own
-- [Advanced](#advanced) - shapes, injection, and seeding a value locally
+- [The types you can declare](#the-types-you-can-declare) - Pydantic types, plus lists and your own models
+- [Advanced](#advanced) - models, injection, and seeding a value locally
 - [Troubleshooting](#troubleshooting) - the four that come up most
 
 ## Keep only the values the call needs
@@ -32,13 +33,13 @@ weekday, keep just the timestamp.
 
 Merge these entries into an existing package:
 
-```yaml agent.yaml
-variables:
-  current_datetime:
-    type: str
-  current_weekday:
-    type: str
+```python state.py
+class State(BaseModel):
+    current_datetime: str = ""
+    current_weekday: str = ""
+```
 
+```yaml agent.yaml
 prefetch:
   - name: local_clock
     clock: now
@@ -48,8 +49,8 @@ prefetch:
       - current_weekday: result.day_of_week
 ```
 
-Use a shape for fields that travel together as a task result. Pre-fetch fills
-plain values, so it cannot save the clock into a shape. Keep separate values
+Use a model for fields that travel together as a task result. Pre-fetch fills
+plain values, so it cannot save the clock into a model. Keep separate values
 when they have different confirmation steps or different readers.
 
 
@@ -57,12 +58,17 @@ when they have different confirmation steps or different readers.
 
 Declare a value, save it when a task finishes, and read it in a later prompt:
 
-```yaml agent.yaml
-variables:
-  requested_service:
-    type: str
-    description: The service the caller chose for this booking.
+```python state.py
+from pydantic import BaseModel, Field
 
+
+class State(BaseModel):
+    requested_service: str = Field(
+        "", description="The service the caller chose for this booking."
+    )
+```
+
+```yaml agent.yaml
 agents:
   concierge:
     tasks:
@@ -74,7 +80,7 @@ agents:
 ```
 
 ```markdown tasks/booking.md
-Requested service: {{requested_service}}
+Requested service: {{state.requested_service}}
 If no service is recorded, ask which service the caller wants.
 ```
 
@@ -87,49 +93,54 @@ step in full.
 
 <Note>
   The snippets below extend an existing package. Merge them into the matching
-  blocks in `agent.yaml`.
+  blocks in `state.py` and `agent.yaml`.
 </Note>
 
 ## 1. Declare it
 
-A variable needs a name and a `type:`. Start with plain text:
+Write a `State` class in `state.py`, next to `agent.yaml`. Each field is one
+variable. Start with plain text:
 
-```yaml agent.yaml
-variables:
-  requested_service:
-    type: str
-    description: The service the caller chose for this booking.
+```python state.py
+from pydantic import BaseModel, Field
+
+
+class State(BaseModel):
+    requested_service: str = Field(
+        "", description="The service the caller chose for this booking."
+    )
 ```
 
 That is the whole declaration. `requested_service` is the name you will use
-everywhere else, and `str` means it holds text.
+everywhere else, and `str` means it holds text. The default is what the value
+starts as. Every field needs one: `= ""` for text, `= None` with `| None`, and
+`= []` for a list.
 
-<ParamField path="type" type="string" required>
-  A single-line Python type expression. Accepts `str`, `int`, `float`, `bool`, `Phone`,
-  `Date`, `Time`, `Id`, `EmailStr`, `NameEmail`, a declared shape name, `Literal[...]`,
-  `list[T]`, or `T | None`. The aliases `string`, `integer`, `number`, and `boolean` also
-  work. See the [type grammar](/reference/variables#the-type-grammar) for composition
-  rules and target limits.
-</ParamField>
+`Field(description=...)` is what the model reads when a task asks it for this
+value. Write it for the model, short, and so it reads whole when the value is
+empty. The reasoning you want to keep for the next author goes in a `#` comment,
+which reaches nothing.
 
-<ParamField path="description" type="string">
-  A sentence explaining what the value means. Used to describe the task finish argument
-  derived from this variable. Required for `source: conversation`; otherwise omit for no
-  extra description. The saved value is still shared only through placeholders.
-</ParamField>
+`agent.yaml` lists a value under `variables:` only when it needs a `source:` or
+a `confirm:`. It is a list, with one entry per value:
 
-<ParamField path="default" type="matching the declared type">
-  A scalar starting value, checked against `type`. Shapes, lists, and `NameEmail` take no
-  authored default. If omitted, a scalar or shape starts unset and a list starts as `[]`.
-  An unset value renders as `none recorded yet.` in a prompt.
+```yaml agent.yaml
+variables:
+  - name: caller_name
+    source: call_start
+```
+
+<ParamField path="name" type="string" required>
+  The field on `State` this entry configures. An entry naming no field is refused.
 </ParamField>
 
 <ParamField path="source" type="string">
   Accepts `call_start`, `conversation` (SLNG only), or a [system call
   fact](/reference/variables#sources). If omitted, the variable has no automatic call-fact
   source; a task, pre-fetch, or session payload can still fill it. Route support is
-  checked for system sources. `conversation` requires a description and forbids a default;
-  inbound code-target calls require a default for `call_start`.
+  checked for system sources. `conversation` requires a `Field(description=...)` and an
+  `= None` default in `state.py`. Inbound code-target calls require a default for
+  `call_start`.
 </ParamField>
 
 <ParamField path="confirm" type="string">
@@ -138,7 +149,14 @@ everywhere else, and `str` means it holds text.
   omitted, the value is usable as soon as it arrives.
 </ParamField>
 
-A variable starts unset unless you give it a `default:`.
+A variable starts at its default. An unset value renders as `none recorded yet.`
+in a prompt.
+
+<Note>
+  `unmute validate` and `unmute compile` read `state.py` by running it through
+  `uv`, so `uv` must be on your `PATH` for a package that has one. The first run
+  needs network. A package without a `state.py` needs no `uv`.
+</Note>
 
 ## 2. Fill it
 
@@ -171,8 +189,11 @@ that service.
 ```
 
 `assign:` creates a finish argument named `service` from the
-`requested_service` declaration. The destination already owns the type and the
-description, so the task does not repeat them.
+`requested_service` field. The field already owns the type and the description,
+so the task does not repeat them.
+
+A step must return every whole value it assigns. Mark one it may leave out with
+a `?` after the result field, as `- callback_time: result.callback_time?`.
 
 All assigned values are checked before any are saved. If one is invalid, the
 task stays open so the model can correct its answer, and nothing changes.
@@ -180,16 +201,18 @@ task stays open so the model can correct its answer, and nothing changes.
 ## 3. Read it where it is needed
 
 Saving a value does not put it in any prompt. A prompt reads a value only when
-it names it:
+it names it, as `{{state.name}}`:
 
 ```markdown tasks/booking.md
-Requested service: {{requested_service}}
+Requested service: {{state.requested_service}}
 Use it if present. If no service is recorded, ask which service the caller wants.
 ```
 
 An unset value renders as `none recorded yet.`, so write the sentence to read
 whole either way. The instructions above work before and after the earlier task
 saves the service.
+
+A bare `{{requested_service}}` is refused, with the fix: `write {{state.requested_service}}`.
 
 <Warning>
   The agent that owns a task needs its own placeholder to remember the result
@@ -200,20 +223,23 @@ saves the service.
 ### Use one in the greeting
 
 The greeting renders once, before anyone speaks, so it can only name a value
-that is already settled: one supplied at session start, a `default:`, or a
+that is already settled: one supplied at session start, a default, or a
 prefetch assignment.
+
+```python state.py
+class State(BaseModel):
+    caller_name: str = "there"
+```
 
 ```yaml agent.yaml
 variables:
-  caller_name:
-    type: str
+  - name: caller_name
     source: call_start
-    default: there
 
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi {{caller_name}}, how can I help?"
+    text: "Hi {{state.caller_name}}, how can I help?"
 ```
 
 <Warning>
@@ -228,9 +254,7 @@ conversation:
 
 The type is what the call checks a value against before saving it. A task's
 finish argument is built from it too, so the model is told what shape of answer
-is wanted.
-
-### Built-in types
+is wanted. `state.py` is ordinary Pydantic, so the types are Pydantic's.
 
 | Type | What it holds |
 |---|---|
@@ -238,28 +262,47 @@ is wanted.
 | `int` | A whole number |
 | `float` | A number that may have a decimal part |
 | `bool` | `true` or `false` |
-| `Phone` | An international phone number in E.164 format |
-| `Date` | Date text in `YYYY-MM-DD` format |
-| `Time` | A 24-hour time in `HH:MM` format |
-| `Id` | A short identifier with a defined character set |
+| `date` | A calendar date, shown in a prompt as `2026-10-02` |
+| `time` | A time of day, shown in a prompt as `16:30:00` |
 | `EmailStr` | A valid email address, saved as plain text |
-| `NameEmail` | A person and their email address, held as two fields |
+| `Annotated[str, StringConstraints(pattern=...)]` | Text that matches a pattern, such as an identifier |
 
-`string`, `integer`, `number`, and `boolean` are aliases for `str`, `int`,
-`float`, and `bool`.
+Those cover most packages. The forms below are for when they do not.
 
-Those ten cover most packages. The three forms below are for when they do not.
+### A phone number
+
+`pydantic_extra_types.phone_numbers` has a `PhoneNumber`, which on its own saves
+`tel:+34-600-111-222`. Wrap it so the saved value is E.164, `+34600111222`:
+
+```python state.py
+from typing import Annotated
+
+import phonenumbers
+from pydantic_extra_types.phone_numbers import PhoneNumberValidator
+
+Phone = Annotated[
+    str | phonenumbers.PhoneNumber, PhoneNumberValidator(number_format="E164")
+]
+
+
+class State(BaseModel):
+    caller_phone: Phone | None = None
+```
+
+Besides `phone_numbers`, two more `pydantic_extra_types` modules are open to
+you: `currency_code` and `language_code`. Any other is refused. The
+[reference](/reference/variables#what-a-field-can-be) lists the types in each.
 
 ### A fixed set of choices
 
-```yaml agent.yaml
-variables:
-  booking_status:
-    type: Literal["booked", "cancelled", "pending"]
+```python state.py
+class State(BaseModel):
+    booking_status: Literal["booked", "cancelled", "pending"] | None = None
 ```
 
 Anything outside the set is refused where it enters, and the refusal lists what
-was allowed.
+was allowed. The default is `None`, because an empty string is not one of the
+three words.
 
 ### A value that may be absent
 
@@ -272,32 +315,34 @@ can honestly come back with nothing.
 
 <Note>
   LiveKit and Pipecat support every type on this page. The SLNG target supports
-  the basic scalars only: `str`, `int`, `float`, `bool`, and their aliases. It
-  runs none of your package's code, so it has nowhere to check a shape. The
-  [Twilio target](/targets/twilio) refuses variables and shapes.
+  plain `str`, `int`, `float` and `bool` fields only. It runs none of your
+  package's code, so it has nowhere to check a model or a format. The
+  [Twilio target](/targets/twilio) refuses a `state.py`.
 </Note>
 
-The [type reference](/reference/variables#the-type-grammar) has the exact
-formats and composition rules. Your tools still check business rules, such as
-whether a record exists and whether a slot is free.
+The [reference](/reference/variables#the-state-class-holds-the-types)
+has the full list, what is refused, and how a type is enforced. Your tools
+still check business rules, such as whether a record exists and whether a slot
+is free.
 
-Every type on this page appears once in
+Every kind of type on this page appears once in
 [`examples/customer-intake`](https://github.com/slng-ai/unmute/tree/main/examples/customer-intake),
 one agent that collects a caller's details and hands them to a tool.
 
 ## Keep several records
 
-Declare `type: list[T]` when later steps need several values of the same type.
-A list starts as `[]`.
+Declare `list[T]` when later steps need several values of the same type. A list
+starts as `[]`.
 
 In a task's `assign:`, `variable+:` appends one item and `variable:` replaces
 the whole list:
 
-```yaml agent.yaml
-variables:
-  notes:
-    type: list[str]
+```python state.py
+class State(BaseModel):
+    notes: list[str] = []
+```
 
+```yaml agent.yaml
 assign:
   - notes+: result.note
 ```
@@ -311,50 +356,49 @@ to choose between a current value and a list.
 
 Three things you will not need on your first agent.
 
-### Group fields into a shape
+### Group fields into a model
 
 <Note>
-  Skip this until you need it. A shape is worth declaring when several fields
+  Skip this until you need it. A model is worth declaring when several fields
   always travel together and one tool fills all of them at once. Until then,
   separate variables are simpler to read and simpler to prompt.
 </Note>
 
-A pre-fetch cannot fill a shape or a list. Use a task to produce grouped fields;
+A pre-fetch cannot fill a model or a list. Use a task to produce grouped fields;
 use separate scalar variables for clock and lookup pre-fetch results. A single
 pre-fetch may assign several scalar variables from one result.
 
-A shape defines your own reusable object type. Choose a name, then declare
-each field and its type under `shapes:`. Set a variable's `type:` to that
-name to store an object with those fields.
+A model is a Pydantic class in `state.py`. Declare its fields, then use the
+class as a field's type on `State`.
 
-One shape can be used by several variables. Each variable holds its own
-value, and a task assignment saves all of the object's fields together.
+One model can be used by several fields. Each field holds its own value, and a
+task assignment saves all of the object's fields together.
 
 For example, this package defines an object type called `Appointment` and
 uses it for the variable `appointment`:
 
-```yaml agent.yaml
-shapes:
-  - name: Appointment
-    fields:
-      - booking_id: Id
-      - service: Literal["haircut", "hair-color", "blowout"]
-      - date: Date
-      - time: Time
+```python state.py
+from datetime import date, time
+from typing import Literal
 
-variables:
-  appointment:
-    type: Appointment
-    description: The latest appointment successfully saved by the booking tool.
+from pydantic import BaseModel, Field
+
+
+class Appointment(BaseModel):
+    booking_id: str
+    service: Literal["haircut", "hair-color", "blowout"]
+    date: date
+    time: time
+
+
+class State(BaseModel):
+    appointment: Appointment | None = Field(
+        None, description="The latest appointment successfully saved by the booking tool."
+    )
 ```
 
-A task assignment saves all of the object's fields together, and one shape can
-be used by several variables, each holding its own value.
-
-Use the short field form, `- field_name: Type`, or the long form with `name:`,
-`type:` and `description:` when a field needs explaining to the model. See the
-[shape reference](/reference/variables#shapes-groups-fields-into-a-named-type)
-for both.
+Give a model field a `Field(description=...)` when it needs explaining to the
+model. Its `description` is sent with the field in the finish argument.
 
 <Warning>
   Declare a field only when something in the package can fill it. A field no
@@ -364,13 +408,15 @@ for both.
 
 #### Reading one field
 
-`{{appointment}}` renders the whole object as compact JSON. `{{appointment.date}}`
-reads one field, and a dotted path can follow nested shapes. To read fields
-from a list item, save that item into its own variable first.
+`{{state.appointment}}` renders the whole object as compact JSON.
+`{{state.appointment.date}}` reads one field, and a dotted path can follow nested
+models. To read fields from a list item, save that item into its own variable
+first.
 
-`NameEmail` is an object type too, so `{{contact.name}}` and `{{contact.email}}`
-work without declaring anything under `shapes:`. It is refused as a shape name,
-because it already means something.
+For a name and an email address, use a two-field model such as
+`Contact(name: str, email: EmailStr)`, so `{{state.contact.name}}` and
+`{{state.contact.email}}` work. Pydantic's own `NameEmail` is one string, so a
+prompt cannot read `.name` from it.
 
 For deciding which fields belong together, separating a requested change from a
 saved result, and choosing one record or a list, see
@@ -390,7 +436,7 @@ input:
   required:
     - date
 inject:
-  - service: "{{requested_service}}"
+  - service: "{{state.requested_service}}"
 local:
   handler: tools/check_slots.py
 ```
@@ -414,9 +460,9 @@ unmute dev my-agent --var caller_name=Priya
 ```
 
 `--var` works for a declared variable with `source: call_start` or no `source:`
-at all. Values are parsed against the variable's type; pass JSON for an object
-or a list, quoted for your shell. A value that does not fit its type stops the
-call start, and the error names the field.
+at all. Values are parsed against the field's type; pass JSON for a model or a
+list, quoted for your shell. A value that does not fit its type stops the call
+start, and the error names the field.
 
 A system source such as `from_number` comes from the phone route instead, and
 your machine is not one. To exercise prefetch and confirmation locally, stand
@@ -441,7 +487,7 @@ whole either way. An unset value is normal early in a call, so the prompt should
 say what to do about it:
 
 ```markdown
-Requested service: {{requested_service}}
+Requested service: {{state.requested_service}}
 If no service is recorded, ask which service the caller wants.
 ```
 

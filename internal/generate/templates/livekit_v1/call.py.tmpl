@@ -69,7 +69,7 @@ async def run_call(ctx: JobContext) -> None:
     # to be able to reach this from a method body. Not named session_id, because
     # this file already writes a "session_id" into the telephony call context and
     # that is a different thing.
-    slng_state = Userdata({{.Slng.SessionIDField}}=str(uuid.uuid4()))
+    slng_state = CallState({{.Slng.SessionIDField}}=str(uuid.uuid4()))
 {{- if .Slng.ClientBaseURL}}
     # This client is ours, so closing it is ours too: the plugin closes only a
     # client it built itself. Without this a worker leaks one connection pool per
@@ -83,9 +83,9 @@ async def run_call(ctx: JobContext) -> None:
     ctx.add_shutdown_callback(_close_slng_client)
 {{- end}}
 {{- end}}
-    session = AgentSession{{if .HasUserdata}}[Userdata]{{end}}(
+    session = AgentSession{{if .HasUserdata}}[CallState]{{end}}(
 {{- if .HasUserdata}}
-        userdata={{if .Slng.Any}}slng_state{{else}}Userdata(){{end}},
+        userdata={{if .Slng.Any}}slng_state{{else}}CallState(){{end}},
 {{- end}}
         # One retry, not the framework's three. A failed completion is retried
         # four times by default with 0.1 + 2.0 + 2.0 seconds of sleep between the

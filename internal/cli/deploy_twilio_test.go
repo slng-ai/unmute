@@ -375,7 +375,7 @@ func deployTwilioIn(t *testing.T, f *fakeTwilio, dir string, env map[string]stri
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
 	root.SetArgs(append([]string{"deploy", dir}, args...))
-	err := root.Execute()
+	err := root.ExecuteContext(recordedCtx(t))
 	run := twilioRun{dir: dir, out: stdout.String(), errOut: stderr.String(), err: err}
 	report, _ := os.ReadFile(filepath.Join(dir, "build", "twilio", "deploy-report.json"))
 	for _, text := range []string{run.out, run.errOut, errText(err), string(report)} {
@@ -798,7 +798,7 @@ func TestTwilioDeployRefusesSeveralTargets(t *testing.T) {
 			root.SetOut(&stdout)
 			root.SetErr(&stderr)
 			root.SetArgs(append([]string{"deploy", dir}, tc.args...))
-			err := root.Execute()
+			err := root.ExecuteContext(recordedCtx(t))
 			if err == nil || !strings.Contains(err.Error(), "deploy routes one number per run") {
 				t.Fatalf("err = %v", err)
 			}

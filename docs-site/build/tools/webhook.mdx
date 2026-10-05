@@ -39,14 +39,14 @@ input:
   properties: {}
 
 inject:
-  - customer_id: "{{customer_id}}"
-  - dialed_number: "{{dialed_number}}"
+  - customer_id: "{{state.customer_id}}"
+  - dialed_number: "{{state.dialed_number}}"
   - channel: phone
 
 webhook:
   url_env: SALON_API_URL
   base_url: https://api.example.com
-  path: /customers/{{customer_id}}/appointments/confirm
+  path: /customers/{{state.customer_id}}/appointments/confirm
   auth:
     type: bearer
     token_env: SALON_API_TOKEN
@@ -83,7 +83,7 @@ refused. Full rules in [the behavior fields](/build/tools/overview#the-three-beh
 
 <ParamField path="path" type="string">
   Path appended to the base URL. A non-empty path starts with `/` and may use
-  `{{variable}}` tokens, whose values are URL-encoded. Omit to use the base URL alone.
+  `{{state.variable}}` tokens, whose values are URL-encoded. Omit to use the base URL alone.
 </ParamField>
 
 <ParamField path="auth" type="object">
@@ -97,10 +97,10 @@ Pipecat and LiveKit read it at run time and never look at `base_url`.
 ## The path renders per call
 
 ```yaml
-  path: /customers/{{customer_id}}/appointments/confirm
+  path: /customers/{{state.customer_id}}/appointments/confirm
 ```
 
-`{{customer_id}}` is a [variable](/build/variables), rendered when the tool is
+`{{state.customer_id}}` is a [variable](/build/variables), rendered when the tool is
 called, and the rendered value is URL-encoded for you. Because it renders per
 call rather than once at session start, a variable that only gets its value
 once a task assigns it partway through the call is fine here.
@@ -148,8 +148,8 @@ input:
   properties: {}
 
 inject:
-  - customer_id: "{{customer_id}}"
-  - dialed_number: "{{dialed_number}}"
+  - customer_id: "{{state.customer_id}}"
+  - dialed_number: "{{state.dialed_number}}"
   - channel: phone
 ```
 
@@ -161,7 +161,7 @@ The tool above takes no parameters at all: everything the API needs is injected.
 The model can call it or not call it, and that is the whole of its authority. It
 cannot invent a customer id.
 
-A value that is exactly one `{{token}}` keeps that variable's declared type, so a
+A value that is exactly one `{{token}}` keeps that field's type from `state.py`, so a
 number stays a number.
 
 Every injected value must be a scalar. Strings, numbers, booleans, and null are
@@ -234,10 +234,10 @@ A token that names nothing at all fails at compile time:
 
 ```text
 tools/confirm_appointment.yaml:7: tool "confirm_appointment" webhook.path references
-  {{not_a_variable}}, which is not a declared variable
+  {{not_a_variable}}, which State in state.py does not declare
 ```
 
-**Fix:** declare the variable under `variables:`, or correct the spelling in the
+**Fix:** declare the field on `State` in `state.py`, or correct the spelling in the
 path.
 
 ### `token_env` holds a value instead of a name
@@ -285,6 +285,6 @@ never see, or in `input:` for one the model fills in.
     When the request needs code of your own, like a signature.
   </Card>
   <Card title="Variables" icon="braces" href="/build/variables">
-    Where `{{customer_id}}` comes from.
+    Where `{{state.customer_id}}` comes from.
   </Card>
 </Columns>

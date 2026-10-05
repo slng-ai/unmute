@@ -82,7 +82,7 @@ type compilerGoldenCase struct {
 func thenReturnGolden(t *testing.T) compilerGoldenCase {
 	agent := safeAgent(t)
 	agent.Tasks["collect"] = Task{
-		Instructions: "collect", Result: map[string]ResultField{"done": {Type: PrimitiveBoolean}},
+		Instructions: "collect", Result: map[string]ResultField{"done": {Type: boolType}},
 		Context: TaskContext{History: HistoryFull},
 	}
 	agent.TaskGroups["collect_then_return"] = TaskGroup{

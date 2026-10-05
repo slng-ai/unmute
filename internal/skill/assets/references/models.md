@@ -543,13 +543,13 @@ decision the author is making rather than an implementation detail.
   that every repeat is fast.
 - Tool turns always take the model path, both the request turn and the result
   turn.
-- A router-bound system prompt keeps its `{{name}}` placeholders and the values
+- A router-bound system prompt keeps its `{{state.name}}` placeholders and the values
   travel beside it, which is what makes a personalised prompt cacheable.
   Greetings, tool arguments, injected values and webhook paths keep rendering
   locally.
 - **Write a per-call value the agent speaks as a placeholder, not into the prompt
   text.** A caller's name, the company name, an appointment detail read back: put
-  `{{customer_name}}` in the prompt, declare the variable, and let the router
+  `{{state.customer_name}}` in the prompt, declare the variable, and let the router
   substitute. The stored answer then holds the placeholder rather than the name,
   so it can be cached at all and it is shared across callers, each hearing their
   own value. Measured 2026-08-24: an answer stored as "Absolutely, Rajesh" came

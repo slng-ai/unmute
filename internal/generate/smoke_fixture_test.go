@@ -30,6 +30,8 @@ import (
 // calls, and nothing dispatches values into an inbound one: a call_start
 // variable with no default is refused on an inbound package.
 func addReminderVariables(agent *ir.Agent) {
+	addStateFields(agent,
+		`name: str = ""`, `appointment_time: str = ""`, `dialed_number: str | None = None`, `reschedule_to: str | None = None`)
 	agent.Variables["name"] = ir.Variable{
 		Type:        ir.PrimitiveString,
 		Default:     "",
@@ -55,6 +57,22 @@ func addReminderVariables(agent *ir.Agent) {
 	}
 }
 
+// addStateFields appends fields to the package's state.py as it will be copied
+// into the project, and puts each in the variable order. The smokes mutate the
+// IR after it is built, and a variable the IR names but State does not declare
+// is a field the emitted class would not have, so the source has to move with
+// it. Each line is one `name: annotation = default` of the State class, which is
+// the last class in every package these fixtures use.
+func addStateFields(agent *ir.Agent, lines ...string) {
+	agent.StateSource = strings.TrimRight(agent.StateSource, "\n")
+	for _, line := range lines {
+		agent.StateSource += "\n    " + line
+		name, _, _ := strings.Cut(line, ":")
+		agent.VariableOrder = append(agent.VariableOrder, name)
+	}
+	agent.StateSource += "\n"
+}
+
 // useWebhookTools builds its two tools here rather than borrowing them from the
 // example: it used to rewrite tools by name, and when the example stopped having
 // those names the map miss handed it a zero-value ir.Tool, so every webhook
@@ -65,6 +83,7 @@ func useWebhookTools(agent *ir.Agent) {
 	// The path segment is a plain string, not the salon's E.164 Phone: the smoke
 	// seeds it with a slash and a space to prove the segment is URL-encoded, and
 	// _save_result would refuse that shape on a Phone.
+	addStateFields(agent, `customer_id: str = ""`)
 	agent.Variables["customer_id"] = ir.Variable{
 		Type:        ir.PrimitiveString,
 		Default:     "",
@@ -146,7 +165,7 @@ func TestSmokeFixturesGenerateAndKeepTheirPythonSurface(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				agent, err := ir.Build(pkg)
+				agent, err := buildWithState(t, pkg)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -202,7 +221,7 @@ func TestKnowledgeSmokeKeepsItsPythonSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +296,7 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +306,7 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 		symbols  []string
 	}{
 		{ir.ProviderLiveKit, agentSource, []string{
-			"class Userdata(BaseModel):", "class ManageBooking(", "class VerifyCustomer(",
+			"class CallState(State):", "class ManageBooking(", "class VerifyCustomer(",
 			"class ComplaintSpecialist(", "class _TaskTransfer(",
 			"async def record_complaint(", "async def to_complaints(",
 			// The smoke scripts drive the pre-fetch directly, because that is the
@@ -296,7 +315,7 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 			"async def _prefetch(",
 		}},
 		{ir.ProviderPipecat, agentSource, []string{
-			"class State(BaseModel):", "class ConciergeAgent(", "class ComplaintSpecialistAgent(",
+			"class CallState(State):", "class ConciergeAgent(", "class ComplaintSpecialistAgent(",
 			// One read and one write, since the five narrower booking tools were
 			// merged: find_slots answers "what do they hold" and "what is free"
 			// in one call, and save_booking is the only tool that changes a
@@ -328,7 +347,7 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 		})
 	}
 
-	// The smokes construct Userdata and State with the caller identifier by
+	// The smokes construct CallState with the caller identifier by
 	// keyword, so a rename has to fail here rather than at runtime.
 	if _, ok := agent.Variables["customer_phone"]; !ok {
 		t.Error("the salon package no longer declares customer_phone; the journey smokes pass it by keyword")
@@ -355,7 +374,7 @@ func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +424,7 @@ func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
 	v3 := emittedPipecatFor(t, "salon-concierge-v3")
 	for _, want := range []string{
 		"handler = tools.look_up_customer.look_up_customer",
-		"await asyncio.to_thread(handler, phone=state.customer_phone)",
+		`await asyncio.to_thread(handler, phone=state.plain("customer_phone"))`,
 	} {
 		if !strings.Contains(v3, want) {
 			t.Errorf("salon-concierge-v3 bot.py no longer emits %q, so the prefetch smoke stub is not exercised", want)
@@ -716,7 +735,7 @@ func TestSmokeLiveKitRunContextStandInCarriesEveryAttributeRead(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			agent, err := ir.Build(pkg)
+			agent, err := buildWithState(t, pkg)
 			if err != nil {
 				t.Fatal(err)
 			}

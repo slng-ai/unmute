@@ -19,7 +19,7 @@ import "testing"
 // machinery, which is where every claim in this feature actually lands.
 
 func TestSmokeTypedStateLiveKit(t *testing.T) {
-	runLiveKitSmokeScript(t, "typed_state", nil, nil, typedStateSmokeScript("agent", "Userdata()"))
+	runLiveKitSmokeScript(t, "typed_state", nil, nil, typedStateSmokeScript("agent", "CallState()"))
 }
 
 func TestSmokeTypedStatePipecat(t *testing.T) {
@@ -32,8 +32,8 @@ func TestSmokeTypedStatePipecat(t *testing.T) {
 // step by hand.
 const typedStateExpectedState = `{
   "appointments": [
-    {"appointment_type": "haircut", "scheduled_date": "2026-03-19", "scheduled_time": "09:30"},
-    {"appointment_type": "dry_cut", "scheduled_date": "2026-03-26", "scheduled_time": "14:00"}
+    {"appointment_type": "haircut", "scheduled_date": "2026-03-19", "scheduled_time": "09:30:00"},
+    {"appointment_type": "dry_cut", "scheduled_date": "2026-03-26", "scheduled_time": "14:00:00"}
   ],
   "booked_for": {"email": "fred.bloggs@example.com", "name": "Fred Bloggs"},
   "caller_phone": "+34600111222",
@@ -63,13 +63,15 @@ EXPECTED = json.loads(r"""` + typedStateExpectedState + `""")
 import asyncio
 from types import SimpleNamespace
 
+from pydantic_core import to_jsonable_python
+
 def check_candidate_visibility():
     fresh = generated.` + stateExpr + `
     fresh.caller_phone = "+34600111222"
     assert generated._render("Phone {{caller_phone}}",fresh) == "Phone none recorded yet."
     assert generated._render("Phone {{caller_phone}}",fresh,site="task:confirm_number") == "Phone +34600111222"
     assert generated._refusal("probe",fresh,[("caller_phone","verify first")])
-    generated._save_result("confirm_number",fresh,{"caller_phone":"+34600111222"})
+    fresh.save_result("confirm_number", {"caller_phone":"+34600111222"})
     assert generated._render("Phone {{caller_phone}}",fresh) == "Phone +34600111222"
     assert not generated._refusal("probe",fresh,[("caller_phone","verify first")])
 
@@ -84,20 +86,20 @@ async def check_finish_handler():
         function_call=SimpleNamespace(call_id="finish-check"))
     if generated.__name__ == "agent":
         task = generated.ConfirmNumber()
-        assert await task.finish(ctx, caller_phone="wrong")
+        assert await task.finish({"caller_phone": "wrong"}, ctx)
         assert not task.done()
         assert not fresh.caller_phone
-        await task.finish(ctx, caller_phone="+34600111222")
+        await task.finish({"caller_phone": "+34600111222"}, ctx)
         assert task.done()
-        await task.finish(ctx, caller_phone="+34600999888")
+        await task.finish({"caller_phone": "+34600999888"}, ctx)
         assert fresh.caller_phone == "+34600111222"
         escaped = generated.ConfirmNumber()
-        await escaped.finish(ctx, unserved_request="another request")
+        await escaped.finish({"unserved_request": "another request"}, ctx)
         assert escaped.done()
         assert fresh.caller_phone == "+34600111222"
         cancelled = generated.ConfirmNumber()
         cancelled.cancel()
-        await cancelled.finish(ctx, caller_phone="+34600999888")
+        await cancelled.finish({"caller_phone": "+34600999888"}, ctx)
         assert fresh.caller_phone == "+34600111222"
     else:
         async def ignore(*args, **kwargs): pass
@@ -142,9 +144,8 @@ asyncio.run(check_stale_visit())
 
 async def check_injection():
     fresh = generated.` + stateExpr + `
-    fresh.accepted = False
-    fresh.count = 0
-    fresh.last_appointment = {"scheduled_date":"2026-09-11", "scheduled_time":"14:00", "appointment_type":"haircut"}
+    fresh.save_batch({"accepted": False, "count": 0, "last_appointment": {
+        "scheduled_date": "2026-09-11", "scheduled_time": "14:00", "appointment_type": "haircut"}})
     if generated.__name__ == "agent":
         import inspect
         task = generated.Book()
@@ -160,7 +161,7 @@ async def check_injection():
         schema = next(tool for tool in node["functions"] if tool.name == "inspect_state")
         assert set(schema.properties) == {"note"} and schema.required == ["note"],schema
         result = await generated._flow_tool_inspect_state({"note":"authored"}, None, fresh)
-    assert result == {"note":"authored", "appointment":fresh.last_appointment,
+    assert result == {"note":"authored", "appointment":fresh.plain("last_appointment"),
         "date":"2026-09-11", "accepted":False, "count":0, "label":"Date 2026-09-11"}, result
     assert result["accepted"] is False and type(result["count"]) is int
 
@@ -225,42 +226,46 @@ def snapshot(s):
 
 
 before_escape = snapshot(state)
-assert generated._save_result("confirm_number", state, {"unserved_request": "another request"}) == {"unserved_request": "another request"}
+assert state.save_result("confirm_number", {"unserved_request": "another request"}) == {"unserved_request": "another request"}
 assert snapshot(state) == before_escape
 
-assert generated._save_result("no_output", state, {}) == {}
+assert not state.save_result("no_output", {}).get("unserved_request")
 assert snapshot(state) == before_escape
 try:
-    generated._save_result("record_flags", state, {"count": 4, "accepted": "not-a-boolean"})
-except generated._StateRefused:
+    state.save_result("record_flags", {"count": 4, "accepted": "not-a-boolean"})
+except generated.StateRefused:
     pass
 else:
     raise AssertionError("invalid primitive result was accepted")
 assert snapshot(state) == before_escape
-generated._save_result("record_flags", state, {"count": 0, "accepted": False})
+state.save_result("record_flags", {"count": 0, "accepted": False})
 assert state.count == 0 and state.accepted is False
 
-assert generated._state_text("appointments", []) == "[]"
-assert generated._state_text("caller_phone", None) == "none recorded yet."
-assert generated._state_text("caller_reason", False) == "false"
-assert generated._state_text("caller_reason", 0) == "0"
+empty = generated.` + stateExpr + `
+assert generated.CallState.render(empty, "appointments") == "[]"
+assert generated.CallState.render(empty, "caller_phone") == "none recorded yet."
+assert generated.CallState.render(empty, "caller_phone") == generated.CallState.EMPTY_TEXT
+assert generated.CallState.render(None, "caller_phone") == generated.CallState.EMPTY_TEXT
+# False and 0 are values, not the absence of one.
+assert generated.CallState.render(state, "accepted") == "false"
+assert generated.CallState.render(state, "count") == "0"
 
 # A batch is all or nothing: a valid list beside a value its field refuses
 # leaves nothing behind. A retry uses the same call state and only commits once
 # every value fits.
 before_batch = snapshot(state)
 try:
-    generated._save_batch(state, {
+    state.save_batch({
         "appointments": [{"scheduled_date": "2026-03-19", "scheduled_time": "09:30",
                           "appointment_type": "haircut"}],
         "count": "not-a-number",
     })
-except generated._StateRefused as refused:
+except generated.StateRefused as refused:
     assert refused.message.startswith("count: "), refused.message
 else:
     raise AssertionError("a batch with one bad value saved the rest")
 assert snapshot(state) == before_batch, (snapshot(state), before_batch)
-generated._save_result("book", state, {
+state.save_result("book", {
     "reason": "create_booking",
     "appointment": {"scheduled_date": "2026-03-19", "scheduled_time": "09:30",
                     "appointment_type": "haircut"},
@@ -274,14 +279,11 @@ state = generated.` + stateExpr + `
 # create it, and a step reading it is told so in words.
 assert state.appointments == [], state.appointments
 assert state.caller_reason == [], state.caller_reason
-assert generated._state_text("appointments", state.appointments) == "[]"
-assert generated._state_text("caller_reason", state.caller_reason) == "[]"
+assert generated.CallState.render(state, "appointments") == "[]"
+assert generated.CallState.render(state, "caller_reason") == "[]"
 
 # The step that reads the caller's number back and gets a yes.
-values = generated._typed_result(
-    "confirm_number", {"caller_phone": "+34600111222", "summary": "read back and agreed"}
-)
-state.caller_phone = values["caller_phone"]
+state.save_result("confirm_number", {"caller_phone": "+34600111222", "summary": "read back and agreed"})
 
 # The caller books, and then books again, and then changes their mind about the
 # second one. Two appointments and two reasons, in the order they gave them.
@@ -290,7 +292,7 @@ booked = [
     ("2026-03-26", "14:00", "dry_cut", "cancel_booking"),
 ]
 for day, at, service, reason in booked:
-    values = generated._typed_result(
+    state.save_result(
         "book",
         {
             "appointment": {
@@ -302,19 +304,17 @@ for day, at, service, reason in booked:
             "summary": "recorded",
         },
     )
-    # The validated model, which is what the state holds. Plain data is made only
-    # where a value leaves for a framework, by _save_result.
-    assert type(values["appointment"]).__name__ == "Appointment", type(values["appointment"])
-    state.appointments.append(values["appointment"])
-    state.caller_reason.append(values["reason"])
+# The validated model, which is what the state holds. Plain data is made only
+# where a value leaves for a framework, by save_result and plain.
+assert type(state.appointments[0]).__name__ == "Appointment", type(state.appointments[0])
 
 assert len(state.appointments) == 2, state.appointments
-assert state.appointments[0].scheduled_date == "2026-03-19", state.appointments
+assert str(state.appointments[0].scheduled_date) == "2026-03-19", state.appointments
 
 # A value outside the declared set. Refused where it enters, the message names
 # the field and lists what was allowed, and the previous contents survive.
 before = json.dumps(
-    generated.to_jsonable_python({
+    to_jsonable_python({
         "appointments": state.appointments,
         "caller_phone": state.caller_phone,
         "caller_reason": state.caller_reason,
@@ -359,19 +359,19 @@ for bad, field, allowed in (
             "summary": "x",
         },
         "appointment.scheduled_date",
-        "year-month-day",
+        "valid date",
     ),
 ):
     try:
-        generated._typed_result("book", bad)
-    except generated._StateRefused as refused:
+        generated.STEP_RESULTS["book"].parse(bad)
+    except generated.StateRefused as refused:
         assert field in refused.message, (field, refused.message)
         assert allowed in refused.message, (allowed, refused.message)
     else:
         raise AssertionError("a value outside its declared type entered the state: " + repr(bad))
 
 after = json.dumps(
-    generated.to_jsonable_python({
+    to_jsonable_python({
         "appointments": state.appointments,
         "caller_phone": state.caller_phone,
         "caller_reason": state.caller_reason,
@@ -383,10 +383,10 @@ assert after == before, "a refused value changed the state"
 # A phone number of the wrong shape, refused the same way and with its shape
 # named. The shape is checked here and never written into the schema.
 try:
-    generated._typed_result("confirm_number", {"caller_phone": "600 111 222", "summary": "x"})
-except generated._StateRefused as refused:
+    generated.STEP_RESULTS["confirm_number"].parse({"caller_phone": "600 111 222", "summary": "x"})
+except generated.StateRefused as refused:
     assert "caller_phone" in refused.message, refused.message
-    assert "E.164" in refused.message, refused.message
+    assert "phone number" in refused.message, refused.message
 else:
     raise AssertionError("a phone number of the wrong shape entered the state")
 
@@ -397,10 +397,7 @@ else:
 # The step that takes them. reminder_email is not a field the model fills: it
 # comes off the pair through a dotted assign, so one answer fills both values and
 # the model is never asked for the address twice.
-generated._save_result(
-    "take_contact",
-    state,
-    {"booked_for": {"name": "Fred Bloggs", "email": "Fred.Bloggs@EXAMPLE.com"},
+state.save_result("take_contact", {"booked_for": {"name": "Fred Bloggs", "email": "Fred.Bloggs@EXAMPLE.com"},
      "summary": "recorded"},
 )
 # Normalized on the way in, which is what makes the saved value plain text a
@@ -411,27 +408,21 @@ assert state.booked_for.email == "Fred.Bloggs@example.com", state.booked_for
 # A wrong address is refused where it enters, naming the field and the format,
 # with the library's own reason after it so the model can correct itself. And the
 # previous contents survive.
-kept = (state.reminder_email, generated.to_jsonable_python(state.booked_for))
+kept = (state.reminder_email, to_jsonable_python(state.booked_for))
 try:
-    generated._save_result(
-        "take_contact",
-        state,
-        {"booked_for": {"name": "Fred", "email": "fred dot bloggs at example dot com"},
+    state.save_result("take_contact", {"booked_for": {"name": "Fred", "email": "fred dot bloggs at example dot com"},
          "summary": "x"},
     )
-except generated._StateRefused as refused:
+except generated.StateRefused as refused:
     assert "booked_for" in refused.message, refused.message
-    assert "an email address" in refused.message, refused.message
+    assert "email address" in refused.message, refused.message
 else:
     raise AssertionError("a value that is not an email address entered the state")
-assert (state.reminder_email, generated.to_jsonable_python(state.booked_for)) == kept
+assert (state.reminder_email, to_jsonable_python(state.booked_for)) == kept
 
 # Then the value the run ends with, so the expected state below is one the
 # conversation produced.
-generated._save_result(
-    "take_contact",
-    state,
-    {"booked_for": {"name": "Fred Bloggs", "email": "fred.bloggs@example.com"},
+state.save_result("take_contact", {"booked_for": {"name": "Fred Bloggs", "email": "fred.bloggs@example.com"},
      "summary": "recorded"},
 )
 
@@ -449,44 +440,33 @@ for said in (
     "fred.bloggs@example..com",
 ):
     try:
-        generated.TypeAdapter(generated.EmailStr).validate_python(said)
-    except Exception as refused:
-        reason = str(refused)
-        assert "expected an email address" in reason, (said, reason)
+        state.save_batch({"reminder_email": said})
+    except generated.StateRefused as refused:
+        reason = refused.message
+        assert reason.startswith("reminder_email: "), (said, reason)
         # The library's own sentence, which is the half that says what to fix.
         # Its wording is the library's, so this asserts that something specific
-        # followed the phrase rather than matching any one message.
-        tail = reason.split("expected an email address, like name@example.com: ", 1)
-        assert len(tail) == 2 and len(tail[1].split("[type=")[0].strip()) > 10, (said, reason)
+        # followed the field rather than matching any one message.
+        assert "email address" in reason and len(reason.split(": ", 1)[1]) > 10, (said, reason)
     else:
         raise AssertionError("a spoken address written down wrong was accepted: " + repr(said))
 
-# And the one written form a model reaches for that the pair does read.
-assert generated.NameEmail.model_validate(
-    "Fred Bloggs <fred.bloggs@example.com>"
-).name == "Fred Bloggs"
-
-# The empty string is no value yet rather than a wrong one, on both of them.
-adapter = generated.TypeAdapter(generated.EmailStr)
-assert adapter.validate_python("") == ""
-assert generated._state_text("reminder_email", "") == "none recorded yet."
-empty_pair = generated.NameEmail.model_validate("")
-assert (empty_pair.name, empty_pair.email) == ("", ""), empty_pair
-
-# The pair, read out of one string in both spellings it arrives in. This is the
-# whole reason the class carries a parser: a tool that returns a formatted
-# contact, or a dotted assign that picks one string out of a result, hands over a
-# string and not two fields.
-pair = generated.NameEmail.model_validate("Fred Bloggs <fred.bloggs@example.com>")
-assert (pair.name, pair.email) == ("Fred Bloggs", "fred.bloggs@example.com"), pair
-bare = generated.NameEmail.model_validate("fred.bloggs@example.com")
-assert (bare.name, bare.email) == ("fred.bloggs", "fred.bloggs@example.com"), bare
-fields = generated.NameEmail.model_validate({"name": "Fred", "email": "fred@example.com"})
-assert (fields.name, fields.email) == ("Fred", "fred@example.com"), fields
+# A blank result value is no value yet, not a wrong one: it reads as absent, so
+# the refusal says the field is missing instead of calling "" a bad address.
 try:
-    generated.NameEmail.model_validate("Fred Bloggs <not-an-address>")
+    generated.STEP_RESULTS["take_contact"].parse({"booked_for": "", "summary": "x"})
+except generated.StateRefused as refused:
+    assert refused.message == "booked_for: Field required", refused.message
+else:
+    raise AssertionError("a blank result value was accepted as a contact")
+
+# The pair is a model the author wrote, so it is filled by its two fields.
+pair = generated.Contact.model_validate({"name": "Fred Bloggs", "email": "fred.bloggs@example.com"})
+assert (pair.name, pair.email) == ("Fred Bloggs", "fred.bloggs@example.com"), pair
+try:
+    generated.Contact.model_validate({"name": "Fred Bloggs", "email": "not-an-address"})
 except Exception as refused:
-    assert "an email address" in str(refused), str(refused)
+    assert "email address" in str(refused), str(refused)
 else:
     raise AssertionError("a pair holding no address was accepted")
 
@@ -494,50 +474,61 @@ else:
 # shape's field goes through.
 probe = generated.` + stateExpr + `
 probe.booked_for = pair
-assert generated._state_lookup(probe, "booked_for__name")[1] == "Fred Bloggs"
+assert probe.lookup("booked_for__name")[1] == "Fred Bloggs"
 assert generated._render("For {{booked_for__name}}", probe) == "For Fred Bloggs"
-assert generated._state_lookup(probe, "booked_for__missing")[1] is None
+assert probe.lookup("booked_for__missing")[1] is None
 
 # And neither type puts a format keyword in the schema the model is sent, which
 # is the one thing a Pydantic-native EmailStr would have done.
-for adapters in generated._FINISH_TYPES.values():
-    for name, adapter in adapters.items():
-        rendered_schema = json.dumps(generated._schema(adapter))
-        assert "format" not in rendered_schema, (name, rendered_schema)
+def schema_keys(node):
+    """Every key anywhere in a schema, so a keyword is found wherever it nests."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield key
+            yield from schema_keys(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from schema_keys(value)
+
+
+for step, result in generated.STEP_RESULTS.items():
+    keys = set(schema_keys(result.tool_parameters()))
+    assert not keys & {"format", "pattern"}, (step, keys)
 
 # The state as a prompt reads it: compact JSON, never a Python repr.
-rendered = generated._state_text("appointments", state.appointments)
+rendered = generated.CallState.render(state, "appointments")
 assert rendered.startswith('[{"'), rendered
 assert "'" not in rendered, rendered
 assert "None" not in rendered, rendered
-assert generated._state_text("caller_reason", state.caller_reason) == '["create_booking","cancel_booking"]'
+assert generated.CallState.render(state, "caller_reason") == '["create_booking","cancel_booking"]'
 
 # The finish schema goes out with no $ref and no $defs left in it. Measured
 # against the provider: a $ref inside one tool property comes back 200 with the
 # model inventing field names for the nested object, so every result would be
 # refused where it entered and nothing would say why.
-nested = generated.TypeAdapter(list[generated.Appointment])
-assert "$ref" in json.dumps(nested.json_schema()), "the fixture stopped producing a $ref to resolve"
-resolved = generated._schema(nested)
+from pydantic import TypeAdapter
+
+nested = TypeAdapter(list[generated.Appointment]).json_schema()
+assert "$ref" in json.dumps(nested), "the fixture stopped producing a $ref to resolve"
+resolved = generated._tool_schema(nested, nested.get("$defs", {}))
 assert "$ref" not in json.dumps(resolved), json.dumps(resolved)
 assert "$defs" not in resolved, sorted(resolved)
 # And the resolution put the referenced object's own fields in place.
 assert resolved["items"]["properties"]["scheduled_date"]["type"] == "string", resolved
-for adapters in generated._FINISH_TYPES.values():
-    for name, adapter in adapters.items():
-        one = generated._schema(adapter)
-        assert "$ref" not in json.dumps(one), (name, one)
-        assert "$defs" not in one, (name, sorted(one))
+for step, result in generated.STEP_RESULTS.items():
+    one = result.tool_parameters()
+    assert "$ref" not in json.dumps(one), (step, one)
+    assert "$defs" not in json.dumps(one), (step, one)
 
 # And the whole declared state, field for field, against the one expectation
 # both targets read.
 final = {
-    "appointments": generated.to_jsonable_python(state.appointments),
+    "appointments": to_jsonable_python(state.appointments),
     "caller_phone": state.caller_phone,
     "caller_reason": state.caller_reason,
     "reminder_email": state.reminder_email,
     # The pair is a model, so it is compared the way a prompt renders it.
-    "booked_for": generated.to_jsonable_python(state.booked_for),
+    "booked_for": to_jsonable_python(state.booked_for),
 }
 assert final == EXPECTED, json.dumps(final, indent=2, sort_keys=True)
 print("typed state: the scripted conversation ends with the expected state")

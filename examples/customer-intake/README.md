@@ -1,7 +1,7 @@
 # customer-intake
 
-One agent that takes a caller's details, saves each one under a declared type,
-and hands them to a tool the model cannot type over.
+One agent that takes a caller's details, saves each one under a type you wrote in
+`state.py`, and hands them to a tool the model cannot type over.
 
 It is the small package for one question: **how do I collect typed information
 from a caller and use it?** [`salon-concierge`](../salon-concierge/) does all of
@@ -33,6 +33,9 @@ cp examples/customer-intake/build/pipecat/.env.example .env   # then fill it in
 unmute dev examples/customer-intake --target pipecat
 ```
 
+`validate` and `compile` read `state.py` through `uv`, so `uv` has to be on your
+`PATH`, and the first run needs network.
+
 The generated `.env.example` names every value the run needs. All five are
 required and the agent refuses to start while one is empty.
 
@@ -56,26 +59,27 @@ python3 examples/customer-intake/tools/intake.py
 
 ## What it collects
 
-Every type in the authoring grammar appears once, and each one is there because
-that value really has that shape.
+Every kind of type `state.py` can hold appears once, and each one is there
+because that value really has that shape. They are all fields on the `State`
+class in `state.py`.
 
 | Value | Type | Where it comes from |
 |---|---|---|
-| `caller_phone` | `Phone` | the carrier's caller ID, then a step that hears the caller agree |
-| `contact` | `NameEmail` | one answer, held as a name and an address |
+| `caller_phone` | `Phone`, an E.164 phone number | the carrier's caller ID, then a step that hears the caller agree |
+| `contact` | `Contact`, a model with `name` and `email` | one answer, held as a name and an address |
 | `caller_email` | `EmailStr` | picked off `contact` with a dotted assign, not asked for twice |
 | `enquiry` | `Literal[...]` | one of four words; a fifth is refused where it enters |
-| `callback_time` | `Time \| None` | the caller says "half four", the model writes 16:30, or leaves it out |
+| `callback_time` | `time \| None` | the caller says "half four", the model writes 16:30, or leaves it out |
 | `notes` | `list[str]` | appended, so a second remark does not replace the first |
-| `record` | a declared shape | the tool's return, relayed by the model into `finish` |
-| `record_id` | `Id` | picked off `record` with a dotted assign |
-| `today_date` | `Date` | read once from the clock before the greeting |
+| `record` | `CustomerRecord`, a model | the tool's return, relayed by the model into `finish` |
+| `record_id` | `Id`, text with a pattern | picked off `record` with a dotted assign |
+| `today_date` | `date` | read once from the clock before the greeting |
 
 ## The three things it shows
 
-**A value is checked where it enters, not where it is used.** Each type above
-lowers to `str` in the schema the model is sent, and to a validator in the
-generated Python. An address the model heard wrong is refused with the format,
+**A value is checked where it enters, not where it is used.** Pydantic checks
+every type above when a value is saved, and the model is sent each rule as words
+in the field's description. An address the model heard wrong is refused with the format,
 in a message the model can correct itself from, and the previous value survives.
 Nothing downstream re-checks anything.
 
@@ -102,7 +106,8 @@ be opened against somebody else's number and nothing would say so.
 
 | File | What is in it |
 |---|---|
-| `agent.yaml` | one agent, three tasks, the shape, the variables and the pre-fetch |
+| `state.py` | the `State` class: every value's type, default and description, and the models they use |
+| `agent.yaml` | one agent, three tasks, the `variables:` list and the pre-fetch |
 | `targets.yaml` | both code targets, no `connection:`, which is what makes it browser only |
 | `instructions.md` | the agent's own prompt; deliberately holds no phone number |
 | `tasks/verify-contact.md` | the confirming step, and the only prompt that holds the number |
@@ -119,7 +124,7 @@ For a package with none of the structure at all, to read the optimized one
 against, read
 [`salon-concierge-single-prompt`](../salon-concierge-single-prompt/).
 
-The declared types are refused on the `slng` target, which runs no code from
+The types in `state.py` are refused on the `slng` target, which runs no code from
 your package and so has nowhere to check one. That is why this package names
 only the two code targets.
 
@@ -224,7 +229,7 @@ each have a format.
 
 **Fix:** read the refusal. It names the field and what was allowed, and the
 model corrects itself on the next turn. To change what is accepted, change the
-`type:` on that variable in `agent.yaml`. Rewording the description does not
+type on that field in `state.py`. Rewording the description does not
 work: no wording reliably stops a model sending nothing when there is nothing.
 
 ### The scripted run cannot find a key
@@ -237,10 +242,10 @@ work: no wording reliably stops a model sending nothing when there is nothing.
 cp .env examples/customer-intake/.env
 ```
 
-### I added a `slng` target and the declared types are refused
+### I added a `slng` target and the types are refused
 
-That target is hosted. The check for a declared type is Python this compiler
-emits, and a hosted target emits no project to run it in.
+That target is hosted. The check for a type is Python in your `state.py`, and a
+hosted target emits no project to run it in.
 
 **Fix:** keep this package on the two targets `targets.yaml` names, `livekit`
 and `pipecat`.
@@ -254,6 +259,6 @@ unmute compile examples/customer-intake --target livekit
 - [`salon-concierge`](../salon-concierge/) - the same types, in a full package
 - [`salon-concierge-single-prompt`](../salon-concierge-single-prompt/) - none of the structure, to read against
 - [All four examples](../README.md) - what each one is for
-- [Variables](../../docs-site/build/variables.mdx) - every key a variable takes
+- [Variables](../../docs-site/build/variables.mdx) - `state.py` and every key a variable takes
 - [Pre-fetch](../../docs-site/build/prefetch.mdx) - what runs before the greeting
 - [Python tools](../../docs-site/build/tools/python.mdx) - the `local:` block this package uses

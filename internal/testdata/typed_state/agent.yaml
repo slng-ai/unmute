@@ -28,49 +28,11 @@ secrets:
   - DEEPGRAM_API_KEY
   - SLNG_API_KEY
 
-shapes:
-  - name: Appointment
-    description: One thing being booked, moved or cancelled.
-    fields:
-      - scheduled_date: Date
-      - name: scheduled_time
-        type: Time
-        description: The time the caller agreed to.
-      - name: appointment_type
-        type: Literal["haircut", "dry_cut"]
-        description: The service the caller asked for, in the salon's own words.
-
+# How the values on State in state.py behave: where one comes from, and
+# which step confirms it. A value needs an entry only for one of those.
 variables:
-  count:
-    type: int
-  accepted:
-    type: bool
-  caller_reason:
-    type: list[Literal["create_booking", "cancel_booking"]]
-    description: Why the caller rang. More than one, because one call can do more than one thing.
-
-  appointments:
-    type: list[Appointment]
-    description: What this call has booked so far, in the order the caller gave them.
-
-  caller_phone:
-    type: Phone
-    default: ""
+  - name: caller_phone
     confirm: confirm_number
-    description: The number the caller rang from, once they have agreed it is theirs.
-
-  last_appointment:
-    type: Appointment | None
-    description: The appointment most recently booked on this call, so a prompt can name one part of it.
-
-  reminder_email:
-    type: EmailStr
-    default: ""
-    description: Where the caller wants the reminder sent, saved only once they have spelled it out.
-
-  booked_for:
-    type: NameEmail
-    description: Who the appointment is under, with their name and their email address held apart.
 
 agents:
   desk:
@@ -94,7 +56,7 @@ agents:
         assign:
           - caller_reason+: result.reason
           - appointments+: result.appointment
-          - last_appointment: result.appointment
+          - last_appointment: result.appointment?
         context:
           history: reset
 

@@ -1,0 +1,329 @@
+{
+  "source": "internal/voice-agents-tests/salon-concierge-v3/state.py",
+  "digest": "d9a74f6d636abc69ae0bce5c1b753a5c31bf5c18030f8fc8262c0a65f8425c47",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Appointment": {
+          "description": "One thing being booked, moved or cancelled.",
+          "properties": {
+            "scheduled_date": {
+              "format": "date",
+              "title": "Scheduled Date",
+              "type": "string"
+            },
+            "scheduled_time": {
+              "format": "time",
+              "title": "Scheduled Time",
+              "type": "string"
+            },
+            "appointment_type": {
+              "description": "The service the caller asked for, in the salon's own words.",
+              "enum": [
+                "haircut",
+                "haircolor",
+                "haircut_and_haircolor",
+                "dry_cut"
+              ],
+              "title": "Appointment Type",
+              "type": "string"
+            },
+            "action": {
+              "description": "What this call did to this appointment.",
+              "enum": [
+                "create",
+                "modify",
+                "cancel"
+              ],
+              "title": "Action",
+              "type": "string"
+            },
+            "booking_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The diary's own id for the booking, once one exists. Absent while the caller is still choosing a time.",
+              "title": "Booking Id"
+            }
+          },
+          "required": [
+            "scheduled_date",
+            "scheduled_time",
+            "appointment_type",
+            "action"
+          ],
+          "title": "Appointment",
+          "type": "object"
+        },
+        "Complaint": {
+          "description": "One thing the caller is unhappy about.",
+          "properties": {
+            "complaint_id": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+              "title": "Complaint Id",
+              "type": "string"
+            },
+            "reason": {
+              "description": "What the complaint is about, in the salon's own categories.",
+              "enum": [
+                "service_quality",
+                "waiting_time",
+                "price",
+                "staff",
+                "other"
+              ],
+              "title": "Reason",
+              "type": "string"
+            },
+            "about": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Appointment"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The appointment the complaint concerns, when it concerns one. A complaint about the salon in general has none."
+            },
+            "resolution": {
+              "description": "What was offered or done about it on this call. Three of these are offers and not outcomes: a refund offered is not a refund approved, a rebooking offered is not a rebooking confirmed, and escalated means somebody will look, not that they agreed. Only what a tool did is done. Say this value out loud in the tense it is written in.",
+              "enum": [
+                "refund_offered",
+                "rebooking_offered",
+                "escalated",
+                "noted"
+              ],
+              "title": "Resolution",
+              "type": "string"
+            }
+          },
+          "required": [
+            "complaint_id",
+            "reason",
+            "resolution"
+          ],
+          "title": "Complaint",
+          "type": "object"
+        },
+        "Contact": {
+          "description": "A person's name and email address, held as two separate parts.\n\nTwo fields rather than Pydantic's NameEmail, which is one string: a prompt\ncan then use the name without saying the address out loud.",
+          "properties": {
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "email": {
+              "format": "email",
+              "title": "Email",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "email"
+          ],
+          "title": "Contact",
+          "type": "object"
+        }
+      },
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "stylist_note": {
+          "default": "",
+          "description": "What the caller asked to pass on to their stylist, in their own words.",
+          "title": "Stylist Note",
+          "type": "string"
+        },
+        "today_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Today's date in the salon's timezone, in YYYY-MM-DD form.",
+          "title": "Today Date"
+        },
+        "complaints": {
+          "default": [],
+          "description": "Complaints recorded during this call.",
+          "items": {
+            "$ref": "#/$defs/Complaint"
+          },
+          "title": "Complaints",
+          "type": "array"
+        },
+        "customer_phone": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The phone number the caller agreed to use, in E.164 form.",
+          "title": "Customer Phone"
+        },
+        "customer_name": {
+          "default": "",
+          "description": "The name returned by the customer lookup.",
+          "title": "Customer Name",
+          "type": "string"
+        },
+        "customer_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The customer ID returned by the customer lookup.",
+          "title": "Customer Id"
+        },
+        "customer_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "existing",
+                "created",
+                "invalid"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether the customer was found, created, or invalid.",
+          "title": "Customer Status"
+        },
+        "appointment_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The exact appointment ID returned by the booking tool.",
+          "title": "Appointment Id"
+        },
+        "appointment_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The exact date selected with the caller.",
+          "title": "Appointment Date"
+        },
+        "appointment_time": {
+          "anyOf": [
+            {
+              "format": "time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The exact time selected with the caller.",
+          "title": "Appointment Time"
+        },
+        "appointment_slot_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The exact slot ID returned by availability, including its separators.",
+          "title": "Appointment Slot Id"
+        },
+        "appointment_service": {
+          "anyOf": [
+            {
+              "enum": [
+                "haircut",
+                "haircolor",
+                "haircut_and_haircolor",
+                "dry_cut"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The service selected with the caller.",
+          "title": "Appointment Service"
+        },
+        "confirmation_contact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Contact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who the confirmation goes to, name and address held apart, so a prompt can name the person without reading their address out loud. Here to find what only a real call finds: whether a model can turn a spelled-out address into the written form on the first try, and whether the refusal it gets back when it cannot is one it can correct itself from."
+        },
+        "confirmation_email": {
+          "anyOf": [
+            {
+              "format": "email",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The address on its own, taken off confirmation_contact rather than asked for twice.",
+          "title": "Confirmation Email"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

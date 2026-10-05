@@ -54,7 +54,7 @@ func TestManifestCreateAndUse(t *testing.T) {
 			args = append(args, "--editor")
 		}
 		cmd.SetArgs(args)
-		err := cmd.Execute()
+		err := cmd.ExecuteContext(recordedCtx(t))
 		return out.String(), err
 	}
 	if _, err := run("manifest", "create", "acme"); err != nil {
@@ -100,7 +100,7 @@ func TestManifestInvalidEditorDraftIsKept(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetArgs([]string{"manifest", "create", "invalid", "--editor"})
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(recordedCtx(t))
 	if err == nil || !strings.Contains(err.Error(), "draft kept at ") {
 		t.Fatalf("invalid draft: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestManifestEditorFailureKeepsDraft(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetArgs([]string{"manifest", "create", "acme", "--editor"})
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(recordedCtx(t))
 	if err == nil || !strings.Contains(err.Error(), "editor failed; draft kept at ") {
 		t.Fatalf("editor failure: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestGuidedManifestCreateEditAndCopies(t *testing.T) {
 		cmd.SetErr(&out)
 		cmd.SetIn(strings.NewReader(input))
 		cmd.SetArgs(args)
-		err := cmd.Execute()
+		err := cmd.ExecuteContext(recordedCtx(t))
 		return out.String(), err
 	}
 	if out, err := run("acme\n1\n8\n2\n", "manifest", "create"); err != nil {
@@ -251,7 +251,7 @@ func TestExternalEditorRepairsInvalidManifest(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs([]string{"manifest", "edit", "acme", "--editor"})
-	if err := cmd.Execute(); err != nil {
+	if err := cmd.ExecuteContext(recordedCtx(t)); err != nil {
 		t.Fatalf("repair: %v\n%s", err, out.String())
 	}
 	saved, err := store.Load("acme")

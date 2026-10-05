@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/scaffold"
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -228,20 +231,14 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			}
 		}
 	}
-	// Shapes first, in the order the author wrote them: it is a list, so the
-	// order is the author's and nothing here sorts it.
-	for _, shape := range pkg.Agent.Shapes {
-		data.Shapes = append(data.Shapes, scaffold.Shape{
-			Name: shape.Name, Description: shape.Description, Fields: shapeFields(shape.Fields),
-		})
-	}
-	for name, variable := range pkg.Agent.Variables {
+	// state.py is the author's, and the console writes it back as it read it.
+	// Only the variables: entries are carried beside it, in the author's order.
+	data.State = pkg.StateSource
+	for _, variable := range pkg.Agent.Variables {
 		data.Variables = append(data.Variables, scaffold.Variable{
-			Name: name, Type: variable.Type, Default: jsonText(variable.Default), Source: variable.Source,
-			Confirm: variable.Confirm, Description: variable.Description,
+			Name: variable.Name, Source: variable.Source, Confirm: variable.Confirm,
 		})
 	}
-	sort.Slice(data.Variables, func(i, j int) bool { return data.Variables[i].Name < data.Variables[j].Name })
 
 	for _, name := range agentNames {
 		definition := pkg.Agent.Agents[name]
@@ -504,20 +501,6 @@ func jsonText(value any) string {
 	return string(encoded)
 }
 
-// pairsText flattens an authored pair list into the JSON object the console
-// carries it as. Order is the author's, which the console does not preserve
-// anyway: it writes the pairs back sorted by key.
-// shapeFields carries an authored field list, a shape's or an expect: list,
-// into the console's own shape of it: the same three keys, so both authored
-// forms are written back the way they were read.
-func shapeFields(fields []packagespec.Field) []scaffold.ShapeField {
-	out := make([]scaffold.ShapeField, 0, len(fields))
-	for _, field := range fields {
-		out = append(out, scaffold.ShapeField{Name: field.Name, Type: field.Type, Description: field.Description})
-	}
-	return out
-}
-
 func boolValue(value *bool) bool { return value != nil && *value }
 
 func roundTripLosses(original *packagespec.Package, data scaffold.Data) ([]string, error) {
@@ -551,6 +534,9 @@ func roundTripLosses(original *packagespec.Package, data scaffold.Data) ([]strin
 		if rendered.Markdown[path] != content {
 			losses = append(losses, path+": content")
 		}
+	}
+	if !bytes.Equal(original.StateSource, rendered.StateSource) {
+		losses = append(losses, packagespec.StateFile+": content")
 	}
 	for path, content := range original.Handlers {
 		renderedContent, ok := rendered.Handlers[path]
@@ -700,6 +686,9 @@ func validateMaintained(path string) error {
 func maintainedWarnings(path string) ([]string, error) {
 	pkg, err := packagespec.Load(path)
 	if err != nil {
+		return nil, err
+	}
+	if err := pkg.ReadState(context.Background(), stateschema.UV{}); err != nil {
 		return nil, err
 	}
 	agent, err := ir.Build(pkg)

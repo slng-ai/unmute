@@ -1,0 +1,33 @@
+{
+  "source": "internal/testdata/summary_core/state.py",
+  "digest": "4b8584d0b98e19419617deb541135aae767b6379c269eaba79227450139771c1",
+  "report": {
+    "schema": {
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "customer_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Customer Id"
+        },
+        "verified": {
+          "default": false,
+          "title": "Verified",
+          "type": "boolean"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

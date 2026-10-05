@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -8,13 +9,16 @@ import (
 	"testing"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 )
 
 // finishPackage writes the smallest package that holds a task, a tool with a
 // declared output, and a variable to save into. Every case here is about what
 // the compiler reads out of a real tool file, so the fixture writes one rather
-// than building a Tool struct by hand.
-func finishPackage(t *testing.T, variables, task, output string) *packagespec.Package {
+// than building a Tool struct by hand. state is what state.py would declare,
+// built in Go so no test runs Python, and entries are the `variables:` list
+// items for the fields that need source: or confirm:.
+func finishPackage(t *testing.T, state []stateschema.Field, entries, task, output string) *packagespec.Package {
 	t.Helper()
 	root := t.TempDir()
 	write := func(name, content string) {
@@ -35,7 +39,7 @@ entry_agent: desk
 secrets:
   - OPENAI_API_KEY
 
-`+variables+`
+`+variablesYAML(entries)+`
 agents:
   desk:
     instructions: instructions.md
@@ -83,11 +87,36 @@ capacity:
 	write("tools/book_it.yaml", "description: Book one appointment.\n\ninput:\n  type: object\n  properties:\n    when:\n      type: string\n  required:\n    - when\n\noutput:\n"+output+"\nlocal:\n  handler: tools/salon.py\n\neffect: returns_data\n")
 	write("tools/look_up.yaml", "description: Read the diary.\n\ninput:\n  type: object\n  properties: {}\n\noutput:\n  type: object\n  properties:\n    status:\n      type: string\n      enum:\n        - found\n  required:\n    - status\n\nlocal:\n  handler: tools/salon.py\n\neffect: returns_data\n")
 	write("tools/salon.py", "def book_it(when: str) -> dict:\n    return {\"status\": \"booked\", \"reference\": when}\n\n\ndef look_up() -> dict:\n    return {\"status\": \"found\"}\n")
-	pkg, err := packagespec.Load(root)
+	pkg, err := loadRecorded(root)
 	if err != nil {
 		t.Fatalf("the fixture itself does not load: %v", err)
 	}
+	withState(pkg, state...)
 	return pkg
+}
+
+func variablesYAML(entries string) string {
+	if entries == "" {
+		return ""
+	}
+	return "variables:\n" + entries + "\n"
+}
+
+// bookingReference is `booking_reference: str = ""`, the one value most cases
+// here save into.
+var bookingReference = stateschema.Field{
+	Name: "booking_reference", Description: "The reference of the booking just made.",
+	Type: stringType, Default: json.RawMessage(`""`),
+}
+
+// bookingState is `booking: Booking | None = None`, Booking holding a reference
+// and a service.
+var bookingState = stateschema.Field{
+	Name: "booking", Description: "The booking just made.", Default: json.RawMessage("null"),
+	Type: &stateschema.Type{Kind: stateschema.KindObject, Nullable: true, Model: "Booking", Fields: []stateschema.Field{
+		{Name: "reference", Type: stringType, Required: true},
+		{Name: "service", Type: stringType, Required: true},
+	}},
 }
 
 const finishOKOutput = `  type: object
@@ -104,18 +133,10 @@ const finishOKOutput = `  type: object
     - reference
 `
 
-const finishVariables = `variables:
-  booking_reference:
-    type: str
-    default: ""
-    description: The reference of the booking just made.
-
-`
-
 // A step that ends on its tool compiles, and the resolved entry carries the
 // tool and the values that mean success.
 func TestBuildLowersFinish(t *testing.T) {
-	pkg := finishPackage(t, finishVariables, `      - name: take_booking
+	pkg := finishPackage(t, []stateschema.Field{bookingReference}, "", `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
@@ -199,7 +220,7 @@ func TestBuildRefusesAFinishEntryItWouldDrop(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pkg := finishPackage(t, finishVariables, `      - name: take_booking
+			pkg := finishPackage(t, []stateschema.Field{bookingReference}, "", `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
@@ -235,7 +256,7 @@ func TestBuildKeepsEveryAlternativeOnOneField(t *testing.T) {
     - status
     - reference
 `
-	pkg := finishPackage(t, finishVariables, `      - name: take_booking
+	pkg := finishPackage(t, []stateschema.Field{bookingReference}, "", `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
@@ -272,15 +293,15 @@ func TestBuildKeepsEveryAlternativeOnOneField(t *testing.T) {
 // an author finds out.
 func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		variables string
-		task      string
-		output    string
-		phrases   []string
+		name    string
+		state   []stateschema.Field
+		task    string
+		output  string
+		phrases []string
 	}{
 		{
-			name:      "a tool the task does not hold",
-			variables: finishVariables,
+			name:  "a tool the task does not hold",
+			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
@@ -300,8 +321,8 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 			// propertyResultField types an output as text unless the schema
 			// says integer, number or boolean, so an object read as text and
 			// passed, and the mismatch surfaced after the business tool ran.
-			name:      "an object output on a plain destination",
-			variables: finishVariables,
+			name:  "an object output on a plain destination",
+			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
@@ -330,11 +351,11 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
     - status
     - reference
 `,
-			phrases: []string{"book_it", "reference", "object", "one plain value"},
+			phrases: []string{"book_it returns reference as object", "the value is an object and the destination is str"},
 		},
 		{
-			name:      "an array output on a plain destination",
-			variables: finishVariables,
+			name:  "an array output on a plain destination",
+			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
@@ -362,11 +383,11 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
     - status
     - reference
 `,
-			phrases: []string{"book_it", "reference", "array", "one plain value"},
+			phrases: []string{"book_it returns reference as array", "the destination is str"},
 		},
 		{
-			name:      "a success field with no enum",
-			variables: finishVariables,
+			name:  "a success field with no enum",
+			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
@@ -383,8 +404,8 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 			phrases: []string{"reference on book_it has no enum", "give the output property an enum:"},
 		},
 		{
-			name:      "a success value outside the enum",
-			variables: finishVariables,
+			name:  "a success value outside the enum",
+			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
@@ -401,8 +422,8 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 			phrases: []string{"book_it never returns status: done", "booked, slot_unavailable"},
 		},
 		{
-			name:      "a tool that does not return what assign saves",
-			variables: finishVariables,
+			name:  "a tool that does not return what assign saves",
+			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
@@ -427,8 +448,8 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 			phrases: []string{"book_it returns no reference", "every tool under finish:"},
 		},
 		{
-			name:      "a result field of the wrong type",
-			variables: finishVariables,
+			name:  "a result field of the wrong type",
+			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
@@ -453,24 +474,11 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
     - status
     - reference
 `,
-			phrases: []string{"book_it returns reference as integer", "the variable is str"},
+			phrases: []string{"book_it returns reference as integer", "the value is int and the destination is str"},
 		},
 		{
-			name: "an object where the shape declares a field the tool omits",
-			variables: `shapes:
-  - name: Booking
-    fields:
-      - name: reference
-        type: str
-      - name: service
-        type: str
-
-variables:
-  booking:
-    type: Booking | None
-    description: The booking just made.
-
-`,
+			name:  "an object where the shape declares a field the tool omits",
+			state: []stateschema.Field{bookingState},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
@@ -497,11 +505,11 @@ variables:
   required:
     - status
 `,
-			phrases: []string{"book_it returns booking without service", "the shape Booking declares it"},
+			phrases: []string{"book_it returns booking as object", "the value has no service, which Booking | None requires"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pkg := finishPackage(t, tc.variables, tc.task, tc.output)
+			pkg := finishPackage(t, tc.state, "", tc.task, tc.output)
 			_, err := Build(pkg)
 			if err == nil {
 				t.Fatal("want a refusal")
@@ -521,20 +529,7 @@ variables:
 // A shaped object the tool does return, field for field, compiles: this is the
 // salon's own booking, and it is the case the object walk exists to allow.
 func TestBuildAcceptsAShapedTerminalResult(t *testing.T) {
-	pkg := finishPackage(t, `shapes:
-  - name: Booking
-    fields:
-      - name: reference
-        type: str
-      - name: service
-        type: str
-
-variables:
-  booking:
-    type: Booking | None
-    description: The booking just made.
-
-`, `      - name: take_booking
+	pkg := finishPackage(t, []stateschema.Field{bookingState}, "", `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
@@ -643,19 +638,10 @@ func TestBuildMarksAWithdrawingTask(t *testing.T) {
 // skip variable, so each refusal is checked against a real file.
 func skipPackage(t *testing.T, skip, on string) *packagespec.Package {
 	t.Helper()
-	variables := `variables:
-  booking_reference:
-    type: str
-    default: ""
-    description: The reference of the booking just made.
-
-  confirmed_phone:
-    type: str
-    default: ""
-    confirm: take_booking
-    description: The number the caller agreed to.
-
-`
+	state := []stateschema.Field{bookingReference, {
+		Name: "confirmed_phone", Description: "The number the caller agreed to.", Type: stringType, Default: json.RawMessage(`""`),
+	}}
+	entries := "  - name: confirmed_phone\n    confirm: take_booking\n"
 	steps := "      - " + map[bool]string{true: "task: take_booking\n        skip_when_confirmed: " + skip, false: "take_booking"}[on == "take_booking"] + "\n" +
 		"      - " + map[bool]string{true: "task: second_step\n        skip_when_confirmed: " + skip, false: "second_step"}[on == "second_step"] + "\n"
 	task := `      - name: take_booking
@@ -675,7 +661,7 @@ func skipPackage(t *testing.T, skip, on string) *packagespec.Package {
     task_groups:
       - book
 `
-	pkg := finishPackage(t, variables, task, finishOKOutput)
+	pkg := finishPackage(t, state, entries, task, finishOKOutput)
 	source, err := os.ReadFile(filepath.Join(pkg.Root, "agent.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -684,9 +670,10 @@ func skipPackage(t *testing.T, skip, on string) *packagespec.Package {
 	if err := os.WriteFile(filepath.Join(pkg.Root, "agent.yaml"), []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err := packagespec.Load(pkg.Root)
+	reloaded, err := loadRecorded(pkg.Root)
 	if err != nil {
 		t.Fatalf("the fixture itself does not load: %v", err)
 	}
+	withState(reloaded, state...)
 	return reloaded
 }

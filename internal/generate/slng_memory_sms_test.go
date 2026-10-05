@@ -107,7 +107,7 @@ func TestSlngAnnouncesEveryKindOfToolIncludingABuiltin(t *testing.T) {
 		tool.Announce = []string{"One moment."}
 		pkg.Tools[name] = tool
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestSlngBuiltinInjectIsConfigNotAnArgumentForTheDeploy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

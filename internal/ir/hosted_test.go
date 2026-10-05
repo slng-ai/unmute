@@ -37,7 +37,7 @@ func TestHostedDigestAlgorithmIsPinned(t *testing.T) {
 // slng target reads nowhere.
 func hostedFixture(t *testing.T, fixture string) (*Agent, []Target) {
 	t.Helper()
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", fixture))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", fixture))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestHostedFixtureMirrorsAreWhatThePullWrote(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			pkg, err := packagespec.Load(root)
+			pkg, err := loadRecorded(root)
 			if err != nil {
 				t.Fatal(err)
 			}

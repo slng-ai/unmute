@@ -60,13 +60,9 @@ func validateTwilioTarget(agent *Agent, resolved Target, row *TargetValidation) 
 		refuse("emits no handoff, transfer or delegate control, and this package declares %s: remove them, or compile to livekit or pipecat",
 			strings.Join(sortedKeys(agent.Controls), ", "))
 	}
-	if len(agent.Variables) > 0 {
-		refuse("has no session state, and this package declares variables (%s): remove them and say the facts in the instructions, or compile to livekit or pipecat",
-			strings.Join(sortedKeys(agent.Variables), ", "))
-	}
-	if len(agent.Shapes) > 0 {
-		refuse("has no session state, so shapes (%s) have nothing to describe: remove them, or compile to livekit or pipecat",
-			strings.Join(sortedKeys(agent.Shapes), ", "))
+	if agent.State != nil {
+		refuse("has no session state, and this package declares one in state.py (%s): remove it and say the facts in the instructions, or compile to livekit or pipecat",
+			strings.Join(agent.VariableOrder, ", "))
 	}
 	validateTwilioChannels(agent, refuse)
 	validateTwilioConversation(agent, refuse)

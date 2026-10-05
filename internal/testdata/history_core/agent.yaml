@@ -81,14 +81,6 @@ handoffs:
     context:
       history: reset
 
-variables:
-  caller_phone:
-    type: string
-    default: ""
-  verified:
-    type: boolean
-    default: false
-
 models:
   think:
     fast_reasoning:

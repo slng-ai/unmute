@@ -48,11 +48,11 @@ os.environ.pop("UNMUTE_CALL_FACTS", None)
 
 agent = _project("agent")
 
-state = agent.Userdata()
+state = agent.CallState()
 
 
 def fresh():
-    return agent.Userdata()
+    return agent.CallState()
 
 
 # 1. Resolved. The clock always reads, so this is the entry that proves the block
@@ -60,12 +60,12 @@ def fresh():
 resolved = fresh()
 asyncio.run(agent._prefetch(resolved, None))
 assert resolved.today_date, "the clock entry resolved nothing"
-assert len(resolved.today_date) == 10, resolved.today_date
-assert resolved.today_date.count("-") == 2, resolved.today_date
+assert len(str(resolved.today_date)) == 10, resolved.today_date
+assert str(resolved.today_date).count("-") == 2, resolved.today_date
 
 # 2. Skipped, twice over: no call context, so the caller entry has nothing to read,
 #    and the profile entry that reads what it would have assigned skips with it.
-assert resolved.customer_phone == "", resolved.customer_phone
+assert not resolved.customer_phone, resolved.customer_phone
 assert resolved.customer_name == "", resolved.customer_name
 assert resolved._unconfirmed == {"customer_phone", "customer_name", "customer_id"}, resolved._unconfirmed
 
@@ -85,7 +85,7 @@ assert "customer_phone" in seeded._unconfirmed, seeded._unconfirmed
 for withheld in ("", "anonymous", "ANONYMOUS", "+266696687", "+8628245225"):
     hidden = fresh()
     asyncio.run(agent._prefetch(hidden, {"from_number": withheld}))
-    assert hidden.customer_phone == "", (withheld, hidden.customer_phone)
+    assert not hidden.customer_phone, (withheld, hidden.customer_phone)
     assert hidden._unconfirmed == {"customer_phone", "customer_name", "customer_id"}, (withheld, hidden._unconfirmed)
 
 # And a real number is still a real number, including one that begins with the
@@ -166,7 +166,7 @@ def fresh():
 resolved = fresh()
 asyncio.run(bot._prefetch(resolved, None))
 assert resolved.today_date, "the clock entry resolved nothing"
-assert resolved.customer_phone == "", resolved.customer_phone
+assert not resolved.customer_phone, resolved.customer_phone
 assert resolved._unconfirmed == {"customer_phone", "customer_name", "customer_id"}, resolved._unconfirmed
 
 seeded = fresh()
@@ -227,10 +227,10 @@ agent = _project("agent")
 # the wrong zone would agree with itself and pass.
 declared = ZoneInfo("Europe/Madrid")
 
-state = agent.Userdata()
+state = agent.CallState()
 asyncio.run(agent._prefetch(state, None))
 now = datetime.now(declared)
-assert state.booking_date == now.date().isoformat(), state.booking_date
+assert state.booking_date == now.date(), state.booking_date
 # The weekday names the day the date lands on. Only a real reading can show this:
 # a compile-time test sees the expression, not that indexing the spelled-out tuple
 # with weekday() lines up, and the tuple exists because strftime("%A") follows the
@@ -239,15 +239,15 @@ assert state.booking_weekday == agent._PREFETCH_DAYS[now.weekday()], state.booki
 
 # The seed fills what the carrier did not.
 os.environ["UNMUTE_CALL_FACTS"] = json.dumps({"from_number": "+34600111222"})
-seeded = agent.Userdata()
+seeded = agent.CallState()
 asyncio.run(agent._prefetch(seeded, None))
 assert seeded.customer_phone == "+34600111222", seeded.customer_phone
 
 # And loses to what it did. This is the one that matters: a stale value left in a
 # .env must not quietly replace a real caller's number.
-carrier = agent.Userdata()
-asyncio.run(agent._prefetch(carrier, {"from_number": "+34999888777"}))
-assert carrier.customer_phone == "+34999888777", carrier.customer_phone
+carrier = agent.CallState()
+asyncio.run(agent._prefetch(carrier, {"from_number": "+34600999888"}))
+assert carrier.customer_phone == "+34600999888", carrier.customer_phone
 
 os.environ.pop("UNMUTE_CALL_FACTS", None)
 
@@ -262,7 +262,7 @@ func provenanceFixture(agent *ir.Agent) {
 	agent.Prefetch = append(agent.Prefetch, ir.Prefetch{Name: "related_record", Tool: "lookup_customer", Inputs: []string{"caller_name"}, Args: []ir.Pair{{Key: "email", Value: "{{caller_name}}"}}, Assign: []ir.Pair{{Key: "customer_id", Value: "result.customer_id"}}, Confirm: "verify_caller"})
 }
 func TestSmokeConfirmationProvenanceLiveKit(t *testing.T) {
-	runLiveKitSmokeScript(t, "prefetch_core", nil, provenanceFixture, provenanceScript("agent", "Userdata()"))
+	runLiveKitSmokeScript(t, "prefetch_core", nil, provenanceFixture, provenanceScript("agent", "CallState()"))
 }
 func TestSmokeConfirmationProvenancePipecat(t *testing.T) {
 	runPipecatSmokeScript(t, "prefetch_core", nil, provenanceFixture, provenanceScript("bot", "build_state()"))
@@ -275,33 +275,33 @@ generated = _project("` + module + `")
 state=generated.` + state + `
 def snapshot(s): return deepcopy((vars(s),s._unconfirmed,s._prefetch_provenance))
 def seed():
-    generated._save_batch(state,{"caller_phone":"+34600111222"},inputs=())
-    generated._save_batch(state,{"caller_name":"OLD_PROFILE"},inputs=("caller_phone",))
-    generated._save_batch(state,{"customer_id":"OLD_RELATED"},inputs=("caller_name",))
-    generated._save_batch(state,{"booking_date":"2026-09-06"},inputs=())
+    state.save_batch({"caller_phone":"+34600111222"},inputs=())
+    state.save_batch({"caller_name":"OLD_PROFILE"},inputs=("caller_phone",))
+    state.save_batch({"customer_id":"OLD_RELATED"},inputs=("caller_name",))
+    state.save_batch({"booking_date":"2026-09-06"},inputs=())
 seed()
-assert generated._prompt_value(state,"caller_name")[1] is None
-assert generated._prompt_value(state,"caller_name","task:verify_caller")[1]=="OLD_PROFILE"
-generated._save_result("verify_caller",state,{"caller_phone":"+34600111222"})
-assert generated._prompt_value(state,"caller_name")[1]=="OLD_PROFILE"
-assert generated._prompt_value(state,"customer_id")[1]=="OLD_RELATED"
-generated._save_result("verify_caller",state,{"caller_phone":"+34600999888"})
-assert state.caller_name==generated._default(state,"caller_name") and state.customer_id==generated._default(state,"customer_id")
-assert state.booking_date=="2026-09-06"
+assert generated.CallState.render(state, "caller_name") == generated.CallState.EMPTY_TEXT
+assert generated.CallState.render(state, "caller_name", "task:verify_caller")=="OLD_PROFILE"
+state.save_result("verify_caller", {"caller_phone":"+34600111222"})
+assert generated.CallState.render(state, "caller_name")=="OLD_PROFILE"
+assert generated.CallState.render(state, "customer_id")=="OLD_RELATED"
+state.save_result("verify_caller", {"caller_phone":"+34600999888"})
+assert state.caller_name==state.initial_value("caller_name") and state.customer_id==state.initial_value("customer_id")
+assert str(state.booking_date)=="2026-09-06"
 seed()
 before=snapshot(state)
-try: generated._save_batch(state,{"caller_phone":"+34600999888","verified":"invalid"},step="verify_caller")
-except generated._StateRefused: pass
+try: state.save_batch({"caller_phone":"+34600999888","verified":"invalid"},step="verify_caller")
+except generated.StateRefused: pass
 else: raise AssertionError("invalid batch saved")
 assert snapshot(state)==before
 # Explicit replacements in the same valid batch survive input invalidation.
-generated._save_batch(state,{"caller_phone":"+34600999888","caller_name":"NEW_PROFILE"},step="verify_caller")
-assert state.caller_name=="NEW_PROFILE" and state.customer_id==generated._default(state,"customer_id")
+state.save_batch({"caller_phone":"+34600999888","caller_name":"NEW_PROFILE"},step="verify_caller")
+assert state.caller_name=="NEW_PROFILE" and state.customer_id==state.initial_value("customer_id")
 assert "caller_name" not in state._prefetch_provenance
 # Another writer is not agreement, even when it repeats an agreed value.
-generated._save_batch(state,{"caller_phone":"+34600999888"},step="another_task")
-assert generated._prompt_value(state,"caller_phone")[1] is None
-assert generated._prompt_value(state,"caller_name")[1] is None
+state.save_batch({"caller_phone":"+34600999888"},step="another_task")
+assert generated.CallState.render(state, "caller_phone") == generated.CallState.EMPTY_TEXT
+assert generated.CallState.render(state, "caller_name") == generated.CallState.EMPTY_TEXT
 fresh=generated.` + state + `
 assert fresh._unconfirmed is not state._unconfirmed
 assert not getattr(fresh,"_prefetch_provenance",{})
@@ -319,7 +319,7 @@ func deadlineFixture(agent *ir.Agent) {
 	}
 }
 func TestSmokePrefetchDeadlineLiveKit(t *testing.T) {
-	runLiveKitSmokeScript(t, "salon-concierge-v3", nil, deadlineFixture, deadlineScript("agent", "Userdata()"))
+	runLiveKitSmokeScript(t, "salon-concierge-v3", nil, deadlineFixture, deadlineScript("agent", "CallState()"))
 }
 func TestSmokePrefetchDeadlinePipecat(t *testing.T) {
 	runPipecatSmokeScript(t, "salon-concierge-v3", nil, deadlineFixture, deadlineScript("bot", "build_state()"))

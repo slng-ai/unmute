@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -16,7 +17,7 @@ import (
 // to run, a task an agent runs so confirm: has a step to name, and a timezone.
 func loadPrefetchCore(t *testing.T) *packagespec.Package {
 	t.Helper()
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "prefetch_core"))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", "prefetch_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +98,7 @@ func TestBuildPrefetchReadsTwoZones(t *testing.T) {
 		"  - name: caller\n    source: from_number\n",
 		"  - name: opening\n    clock: now\n    timezone: America/New_York\n    assign:\n"+
 			"      - customer_id: result.date\n\n  - name: caller\n    source: from_number\n")
-	pkg, err := packagespec.Load(dir)
+	pkg, err := loadRecorded(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +136,7 @@ func TestBuildPrefetchTakesEitherAnswerToWrites(t *testing.T) {
 			if tc.want {
 				dir = writePatchedPrefetchCore(t, "    writes: false\n", tc.to)
 			}
-			pkg, err := packagespec.Load(dir)
+			pkg, err := loadRecorded(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -192,7 +193,7 @@ func TestBuildPrefetchGivesAVariableASessionStartValue(t *testing.T) {
 func patchPrefetchCore(t *testing.T, from, to string) error {
 	t.Helper()
 	dir := writePatchedPrefetchCore(t, from, to)
-	pkg, err := packagespec.Load(dir)
+	pkg, err := loadRecorded(dir)
 	if err != nil {
 		return err
 	}
@@ -273,7 +274,7 @@ func TestBuildPrefetchRefusesTheShape(t *testing.T) {
 			name: "rule 4: assign names an undeclared variable",
 			from: "      - booking_date: result.date",
 			to:   "      - bookng_date: result.date",
-			want: []string{"assigns bookng_date", "not a declared variable", "variables: block"},
+			want: []string{"assigns bookng_date", "State in state.py does not declare", "Declare it there as a field"},
 		},
 		{
 			name: "rule 5: assign names a field the source does not produce",
@@ -436,9 +437,9 @@ func TestBuildPrefetchRefusesTheSource(t *testing.T) {
 		},
 		{
 			name: "rule 13: args name an undeclared variable",
-			from: `      - phone: "{{caller_phone}}"`,
-			to:   `      - phone: "{{callr_phone}}"`,
-			want: []string{"reads {{callr_phone}}", "not a declared variable"},
+			from: `      - phone: "{{state.caller_phone}}"`,
+			to:   `      - phone: "{{state.callr_phone}}"`,
+			want: []string{"reads {{callr_phone}}", "State in state.py does not declare"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -468,7 +469,7 @@ func TestBuildPrefetchRefusesABackwardsOrder(t *testing.T) {
 
 	t.Run("caller below profile is refused", func(t *testing.T) {
 		caller := "  - name: caller\n    source: from_number\n    assign:\n      - caller_phone: result.value\n\n"
-		profile := "  - name: profile\n    tool: lookup_customer\n    # This lookup reads. The key is required either way: the compiler cannot\n    # check either answer, so it makes the author state one.\n    writes: false\n    args:\n      - phone: \"{{caller_phone}}\"\n    assign:\n      - caller_name: result.name\n"
+		profile := "  - name: profile\n    tool: lookup_customer\n    # This lookup reads. The key is required either way: the compiler cannot\n    # check either answer, so it makes the author state one.\n    writes: false\n    args:\n      - phone: \"{{state.caller_phone}}\"\n    assign:\n      - caller_name: result.name\n"
 		err := patchPrefetchCore(t, caller+profile, profile+"\n"+caller)
 		if err == nil {
 			t.Fatal("a backwards list was accepted, so the file's visible order is not the agent's")
@@ -495,7 +496,7 @@ func TestBuildPrefetchRefusesConfirmation(t *testing.T) {
 	t.Run("an unconfirmed value may be referenced in the greeting", func(t *testing.T) {
 		err := patchPrefetchCore(t,
 			`    text: "Hi, you have reached Acme Support. How can I help you today?"`,
-			`    text: "Hi, calling from {{caller_phone}}?"`)
+			`    text: "Hi, calling from {{state.caller_phone}}?"`)
 		if err != nil {
 			t.Fatalf("a legal reference was refused: %v", err)
 		}
@@ -508,10 +509,10 @@ func TestBuildPrefetchRefusesConfirmation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, append(body, []byte("\n\nThe caller is on {{caller_phone}}.\n")...), 0o600); err != nil {
+		if err := os.WriteFile(path, append(body, []byte("\n\nThe caller is on {{state.caller_phone}}.\n")...), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		pkg, err := packagespec.Load(dir)
+		pkg, err := loadRecorded(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -522,17 +523,15 @@ func TestBuildPrefetchRefusesConfirmation(t *testing.T) {
 
 	t.Run("rule 17: two inputs confirmed by different steps", func(t *testing.T) {
 		dir := writePatchedPrefetchCore(t,
-			"      - phone: \"{{caller_phone}}\"",
-			"      - phone: \"{{caller_phone}}\"\n      - account: \"{{customer_id}}\"")
-		pkg, err := packagespec.Load(dir)
+			"      - phone: \"{{state.caller_phone}}\"",
+			"      - phone: \"{{state.caller_phone}}\"\n      - account: \"{{state.customer_id}}\"")
+		pkg, err := loadRecorded(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
 		// A second confirming step, reached from intake's own tasks: list, so rule
 		// 15 passes and rule 17 is the one that fires.
-		variable := pkg.Agent.Variables["customer_id"]
-		variable.Confirm = "verify_account"
-		pkg.Agent.Variables["customer_id"] = variable
+		setConfirm(pkg, "customer_id", "verify_account")
 		task := pkg.Tasks["verify_caller"]
 		task.Name, task.When = "verify_account", "Confirm the account."
 		task.Assign = append(task.Assign, packagespec.Pair{Key: "customer_id", Value: "result.customer_id"})
@@ -577,7 +576,7 @@ func TestValidatePrefetchWarnsOnARouteThatSuppliesNoCallFact(t *testing.T) {
 	// at all. session_id is a compile-time literal on LiveKit and is deliberately
 	// not granted on either Pipecat route, so it is the honest subject today.
 	dir := writePatchedPrefetchCore(t, "    source: from_number\n", "    source: session_id\n")
-	pkg, err := packagespec.Load(dir)
+	pkg, err := loadRecorded(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -657,7 +656,7 @@ func TestValidatePrefetchWarnsWhenTheFactIsSuppliedTheOtherWay(t *testing.T) {
 			if tc.source != "from_number" {
 				dir = writePatchedPrefetchCore(t, "    source: from_number\n", "    source: "+tc.source+"\n")
 			}
-			pkg, err := packagespec.Load(dir)
+			pkg, err := loadRecorded(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -698,10 +697,10 @@ func TestValidatePrefetchWarnsWhenTheFactIsSuppliedTheOtherWay(t *testing.T) {
 // package validates green on both code targets.
 func TestValidatePrefetchLeavesTheSystemSourceRefusalAlone(t *testing.T) {
 	pkg := loadPrefetchCore(t)
-	for name, variable := range pkg.Agent.Variables {
+	for _, variable := range pkg.Agent.Variables {
 		if variable.Source != "" {
 			t.Errorf("variable %q carries source: %q; the prefetch reads the fact, so no variable has to",
-				name, variable.Source)
+				variable.Name, variable.Source)
 		}
 	}
 	agent, err := Build(pkg)
@@ -770,44 +769,44 @@ func assertRefusal(t *testing.T, err error, want ...string) {
 // declared list holding a string dies with an AttributeError mid-sentence, on
 // the call rather than at compile time.
 func TestBuildPrefetchRefusesAValueWithFields(t *testing.T) {
+	customer := &stateschema.Type{Kind: stateschema.KindObject, Nullable: true, Model: "Customer", Fields: []stateschema.Field{
+		{Name: "phone_number", Type: stringType, Required: true},
+	}}
+	nameEmail := &stateschema.Type{Kind: stateschema.KindObject, Model: "NameEmail", Fields: []stateschema.Field{
+		{Name: "name", Type: stringType, Required: true}, {Name: "email", Type: stringType, Required: true},
+	}}
 	for _, tc := range []struct {
 		name string
-		from string
-		to   string
+		typ  *stateschema.Type
 		want []string
 	}{
 		{
 			// The crash. `caller_name` is what the tool entry assigns, so this
 			// is the whole path: a tool result field into a declared list.
 			name: "a list is filled by the step that produces it",
-			from: "  caller_name:\n    type: string\n    default: \"\"\n",
-			to:   "  caller_name:\n    type: list[string]\n",
+			typ:  listOf(stringType),
 			want: []string{`prefetch "profile" assigns caller_name`, "declared list[str]",
 				"resolves one plain value before the greeting", "from the step that produces it"},
 		},
 		{
-			// The same branch reached through a declared shape rather than a
-			// list, because a shape is the other thing a step hands back whole.
-			name: "a shape is filled by the step that produces it",
-			from: "  caller_name:\n    type: string\n    default: \"\"\n",
-			to: "  caller_name:\n    type: Customer | None\n\n" +
-				"shapes:\n  - name: Customer\n    description: Who the caller is.\n" +
-				"    fields:\n      - phone_number: Phone\n",
+			// The same branch reached through a model rather than a list,
+			// because a model is the other thing a step hands back whole.
+			name: "a model is filled by the step that produces it",
+			typ:  customer,
 			want: []string{"declared Customer | None", "resolves one plain value before the greeting"},
 		},
 		{
-			// And through a shape the compiler supplies, which reaches this
-			// branch only because internal/ir seeds it into the catalog: it is
-			// two fields whichever file declared it, so a pre-fetch handing it
+			// Two fields whichever file declared it, so a pre-fetch handing it
 			// one plain value has nothing to put in the other.
-			name: "a supplied shape is filled by the step that produces it",
-			from: "  caller_name:\n    type: string\n    default: \"\"\n",
-			to:   "  caller_name:\n    type: NameEmail\n",
+			name: "a two-field model is filled by the step that produces it",
+			typ:  nameEmail,
 			want: []string{"declared NameEmail", "resolves one plain value before the greeting"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := patchPrefetchCore(t, tc.from, tc.to)
+			pkg := loadPrefetchCore(t)
+			setFieldType(pkg, "caller_name", tc.typ)
+			_, err := Build(pkg)
 			if err == nil {
 				t.Fatal("a pre-fetch filled a variable declared with fields")
 			}
@@ -816,38 +815,33 @@ func TestBuildPrefetchRefusesAValueWithFields(t *testing.T) {
 	}
 }
 
+// setFieldType replaces the type of one State field, keeping its default.
+func setFieldType(pkg *packagespec.Package, name string, typ *stateschema.Type) {
+	for i := range pkg.State.Fields {
+		if pkg.State.Fields[i].Name == name {
+			pkg.State.Fields[i].Type = typ
+		}
+	}
+}
+
 // The other half, and the one that matters more: the fix must not refuse what a
-// pre-fetch legitimately fills. Shaped text is checked where the value enters
-// the state rather than in the schema the model is sent, so plain text assigns
-// into it, and salon-concierge-v2 declares `customer_phone` exactly this way.
+// pre-fetch legitimately fills. A checked text type is validated where the value
+// enters the state rather than in the schema the model is sent, so plain text
+// assigns into it, and salon-concierge-v2 declares `customer_phone` this way.
 func TestBuildPrefetchFillsShapedText(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		from string
-		to   string
+		name, field, format string
 	}{
-		{
-			name: "a call fact fills a Phone",
-			from: "  caller_phone:\n    type: string\n    default: \"\"\n",
-			to:   "  caller_phone:\n    type: Phone\n    default: \"\"\n",
-		},
-		{
-			name: "the clock fills a Date",
-			from: "  booking_date:\n    type: string\n    default: \"\"\n",
-			to:   "  booking_date:\n    type: Date\n    default: \"\"\n",
-		},
-		{
-			// An EmailStr is one plain value, so a lookup returning an address
-			// fills it. Worth its own case because the check is a library call
-			// rather than a pattern, and the predicate that decides this reads
-			// the kind rather than the check.
-			name: "a lookup fills an EmailStr",
-			from: "  caller_name:\n    type: string\n    default: \"\"\n",
-			to:   "  caller_name:\n    type: EmailStr\n    default: \"\"\n",
-		},
+		{"a call fact fills a Phone", "caller_phone", "phone"},
+		{"the clock fills a Date", "booking_date", "date"},
+		// An EmailStr is one plain value, so a lookup returning an address
+		// fills it.
+		{"a lookup fills an EmailStr", "caller_name", "email"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := patchPrefetchCore(t, tc.from, tc.to); err != nil {
+			pkg := loadPrefetchCore(t)
+			setFieldType(pkg, tc.field, &stateschema.Type{Kind: stateschema.KindString, Format: tc.format})
+			if _, err := Build(pkg); err != nil {
 				t.Fatalf("a pre-fetch was refused a variable it can fill: %v", err)
 			}
 		})
@@ -865,19 +859,17 @@ func TestConfirmationWithoutPrefetch(t *testing.T) {
 		{"later readers legal", "confirm_number", false, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pkg, err := packagespec.Load(filepath.Join("..", "testdata", "typed_state"))
+			pkg, err := loadRecorded(filepath.Join("..", "testdata", "typed_state"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			variable := pkg.Agent.Variables["caller_phone"]
-			variable.Confirm = tc.confirmer
-			pkg.Agent.Variables["caller_phone"] = variable
+			setConfirm(pkg, "caller_phone", tc.confirmer)
 			if tc.removeAssign {
 				task := pkg.Tasks["confirm_number"]
 				task.Assign = nil
 				pkg.Tasks["confirm_number"] = task
 			}
-			pkg.Markdown["instructions.md"] += "\nPhone {{caller_phone}}."
+			pkg.Markdown["instructions.md"] += "\nPhone {{state.caller_phone}}."
 			_, err = Build(pkg)
 			if tc.want == "" {
 				if err != nil {
@@ -897,9 +889,9 @@ func TestPrefetchTracksHiddenDependencies(t *testing.T) {
 			pkg.Agent.Prefetch[2].Args = nil
 			tool := pkg.Tools["lookup_customer"]
 			if site == "inject" {
-				tool.Inject = []packagespec.Pair{{Key: "hidden_phone", Value: "{{caller_phone}}"}}
+				tool.Inject = []packagespec.Pair{{Key: "hidden_phone", Value: "{{state.caller_phone}}"}}
 			} else {
-				tool.Webhook.Path = "/{{caller_phone}}"
+				tool.Webhook.Path = "/{{state.caller_phone}}"
 			}
 			pkg.Tools["lookup_customer"] = tool
 			agent, err := Build(pkg)

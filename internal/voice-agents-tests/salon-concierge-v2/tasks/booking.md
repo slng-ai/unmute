@@ -33,7 +33,7 @@ information twice.
 
 ## What you are handed
 
-Today is `{{booking_date}}`, in the salon's own timezone. You get what was said
+Today is `{{state.booking_date}}`, in the salon's own timezone. You get what was said
 out loud on this call plus the conversation info at the end of this prompt. No
 tool result anybody ran before you is in front of you, so call the tool
 yourself for availability, a booking list or a price.

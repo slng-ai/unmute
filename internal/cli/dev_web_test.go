@@ -574,7 +574,7 @@ func TestDevSessionAnswersBeforeTheRuntimeExists(t *testing.T) {
 // browser loop went silent with nothing logged as wrong. This holds the token's
 // name to the string the emitted agent.py actually registers.
 func TestDevDispatchNameMatchesTheEmittedWorker(t *testing.T) {
-	agent, targets, err := loadPackage(filepath.Join("..", "testdata", "safe_core"), []string{"livekit"})
+	agent, targets, err := loadPackage(recordedCtx(t), filepath.Join("..", "testdata", "safe_core"), []string{"livekit"})
 	if err != nil {
 		t.Fatal(err)
 	}

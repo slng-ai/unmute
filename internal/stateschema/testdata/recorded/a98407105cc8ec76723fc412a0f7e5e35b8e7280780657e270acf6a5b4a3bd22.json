@@ -1,0 +1,418 @@
+{
+  "source": "internal/stateschema/testdata/models/kinds.py",
+  "digest": "a98407105cc8ec76723fc412a0f7e5e35b8e7280780657e270acf6a5b4a3bd22",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Appointment": {
+          "description": "One booking.",
+          "properties": {
+            "booking_id": {
+              "pattern": "^[A-Z0-9-]{3,32}$",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "day": {
+              "format": "date",
+              "title": "Day",
+              "type": "string"
+            },
+            "at": {
+              "anyOf": [
+                {
+                  "format": "time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "At"
+            },
+            "service": {
+              "enum": [
+                "haircut",
+                "blowout"
+              ],
+              "title": "Service",
+              "type": "string"
+            }
+          },
+          "required": [
+            "booking_id",
+            "day",
+            "service"
+          ],
+          "title": "Appointment",
+          "type": "object"
+        },
+        "Customer": {
+          "description": "A caller and the bookings they hold.",
+          "properties": {
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "email": {
+              "anyOf": [
+                {
+                  "format": "email",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Email"
+            },
+            "bookings": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Appointment"
+              },
+              "title": "Bookings",
+              "type": "array"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "title": "Customer",
+          "type": "object"
+        },
+        "Tier": {
+          "description": "A closed set written as an Enum class.",
+          "enum": [
+            "gold",
+            "silver"
+          ],
+          "title": "Tier",
+          "type": "string"
+        }
+      },
+      "description": "The call state.",
+      "properties": {
+        "caller_phone": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The caller's number in E.164.",
+          "title": "Caller Phone"
+        },
+        "verified": {
+          "default": false,
+          "title": "Verified",
+          "type": "boolean"
+        },
+        "visits": {
+          "default": 0,
+          "title": "Visits",
+          "type": "integer"
+        },
+        "spend": {
+          "default": 0.0,
+          "title": "Spend",
+          "type": "number"
+        },
+        "contact": {
+          "anyOf": [
+            {
+              "format": "name-email",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contact"
+        },
+        "tier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "enquiry": {
+          "anyOf": [
+            {
+              "enum": [
+                "new",
+                "existing"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enquiry"
+        },
+        "single": {
+          "const": "only",
+          "default": "only",
+          "title": "Single",
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "customer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Customer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "history": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Appointment"
+          },
+          "title": "History",
+          "type": "array"
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "enum": [
+                "AED",
+                "AFN",
+                "ALL",
+                "AMD",
+                "AOA",
+                "ARS",
+                "AUD",
+                "AWG",
+                "AZN",
+                "BAM",
+                "BBD",
+                "BDT",
+                "BHD",
+                "BIF",
+                "BMD",
+                "BND",
+                "BOB",
+                "BOV",
+                "BRL",
+                "BSD",
+                "BTN",
+                "BWP",
+                "BYN",
+                "BZD",
+                "CAD",
+                "CDF",
+                "CHE",
+                "CHF",
+                "CHW",
+                "CLF",
+                "CLP",
+                "CNY",
+                "COP",
+                "COU",
+                "CRC",
+                "CUP",
+                "CVE",
+                "CZK",
+                "DJF",
+                "DKK",
+                "DOP",
+                "DZD",
+                "EGP",
+                "ERN",
+                "ETB",
+                "EUR",
+                "FJD",
+                "FKP",
+                "GBP",
+                "GEL",
+                "GHS",
+                "GIP",
+                "GMD",
+                "GNF",
+                "GTQ",
+                "GYD",
+                "HKD",
+                "HNL",
+                "HTG",
+                "HUF",
+                "IDR",
+                "ILS",
+                "INR",
+                "IQD",
+                "IRR",
+                "ISK",
+                "JMD",
+                "JOD",
+                "JPY",
+                "KES",
+                "KGS",
+                "KHR",
+                "KMF",
+                "KPW",
+                "KRW",
+                "KWD",
+                "KYD",
+                "KZT",
+                "LAK",
+                "LBP",
+                "LKR",
+                "LRD",
+                "LSL",
+                "LYD",
+                "MAD",
+                "MDL",
+                "MGA",
+                "MKD",
+                "MMK",
+                "MNT",
+                "MOP",
+                "MRU",
+                "MUR",
+                "MVR",
+                "MWK",
+                "MXN",
+                "MXV",
+                "MYR",
+                "MZN",
+                "NAD",
+                "NGN",
+                "NIO",
+                "NOK",
+                "NPR",
+                "NZD",
+                "OMR",
+                "PAB",
+                "PEN",
+                "PGK",
+                "PHP",
+                "PKR",
+                "PLN",
+                "PYG",
+                "QAR",
+                "RON",
+                "RSD",
+                "RUB",
+                "RWF",
+                "SAR",
+                "SBD",
+                "SCR",
+                "SDG",
+                "SEK",
+                "SGD",
+                "SHP",
+                "SLE",
+                "SOS",
+                "SRD",
+                "SSP",
+                "STN",
+                "SVC",
+                "SYP",
+                "SZL",
+                "THB",
+                "TJS",
+                "TMT",
+                "TND",
+                "TOP",
+                "TRY",
+                "TTD",
+                "TWD",
+                "TZS",
+                "UAH",
+                "UGX",
+                "USD",
+                "USN",
+                "UYI",
+                "UYU",
+                "UYW",
+                "UZS",
+                "VED",
+                "VES",
+                "VND",
+                "VUV",
+                "WST",
+                "XAD",
+                "XAF",
+                "XAG",
+                "XAU",
+                "XBA",
+                "XBB",
+                "XBC",
+                "XBD",
+                "XCD",
+                "XCG",
+                "XDR",
+                "XOF",
+                "XPD",
+                "XPF",
+                "XPT",
+                "XSU",
+                "XTS",
+                "XUA",
+                "XXX",
+                "YER",
+                "ZAR",
+                "ZMW",
+                "ZWG"
+              ],
+              "maxLength": 3,
+              "minLength": 3,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currency"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "pattern": "^\\w{2}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "greeting": {
+          "default": "Hello",
+          "title": "Greeting",
+          "type": "string"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

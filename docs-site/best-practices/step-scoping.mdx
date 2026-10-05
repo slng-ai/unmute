@@ -101,7 +101,7 @@ The model has something real to check that clause against when the owner's
 prompt names the value the earlier task saved:
 
 ```md instructions.md
-The verified customer is {{customer_id}}. Once that value is present, verification has already
+The verified customer is {{state.customer_id}}. Once that value is present, verification has already
 succeeded. Never run that task again unless the caller says the number is wrong.
 ```
 

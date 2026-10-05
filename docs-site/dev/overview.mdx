@@ -267,22 +267,25 @@ it, and one package can override both. The generated
 
 `--var name=value` stands in for the values a production call would arrive
 with. It is repeatable, and it only accepts variables declared with
-`source: call_start`:
+`source: call_start`. The value is parsed against the field's type in
+`state.py`, and a model or a list is passed as JSON.
+
+```python state.py
+class State(BaseModel):
+    customer_id: str = Field("cus_1001", description="CRM id of the caller.")
+```
 
 ```yaml agent.yaml
 variables:
-  customer_id:
-    type: string
+  - name: customer_id
     source: call_start
-    default: cus_1001
-    description: CRM id of the caller.
 ```
 
 ```sh
 unmute dev my-agent --var customer_id=cus_2002
 ```
 
-Leave the flag out and the `default` is used instead. See
+Leave the flag out and the field's default is used instead. See
 [variables](/build/variables) for what happens when you try to seed something
 else.
 

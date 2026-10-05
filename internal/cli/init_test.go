@@ -31,7 +31,7 @@ func run(t *testing.T, args ...string) (string, error) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs(args)
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(recordedCtx(t))
 	return out.String(), err
 }
 
@@ -44,7 +44,7 @@ func runWithInput(t *testing.T, input string, args ...string) (string, error) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs(args)
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(recordedCtx(t))
 	return out.String(), err
 }
 
@@ -264,7 +264,7 @@ func TestInitRefusesAFolderThatCannotBeAnAgentName(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
 	cmd.SetArgs([]string{"init", dir})
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(recordedCtx(t))
 	if err == nil {
 		t.Fatal("init wrote a package whose name it could not derive")
 	}
@@ -288,7 +288,7 @@ func TestInitWritesAPackageThatValidates(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
 	cmd.SetArgs([]string{"init", dir})
-	if err := cmd.Execute(); err != nil {
+	if err := cmd.ExecuteContext(recordedCtx(t)); err != nil {
 		t.Fatal(err)
 	}
 	written, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
@@ -298,7 +298,7 @@ func TestInitWritesAPackageThatValidates(t *testing.T) {
 	if !strings.Contains(string(written), "name: acme-support\n") {
 		t.Errorf("agent.yaml does not carry the name derived from the folder:\n%s", written)
 	}
-	if _, _, err := loadPackage(dir, nil); err != nil {
+	if _, _, err := loadPackage(recordedCtx(t), dir, nil); err != nil {
 		t.Errorf("the scaffolded package does not build: %v", err)
 	}
 }

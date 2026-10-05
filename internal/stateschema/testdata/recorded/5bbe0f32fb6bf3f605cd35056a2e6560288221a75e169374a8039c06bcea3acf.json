@@ -1,0 +1,51 @@
+{
+  "source": "internal/testdata/prefetch_core/state.py",
+  "digest": "5bbe0f32fb6bf3f605cd35056a2e6560288221a75e169374a8039c06bcea3acf",
+  "report": {
+    "schema": {
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "customer_id": {
+          "default": "",
+          "title": "Customer Id",
+          "type": "string"
+        },
+        "verified": {
+          "default": false,
+          "title": "Verified",
+          "type": "boolean"
+        },
+        "booking_date": {
+          "default": "",
+          "title": "Booking Date",
+          "type": "string"
+        },
+        "booking_weekday": {
+          "default": "",
+          "title": "Booking Weekday",
+          "type": "string"
+        },
+        "booking_year": {
+          "default": "",
+          "title": "Booking Year",
+          "type": "string"
+        },
+        "caller_phone": {
+          "default": "",
+          "title": "Caller Phone",
+          "type": "string"
+        },
+        "caller_name": {
+          "default": "",
+          "title": "Caller Name",
+          "type": "string"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

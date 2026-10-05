@@ -141,22 +141,31 @@ from: it already carries your own values.
 ## Give the call its values
 
 An outbound call usually knows things before it starts: who is being called,
-about what. Declare them as `call_start` variables:
+about what. Declare them as fields on `State` in `state.py`, and give each a
+`call_start` source in `agent.yaml`:
+
+```python state.py
+from pydantic import BaseModel, Field
+
+
+class State(BaseModel):
+    customer_id: str = Field(
+        "", description="CRM id of the customer this call is about. Used by the booking tools, never spoken."
+    )
+    name: str = Field("", description="Customer's first name, used in the greeting and the prompt.")
+    appointment_time: str = Field(
+        "", description='Appointment start in spoken form, for example "tomorrow at 3 pm".'
+    )
+```
 
 ```yaml agent.yaml
 variables:
-  customer_id:
-    type: string
+  - name: customer_id
     source: call_start
-    description: CRM id of the customer this call is about. Used by the booking tools, never spoken.
-  name:
-    type: string
+  - name: name
     source: call_start
-    description: Customer's first name, used in the greeting and the prompt.
-  appointment_time:
-    type: string
+  - name: appointment_time
     source: call_start
-    description: Appointment start in spoken form, for example "tomorrow at 3 pm".
 ```
 
 Locally, `--var` supplies them:
@@ -175,28 +184,25 @@ spelling for its platform.
 That is the whole relationship: **`--var` is the local stand in for the dispatch
 payload**. Same names, same types, same variables.
 
-Values are checked against the declared type, and an undeclared name is refused
-rather than quietly ignored.
+Values are checked against the field's type in `state.py`, and an undeclared
+name is refused rather than quietly ignored.
 
 ### Every key a variable takes
 
-<ParamField path="type" type="type expression" required>
-  What the value is, written as one line: a built-in such as `string`, a
-  `Literal[...]` set, a `list[...]`, or a shape you declared. [The type
-  grammar](/reference/variables#the-type-grammar) has all of them.
+Types, defaults and descriptions are not keys of `variables:`. They live on the
+field in `state.py`, as the [reference](/reference/variables#the-state-class-holds-the-types)
+explains. The list takes three keys.
+
+<ParamField path="name" type="string" required>
+  The field on `State` this entry configures.
 </ParamField>
 
 <ParamField path="source" type="call_start | conversation | a system call fact">
   Where the value comes from. `call_start` is the dispatch payload, which
   `--var` stands in for. `conversation` is a value the model records mid-call.
   The eight system facts are listed below. Left out, a task's `assign:` fills
-  it.
-</ParamField>
-
-<ParamField path="default" type="a value of the declared type">
-  What the value is before anything supplies one. Required on a `call_start`
-  variable when the channel is also inbound, because an inbound call carries no
-  dispatch payload.
+  it. A `call_start` field needs a default in `state.py` when the channel is also
+  inbound, because an inbound call carries no dispatch payload.
 </ParamField>
 
 <ParamField path="confirm" type="step name">
@@ -205,21 +211,17 @@ rather than quietly ignored.
   [`confirm:`](/reference/variables#confirm-marks-a-value-the-caller-has-to-agree-to).
 </ParamField>
 
-<ParamField path="description" type="string">
-  What the value is, for a reader and for the model. Required on a
-  `source: conversation` variable, because the model reads it to know what to
-  record.
-</ParamField>
-
 ## Values the route supplies
 
 Some variables are filled in by the runtime, not by you:
 
 ```yaml
-  dialed_number:
-    type: string
+variables:
+  - name: dialed_number
     source: to_number
 ```
+
+`dialed_number` is a `str` field with a default on `State`.
 
 System sources include `to_number`, `from_number`, `direction`, `call_id`,
 `stream_id`, `session_id`, `carrier`, and `connection`. Seeding one with

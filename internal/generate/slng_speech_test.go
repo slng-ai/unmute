@@ -123,7 +123,7 @@ func TestSlngSpeechGatewayUsesTargetOverride(t *testing.T) {
 	model.Params = map[string]any{"world_part": "jp"}
 	override.Models["transcriber"] = model
 	pkg.Targets["livekit"] = override
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

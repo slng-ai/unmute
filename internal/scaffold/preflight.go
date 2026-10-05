@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -35,6 +37,9 @@ func Preflight(data Data) (PreflightReport, error) {
 	}
 	pkg, err := spec.Load(dir)
 	if err != nil {
+		return PreflightReport{}, err
+	}
+	if err := data.readState(context.Background(), pkg, stateschema.UV{}); err != nil {
 		return PreflightReport{}, err
 	}
 	agent, err := ir.Build(pkg)

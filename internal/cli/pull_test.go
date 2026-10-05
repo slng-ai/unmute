@@ -57,7 +57,7 @@ func pullOnDir(t *testing.T, dir, script string, args ...string) (out, errOut st
 	root.SetErr(&stderr)
 	root.SetIn(strings.NewReader(""))
 	root.SetArgs(append([]string{"pull", dir}, args...))
-	err = root.Execute()
+	err = root.ExecuteContext(recordedCtx(t))
 	return stdout.String(), stderr.String(), err
 }
 
@@ -288,7 +288,7 @@ func TestPullReportsUnchangedRatherThanSkipping(t *testing.T) {
 	root.SetErr(&stderr)
 	root.SetIn(strings.NewReader(""))
 	root.SetArgs([]string{"pull", dir})
-	if err := root.Execute(); err != nil {
+	if err := root.ExecuteContext(recordedCtx(t)); err != nil {
 		t.Fatalf("a second pull over an up-to-date package failed: %v\n%s", err, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "unchanged") {
@@ -384,7 +384,7 @@ esac`,
 			root.SetErr(&stderr)
 			root.SetIn(strings.NewReader(""))
 			root.SetArgs([]string{"pull", dir})
-			assertRefusal(t, root.Execute(), tc.want)
+			assertRefusal(t, root.ExecuteContext(recordedCtx(t)), tc.want)
 		})
 	}
 }
@@ -424,7 +424,7 @@ func TestPullRefusesWithNoCredential(t *testing.T) {
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
 	root.SetArgs([]string{"pull", dir})
-	assertRefusal(t, root.Execute(), []string{
+	assertRefusal(t, root.ExecuteContext(recordedCtx(t)), []string{
 		"no SLNG credential found",
 		target.SlngRouterKeyEnv,
 		"the only command that needs one",
@@ -538,7 +538,7 @@ func TestPullAddsASecretNameThePlatformOnlyNamesInItsConfig(t *testing.T) {
 	root.SetErr(&stderr)
 	root.SetIn(strings.NewReader(""))
 	root.SetArgs([]string{"pull", dir, "--force"})
-	if err := root.Execute(); err != nil {
+	if err := root.ExecuteContext(recordedCtx(t)); err != nil {
 		t.Fatalf("pull failed: %v\n%s", err, stderr.String())
 	}
 
@@ -593,7 +593,7 @@ func TestPullCheckWritesNothing(t *testing.T) {
 	root.SetErr(&stderr)
 	root.SetIn(strings.NewReader(""))
 	root.SetArgs([]string{"pull", dir, "--check"})
-	if err := root.Execute(); err == nil {
+	if err := root.ExecuteContext(recordedCtx(t)); err == nil {
 		t.Fatal("--check found drift and exited 0")
 	}
 	if !strings.Contains(stdout.String(), "stale") {
@@ -938,7 +938,7 @@ func TestPullAddsNoSecretToAPackageThatOnlyDeploysToSlng(t *testing.T) {
 	root.SetErr(&stderr)
 	root.SetIn(strings.NewReader(""))
 	root.SetArgs([]string{"pull", dir, "--force"})
-	if err := root.Execute(); err != nil {
+	if err := root.ExecuteContext(recordedCtx(t)); err != nil {
 		t.Fatalf("pull failed: %v\n%s", err, stderr.String())
 	}
 

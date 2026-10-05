@@ -62,8 +62,11 @@ package differently.
 1. `internal/spec.Load` reads `agent.yaml`, `targets.yaml`, prompts, tools,
    connections, local handlers, and the linked package-root `manifest`.
    Strict decoding rejects unknown fields.
+   A package's call state is the author's own Pydantic `state.py`.
+   `internal/stateschema` runs it through uv with pinned Pydantic and reads the
+   JSON Schema Pydantic writes for `State`. Go never parses a Python type.
 2. `internal/ir.Build` resolves names, model bindings, controls, connections,
-   overrides, and routes into target-independent IR.
+   overrides, the state schema, and routes into target-independent IR.
 3. `internal/ir.Validate` checks the IR against the selected target's
    capability table. Unsupported behavior fails before generation. Safe
    target differences can produce warnings. A package manifest additionally
@@ -86,7 +89,7 @@ The source package describes durable behavior. A target driver owns how that
 behavior is expressed in one framework.
 
 - **LiveKit** emits `agent.py` (the entry point, with `call.py`, `agents.py`,
-  `session.py`, `state.py`, `settings.py`, `prompts/` and `utils/` beside it) and uses a separate LiveKit Server for media,
+  `session.py`, `state.py`, `call_state.py`, `settings.py`, `prompts/` and `utils/` beside it) and uses a separate LiveKit Server for media,
   rooms, and job dispatch.
 - **Pipecat** emits `bot.py` (the entry point, with the same modules beside
   it). The generated process owns both its network

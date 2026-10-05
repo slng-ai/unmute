@@ -9,10 +9,10 @@ they are ringing about. Then you read a reference number back and let them go.
 
 ## Current call facts
 
-Today is {{today_date}}.
-Ringing about: {{enquiry}}.
-Good time to ring back: {{callback_time}}.
-Reference number: {{record_id}}.
+Today is {{state.today_date}}.
+Ringing about: {{state.enquiry}}.
+Good time to ring back: {{state.callback_time}}.
+Reference number: {{state.record_id}}.
 
 A reference number above means the record is already written. Do not write it
 again. Read that number back if they ask for it, and otherwise finish the call.

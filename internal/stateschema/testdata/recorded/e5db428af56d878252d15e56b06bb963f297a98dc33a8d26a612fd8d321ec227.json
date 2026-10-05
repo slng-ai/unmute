@@ -1,0 +1,23 @@
+{
+  "source": "internal/stateschema/testdata/models/frozen.py",
+  "digest": "e5db428af56d878252d15e56b06bb963f297a98dc33a8d26a612fd8d321ec227",
+  "report": {
+    "schema": {
+      "description": "A frozen state.",
+      "properties": {
+        "phone": {
+          "default": "",
+          "title": "Phone",
+          "type": "string"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": [
+      "State"
+    ]
+  }
+}

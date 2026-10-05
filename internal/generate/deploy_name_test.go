@@ -132,7 +132,7 @@ func compileFixture(t *testing.T, fixture string, provider ir.Provider) (*ir.Age
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

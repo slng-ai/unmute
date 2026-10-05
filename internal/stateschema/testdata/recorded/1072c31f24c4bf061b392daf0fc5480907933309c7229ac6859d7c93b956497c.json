@@ -1,0 +1,44 @@
+{
+  "source": "internal/stateschema/testdata/models/recursive.py",
+  "digest": "1072c31f24c4bf061b392daf0fc5480907933309c7229ac6859d7c93b956497c",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Node": {
+          "description": "A tree node.",
+          "properties": {
+            "children": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Node"
+              },
+              "title": "Children",
+              "type": "array"
+            }
+          },
+          "title": "Node",
+          "type": "object"
+        }
+      },
+      "description": "A state holding a tree.",
+      "properties": {
+        "root": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Node"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "source": "internal/testdata/slng_core/state.py",
+  "digest": "17b76dbac312008c42b460ccde17cf5603e5163b6f9fd5e493e77b124b67a02c",
+  "report": {
+    "schema": {
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {
+        "customer_name": {
+          "default": "there",
+          "title": "Customer Name",
+          "type": "string"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

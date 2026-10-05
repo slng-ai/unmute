@@ -136,7 +136,7 @@ func runCompileCommand(t *testing.T, args ...string) (string, string, error) {
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs(append([]string{"compile"}, args...))
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(recordedCtx(t))
 	return stdout.String(), stderr.String(), err
 }
 

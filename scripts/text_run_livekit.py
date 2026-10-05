@@ -180,6 +180,7 @@ async def run(args: argparse.Namespace) -> None:
     import agent  # noqa: F401, PLC0415 - after sys.path and cwd are set
     import agents as generated  # noqa: PLC0415
     import call  # noqa: PLC0415
+    import call_state  # noqa: PLC0415
     import session as state  # noqa: PLC0415
     from livekit.agents import AgentSession  # noqa: PLC0415
     from livekit.agents.beta.tools import end_call as end_call_tool  # noqa: PLC0415
@@ -215,7 +216,7 @@ async def run(args: argparse.Namespace) -> None:
         )
     else:
         llm = compiled_llm(build / "call.py", vars(call))
-    async with AgentSession(userdata=state.Userdata(), llm=llm) as session:
+    async with AgentSession(userdata=call_state.CallState(), llm=llm) as session:
         # A package that declares no `prefetch:` emits no _prefetch at all.
         prefetch = getattr(state, "_prefetch", None)
         if prefetch is not None:

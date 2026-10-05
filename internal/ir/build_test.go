@@ -633,20 +633,6 @@ func TestBuildRejectsBadAndCollidingNames(t *testing.T) { // V7
 			},
 			want: "collide",
 		},
-		{
-			name: "variable named like a state model setting",
-			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["model_config"] = packagespec.Variable{Type: "string"}
-			},
-			want: "taken by the generated Pydantic state model",
-		},
-		{
-			name: "variable named like a builtin type",
-			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Variables["str"] = packagespec.Variable{Type: "string"}
-			},
-			want: "taken by the generated Pydantic state model",
-		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -684,7 +670,7 @@ func patchSafeCore(t *testing.T, from, to string) error {
 	if err := os.WriteFile(path, []byte(patched), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = packagespec.Load(dir)
+	_, err = loadRecorded(dir)
 	return err
 }
 
@@ -1196,7 +1182,7 @@ func TestDelegateAnnounceIsAFieldOfItsOwn(t *testing.T) {
 
 func loadSafeCore(t *testing.T) *packagespec.Package {
 	t.Helper()
-	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "safe_core"))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1745,7 +1731,7 @@ func TestBuildAssignRefusalNamesTheVariablesBlock(t *testing.T) {
 		t.Fatal("an assign to an undeclared variable must fail at compile")
 	}
 	for _, want := range []string{
-		"customer_status", "not declared under the variables: block", "agent.yaml",
+		"customer_status", "State in state.py does not declare", "agent.yaml",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal is missing %q:\n%v", want, err)

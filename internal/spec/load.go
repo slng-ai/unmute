@@ -42,7 +42,9 @@ func Load(dir string) (*Package, error) {
 	if err := pkg.readManifest(); err != nil {
 		return nil, err
 	}
-	pkg.readVariableOrder()
+	if err := pkg.readState(); err != nil {
+		return nil, err
+	}
 
 	for _, name := range pkg.Agent.Tools {
 		if filepath.Base(name) != name {

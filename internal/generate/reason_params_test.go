@@ -24,7 +24,7 @@ func reasonParamsArtifact(t *testing.T, provider ir.Provider) Artifact {
 	def.Params = map[string]any{"reasoning_effort": "none"}
 	pkg.Agent.Models.Think["fast_reasoning"] = def
 
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestReasonParamsNeverInventsSampling(t *testing.T) {
 		def.TopP = nil
 		pkg.Agent.Models.Think[name] = def
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

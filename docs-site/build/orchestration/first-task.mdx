@@ -167,22 +167,28 @@ stop anywhere and come back.
 
   <Step title="Say what you want to keep">
     A task can save what it learns. You say what that is by declaring a
-    variable, once, with a type. Add this block to `agent.yaml`, anywhere at
-    the top level:
+    field, once, with a type. Write a `State` class in a new `state.py` next to
+    `agent.yaml`:
 
-    ```yaml agent.yaml
-    variables:
-      tracking_number:
-        type: str
-        description: The tracking number of the parcel we found for this caller.
-      delivery_date:
-        type: Date
-        description: The day that parcel is due, written year-month-day.
+    ```python state.py
+    from datetime import date
+
+    from pydantic import BaseModel, Field
+
+
+    class State(BaseModel):
+        tracking_number: str = Field(
+            "", description="The tracking number of the parcel we found for this caller."
+        )
+        delivery_date: date | None = Field(
+            None, description="The day that parcel is due, written year-month-day."
+        )
     ```
 
-    `Date` is a built-in type. A value that is not a date in that form is
+    `date` is a Pydantic type. A value that is not a date in that form is
     refused where it enters, and the model is told the form, so it can try
     again. The description is read by the model, so write it for the model.
+    `unmute` reads `state.py` through `uv`, so `uv` must be on your `PATH`.
 
     Nothing reads these yet. Declaring a value and using it are two separate
     things, and that is on purpose.
@@ -330,7 +336,7 @@ stop anywhere and come back.
 
     When the caller asks where their parcel is, run find_parcel.
 
-    The parcel we found on this call: {{tracking_number}}, due {{delivery_date}}.
+    The parcel we found on this call: {{state.tracking_number}}, due {{state.delivery_date}}.
     When those are filled in, tell the caller the day and do not run find_parcel
     again unless they give a different number.
     ```
@@ -532,14 +538,6 @@ models:
     detector:
       provider: livekit
       model: turn-detector-mini
-
-variables:
-  tracking_number:
-    type: str
-    description: The tracking number of the parcel we found for this caller.
-  delivery_date:
-    type: Date
-    description: The day that parcel is due, written year-month-day.
 
 tools:
   - end_call

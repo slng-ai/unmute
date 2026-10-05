@@ -99,7 +99,7 @@ func TestRefusalNamesTheSupplyingStepAndAsksForTheRest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,12 +108,12 @@ func TestRefusalNamesTheSupplyingStepAndAsksForTheRest(t *testing.T) {
 	// emitted hints cannot read alike by accident.
 	agent.Tasks["verify_customer"] = ir.Task{
 		Instructions: "Confirm who is calling.",
-		Result:       map[string]ir.ResultField{"confirmed_value": {Type: ir.PrimitiveString}},
+		Result:       map[string]ir.ResultField{"confirmed_value": {Type: stringType()}},
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	agent.Tasks["record_note"] = ir.Task{
 		Instructions: "Record a note.",
-		Result:       map[string]ir.ResultField{"assigned_value": {Type: ir.PrimitiveString}},
+		Result:       map[string]ir.ResultField{"assigned_value": {Type: stringType()}},
 		Context:      ir.TaskContext{History: ir.HistoryFull},
 	}
 	noteTask := agent.Tasks["verify_customer"]

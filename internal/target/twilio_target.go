@@ -56,7 +56,7 @@ var TwilioPins = map[string]string{
 	"fastapi":          "0.141.1",
 	"google-genai":     "2.25.0",
 	"openai":           "3.19.2",
-	"pydantic":         "2.13.5",
+	"pydantic":         StatePins["pydantic"],
 	"python-multipart": "0.0.32",
 	"twilio":           "9.11.1",
 	"uvicorn":          "0.54.0",
@@ -366,8 +366,7 @@ func twilioFields() map[Field]Capability {
 		FieldVariableConfirm:       no(twilioOnlyOne("a value awaiting confirmation")),
 		FieldVariableConversation:  no("twilio target has no session state for a model to record into: remove the variable, or compile to slng"),
 		FieldTemplates:             no("twilio target renders no session-start values into the prompt: remove the {{placeholder}}, or compile to livekit or pipecat"),
-		FieldTypedState:            no("twilio target has no session state, so a declared shape has nothing to check: remove the variable, or compile to livekit or pipecat"),
-		FieldShapedText:            no("twilio target has no session state, so a shaped value has nothing to check: remove the variable, or compile to livekit or pipecat"),
+		FieldTypedState:            no("twilio target has no session state, so a state.py has nothing to hold: remove it, or compile to livekit or pipecat"),
 	}
 }
 

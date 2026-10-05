@@ -42,10 +42,10 @@ Choose the smallest native shape and tell the user what you chose.
 **Every agent-level list attaches something already declared, except `tasks:`, written where it runs.** Five kinds: `tools:`, `tasks:` and `task_groups:` come back, `handoffs:` and `escalations:` do not. No `kind:` field, and all five share one namespace. `references/orchestration.md` has the table.
 **Define each tool once.** Its contract lives in `tools/<name>.yaml`; `tools:` lists hold names only.
 
-**Task `assign:` and tool `output:` are different contracts.** Task finish fields come from destination variables; do not repeat their types.
+**Task `assign:` and tool `output:` are different contracts.** Task finish fields come from destination fields on `State` in `state.py`; do not repeat their types.
 **A step that ends on a tool result should say so.** `finish:` names the tools that end it and what a successful result looks like, so it saves and moves on with no model request in between. `skip_when_confirmed:` skips a group step whose confirmation holds; `opening: listen` speaks one fixed question and waits. Code targets only; `references/orchestration.md` has the rules.
 
-Omitted task and handoff history means `messages`: spoken turns without tool records. With `reset`, name each needed saved value in the receiver's prompt as `{{variable}}`.
+Omitted task and handoff history means `messages`: spoken turns without tool records. With `reset`, name each needed saved value in the receiver's prompt as `{{state.variable}}`.
 
 Use block-style YAML sequences in assistant-authored packages. Do not use anchors or aliases.
 

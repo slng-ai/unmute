@@ -410,6 +410,6 @@ func devTestCommand(t *testing.T) (*cobra.Command, *bytes.Buffer) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetContext(t.Context())
+	cmd.SetContext(recordedCtx(t))
 	return cmd, &out
 }

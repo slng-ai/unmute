@@ -78,7 +78,7 @@ func TestLiveKitExportHookKeepsTheWholeCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestLiveKitV1RemyGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestV31LiveKitTracingIsIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func TestLiveKitV1UnconfiguredGolden(t *testing.T) { // V24
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +395,7 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +494,7 @@ func TestV26_LiveKitAgentWebhookImportsHTTPX(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +543,7 @@ func authAgent(t *testing.T, auth *ir.ToolAuth) *ir.Agent {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,7 +590,7 @@ func TestLiveKitV1NoAuthHelpersWithoutAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,7 +615,7 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -669,7 +669,7 @@ func TestT16_LiveKitEmitsListenFallbackAdapter(t *testing.T) {
 	primary.Fallback = []string{"backup_stt"}
 	pkg.Agent.Models.Listen["transcriber"] = primary
 	pkg.Agent.Listen = "transcriber"
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -856,7 +856,7 @@ func TestLiveKitV1EmptyTaskResponseContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -893,7 +893,7 @@ func TestLiveKitV1EmptyTaskResponseContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	minimalAgent, err := ir.Build(minimalPkg)
+	minimalAgent, err := buildWithState(t, minimalPkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -919,7 +919,7 @@ func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -974,13 +974,13 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assignedTask := agent.Tasks["find_slot"]
 	assignedTask.Assign = []ir.AssignTo{{Var: "caller_phone", Field: "date"}}
-	assignedTask.Result = map[string]ir.ResultField{"date": {Type: ir.PrimitiveString}}
+	assignedTask.Result = map[string]ir.ResultField{"date": {Type: stringType()}}
 	agent.Tasks["find_slot"] = assignedTask
 	agent.Controls["do_find"] = &ir.Delegate{
 		Kind: ir.ControlDelegate, Task: "find_slot",
@@ -998,11 +998,10 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	for _, want := range []string{
 		"async def do_find(self, ctx: RunContext) -> dict:",
 		"result = await FindSlot(chat_ctx=owner_ctx.copy(exclude_instructions=True, exclude_config_update=True, exclude_handoff=True))",
-		`_values = _save_result("find_slot", ctx.userdata, {"date": date, "unserved_request": unserved_request})`,
-		"class Userdata(BaseModel):",
-		"caller_phone: str | None = None",
-		"session = AgentSession[Userdata](",
-		"userdata=Userdata(),",
+		`_values = ctx.userdata.save_result("find_slot", dict(raw_arguments))`,
+		"class CallState(State):",
+		"session = AgentSession[CallState](",
+		"userdata=CallState(),",
 		// V1/B1: the single-task delegate docstring carries the finality guidance
 		// so the owner LLM does not re-run the finished flow.
 		"Do not run this flow again for the same request.",
@@ -1038,7 +1037,7 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1132,7 +1131,7 @@ func TestLiveKitV1SharedGroupTaskTransferAndResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1186,7 +1185,7 @@ func TestLiveKitV1IsolatedGroupTaskAgentTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1248,7 +1247,7 @@ func TestLiveKitV1TaskRejectsOtherControlKinds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			agent, err := ir.Build(pkg)
+			agent, err := buildWithState(t, pkg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1279,7 +1278,7 @@ func TestV1LiveKitCompletedFlowEndsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1351,7 +1350,7 @@ func TestV2LiveKitToolCarriesSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1404,7 +1403,7 @@ func TestF3LiveKitSingleAgentMinimalShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1433,7 +1432,7 @@ func TestF3LiveKitSingleAgentMinimalShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ragent, err := ir.Build(rpkg)
+	ragent, err := buildWithState(t, rpkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1455,7 +1454,7 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1510,7 +1509,7 @@ func TestLiveKitV1PerTaskModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1544,7 +1543,7 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1596,7 +1595,7 @@ func TestLiveKitV1HistoryResetAndToolCallShaping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1628,7 +1627,7 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1707,7 +1706,7 @@ func TestV3LiveKitAgentTransfersHiddenOnlyOnEnter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1757,7 +1756,7 @@ func TestLiveKitV1BuiltinEndCallTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1800,7 +1799,7 @@ func TestLiveKitV1ConversationShapingAndAgentTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2150,9 +2149,10 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		`raise RuntimeError("phone_number must be an E.164 number")`,
 		// A dispatched value and a carrier fact are both saved through the
 		// typed check, never assigned straight onto the state.
-		`_save_call_start(userdata, values, ("campaign_id", "customer_id", "verified"))`,
-		`not _save_fact(userdata, "provider_call_id", value)`,
-		`not _save_fact(userdata, "call_direction", value)`,
+		`CALL_START: ClassVar[tuple[str, ...]] = ("campaign_id",`,
+		`userdata.save_call_start(values)`,
+		`not userdata.save_fact("provider_call_id", value)`,
+		`not userdata.save_fact("call_direction", value)`,
 		// System sources and dispatched input variables hydrate through their own
 		// call, so one path serves telephony and a plain `dev --var` session alike.
 		`_hydrate_livekit_context(session.userdata, call_context)`,
@@ -2321,15 +2321,13 @@ func configuredLiveKitSIP(t *testing.T) (*ir.Agent, ir.Target) {
 	phone := pkg.Agent.Channels["phone"]
 	phone.Outbound, phone.OnVoicemail = &outbound, "hangup"
 	pkg.Agent.Channels["phone"] = phone
-	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start", Default: "manual"}
-	pkg.Agent.Variables["provider_call_id"] = spec.Variable{Type: "string", Source: "call_id"}
-	pkg.Agent.Variables["call_direction"] = spec.Variable{Type: "string", Source: "direction"}
+	addCarrierVariables(t, pkg)
 	human := pkg.Agent.Escalations["to_human"]
 	human.Cold = nil
 	human.Warm = &spec.WarmTransfer{Destination: "billing_line", Briefing: "Say who is calling and why."}
 	pkg.Agent.Escalations["to_human"] = human
 
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2355,7 +2353,7 @@ func configuredLiveKitSIPCold(t *testing.T) (*ir.Agent, ir.Target) {
 	}
 	pkg.Connections["primary_phone"] = connection
 
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2379,14 +2377,12 @@ func configuredLiveKitConnector(t *testing.T) (*ir.Agent, ir.Target) {
 	}
 	// Exercise the metadata/hydrate path: the bridge writes these into the
 	// dispatch metadata and the connector agent branch reads them back.
-	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start", Default: "manual"}
-	pkg.Agent.Variables["provider_call_id"] = spec.Variable{Type: "string", Source: "call_id"}
-	pkg.Agent.Variables["call_direction"] = spec.Variable{Type: "string", Source: "direction"}
+	addCarrierVariables(t, pkg)
 	configured := pkg.Targets["livekit"]
 	configured.Connection = "primary_phone"
 	setConnectionRoute(pkg, "primary_phone", "connector", "twilio")
 	pkg.Targets = map[string]spec.Target{"livekit": configured}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2495,7 +2491,7 @@ func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2543,7 +2539,7 @@ func TestLiveKitV1MCPSelectionTransportAndScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2625,7 +2621,7 @@ func TestLiveKitV1MCPPreflightIsRequired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2734,7 +2730,7 @@ func TestLiveKitV1LocalAndMCPTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2823,7 +2819,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2880,7 +2876,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	agent.TaskGroups["do_reserve"] = reserve
 	task := agent.Tasks["find_slot"]
 	task.Model = "backup"
-	task.Result["details"] = ir.ResultField{Schema: map[string]any{"type": "object"}}
+	task.Result["details"] = ir.ResultField{Type: objectType()}
 	task.Tools = append(task.Tools, "browse_tables")
 	agent.Tasks["find_slot"] = task
 	task.Assign = []ir.AssignTo{{Var: "caller_phone", Field: "date"}}
@@ -3040,7 +3036,7 @@ func TestLiveKitV1OpenAIResponsesMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3169,7 +3165,7 @@ func TestLiveKitV1ToolAnnounceSpeaksBeforeTheWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3256,7 +3252,7 @@ func TestLiveKitV1TaskDropsParentInFlightCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3299,7 +3295,7 @@ func TestLiveKitV1TaskDropsParentInFlightCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bareAgent, err := ir.Build(bare)
+	bareAgent, err := buildWithState(t, bare)
 	if err != nil {
 		t.Fatal(err)
 	}

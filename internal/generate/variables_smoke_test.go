@@ -52,10 +52,7 @@ path = bot._render(
 assert path == "/customers/cus%2F10%2042/appointments", path
 state.customer_phone = "+34600111222"
 # verify_customer assigns both fields, and the status is a required Literal.
-bot._save_result(
-    "verify_customer",
-    state,
-    {"customer_phone": state.customer_phone, "customer_status": "existing"},
+state.save_result("verify_customer", {"customer_phone": state.customer_phone, "customer_status": "existing"},
 )
 
 # An unset variable produces a refusal naming it, not a request.
@@ -90,7 +87,7 @@ os.environ["REDIS_URL"] = "redis://127.0.0.1:6379/0"
 
 generated = _project("agent")
 
-userdata = generated.Userdata()
+userdata = generated.CallState()
 userdata.name = "Ada"
 userdata.customer_phone = "+34600111222"
 
@@ -106,10 +103,7 @@ path = generated._render(
 # The plus is percent-encoded too.
 assert path == "/customers/%2B34600111222/appointments", path
 # verify_customer assigns both fields, and the status is a required Literal.
-generated._save_result(
-    "verify_customer",
-    userdata,
-    {"customer_phone": userdata.customer_phone, "customer_status": "existing"},
+userdata.save_result("verify_customer", {"customer_phone": userdata.customer_phone, "customer_status": "existing"},
 )
 
 refusal = generated._refusal("reschedule_appointment", userdata, [("reschedule_to", "the new slot")])
@@ -120,7 +114,7 @@ assert generated._refusal("reschedule_appointment", userdata, [("reschedule_to",
 # The dispatch stand-in is validated and applied.
 os.environ["UNMUTE_CALL_START"] = json.dumps({"name": "Grace", "customer_phone": "+34600111333", "appointment_time": "Monday"})
 values = generated._dispatched_call_start({})
-fresh = generated.Userdata()
+fresh = generated.CallState()
 generated._hydrate_call_start(fresh, values)
 assert fresh.name == "Grace", fresh.name
 

@@ -473,16 +473,16 @@ model, same param, two different failures, and neither is a reason to set it.
 
 A prompt that names the caller is different on every call, which would mean
 nothing ever repeats. So a router-bound prompt keeps its placeholders, for
-example `{{caller_name}}` in an instructions file with a matching
-`caller_name` variable. The router receives the prompt with the placeholder
+example `{{state.caller_name}}` in an instructions file with a matching
+`caller_name` field on `State`. The router receives the prompt with the placeholder
 intact, plus a map of this call's values, and substitutes them itself. Every
 call sends the same prompt, so turns can still repeat. This applies to the
 system prompt only; greetings, tool arguments, injected values, and webhook
 paths keep rendering locally.
 
-Only variables referenced by the current prompt are sent. Declaring a shape
+Only variables referenced by the current prompt are sent. Declaring a model
 or saving a task result does not add all call state to a router request.
-Dotted references such as `{{appointment.date}}` select that field alone.
+Dotted references such as `{{state.appointment.date}}` select that field alone.
 
 On LiveKit, values are read again for every request. On Pipecat, they refresh
 when the call saves state. Direct-provider agent prompts refresh when their
@@ -510,7 +510,7 @@ The value also has to match the answer **character for character** to be
 recognised and stored. A phone number the model regroups, or a date it
 rewrites, leaves the real thing in the stored copy. The personal-data scan then
 refuses to share it, and the turn stops caching. There is no error, just a hit
-rate of zero. Write the expected shape into the variable's own `description`,
+rate of zero. Write the expected shape into the field's own `Field(description=...)`,
 and make whatever produces the value follow it. This decides caching only for a
 value the agent says out loud. A value passed only to tools can take whatever
 shape the rest of your package uses. `examples/salon-concierge` returns E.164

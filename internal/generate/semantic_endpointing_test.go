@@ -181,7 +181,7 @@ func TestTurnFieldsSurviveAPerTargetOverride(t *testing.T) {
 		pkg.Agent.Models.Turn[name] = def
 	}
 
-	agent, err := ir.Build(pkg)
+	agent, err := buildWithState(t, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}

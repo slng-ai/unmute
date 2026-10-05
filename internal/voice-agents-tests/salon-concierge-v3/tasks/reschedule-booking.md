@@ -2,9 +2,9 @@
 
 Speak only in English.
 
-Move appointment {{appointment_id}} for {{appointment_service}} to
-{{appointment_date}} at {{appointment_time}}, using slot
-{{appointment_slot_id}}.
+Move appointment {{state.appointment_id}} for {{state.appointment_service}} to
+{{state.appointment_date}} at {{state.appointment_time}}, using slot
+{{state.appointment_slot_id}}.
 
 You have no earlier conversation. If any needed value is unavailable, ask the
 caller for it and do not call modify_booking. Otherwise, read the service, date,
