@@ -844,7 +844,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 			resolved.Provider))
 	}
 	if agent.Tracing != nil {
-		applyCapability(caps, tracingCapability(agent.Tracing.Provider), provider, row)
+		applyCapability(caps, TracingCapability(agent.Tracing.Provider), provider, row)
 	}
 	row.Errors = append(row.Errors, validateRegions(resolved.DeploymentRegions)...)
 	if provider == targetcap.LiveKit {

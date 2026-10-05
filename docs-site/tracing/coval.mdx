@@ -30,9 +30,9 @@ tracing:
 That is the whole change to your package. Compile, and both the Pipecat and
 LiveKit projects send spans to Coval.
 
-<ParamField path="provider" type="langfuse | coval" required>
+<ParamField path="provider" type="langfuse | logfire | coval" required>
   Which service the spans go to. `coval` is this page. Any other name is
-  refused, with both accepted names in the message, and leaving the whole
+  refused, with the accepted names in the message, and leaving the whole
   `tracing:` block out means the agent exports nothing.
 </ParamField>
 

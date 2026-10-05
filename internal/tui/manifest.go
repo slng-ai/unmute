@@ -276,11 +276,7 @@ func guideManifestTarget(runner *fieldRunner, data *scaffold.Data) error {
 	if rules := runner.manifest.Tracing; rules != nil {
 		options := []menuChoice{newChoice("Disabled", "")}
 		for _, provider := range rules.Allow {
-			field := targetcap.FieldTracingLangfuse
-			if provider == "coval" {
-				field = targetcap.FieldTracingCoval
-			}
-			if targetcap.Default().Capability(field, targetcap.Provider(data.Target)).Tag == targetcap.Gated {
+			if targetcap.Default().Capability(ir.TracingCapability(provider), targetcap.Provider(data.Target)).Tag == targetcap.Gated {
 				continue
 			}
 			options = append(options, newChoice(provider, provider))

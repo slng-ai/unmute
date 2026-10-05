@@ -1,0 +1,792 @@
+"""Generated telemetry for {{.Project}}.
+
+One OpenTelemetry provider per call, and the one backend it exports to.
+
+`utils/tracing.py` decides which spans a call produces. This module decides
+where those spans go and which attribute names they carry. So the call code
+never names a backend, and a new backend is one class here.
+"""
+
+from __future__ import annotations
+
+{{if eq .Provider "langfuse"}}import base64
+{{end}}import json
+{{if eq .Provider "coval"}}import logging
+{{end}}import os
+{{if eq .Provider "logfire"}}import re
+{{end}}{{if eq .Provider "coval"}}import threading
+import urllib.error
+import urllib.request
+{{end}}from abc import ABC, abstractmethod
+{{if eq .Provider "coval"}}from collections import deque
+{{end}}from collections.abc import Callable, Mapping{{if ne .Provider "langfuse"}}, Sequence{{end}}
+{{if ne .Provider "coval"}}from dataclasses import dataclass
+{{end}}{{if eq .Provider "langfuse"}}from datetime import UTC, datetime
+{{end}}from typing import {{if eq .Provider "logfire"}}Any, {{end}}ClassVar, Self
+
+from opentelemetry import trace
+from opentelemetry.context import Context
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+{{- if and (eq .Provider "coval") (eq .Target "livekit")}}
+    SimpleSpanProcessor,
+{{- end}}
+    SpanExporter,
+{{- if ne .Provider "langfuse"}}
+    SpanExportResult,
+{{- end}}
+)
+from opentelemetry.util.types import AttributeValue
+
+AGENT_NAME = {{pyq .AgentName}}
+{{if eq .Provider "coval"}}
+logger = logging.getLogger("coval_tracing")
+
+# Set by `unmute dev` and by nothing else, so a local run and the same build
+# deployed can be told apart in Coval. Read at import rather than baked in at
+# compile time: one build serves both. The name is owned by `LocalRunEnv` in
+# internal/generate/tracing.go.
+LOCAL_RUN_ENV = "UNMUTE_LOCAL_RUN"
+
+# What Coval groups and filters by. Trace Search has no service.name filter, so
+# this same value also goes on the `agent.name` attribute, the conversation
+# metadata and the conversation tag.
+TRACE_NAME = AGENT_NAME + "-local" if os.environ.get(LOCAL_RUN_ENV) else AGENT_NAME
+{{else}}
+TRACE_NAME = AGENT_NAME
+{{end}}
+# OpenTelemetry's exporter interface takes its flush budget in milliseconds.
+FLUSH_TIMEOUT_MS = 30000
+
+
+class Backend(ABC):
+    """Where a call's spans go, and the attribute names that backend reads.
+
+    The defaults are the OpenTelemetry GenAI names, which any OTLP backend can
+    read. A subclass overrides only the names its backend reads differently.
+    """
+
+    __slots__ = ()
+
+    # Span names whose children are started in their parent instead. Empty by
+    # default: only a backend that cannot read through a span in between asks.
+    transparent_spans: ClassVar[frozenset[str]] = frozenset()
+
+    @classmethod
+    @abstractmethod
+    def from_env(cls) -> Self:
+        """Build the backend from this process's environment."""
+
+    @abstractmethod
+    def exporter(self) -> SpanExporter:
+        """The exporter every span of the call goes out through."""
+
+    def processor(self) -> SpanProcessor:
+        """How spans reach the exporter: batched, so a slow backend never stalls a call."""
+        return BatchSpanProcessor(self.exporter())
+
+    def call_attributes(self, session_id: str | None) -> dict[str, AttributeValue]:
+        """The attributes that tie every span of one call together."""
+        attributes: dict[str, AttributeValue] = {"agent.name": TRACE_NAME}
+        if session_id:
+            attributes["session.id"] = session_id
+        return attributes
+
+    def agent_run(self, agent_name: str) -> dict[str, AttributeValue]:
+        """Attributes that make a span one agent run. None by default."""
+        return {}
+
+    def observation(
+        self,
+        *,
+        input_value: str | None = None,
+        output_value: str | None = None,
+        kind: str | None = None,
+    ) -> dict[str, AttributeValue]:
+        """What a span took in and gave back, under this backend's names."""
+        pairs = (("input.value", input_value), ("output.value", output_value))
+        return {key: value for key, value in pairs if value is not None}
+
+    def speech_metric(self, kind: str, key: str, value: AttributeValue) -> dict[str, AttributeValue]:
+        """Extra attributes one speech metric maps to. None by default."""
+        return {}
+
+    def tool_span(
+        self, name: str, arguments: str, call_id: str | None
+    ) -> tuple[str, dict[str, AttributeValue]]:
+        """The name and opening attributes of one tool call's span."""
+        attributes: dict[str, AttributeValue] = {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.name": name,
+            "gen_ai.tool.call.arguments": arguments,
+        }
+        if call_id:
+            attributes["gen_ai.tool.call.id"] = call_id
+        return f"execute_tool {name}", attributes
+
+    def tool_result(self, result: str) -> dict[str, AttributeValue]:
+        """What a tool call returned."""
+        return {"gen_ai.tool.call.result": result}
+
+    def tool_outcome(self, status: str) -> dict[str, AttributeValue]:
+        """How a tool call ended: `completed`, `cancelled` or `error`."""
+        return {} if status == "completed" else {"error.type": status}
+{{if eq .Provider "langfuse"}}
+
+@dataclass(frozen=True, slots=True)
+class Langfuse(Backend):
+    """Langfuse's OTLP endpoint, on its v4 observations-first ingestion path."""
+
+    public_key: str
+    secret_key: str
+    base_url: str
+
+    @classmethod
+    def from_env(cls) -> Self:
+        """Read the three Langfuse values. All three are required."""
+        values = [os.getenv(name, "") for name in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL")]
+        if not all(values):
+            raise ValueError(
+                "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and LANGFUSE_BASE_URL must all be set"
+            )
+        return cls(*values)
+
+    def exporter(self) -> SpanExporter:
+        """Plain OTLP with basic auth.
+
+        The ingestion header is what routes an export to the v4 data model.
+        Without it the spans still arrive, on the legacy path, and nothing
+        fails or logs, so it is set here once for both targets.
+        """
+        auth = base64.b64encode(f"{self.public_key}:{self.secret_key}".encode()).decode()
+        return OTLPSpanExporter(
+            endpoint=f"{self.base_url.rstrip('/')}/api/public/otel/v1/traces",
+            headers={"Authorization": f"Basic {auth}", "x-langfuse-ingestion-version": "4"},
+        )
+
+    def call_attributes(self, session_id: str | None) -> dict[str, AttributeValue]:
+        """Langfuse's own session and trace names, which its views group by."""
+        attributes: dict[str, AttributeValue] = {"langfuse.trace.name": TRACE_NAME}
+        if session_id:
+            attributes["langfuse.session.id"] = session_id
+        return attributes
+
+    def observation(
+        self,
+        *,
+        input_value: str | None = None,
+        output_value: str | None = None,
+        kind: str | None = None,
+    ) -> dict[str, AttributeValue]:
+        """Langfuse reads input and output off the observation, not the trace."""
+        pairs = (
+            ("langfuse.observation.type", kind),
+            ("langfuse.observation.input", input_value),
+            ("langfuse.observation.output", output_value),
+        )
+        return {key: value for key, value in pairs if value is not None}
+
+    def speech_metric(self, kind: str, key: str, value: AttributeValue) -> dict[str, AttributeValue]:
+        """Map Pipecat's speech metrics onto the fields Langfuse charts."""
+        if key == "metrics.ttfb":
+            return {
+                "langfuse.observation.metadata.ttfb_seconds": value,
+                "langfuse.observation.completion_start_time": datetime.now(UTC).isoformat(),
+            }
+        if kind == "tts" and key == "metrics.character_count":
+            return {
+                "langfuse.observation.metadata.character_count": value,
+                "langfuse.observation.usage_details": json.dumps({"characters": value}),
+            }
+        return {}
+
+    def tool_span(
+        self, name: str, arguments: str, call_id: str | None
+    ) -> tuple[str, dict[str, AttributeValue]]:
+        """A tool observation, named after the tool.
+
+        Langfuse makes a span with these two GenAI keys a TOOL and names it from
+        gen_ai.tool.name, whatever the span is called. livekit-agents sets the
+        same pair, so one call reads the same way on both targets.
+        """
+        attributes: dict[str, AttributeValue] = {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.name": name,
+            "tool.function_name": name,
+            "langfuse.observation.input": arguments,
+        }
+        if call_id:
+            attributes["tool.call_id"] = call_id
+        return name, attributes
+
+    def tool_result(self, result: str) -> dict[str, AttributeValue]:
+        """The tool's result is the observation's output."""
+        return {"langfuse.observation.output": result}
+
+    def tool_outcome(self, status: str) -> dict[str, AttributeValue]:
+        """Every outcome is recorded, including a clean one."""
+        return {"tool.result_status": status}
+
+
+BACKEND: type[Backend] = Langfuse
+{{end}}{{if eq .Provider "logfire"}}
+
+# A write token names its region: `pylf_v1_eu_<secret>`. The pattern is the one
+# the Logfire SDK reads (logfire/_internal/auth.py).
+LOGFIRE_TOKEN_REGION = re.compile(r"^pylf_v[0-9]+_(?P<region>[a-z]+)_")
+LOGFIRE_REGIONS = ("us", "eu")
+
+
+# What Logfire shows on a row: the operation, then what it ran on. Logfire's own
+# integrations write `chat gpt-4o` and `execute_tool <name>` the same way.
+LOGFIRE_LABELS = {
+    "invoke_agent": ("agent", "gen_ai.agent.name"),
+    "chat": ("chat", "gen_ai.request.model"),
+    "execute_tool": ("tool", "gen_ai.tool.name"),
+    "stt": ("stt", "gen_ai.request.model"),
+    "tts": ("tts", "gen_ai.request.model"),
+}
+
+# The span each target opens for the whole call, and for one exchange.
+LOGFIRE_CALL_SPANS = ("agent_session", "conversation")
+LOGFIRE_TURN_SPAN = "turn"
+LOGFIRE_LINE_CHARS = 80
+
+
+def _plain(value: AttributeValue | None) -> str:
+    """An attribute as text, unwrapping a JSON-encoded string."""
+    text = "" if value is None else str(value)
+    if text.startswith('"'):
+        try:
+            return str(json.loads(text))
+        except ValueError:
+            return text
+    return text
+
+
+def logfire_message(name: str, attributes: Mapping[str, AttributeValue]) -> str | None:
+    """The line Logfire shows for a span, or None to keep the span's own name.
+
+    A turn reads as what the caller said, even where it is also an agent run:
+    a column of identical agent names would say nothing about the call.
+    """
+    if name == LOGFIRE_TURN_SPAN:
+        line = _plain(attributes.get("input.value"))
+        return f"turn: {line[:LOGFIRE_LINE_CHARS]}" if line else "turn"
+    label = LOGFIRE_LABELS.get(str(attributes.get("gen_ai.operation.name")))
+    if label is not None:
+        return f"{label[0]} {_plain(attributes.get(label[1]))}".strip()
+    if name in LOGFIRE_CALL_SPANS:
+        session = attributes.get("session.id") or attributes.get("gen_ai.conversation.id")
+        return f"call {session}" if session else "call"
+    return None
+
+
+def _parts(message: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """One OpenAI-format message as GenAI message parts."""
+    content = message.get("content")
+    if message.get("role") == "tool":
+        return [{"type": "tool_call_response", "id": message.get("tool_call_id"), "response": content}]
+    texts = (
+        [content]
+        if isinstance(content, str)
+        else [part.get("text", "") for part in content or [] if isinstance(part, dict) and part.get("type") == "text"]
+    )
+    calls = [call.get("function") or {} for call in message.get("tool_calls") or []]
+    return [{"type": "text", "content": text} for text in texts if text] + [
+        {"type": "tool_call", "name": call.get("name"), "arguments": call.get("arguments")} for call in calls
+    ]
+
+
+def genai_messages(attributes: Mapping[str, AttributeValue]) -> dict[str, AttributeValue]:
+    """A model call's messages under the GenAI names Logfire's LLM panel reads.
+
+    LiveKit already writes them. Pipecat keeps its own `input` (OpenAI-format
+    messages) and `output` (the reply's text, written when the stream ends), and
+    a plain-string system prompt, so this maps those. Anything else is left alone.
+    """
+    if attributes.get("gen_ai.operation.name") != "chat" or "gen_ai.input.messages" in attributes:
+        return {}
+    mapped: dict[str, AttributeValue] = {}
+    system = attributes.get("gen_ai.system_instructions")
+    if isinstance(system, str) and not system.lstrip().startswith("["):
+        mapped["gen_ai.system_instructions"] = json.dumps([{"type": "text", "content": system}])
+    try:
+        messages = json.loads(str(attributes.get("input") or "[]"))
+    except ValueError:
+        messages = []
+    if isinstance(messages, list) and messages:
+        # The system prompt has its own attribute, so it is not a message too.
+        mapped["gen_ai.input.messages"] = json.dumps(
+            [
+                {"role": message.get("role", "user"), "parts": _parts(message)}
+                for message in messages
+                if isinstance(message, dict) and not (system and message.get("role") == "system")
+            ]
+        )
+    output = attributes.get("output")
+    if output:
+        mapped["gen_ai.output.messages"] = json.dumps(
+            [{"role": "assistant", "parts": [{"type": "text", "content": str(output)}]}]
+        )
+    return mapped
+
+
+def _shaped(span: ReadableSpan) -> ReadableSpan:
+    """A copy of an ended span, labelled and mapped for Logfire. Nothing else moves."""
+    attributes: dict[str, AttributeValue] = dict(span.attributes or {})
+    attributes.update(genai_messages(attributes))
+    message = logfire_message(span.name, attributes)
+    if message:
+        attributes["logfire.msg"] = message
+    return ReadableSpan(
+        name=span.name,
+        context=span.context,
+        parent=span.parent,
+        resource=span.resource,
+        attributes=attributes,
+        events=span.events,
+        links=span.links,
+        kind=span.kind,
+        status=span.status,
+        start_time=span.start_time,
+        end_time=span.end_time,
+        instrumentation_scope=span.instrumentation_scope,
+    )
+
+
+class LogfireExporter(SpanExporter):
+    """The OTLP exporter, sending each span the way Logfire's own integrations shape theirs."""
+
+    def __init__(self, inner: SpanExporter) -> None:
+        """Wrap the exporter that actually sends."""
+        self._inner = inner
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        """Label and map every span, then send them."""
+        return self._inner.export([_shaped(span) for span in spans])
+
+    def force_flush(self, timeout_millis: int = FLUSH_TIMEOUT_MS) -> bool:
+        """Flush the wrapped exporter."""
+        return self._inner.force_flush(timeout_millis)
+
+    def shutdown(self) -> None:
+        """Shut the wrapped exporter down."""
+        self._inner.shutdown()
+
+
+@dataclass(frozen=True, slots=True)
+class Logfire(Backend):
+    """Logfire's OTLP endpoint, in the region the write token names.
+
+    Logfire groups a call into agent runs, and counts a model call toward a run
+    only when it sits directly under the run's span. So this backend asks the
+    span shapers to read through LiveKit's `llm_node`, and marks a span as an
+    agent run where a framework opens none.
+    """
+
+    token: str
+
+    transparent_spans: ClassVar[frozenset[str]] = frozenset({"llm_node"})
+
+    @classmethod
+    def from_env(cls) -> Self:
+        """Read the write token. Nothing else is needed."""
+        token = os.getenv("LOGFIRE_TOKEN", "")
+        if not token:
+            raise ValueError("LOGFIRE_TOKEN must be set")
+        return cls(token)
+
+    @property
+    def base_url(self) -> str:
+        """The region's host, read off the token the way the Logfire SDK reads it.
+
+        An older token names no region, and the SDK sends those to the US
+        region, so this does too. So does a region the SDK does not know.
+        """
+        found = LOGFIRE_TOKEN_REGION.match(self.token)
+        region = found["region"] if found and found["region"] in LOGFIRE_REGIONS else "us"
+        return f"https://logfire-{region}.pydantic.dev"
+
+    def exporter(self) -> SpanExporter:
+        """Plain OTLP, shaped for Logfire. It takes the raw token, with no `Bearer`."""
+        return LogfireExporter(
+            OTLPSpanExporter(
+                endpoint=f"{self.base_url}/v1/traces",
+                headers={"Authorization": self.token},
+            )
+        )
+
+    def call_attributes(self, session_id: str | None) -> dict[str, AttributeValue]:
+        """The shared ones, plus the conversation ID Logfire groups agent runs by."""
+        # Not super(): a slotted dataclass is rebuilt, and zero-argument super
+        # would point at the class it replaced.
+        attributes = Backend.call_attributes(self, session_id)
+        if session_id:
+            attributes["gen_ai.conversation.id"] = session_id
+        return attributes
+
+    def agent_run(self, agent_name: str) -> dict[str, AttributeValue]:
+        """What Logfire's Agents view keys on."""
+        return {"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": agent_name}
+
+
+BACKEND: type[Backend] = Logfire
+{{end}}{{if eq .Provider "coval"}}
+
+COVAL_TRACES_ENDPOINT = "https://api.coval.dev/v1/traces"
+
+# Set by Coval on the OTLP request, not on the call. Different name on purpose.
+SIMULATION_EXPORT_HEADER = "X-Simulation-Id"
+
+# The other way a trace can be correlated. A call no simulation placed is
+# submitted as a Coval conversation once it ends, and its spans go out against
+# the conversation ID that submit returns. Coval accepts exactly one of the two
+# headers, never both.
+COVAL_CONVERSATIONS_ENDPOINT = "https://api.coval.dev/v1/conversations:submit"
+CONVERSATION_EXPORT_HEADER = "X-Conversation-Id"
+
+# A call nobody ever claims must not grow the process without limit.
+MAX_PREACTIVATION_SPANS = 1024
+
+# Coval's ingest is append-only and does not de-duplicate, so a retry has to
+# resend only the batch that failed. The docs require this exact timeout.
+EXPORT_TIMEOUT_SECONDS = 30
+
+# Registering the call is the last thing that happens, inside the host's
+# shutdown window, and LiveKit force-kills a job process ten seconds after
+# shutdown begins. So this is deliberately not EXPORT_TIMEOUT_SECONDS: sharing
+# that budget would let a merely slow Coval cost the whole trace instead of a
+# few seconds, and being cut short is logged rather than silent.
+SUBMIT_TIMEOUT_SECONDS = 5
+
+# Which call a span belongs to. Pipecat Cloud reuses one process for many calls,
+# so this is what stops a span that ended late riding out under the next call's
+# Coval ID. A span without it was never stamped, which is every span on LiveKit,
+# where a job owns its process.
+CALL_TOKEN_ATTR = "coval.internal.call_token"
+
+# How the caller reached the agent. Values are fixed: `browser`, `phone`,
+# `websocket`. A route that cannot be determined records nothing.
+CALL_ORIGIN_ATTR = "coval.call.origin"
+
+
+class CovalExporter(SpanExporter):
+    """Hold spans until the call's Coval ID is known, then export them.
+
+    One exporter for the life of the provider. Its correlation state, though,
+    belongs to one call: Pipecat Cloud runs many sessions through one warm
+    container, and an exporter that kept the first call's ID would file every
+    later call under it. ``begin_call`` clears that state and takes a new
+    token, and ``export`` never sends a span stamped with an older one.
+    """
+
+    def __init__(self, api_key: str) -> None:
+        """Start with no call, no exporter and an empty span buffer."""
+        self._api_key = api_key
+        self._lock = threading.RLock()
+        self._buffer: deque[ReadableSpan] = deque(maxlen=MAX_PREACTIVATION_SPANS)
+        self._dropped = 0
+        self._exporter: OTLPSpanExporter | None = None
+        self.simulation_id: str | None = None
+        self.call_token = 0
+
+    @property
+    def active(self) -> bool:
+        """Whether this call has a correlation ID and is exporting."""
+        return self._exporter is not None
+
+    def begin_call(self) -> int:
+        """Start a new call, keeping nothing at all from the last one."""
+        with self._lock:
+            exporter = self._exporter
+            self._exporter = None
+            self.simulation_id = None
+            self._buffer.clear()
+            self._dropped = 0
+            self.call_token += 1
+            token = self.call_token
+        if exporter is not None:
+            # Only the OTLP exporter the last call bound, never the provider's
+            # own processor: a processor that has been shut down drops every
+            # later span in silence, and the next call still needs it.
+            exporter.shutdown()
+        return token
+
+    def held(self) -> list[ReadableSpan]:
+        """The spans waiting for a correlation ID, oldest first."""
+        with self._lock:
+            return list(self._buffer)
+
+    def activate(self, correlation_id: str, header: str = SIMULATION_EXPORT_HEADER) -> None:
+        """Bind this call to a correlation ID and flush the spans held so far."""
+        with self._lock:
+            if self.simulation_id == correlation_id:
+                return
+            self.simulation_id = correlation_id
+            self._exporter = OTLPSpanExporter(
+                endpoint=COVAL_TRACES_ENDPOINT,
+                headers={"x-api-key": self._api_key, header: correlation_id},
+                timeout=EXPORT_TIMEOUT_SECONDS,
+            )
+            held = list(self._buffer)
+            self._buffer.clear()
+            dropped, self._dropped = self._dropped, 0
+            exporter = self._exporter
+        if dropped:
+            logger.warning("Dropped %d span(s) before the correlation ID arrived", dropped)
+        if held:
+            logger.info("Flushing %d held span(s) to Coval", len(held))
+            exporter.export(held)
+
+    def _belongs(self, span: ReadableSpan) -> bool:
+        """Whether a span is the live call's, or was never stamped with a call."""
+        token = (span.attributes or {}).get(CALL_TOKEN_ATTR)
+        return token is None or token == self.call_token
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        """Export this call's spans, or hold them until the call has an ID."""
+        with self._lock:
+            mine = [span for span in spans if self._belongs(span)]
+            stale = len(spans) - len(mine)
+            exporter = self._exporter
+            if exporter is None:
+                # The deque drops its oldest span past the limit, so count those.
+                self._dropped += max(0, len(self._buffer) + len(mine) - MAX_PREACTIVATION_SPANS)
+                self._buffer.extend(mine)
+        if stale:
+            logger.warning(
+                "Discarded %d span(s) from a finished call rather than filing them "
+                "under the live one",
+                stale,
+            )
+        if exporter is None or not mine:
+            return SpanExportResult.SUCCESS
+        # ponytail: every span of *this* call goes out, not only the ones
+        # stamped with a simulation ID. A batching processor can still be holding
+        # a span created before the ID arrived when activate() drains the buffer,
+        # and filtering on the simulation would silently drop it. The call token
+        # is the only filter worth having: a span from a finished call must never
+        # ride out under the live call's correlation ID.
+        return exporter.export(mine)
+
+    def force_flush(self, timeout_millis: int = FLUSH_TIMEOUT_MS) -> bool:
+        """Flush the bound exporter, if there is one."""
+        with self._lock:
+            exporter = self._exporter
+        return exporter.force_flush(timeout_millis) if exporter else True
+
+    def shutdown(self) -> None:
+        """Drop held spans and shut the bound exporter down."""
+        with self._lock:
+            exporter = self._exporter
+            self._exporter = None
+            self._buffer.clear()
+        if exporter:
+            exporter.shutdown()
+
+
+def _timed_out(error: BaseException) -> bool:
+    """A read or connect timeout, however urllib wrapped it."""
+    return isinstance(error, TimeoutError) or isinstance(
+        getattr(error, "reason", None), TimeoutError
+    )
+
+
+class Coval(Backend):
+    """Coval's OTLP ingest, correlated to a simulation or a conversation.
+
+    Unlike Langfuse and Logfire, a missing key is not fatal here. A Coval key
+    only matters while a simulation is running, and a live call must not fail
+    because an evaluation credential is absent.
+    """
+
+    __slots__ = ("api_key", "router")
+
+    def __init__(self, api_key: str) -> None:
+        """Hold the key and the one exporter this call's spans are routed through."""
+        self.api_key = api_key
+        self.router = CovalExporter(api_key)
+
+    @classmethod
+    def from_env(cls) -> Self:
+        """Read the key, and say plainly when it is missing."""
+        api_key = os.getenv("COVAL_API_KEY", "")
+        logger.info(
+            "Coval tracing on: agent %s, traces to %s, COVAL_API_KEY %s",
+            TRACE_NAME,
+            COVAL_TRACES_ENDPOINT,
+            "present" if api_key else "MISSING",
+        )
+        if not api_key:
+            logger.warning("COVAL_API_KEY is not set, so no trace will reach Coval")
+        return cls(api_key)
+
+    def exporter(self) -> SpanExporter:
+        """The router, which holds spans until the call has a Coval ID."""
+        return self.router
+{{if eq .Target "livekit"}}
+    def processor(self) -> SpanProcessor:
+        """Unbatched, on purpose.
+
+        The router flushes its held spans the moment the simulation ID arrives,
+        and a batching processor could still be holding a span at that moment,
+        which would then export it under no simulation at all.
+        """
+        return SimpleSpanProcessor(self.router)
+{{end}}
+    def tool_span(
+        self, name: str, arguments: str, call_id: str | None
+    ) -> tuple[str, dict[str, AttributeValue]]:
+        """Coval's canonical tool span."""
+        attributes: dict[str, AttributeValue] = {"function.name": name, "function.arguments": arguments}
+        if call_id:
+            attributes["tool_call_id"] = call_id
+        return "llm_tool_call", attributes
+
+    def tool_result(self, result: str) -> dict[str, AttributeValue]:
+        """What the tool returned, under Coval's name."""
+        return {"tool.result": result}
+
+    def tool_outcome(self, status: str) -> dict[str, AttributeValue]:
+        """Coval records only a call that did not complete."""
+        return {} if status == "completed" else {"tool.error": status}
+
+    def submit_conversation(
+        self, transcript: list[dict[str, str]], session_id: str, origin: str = ""
+    ) -> str | None:
+        """Register this call with Coval as a conversation, and return its ID.
+
+        This is the route for a call no simulation placed: a local `unmute dev`
+        run, or production traffic. Coval needs the call to exist before spans
+        can be attached to it, so the transcript is submitted first and the ID
+        it returns is what the spans are exported against.
+        """
+        if not self.api_key:
+            logger.warning("COVAL_API_KEY is not set, so this call is not filed with Coval")
+            return None
+        if not transcript:
+            return None
+        metadata = {"agent": TRACE_NAME, "source": "unmute", "session_id": session_id}
+        if origin:
+            metadata["origin"] = origin
+        payload = {
+            "transcript": transcript,
+            "metadata": metadata,
+            "tags": [TRACE_NAME],
+        }
+        if session_id:
+            payload["external_conversation_id"] = session_id
+        request = urllib.request.Request(
+            COVAL_CONVERSATIONS_ENDPOINT,
+            data=json.dumps(payload).encode(),
+            headers={"x-api-key": self.api_key, "content-type": "application/json"},
+            method="POST",
+        )
+        try:
+            # Not EXPORT_TIMEOUT_SECONDS: this runs in the host's shutdown
+            # window, which is shorter than Coval's required export timeout.
+            with urllib.request.urlopen(request, timeout=SUBMIT_TIMEOUT_SECONDS) as response:
+                body = json.load(response)
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            # A trace is not worth failing a call over, on this path least of
+            # all: the call is already over by the time this runs.
+            if _timed_out(error):
+                logger.warning(
+                    "Registering this call with Coval took longer than its %ss budget, "
+                    "so this call is not filed",
+                    SUBMIT_TIMEOUT_SECONDS,
+                )
+            else:
+                logger.warning("Could not register this call with Coval: %s", error)
+            return None
+        conversation_id = str((body.get("conversation") or {}).get("conversation_id") or "")
+        return conversation_id or None
+
+
+BACKEND: type[Backend] = Coval
+{{end}}
+
+class _Filtered(SpanProcessor):
+    """Hand the backend every ended span except the ones `keep` refuses."""
+
+    def __init__(self, inner: SpanProcessor, keep: Callable[[ReadableSpan], bool]) -> None:
+        """Wrap one processor with one export rule."""
+        self._inner, self._keep = inner, keep
+
+    def on_start(self, span: Span, parent_context: Context | None = None) -> None:
+        """Pass every span on as it starts."""
+        self._inner.on_start(span, parent_context)
+
+    def on_end(self, span: ReadableSpan) -> None:
+        """Pass an ended span on only if it is kept."""
+        if self._keep(span):
+            self._inner.on_end(span)
+
+    def shutdown(self) -> None:
+        """Shut the wrapped processor down."""
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = FLUSH_TIMEOUT_MS) -> bool:
+        """Flush the wrapped processor."""
+        return self._inner.force_flush(timeout_millis)
+
+
+class Telemetry:
+    """The one tracer provider a call's spans go through, and its backend.
+
+    Every target builds one of these and adds its own span processors to it.
+    Nothing outside this module builds a provider or an exporter.
+    """
+
+    __slots__ = ("backend", "provider")
+
+    def __init__(
+        self,
+        backend: Backend | None = None,
+        *,
+        resource: Mapping[str, AttributeValue] | None = None,
+        keep: Callable[[ReadableSpan], bool] | None = None,
+    ) -> None:
+        """Build the provider and attach the backend's exporter to it.
+
+        `backend` defaults to the one this package names in agent.yaml, read
+        from the environment. `keep`, when given, decides which ended spans
+        reach the backend at all.
+        """
+        self.backend = backend if backend is not None else BACKEND.from_env()
+        # Without a service name every call lands as unknown_service.
+        self.provider = TracerProvider(resource=Resource.create({SERVICE_NAME: TRACE_NAME, **(resource or {})}))
+        processor = self.backend.processor()
+        self.add(_Filtered(processor, keep) if keep else processor)
+
+    @classmethod
+    def install(
+        cls, backend: Backend | None = None, *, resource: Mapping[str, AttributeValue] | None = None
+    ) -> Telemetry:
+        """Build telemetry and set it as OpenTelemetry's global provider.
+
+        For a framework that reads the global provider rather than being handed
+        one. OpenTelemetry refuses a second global, so this fails loudly instead
+        of leaving the call traced to a provider nobody exports from.
+        """
+        if isinstance(trace.get_tracer_provider(), TracerProvider):
+            raise RuntimeError("OpenTelemetry already has a TracerProvider; set up unmute telemetry first")
+        telemetry = cls(backend, resource=resource)
+        trace.set_tracer_provider(telemetry.provider)
+        return telemetry
+
+    def tracer(self, name: str = "unmute") -> trace.Tracer:
+        """A tracer on this provider."""
+        return self.provider.get_tracer(name)
+
+    def add(self, processor: SpanProcessor) -> None:
+        """Run one more processor on every span."""
+        self.provider.add_span_processor(processor)
+
+    def flush(self) -> bool:
+        """Send every span that has ended and not gone out yet."""
+        return self.provider.force_flush()

@@ -195,3 +195,7 @@ func enableLangfuse(agent *ir.Agent) {
 func enableCoval(agent *ir.Agent) {
 	agent.Tracing = &ir.Tracing{Provider: "coval"}
 }
+
+func enableLogfire(agent *ir.Agent) {
+	agent.Tracing = &ir.Tracing{Provider: "logfire"}
+}

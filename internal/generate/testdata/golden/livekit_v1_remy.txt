@@ -1362,7 +1362,7 @@ from call_state import CallState
 from session import _dispatched_call_start, _hydrate_call_start, _livekit_job_metadata
 from settings import require_env
 from utils.dev_metrics import install_dev_metrics
-from utils.tracing import setup_langfuse
+from utils.tracing import setup_tracing
 
 # The loop keeps only a weak reference to a task, so a timer nobody holds can be
 # collected before it fires. Each one is held here until it finishes.
@@ -1430,14 +1430,8 @@ async def run_call(ctx: JobContext) -> None:
     )
 
 
-    setup_langfuse(
-        ctx,
-        session,
-        metadata={
-            "langfuse.session.id": ctx.room.name,
-            "langfuse.trace.name": "greeter" + "-" + "remy-fixture-livekit",
-        },
-    )
+    # utils/telemetry.py names the backend. The room is the call's session.
+    setup_tracing(ctx, session)
 
 
     # Inert unless the dev loop set UNMUTE_DEV_METRICS. Reads session events, so
@@ -2251,6 +2245,7 @@ STEP_RESULTS = {step: StepResult.for_step(step) for step in CallState.RESULTS}
     "utils/__init__.py",
     "utils/context.py",
     "utils/dev_metrics.py",
+    "utils/telemetry.py",
     "utils/tracing.py"
   ],
   "required_env": [
@@ -2558,10 +2553,10 @@ description = "Generated LiveKit Agents project (unmute livekit driver)"
 requires-python = ">=3.11"
 dependencies = [
     "httpx",
-    "langfuse>=4,<5",
     "livekit-agents[openai]==1.8.1",
     "livekit-plugins-silero>=1.8.1",
     "livekit-plugins-slng>=1.8.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.33,<2",
     "opentelemetry-sdk>=1.33,<2",
     "python-dotenv",
 ]
@@ -3853,26 +3848,323 @@ def dev_say(session: AgentSession, text: str, **kwargs: Any) -> SpeechHandle:
         response_id = reporter.speech(handle)
         reporter.text(f"{response_id}-text", response_id, response_id, "assistant", text, "final", "generated")
     return handle
+=== utils/telemetry.py ===
+"""Generated telemetry for remy-fixture.
+
+One OpenTelemetry provider per call, and the one backend it exports to.
+
+`utils/tracing.py` decides which spans a call produces. This module decides
+where those spans go and which attribute names they carry. So the call code
+never names a backend, and a new backend is one class here.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+from abc import ABC, abstractmethod
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import ClassVar, Self
+
+from opentelemetry import trace
+from opentelemetry.context import Context
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+    SpanExporter,
+)
+from opentelemetry.util.types import AttributeValue
+
+AGENT_NAME = "greeter-remy-fixture-livekit"
+
+TRACE_NAME = AGENT_NAME
+
+# OpenTelemetry's exporter interface takes its flush budget in milliseconds.
+FLUSH_TIMEOUT_MS = 30000
+
+
+class Backend(ABC):
+    """Where a call's spans go, and the attribute names that backend reads.
+
+    The defaults are the OpenTelemetry GenAI names, which any OTLP backend can
+    read. A subclass overrides only the names its backend reads differently.
+    """
+
+    __slots__ = ()
+
+    # Span names whose children are started in their parent instead. Empty by
+    # default: only a backend that cannot read through a span in between asks.
+    transparent_spans: ClassVar[frozenset[str]] = frozenset()
+
+    @classmethod
+    @abstractmethod
+    def from_env(cls) -> Self:
+        """Build the backend from this process's environment."""
+
+    @abstractmethod
+    def exporter(self) -> SpanExporter:
+        """The exporter every span of the call goes out through."""
+
+    def processor(self) -> SpanProcessor:
+        """How spans reach the exporter: batched, so a slow backend never stalls a call."""
+        return BatchSpanProcessor(self.exporter())
+
+    def call_attributes(self, session_id: str | None) -> dict[str, AttributeValue]:
+        """The attributes that tie every span of one call together."""
+        attributes: dict[str, AttributeValue] = {"agent.name": TRACE_NAME}
+        if session_id:
+            attributes["session.id"] = session_id
+        return attributes
+
+    def agent_run(self, agent_name: str) -> dict[str, AttributeValue]:
+        """Attributes that make a span one agent run. None by default."""
+        return {}
+
+    def observation(
+        self,
+        *,
+        input_value: str | None = None,
+        output_value: str | None = None,
+        kind: str | None = None,
+    ) -> dict[str, AttributeValue]:
+        """What a span took in and gave back, under this backend's names."""
+        pairs = (("input.value", input_value), ("output.value", output_value))
+        return {key: value for key, value in pairs if value is not None}
+
+    def speech_metric(self, kind: str, key: str, value: AttributeValue) -> dict[str, AttributeValue]:
+        """Extra attributes one speech metric maps to. None by default."""
+        return {}
+
+    def tool_span(
+        self, name: str, arguments: str, call_id: str | None
+    ) -> tuple[str, dict[str, AttributeValue]]:
+        """The name and opening attributes of one tool call's span."""
+        attributes: dict[str, AttributeValue] = {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.name": name,
+            "gen_ai.tool.call.arguments": arguments,
+        }
+        if call_id:
+            attributes["gen_ai.tool.call.id"] = call_id
+        return f"execute_tool {name}", attributes
+
+    def tool_result(self, result: str) -> dict[str, AttributeValue]:
+        """What a tool call returned."""
+        return {"gen_ai.tool.call.result": result}
+
+    def tool_outcome(self, status: str) -> dict[str, AttributeValue]:
+        """How a tool call ended: `completed`, `cancelled` or `error`."""
+        return {} if status == "completed" else {"error.type": status}
+
+
+@dataclass(frozen=True, slots=True)
+class Langfuse(Backend):
+    """Langfuse's OTLP endpoint, on its v4 observations-first ingestion path."""
+
+    public_key: str
+    secret_key: str
+    base_url: str
+
+    @classmethod
+    def from_env(cls) -> Self:
+        """Read the three Langfuse values. All three are required."""
+        values = [os.getenv(name, "") for name in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL")]
+        if not all(values):
+            raise ValueError(
+                "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and LANGFUSE_BASE_URL must all be set"
+            )
+        return cls(*values)
+
+    def exporter(self) -> SpanExporter:
+        """Plain OTLP with basic auth.
+
+        The ingestion header is what routes an export to the v4 data model.
+        Without it the spans still arrive, on the legacy path, and nothing
+        fails or logs, so it is set here once for both targets.
+        """
+        auth = base64.b64encode(f"{self.public_key}:{self.secret_key}".encode()).decode()
+        return OTLPSpanExporter(
+            endpoint=f"{self.base_url.rstrip('/')}/api/public/otel/v1/traces",
+            headers={"Authorization": f"Basic {auth}", "x-langfuse-ingestion-version": "4"},
+        )
+
+    def call_attributes(self, session_id: str | None) -> dict[str, AttributeValue]:
+        """Langfuse's own session and trace names, which its views group by."""
+        attributes: dict[str, AttributeValue] = {"langfuse.trace.name": TRACE_NAME}
+        if session_id:
+            attributes["langfuse.session.id"] = session_id
+        return attributes
+
+    def observation(
+        self,
+        *,
+        input_value: str | None = None,
+        output_value: str | None = None,
+        kind: str | None = None,
+    ) -> dict[str, AttributeValue]:
+        """Langfuse reads input and output off the observation, not the trace."""
+        pairs = (
+            ("langfuse.observation.type", kind),
+            ("langfuse.observation.input", input_value),
+            ("langfuse.observation.output", output_value),
+        )
+        return {key: value for key, value in pairs if value is not None}
+
+    def speech_metric(self, kind: str, key: str, value: AttributeValue) -> dict[str, AttributeValue]:
+        """Map Pipecat's speech metrics onto the fields Langfuse charts."""
+        if key == "metrics.ttfb":
+            return {
+                "langfuse.observation.metadata.ttfb_seconds": value,
+                "langfuse.observation.completion_start_time": datetime.now(UTC).isoformat(),
+            }
+        if kind == "tts" and key == "metrics.character_count":
+            return {
+                "langfuse.observation.metadata.character_count": value,
+                "langfuse.observation.usage_details": json.dumps({"characters": value}),
+            }
+        return {}
+
+    def tool_span(
+        self, name: str, arguments: str, call_id: str | None
+    ) -> tuple[str, dict[str, AttributeValue]]:
+        """A tool observation, named after the tool.
+
+        Langfuse makes a span with these two GenAI keys a TOOL and names it from
+        gen_ai.tool.name, whatever the span is called. livekit-agents sets the
+        same pair, so one call reads the same way on both targets.
+        """
+        attributes: dict[str, AttributeValue] = {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.name": name,
+            "tool.function_name": name,
+            "langfuse.observation.input": arguments,
+        }
+        if call_id:
+            attributes["tool.call_id"] = call_id
+        return name, attributes
+
+    def tool_result(self, result: str) -> dict[str, AttributeValue]:
+        """The tool's result is the observation's output."""
+        return {"langfuse.observation.output": result}
+
+    def tool_outcome(self, status: str) -> dict[str, AttributeValue]:
+        """Every outcome is recorded, including a clean one."""
+        return {"tool.result_status": status}
+
+
+BACKEND: type[Backend] = Langfuse
+
+
+class _Filtered(SpanProcessor):
+    """Hand the backend every ended span except the ones `keep` refuses."""
+
+    def __init__(self, inner: SpanProcessor, keep: Callable[[ReadableSpan], bool]) -> None:
+        """Wrap one processor with one export rule."""
+        self._inner, self._keep = inner, keep
+
+    def on_start(self, span: Span, parent_context: Context | None = None) -> None:
+        """Pass every span on as it starts."""
+        self._inner.on_start(span, parent_context)
+
+    def on_end(self, span: ReadableSpan) -> None:
+        """Pass an ended span on only if it is kept."""
+        if self._keep(span):
+            self._inner.on_end(span)
+
+    def shutdown(self) -> None:
+        """Shut the wrapped processor down."""
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = FLUSH_TIMEOUT_MS) -> bool:
+        """Flush the wrapped processor."""
+        return self._inner.force_flush(timeout_millis)
+
+
+class Telemetry:
+    """The one tracer provider a call's spans go through, and its backend.
+
+    Every target builds one of these and adds its own span processors to it.
+    Nothing outside this module builds a provider or an exporter.
+    """
+
+    __slots__ = ("backend", "provider")
+
+    def __init__(
+        self,
+        backend: Backend | None = None,
+        *,
+        resource: Mapping[str, AttributeValue] | None = None,
+        keep: Callable[[ReadableSpan], bool] | None = None,
+    ) -> None:
+        """Build the provider and attach the backend's exporter to it.
+
+        `backend` defaults to the one this package names in agent.yaml, read
+        from the environment. `keep`, when given, decides which ended spans
+        reach the backend at all.
+        """
+        self.backend = backend if backend is not None else BACKEND.from_env()
+        # Without a service name every call lands as unknown_service.
+        self.provider = TracerProvider(resource=Resource.create({SERVICE_NAME: TRACE_NAME, **(resource or {})}))
+        processor = self.backend.processor()
+        self.add(_Filtered(processor, keep) if keep else processor)
+
+    @classmethod
+    def install(
+        cls, backend: Backend | None = None, *, resource: Mapping[str, AttributeValue] | None = None
+    ) -> Telemetry:
+        """Build telemetry and set it as OpenTelemetry's global provider.
+
+        For a framework that reads the global provider rather than being handed
+        one. OpenTelemetry refuses a second global, so this fails loudly instead
+        of leaving the call traced to a provider nobody exports from.
+        """
+        if isinstance(trace.get_tracer_provider(), TracerProvider):
+            raise RuntimeError("OpenTelemetry already has a TracerProvider; set up unmute telemetry first")
+        telemetry = cls(backend, resource=resource)
+        trace.set_tracer_provider(telemetry.provider)
+        return telemetry
+
+    def tracer(self, name: str = "unmute") -> trace.Tracer:
+        """A tracer on this provider."""
+        return self.provider.get_tracer(name)
+
+    def add(self, processor: SpanProcessor) -> None:
+        """Run one more processor on every span."""
+        self.provider.add_span_processor(processor)
+
+    def flush(self) -> bool:
+        """Send every span that has ended and not gone out yet."""
+        return self.provider.force_flush()
 === utils/tracing.py ===
-"""Generated Langfuse tracing for remy-fixture."""
+"""Generated tracing for remy-fixture: LiveKit's own spans, one trace per call.
+
+This module shapes the spans: a `turn` span per exchange, and the conversation
+on the call's root. Where they go, and under which attribute names, is
+utils/telemetry.py.
+"""
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
-from langfuse import Langfuse
 from livekit.agents import AgentSession, JobContext
 from livekit.agents.metrics import STTMetrics, TTSMetrics
 from livekit.agents.telemetry import set_tracer_provider
 from livekit.agents.voice import ConversationItemAddedEvent, MetricsCollectedEvent
 from opentelemetry import trace
-from opentelemetry.context import Context
+from opentelemetry.context import Context, get_current
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider
 from opentelemetry.util.types import AttributeValue
+
+from utils.telemetry import Backend, Telemetry
 
 # The livekit span that covers the whole call, and the root of its trace. Read
 # by name, the way the Pipecat target reads its own. It used to be the only
@@ -3895,9 +4187,9 @@ class CallTrace(SpanProcessor):
 
     Three jobs, in one class because they are the same bookkeeping.
 
-    It copies the call's correlating attributes onto every span, because
-    Langfuse v4 filters and sums over observations and an attribute that sits
-    only on the top span cannot group the spans underneath it. Before 1.8.0
+    It copies the call's correlating attributes onto every span, because a
+    backend that filters and sums over spans, as Langfuse v4 does, cannot group
+    the spans underneath an attribute that sits only on the top one. Before 1.8.0
     livekit's own metadata= did this too, but 1.8.0 rewrote that processor to
     stamp the job's room and job id instead, so this does not rely on it.
 
@@ -3912,15 +4204,21 @@ class CallTrace(SpanProcessor):
     the trace shows what was said rather than an envelope of lifecycle spans.
     """
 
-    def __init__(self, tracer: trace.Tracer, attributes: dict[str, AttributeValue]) -> None:
-        """Bind the tracer that opens turns and the attributes every span carries."""
+    def __init__(
+        self, tracer: trace.Tracer, attributes: dict[str, AttributeValue], backend: Backend
+    ) -> None:
+        """Bind the tracer that opens turns, the attributes every span carries, and the backend's names."""
         self._tracer = tracer
         self._attributes = attributes
+        self._backend = backend
         self._call: Span | None = None
         self._call_context: Context | None = None
         self._turn: trace.Span | None = None
         self._turn_context: Context | None = None
         self._transcript: list[dict[str, str]] = []
+        # Where the children of a span the backend reads through start instead:
+        # the context that span itself was started in, by its span ID.
+        self._lifted: dict[int, Context] = {}
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
         """Stamp the call's attributes on a span and remember the call's root."""
@@ -3931,6 +4229,14 @@ class CallTrace(SpanProcessor):
         if span.name == CALL_SPAN and self._call is None:
             self._call = span
             self._call_context = trace.set_span_in_context(span)
+        # The span is not current yet, so the current context is its parent's.
+        if span.name in self._backend.transparent_spans:
+            self._lifted[span.get_span_context().span_id] = parent_context or get_current()
+
+    def on_end(self, span: ReadableSpan) -> None:
+        """Forget a span the backend reads through, once it is over."""
+        if span.context is not None:
+            self._lifted.pop(span.context.span_id, None)
 
     def begin(self) -> Context | None:
         """Open a turn, inside the call's trace rather than starting a new one."""
@@ -3962,23 +4268,34 @@ class CallTrace(SpanProcessor):
         return self._turn_context if self._turn_context is not None else self.begin()
 
     def context_for(self, name: str, context: Context | None) -> Context | None:
-        """The context a livekit span should be started in."""
-        return self.ensure() if name in TURN_SPANS else context
+        """The context a livekit span should be started in.
+
+        A turn span goes inside the call's turn. A span whose parent the backend
+        reads through goes in that parent's parent: Logfire counts a model call
+        toward an agent run only when it sits right under `agent_turn`, and
+        livekit puts `llm_node` in between.
+        """
+        if name in TURN_SPANS:
+            return self.ensure()
+        parent = trace.get_current_span(context).get_span_context().span_id
+        return self._lifted.get(parent, context)
 
     def said(self, role: str, text: str) -> None:
         """Record one line, on its own turn and on the call as a whole."""
         self._transcript.append({"role": role, "content": text})
+        backend = self._backend
         if self._turn is not None and self._turn.is_recording():
-            side = "input" if role == "user" else "output"
-            self._turn.set_attribute(f"langfuse.observation.{side}", text)
+            line = backend.observation(input_value=text) if role == "user" else backend.observation(output_value=text)
+            self._turn.set_attributes(line)
         if self._call is not None and self._call.is_recording():
             # The whole conversation goes on the root, because that is the one
             # place a reader opens to see the call rather than one turn of it.
-            self._call.set_attribute(
-                "langfuse.observation.input", json.dumps(self._transcript)
+            self._call.set_attributes(
+                backend.observation(
+                    input_value=json.dumps(self._transcript),
+                    output_value=None if role == "user" else text,
+                )
             )
-            if role != "user":
-                self._call.set_attribute("langfuse.observation.output", text)
 
 
 class TurnTracer:
@@ -4031,12 +4348,7 @@ def install_turn_spans(provider: TracerProvider, call: CallTrace) -> None:
 
 
 def _export_call_spans(span: ReadableSpan) -> bool:
-    """Export the whole call, whatever the default filter would make of it.
-
-    The hook has to be set, and not for any filtering of our own: every span
-    here comes from livekit-agents or from this module, and neither is a scope
-    the Langfuse v4 default filter recognises, so leaving the default in place
-    drops the whole call before it reaches the exporter.
+    """Export the whole call except one span, a parentless loop stall.
 
     This used to rename livekit's tool spans as well. livekit-agents starts
     every one as the literal "function_tool" (voice/generation.py) and carries
@@ -4059,22 +4371,13 @@ def _export_call_spans(span: ReadableSpan) -> bool:
     return not (span.name == "event_loop_blocked" and span.parent is None)
 
 
-def setup_langfuse(
-    ctx: JobContext,
-    session: AgentSession,
-    metadata: dict[str, AttributeValue] | None = None,
-) -> TracerProvider:
-    """Install Langfuse tracing on the session and return the tracer provider."""
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-    base_url = os.getenv("LANGFUSE_BASE_URL")
-    values = (public_key, secret_key, base_url)
-    if not all(values):
-        raise ValueError(
-            "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and LANGFUSE_BASE_URL must all be set"
-        )
-
-    trace_provider = TracerProvider()
+def setup_tracing(ctx: JobContext, session: AgentSession) -> Telemetry:
+    """Trace this job's session to the backend agent.yaml names, and return its telemetry."""
+    # One per job, handed to livekit directly: a LiveKit job owns its process,
+    # so nothing here sets OpenTelemetry's global provider.
+    telemetry = Telemetry(keep=_export_call_spans)
+    trace_provider = telemetry.provider
+    attributes = telemetry.backend.call_attributes(ctx.room.name)
     # Our own processor, not livekit-agents' metadata= below. Before 1.8.0 that
     # argument did stamp every span, but 1.8.0 rewrote its processor to stamp
     # the job's own room_id and job_id instead and return early, so at the
@@ -4083,31 +4386,17 @@ def setup_langfuse(
     # The tracer is taken before the patch so this module's own spans are not
     # wrapped by it. They name no turn span, so it would change nothing, but a
     # tracer that wraps itself is a bad thing to leave for the next reader.
-    call = CallTrace(trace_provider.get_tracer("unmute"), dict(metadata or {}))
-    trace_provider.add_span_processor(call)
+    call = CallTrace(trace_provider.get_tracer("unmute"), attributes, telemetry.backend)
+    telemetry.add(call)
     install_turn_spans(trace_provider, call)
     # This is what hands the patched provider to livekit.
-    set_tracer_provider(trace_provider, metadata=metadata)
-    Langfuse(
-        public_key=public_key,
-        secret_key=secret_key,
-        base_url=base_url,
-        tracer_provider=trace_provider,
-        # The SDK's own exporter sends auth and its version and nothing else, so
-        # without this header the spans arrive on the legacy ingestion path. The
-        # Pipecat target sets the same header on its exporter.
-        additional_headers={"x-langfuse-ingestion-version": "4"},
-        # Setting this is what keeps the call: the v4 default filter recognises
-        # neither livekit-agents' scope nor this module's, so leaving the
-        # default in place drops the whole call before the exporter sees it.
-        should_export_span=_export_call_spans,
-    )
+    set_tracer_provider(trace_provider, metadata=attributes)
 
     async def flush_trace() -> None:
         # Close the turn in progress first. A caller who hangs up mid-turn
         # leaves it open, and an unended span is never exported.
         call.end()
-        trace_provider.force_flush()
+        telemetry.flush()
 
     ctx.add_shutdown_callback(flush_trace)
 
@@ -4132,7 +4421,7 @@ def setup_langfuse(
             call.said("user", text)
             if pending_stt_metrics:
                 trace_speech_metrics(
-                    trace_provider,
+                    telemetry,
                     pending_stt_metrics,
                     input_value="audio",
                     output_value=text,
@@ -4144,7 +4433,7 @@ def setup_langfuse(
             call.said("assistant", text)
             if pending_tts_metrics:
                 trace_speech_metrics(
-                    trace_provider,
+                    telemetry,
                     pending_tts_metrics,
                     input_value=text,
                     output_value="audio",
@@ -4157,11 +4446,11 @@ def setup_langfuse(
             # instead of the turn plus the silence that followed.
             call.end()
 
-    return trace_provider
+    return telemetry
 
 
 def trace_speech_metrics(
-    trace_provider: TracerProvider,
+    telemetry: Telemetry,
     speech_metrics: Sequence[STTMetrics | TTSMetrics],
     *,
     input_value: str,
@@ -4178,9 +4467,7 @@ def trace_speech_metrics(
     duration = sum(item.duration for item in speech_metrics)
     audio_duration = sum(item.audio_duration for item in speech_metrics)
     attributes: dict[str, AttributeValue] = {
-        "langfuse.observation.type": "generation",
-        "langfuse.observation.input": input_value,
-        "langfuse.observation.output": output_value,
+        **telemetry.backend.observation(input_value=input_value, output_value=output_value, kind="generation"),
         "gen_ai.operation.name": operation,
         "gen_ai.output.type": "text" if operation == "stt" else "speech",
         "metrics.duration": duration,
@@ -4215,7 +4502,7 @@ def trace_speech_metrics(
     # These are started from an event handler, where the current context is the
     # session rather than the turn, so the turn is passed in explicitly. Without
     # it the transcript lands in a different trace from the turn it belongs to.
-    span = trace_provider.get_tracer("unmute").start_span(
+    span = telemetry.tracer().start_span(
         operation,
         context=context,
         attributes=attributes,

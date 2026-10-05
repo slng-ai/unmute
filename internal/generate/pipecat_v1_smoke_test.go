@@ -392,30 +392,28 @@ if Path("utils/tracing.py").exists():
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
 
-    if hasattr(tracing, "setup_langfuse_tracing"):
-        for name in ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_BASE_URL"):
+    from utils import telemetry as emitted_telemetry
+
+    backend_name = emitted_telemetry.BACKEND.__name__
+    if backend_name in ("Langfuse", "Logfire"):
+        for name in ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_BASE_URL", "LOGFIRE_TOKEN"):
             os.environ.pop(name, None)
         try:
-            tracing.setup_langfuse_tracing()
+            tracing.setup_tracing()
         except ValueError:
             pass
         else:
-            raise AssertionError("configured Langfuse tracing requires all credentials")
-    elif hasattr(tracing, "setup_coval_tracing"):
-        # Unlike Langfuse, a missing COVAL_API_KEY is not fatal here (an
-        # evaluation credential must never gate a live call), so this exercises
-        # real construction and the cached-provider idempotence guard instead
-        # of a raise.
-        os.environ.pop("COVAL_API_KEY", None)
-        provider = tracing.setup_coval_tracing()
-        assert isinstance(provider, TracerProvider), provider
-        assert trace.get_tracer_provider() is provider, "setup did not install the global tracer provider"
-        assert tracing.setup_coval_tracing() is provider, "second call must reuse the cached provider"
+            raise AssertionError(f"configured {backend_name} tracing requires its credentials")
     else:
-        raise AssertionError(
-            "tracing.py exposes neither setup_langfuse_tracing nor setup_coval_tracing: "
-            + repr(sorted(n for n in vars(tracing) if not n.startswith("_")))
-        )
+        # Unlike Langfuse and Logfire, a missing COVAL_API_KEY is not fatal here
+        # (an evaluation credential must never gate a live call), so this
+        # exercises real construction and the cached-telemetry idempotence
+        # guard instead of a raise.
+        os.environ.pop("COVAL_API_KEY", None)
+        telemetry = tracing.setup_tracing()
+        assert isinstance(telemetry.provider, TracerProvider), telemetry.provider
+        assert trace.get_tracer_provider() is telemetry.provider, "setup did not install the global tracer provider"
+        assert tracing.setup_tracing() is telemetry, "second call must reuse the cached telemetry"
 
 builders = sorted(n for n in vars(bot) if n.startswith("build_") and callable(getattr(bot, n)))
 assert builders, "no service builders found in bot.py"
@@ -1079,6 +1077,7 @@ import base64
 import json
 import os
 import threading
+import types
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
@@ -1104,6 +1103,7 @@ os.environ["LANGFUSE_SECRET_KEY"] = "sk-smoke"
 os.environ["LANGFUSE_BASE_URL"] = f"http://127.0.0.1:{receiver.server_port}"
 
 bot = _project("bot")
+from utils import telemetry as emitted_telemetry  # noqa: E402
 from utils import tracing as tracing_config  # noqa: E402
 from loguru import logger  # noqa: E402
 from opentelemetry import trace  # noqa: E402
@@ -1259,7 +1259,7 @@ class SlowProvider:
         self.release = release
         self.released_while_flushing = False
 
-    def force_flush(self) -> None:
+    def flush(self) -> None:
         self.started.set()
         self.released_while_flushing = self.release.wait(timeout=1)
 
@@ -1324,7 +1324,7 @@ async def assert_concurrent_calls_keep_their_own_session(memory) -> None:
     both_named = asyncio.Barrier(2)
 
     async def call(session: str) -> None:
-        tracing_config.start_call({"langfuse.session.id": session})
+        tracing_config.CALL.start_call({"langfuse.session.id": session}, tracing_config._TELEMETRY)
         await both_named.wait()
         with tracer.start_as_current_span(tracing_config.CALL_SPAN):
             await asyncio.sleep(0)
@@ -1348,16 +1348,16 @@ async def assert_concurrent_calls_keep_their_own_session(memory) -> None:
 async def main() -> None:
     await assert_worker_start_failure_stops_runner()
 
-    original_get_provider = tracing_config.trace.get_tracer_provider
-    tracing_config.trace.get_tracer_provider = lambda: TracerProvider()
+    original_get_provider = emitted_telemetry.trace.get_tracer_provider
+    emitted_telemetry.trace.get_tracer_provider = lambda: TracerProvider()
     try:
-        tracing_config.setup_langfuse_tracing()
+        tracing_config.setup_tracing()
     except RuntimeError as exc:
         assert "OpenTelemetry already has a TracerProvider" in str(exc)
     else:
         raise AssertionError("preinstalled provider was silently replaced")
     finally:
-        tracing_config.trace.get_tracer_provider = original_get_provider
+        emitted_telemetry.trace.get_tracer_provider = original_get_provider
 
     flush_started = threading.Event()
     release_flush = threading.Event()
@@ -1369,13 +1369,14 @@ async def main() -> None:
         release_flush.set()
 
     concurrent_task = asyncio.create_task(run_alongside_flush())
-    await asyncio.to_thread(tracing_config.flush_tracing, slow_provider)
+    await asyncio.to_thread(tracing_config.flush_tracing, slow_provider, "")
     await concurrent_task
     assert slow_provider.released_while_flushing
 
     memory = InMemorySpanExporter()
-    provider = tracing_config.setup_langfuse_tracing()
-    assert provider is tracing_config.setup_langfuse_tracing()
+    telemetry = tracing_config.setup_tracing()
+    assert telemetry is tracing_config.setup_tracing()
+    provider = telemetry.provider
     assert provider is trace.get_tracer_provider()
     provider.add_span_processor(SimpleSpanProcessor(memory))
     await assert_concurrent_calls_keep_their_own_session(memory)
@@ -1394,12 +1395,11 @@ async def main() -> None:
     session_id = "session-smoke"
     # bot.py names the call before the worker exists, so the conversation span
     # and everything under it carry the same correlating attributes.
-    tracing_config.start_call(
-        {
-            "langfuse.trace.name": tracing_config.TRACE_NAME,
-            "langfuse.session.id": session_id,
-        }
-    )
+    trace_attributes = tracing_config.start_call(telemetry, types.SimpleNamespace(session_id=session_id))
+    assert trace_attributes == {
+        "langfuse.trace.name": emitted_telemetry.TRACE_NAME,
+        "langfuse.session.id": session_id,
+    }, trace_attributes
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
     main_worker = PipelineWorker(
@@ -1416,7 +1416,7 @@ async def main() -> None:
         conversation_id=session_id,
         enable_tracing=True,
         additional_span_attributes={
-            "langfuse.trace.name": tracing_config.TRACE_NAME,
+            "langfuse.trace.name": emitted_telemetry.TRACE_NAME,
             "langfuse.session.id": session_id,
         },
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
@@ -1583,7 +1583,7 @@ async def main() -> None:
     finally:
         request_agent._tracing_context = original_context
         cancel_parent.end()
-    tracing_config.flush_tracing(provider)
+    tracing_config.flush_tracing(telemetry)
 
     spans = memory.get_finished_spans()
     conversation = next(span for span in spans if span.name == "conversation")
@@ -1639,7 +1639,7 @@ async def main() -> None:
     assert json.loads(requests["tts"].attributes["langfuse.observation.usage_details"]) == {
         "characters": len("traced.")
     }
-    assert conversation.attributes["langfuse.trace.name"] == tracing_config.TRACE_NAME
+    assert conversation.attributes["langfuse.trace.name"] == emitted_telemetry.TRACE_NAME
     assert conversation.attributes["conversation.id"] == session_id
     assert conversation.attributes["langfuse.session.id"] == session_id
     # v4 filters and sums over observations, so the session ID and trace name
@@ -1647,8 +1647,8 @@ async def main() -> None:
     # Pipecat's own additional_span_attributes reach the conversation span alone.
     for span in (conversation, turn, tool_call, *requests.values()):
         assert span.attributes["langfuse.session.id"] == session_id, span.name
-        assert span.attributes["langfuse.trace.name"] == tracing_config.TRACE_NAME, span.name
-    assert conversation.resource.attributes["service.name"] == tracing_config.TRACE_NAME
+        assert span.attributes["langfuse.trace.name"] == emitted_telemetry.TRACE_NAME, span.name
+    assert conversation.resource.attributes["service.name"] == emitted_telemetry.TRACE_NAME
     # The whole call is one trace: pipecat already nests turn under
     # conversation, so nothing re-parents anything and nothing splits.
     assert all(span.context.trace_id == conversation.context.trace_id for span in requests.values())

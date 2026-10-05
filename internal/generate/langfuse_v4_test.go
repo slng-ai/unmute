@@ -15,21 +15,18 @@ import (
 // anything visible in the spans.
 //
 // Langfuse reads `x-langfuse-ingestion-version: 4` to route an export to the
-// observations-first path. The two targets build their exporter differently and
-// each can lose the header on its own: Pipecat sets OTEL_EXPORTER_OTLP_HEADERS
-// by hand, while LiveKit lets the Langfuse SDK build the exporter, and that
-// exporter's own default headers carry auth and the SDK version and nothing
-// else. Without the header the spans still arrive, so nothing fails and nothing
-// is logged; they just arrive on the legacy path, which is the failure this
-// gate exists to catch.
+// observations-first path. Both targets build that exporter in one place, the
+// Langfuse backend in utils/telemetry.py, so the header is set once. Without it
+// the spans still arrive, so nothing fails and nothing is logged; they just
+// arrive on the legacy path, which is the failure this gate exists to catch.
 func TestLangfuseSelectsTheV4IngestionPathOnBothTargets(t *testing.T) {
 	const header = "x-langfuse-ingestion-version"
 	for _, tc := range []struct {
 		provider ir.Provider
 		want     string
 	}{
-		{ir.ProviderLiveKit, `additional_headers={"x-langfuse-ingestion-version": "4"}`},
-		{ir.ProviderPipecat, `x-langfuse-ingestion-version=4`},
+		{ir.ProviderLiveKit, `"x-langfuse-ingestion-version": "4"`},
+		{ir.ProviderPipecat, `"x-langfuse-ingestion-version": "4"`},
 	} {
 		tracing := langfuseTracingModule(t, tc.provider)
 		if !strings.Contains(tracing, tc.want) {
@@ -153,7 +150,7 @@ func TestLangfuseKeepsTheWholeCallInOneTrace(t *testing.T) {
 		}
 		// The root observation is where a reader opens the call, so it carries
 		// the conversation rather than being an envelope of lifecycle spans.
-		if !strings.Contains(tracing, `"langfuse.observation.input", json.dumps(self._transcript)`) {
+		if !strings.Contains(tracing, `input_value=json.dumps(self._transcript)`) || !strings.Contains(tracing, `("langfuse.observation.input", input_value)`) {
 			t.Errorf("%s tracing.py leaves the call's root observation empty", tc.provider)
 		}
 	}
@@ -174,5 +171,5 @@ func langfuseTracingModule(t *testing.T, provider ir.Provider) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return artifactFile(t, artifact, "utils/tracing.py")
+	return artifactFile(t, artifact, tracingSource)
 }

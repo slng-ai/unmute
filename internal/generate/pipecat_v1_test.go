@@ -436,18 +436,16 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, agentSource)
-	tracing := artifactFile(t, artifact, "utils/tracing.py")
+	tracing := artifactFile(t, artifact, tracingSource)
 	for _, want := range []string{
 		"from utils.tracing import ",
-		"trace_provider = setup_langfuse_tracing()",
-		`trace_attributes = {"langfuse.trace.name": TRACE_NAME}`,
-		"if runner_args.session_id is not None:",
-		`trace_attributes["langfuse.session.id"] = runner_args.session_id`,
+		"telemetry = setup_tracing()",
+		"trace_attributes = start_call(telemetry, runner_args)",
 		"conversation_id=runner_args.session_id",
 		"enable_tracing=True",
 		"additional_span_attributes=trace_attributes",
 		"enable_agent_tracing(main, agents)",
-		"await asyncio.to_thread(flush_tracing, trace_provider)",
+		`await asyncio.to_thread(flush_tracing, telemetry, runner_args.session_id or "")`,
 		"primary_error = sys.exception()",
 		"Tracing flush failed while preserving the primary error ({})",
 	} {
@@ -456,35 +454,35 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"_TRACE_PROVIDER: TracerProvider | None = None",
-		"def setup_langfuse_tracing() -> TracerProvider:",
-		"if _TRACE_PROVIDER is not None:",
-		"existing_provider = trace.get_tracer_provider()",
-		"if isinstance(existing_provider, TracerProvider):",
+		"_TELEMETRY: Telemetry | None = None",
+		"def setup_tracing() -> Telemetry:",
+		"if _TELEMETRY is None:",
+		"telemetry = Telemetry.install(resource=_resource())",
+		"if isinstance(trace.get_tracer_provider(), TracerProvider):",
 		"OpenTelemetry already has a TracerProvider",
-		`f"{base_url.rstrip('/')}/api/public/otel"`,
-		"setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter())",
+		`endpoint=f"{self.base_url.rstrip('/')}/api/public/otel/v1/traces"`,
+		"trace.set_tracer_provider(telemetry.provider)",
 		"def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:",
 		"agent._tracing_context = main._tracing_context",
-		"def flush_tracing(provider: TracerProvider) -> None:",
-		"provider.force_flush()",
+		`def flush_tracing(telemetry: Telemetry, session_id: str = "") -> None:`,
+		"return self.provider.force_flush()",
 	} {
 		if !strings.Contains(tracing, want) {
 			t.Errorf("tracing.py missing %q", want)
 		}
 	}
-	if !strings.Contains(tracing, "if not public_key or not secret_key or not base_url:") {
+	if !strings.Contains(tracing, "if not all(values):") {
 		t.Error("configured tracing must reject missing credentials, including all three")
 	}
-	guardAt := strings.Index(tracing, "if isinstance(existing_provider, TracerProvider):")
-	setupAt := strings.Index(tracing, "setup_tracing(service_name=TRACE_NAME")
+	guardAt := strings.Index(tracing, "if isinstance(trace.get_tracer_provider(), TracerProvider):")
+	setupAt := strings.Index(tracing, "trace.set_tracer_provider(telemetry.provider)")
 	if guardAt < 0 || setupAt < 0 || guardAt > setupAt {
-		t.Error("preinstalled OpenTelemetry provider must fail before Pipecat setup")
+		t.Error("preinstalled OpenTelemetry provider must fail before ours is set")
 	}
 	if strings.Contains(bot, "tracing_enabled") {
 		t.Error("configured tracing must not keep an impossible disabled branch")
 	}
-	if strings.Contains(bot, "\n        flush_tracing(trace_provider)\n") {
+	if strings.Contains(bot, "\n        flush_tracing(telemetry") {
 		t.Error("provider flush must not block Pipecat's event loop")
 	}
 	addAt := strings.Index(bot, "await runner.add_workers(main)")
@@ -535,7 +533,7 @@ func TestV31PipecatTracingIsIsolated(t *testing.T) {
 			t.Errorf("bot.py contains tracing implementation %q", forbidden)
 		}
 	}
-	_ = artifactFile(t, artifact, "utils/tracing.py")
+	_ = artifactFile(t, artifact, tracingSource)
 }
 
 func TestV21PipecatUsesNativeTracing(t *testing.T) {
@@ -553,7 +551,7 @@ func TestV21PipecatUsesNativeTracing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tracing := artifactFile(t, artifact, "utils/tracing.py")
+	tracing := artifactFile(t, artifact, tracingSource)
 	// The retired LangfuseAttributeProcessor rewrote Pipecat's own span
 	// attributes from inside on_start, by reassigning span.set_attribute. That
 	// job belongs to _patch_pipecat_tracing, which patches Pipecat's decorators
@@ -569,7 +567,7 @@ func TestV21PipecatUsesNativeTracing(t *testing.T) {
 			t.Errorf("tracing.py contains custom tracing hook %q", forbidden)
 		}
 	}
-	if got := strings.Count(tracing, "SpanProcessor"); got != 2 {
+	if got := strings.Count(artifactFile(t, artifact, "utils/tracing.py"), "SpanProcessor"); got != 2 {
 		t.Errorf("tracing.py names SpanProcessor %d times, want 2: the import and the one CallTrace", got)
 	}
 	// Exactly one place swaps a span's setter, and it is the decorator patch.
@@ -595,11 +593,14 @@ func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, agentSource)
-	tracing := artifactFile(t, artifact, "utils/tracing.py")
+	tracing := artifactFile(t, artifact, tracingSource)
 	for _, want := range []string{
-		"def _patch_pipecat_tracing() -> None:",
+		"def _patch_pipecat_tracing(backend: Backend) -> None:",
 		"service_decorators.add_stt_span_attributes",
 		"service_decorators.add_tts_span_attributes",
+		`set_attributes(backend.observation(output_value=encoded))`,
+		`set_attributes(backend.observation(input_value=encoded))`,
+		`set_attributes(backend.speech_metric(kind, key, value))`,
 		`"langfuse.observation.input"`,
 		`"langfuse.observation.output"`,
 		// Langfuse v4 has no trace input or output: the call's overall pair goes
@@ -610,7 +611,7 @@ func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
 		`"langfuse.observation.usage_details"`,
 		`"langfuse.observation.metadata.ttfb_seconds"`,
 		`"langfuse.observation.metadata.character_count"`,
-		"_patch_pipecat_tracing()",
+		"_patch_pipecat_tracing(telemetry.backend)",
 	} {
 		if !strings.Contains(tracing, want) {
 			t.Errorf("tracing.py missing %q", want)
@@ -651,7 +652,7 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, agentSource)
-	tracing := artifactFile(t, artifact, "utils/tracing.py")
+	tracing := artifactFile(t, artifact, tracingSource)
 	for _, want := range []string{
 		"from utils.tracing import ",
 		"from pipecat.transcriptions.language import Language",
@@ -662,24 +663,23 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider",
+		"from opentelemetry.sdk.trace import Span, SpanProcessor",
 		"def on_start(self, span: Span, parent_context: Context | None = None) -> None:",
 		// Mapping, not dict: ty 0.0.40 reads the caller's literal as dict[str, str]
 		// and dict is invariant in its value type.
-		"def start_call(attributes: Mapping[str, AttributeValue]) -> None:",
+		"def start_call(self, attributes: Mapping[str, AttributeValue], telemetry: Telemetry) -> None:",
 		"def said(self, role: str, text: str) -> None:",
-		"_TRACE_PROVIDER: TracerProvider | None = None",
-		`setattr(patched, "__langfuse_patch__", True)`,
+		"_TELEMETRY: Telemetry | None = None",
+		`setattr(patched, "__unmute_patch__", True)`,
 		`setattr(service_decorators, "add_llm_span_attributes", patched_llm)`,
-		"if not public_key or not secret_key or not base_url:",
-		"def setup_langfuse_tracing() -> TracerProvider:",
-		"global _TRACE_PROVIDER",
-		"if _TRACE_PROVIDER is not None:",
-		"if not isinstance(provider, TracerProvider):",
+		"if not all(values):",
+		"def setup_tracing() -> Telemetry:",
+		"global _TELEMETRY",
+		"if _TELEMETRY is None:",
 		"def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:",
 		"context = self._tracing_context",
-		"if not self._enable_tracing or context is None:",
-		"def flush_tracing(provider: TracerProvider) -> None:",
+		"if not self._enable_tracing or context is None or telemetry is None:",
+		`def flush_tracing(telemetry: Telemetry, session_id: str = "") -> None:`,
 	} {
 		if !strings.Contains(tracing, want) {
 			t.Errorf("tracing.py missing static-check-safe form %q", want)
@@ -691,8 +691,8 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
-		"patched.__langfuse_patch__",
-		"append_to_audio_context.__langfuse_patch__",
+		"patched.__unmute_patch__",
+		"append_to_audio_context.__unmute_patch__",
 		"TTSService.append_to_audio_context =",
 		"trace.get_tracer_provider().force_flush()",
 		"TTSAudioRawFrame",
@@ -724,13 +724,13 @@ func TestV25PipecatTracesConfiguredSystemInstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tracing := artifactFile(t, artifact, "utils/tracing.py")
+	tracing := artifactFile(t, artifact, tracingSource)
 	for _, want := range []string{
 		"service_decorators.add_llm_span_attributes",
 		`kwargs.get("system_instructions")`,
 		`{"role": "system", "content": system_instruction}`,
 		`span.set_attribute("input", encoded)`,
-		`span.set_attribute("langfuse.observation.input", encoded)`,
+		`span.set_attributes(backend.observation(input_value=encoded))`,
 	} {
 		if !strings.Contains(tracing, want) {
 			t.Errorf("tracing.py missing system-instruction tracing form %q", want)
@@ -754,11 +754,12 @@ func TestV22PipecatToolCallsAreTraced(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, agentSource)
-	tracing := artifactFile(t, artifact, "utils/tracing.py")
+	tracing := artifactFile(t, artifact, tracingSource)
 	for _, want := range []string{
 		"class TracedLLMWorker(LLMWorker):",
 		"start_as_current_span(",
-		`name, context=parent`,
+		`span_name, context=parent, attributes=attributes`,
+		`backend.tool_span(name, json.dumps(arguments, default=str), tool_call_id)`,
 		// The pair that makes this a tool call and not an unlabelled span.
 		// Langfuse v4 turns an observation carrying them into a TOOL named
 		// after gen_ai.tool.name, which is what livekit-agents sets, so one
@@ -766,8 +767,8 @@ func TestV22PipecatToolCallsAreTraced(t *testing.T) {
 		// 2026-09-16: the LiveKit tool observation was a TOOL named
 		// `create_booking`, the Pipecat one a plain span named
 		// `tool:create_booking`.
-		`span.set_attribute("gen_ai.operation.name", "execute_tool")`,
-		`span.set_attribute("gen_ai.tool.name", name)`,
+		`"gen_ai.operation.name": "execute_tool"`,
+		`"gen_ai.tool.name": name`,
 		`"langfuse.observation.input"`,
 		`"langfuse.observation.output"`,
 		`"tool.function_name"`,
@@ -810,7 +811,7 @@ func TestV22PipecatMCPToolCallsAreTraced(t *testing.T) {
 		t.Fatal(err)
 	}
 	bot := artifactFile(t, artifact, agentSource)
-	tracing := artifactFile(t, artifact, "utils/tracing.py")
+	tracing := artifactFile(t, artifact, tracingSource)
 	for _, want := range []string{
 		"class TracedLLMWorker(LLMWorker):",
 		"import functools",

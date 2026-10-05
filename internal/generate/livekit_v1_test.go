@@ -87,11 +87,12 @@ func TestLiveKitExportHookKeepsTheWholeCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tracing := artifactFile(t, artifact, "utils/tracing.py")
+	tracing := artifactFile(t, artifact, tracingSource)
 
 	for _, want := range []string{
 		`def _export_call_spans(span: ReadableSpan) -> bool:`,
-		"should_export_span=_export_call_spans",
+		"Telemetry(keep=_export_call_spans)",
+		"self.add(_Filtered(processor, keep) if keep else processor)",
 		"from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider",
 	} {
 		if !strings.Contains(tracing, want) {
@@ -102,7 +103,7 @@ func TestLiveKitExportHookKeepsTheWholeCall(t *testing.T) {
 	hook := pipecatMethodBody(t, tracing, "def _export_call_spans(", "\n\n\ndef ")
 	// The hook drops exactly one thing: the loop monitor's stall span when it has
 	// no parent, which otherwise arrives as a trace of its own. Anything wider
-	// drops the call, because the v4 default filter this replaces keeps none of it.
+	// would drop part of the call for no reason a reader can see.
 	const keep = `return not (span.name == "event_loop_blocked" and span.parent is None)`
 	if !strings.HasSuffix(strings.TrimSpace(hook), keep) {
 		t.Errorf("the filter hook must export every span but a parentless event_loop_blocked:\n%s", hook)
@@ -203,15 +204,14 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, agentSource)
-	tracing := artifactFile(t, artifact, "utils/tracing.py")
+	tracing := artifactFile(t, artifact, tracingSource)
 	readme := artifactFile(t, artifact, "README.md")
 	if !strings.Contains(readme, "`greeter-remy-fixture-livekit`") {
 		t.Error("README trace name must match the emitted Langfuse trace name")
 	}
 	for _, want := range []string{
-		"from utils.tracing import setup_langfuse",
-		`"langfuse.session.id": ctx.room.name`,
-		`"langfuse.trace.name": "greeter" + "-" + "remy-fixture-livekit"`,
+		"from utils.tracing import setup_tracing",
+		"setup_tracing(ctx, session)",
 		"await session.start(agent=Greeter(initial=True), room=ctx.room)",
 	} {
 		if !strings.Contains(bot, want) {
@@ -219,12 +219,16 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"def setup_langfuse(",
+		"def setup_tracing(ctx: JobContext, session: AgentSession) -> Telemetry:",
+		`AGENT_NAME = "greeter-remy-fixture-livekit"`,
+		`attributes = telemetry.backend.call_attributes(ctx.room.name)`,
+		`"langfuse.session.id"`,
+		`"langfuse.trace.name"`,
 		"def trace_speech_metrics(",
 		// Langfuse v4 filters and sums over observations, so the session ID and
 		// trace name have to reach every span, not only the session span.
 		"class CallTrace(SpanProcessor):",
-		"trace_provider.add_span_processor(call)",
+		"telemetry.add(call)",
 		"span.set_attributes(self._attributes)",
 		// And a call is a session of one trace per turn, so livekit's turn spans
 		// are routed into a root this module owns.
@@ -232,8 +236,8 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 		"install_turn_spans(trace_provider, call)",
 		`TURN_SPANS = ("user_turn", "agent_turn")`,
 		`self._tracer.start_span("turn", context=self._call_context)`,
-		"set_tracer_provider(trace_provider, metadata=metadata)",
-		"should_export_span=_export_call_spans",
+		"set_tracer_provider(trace_provider, metadata=attributes)",
+		"Telemetry(keep=_export_call_spans)",
 		"ctx.add_shutdown_callback(flush_trace)",
 		`@session.on("conversation_item_added")`,
 	} {
@@ -244,7 +248,7 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	if strings.Contains(tracing, "if not any(values)") || !strings.Contains(tracing, "if not all(values)") {
 		t.Error("configured tracing must reject missing credentials, including all three")
 	}
-	setupAt := strings.Index(bot, "    setup_langfuse(")
+	setupAt := strings.Index(bot, "    setup_tracing(")
 	startAt := strings.Index(bot, "await session.start(")
 	if setupAt < 0 || startAt < 0 || setupAt > startAt {
 		t.Error("Langfuse tracing must be configured before AgentSession.start")
@@ -254,10 +258,14 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	if !strings.Contains(pyproject, `name = "unmute-remy-fixture"`) {
 		t.Error("pyproject.toml distribution name shadows the livekit dependency")
 	}
-	for _, dep := range []string{`"langfuse>=4,<5"`, `"opentelemetry-sdk>=1.33,<2"`} {
+	for _, dep := range []string{`"opentelemetry-sdk>=1.33,<2"`, `"opentelemetry-exporter-otlp-proto-http>=1.33,<2"`} {
 		if !strings.Contains(pyproject, dep) {
 			t.Errorf("pyproject.toml missing %s", dep)
 		}
+	}
+	// Every backend is plain OTLP now, so no backend brings its own SDK.
+	if strings.Contains(pyproject, "langfuse") {
+		t.Error("pyproject.toml still declares the langfuse SDK")
 	}
 	env := artifactFile(t, artifact, ".env.example")
 	for _, name := range []string{"LANGFUSE_SECRET_KEY=", "LANGFUSE_PUBLIC_KEY=", "LANGFUSE_BASE_URL="} {
@@ -283,15 +291,15 @@ func TestV31LiveKitTracingIsIsolated(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, agentSource)
-	if !strings.Contains(bot, "from utils.tracing import setup_langfuse") {
+	if !strings.Contains(bot, "from utils.tracing import setup_tracing") {
 		t.Fatal("agent.py missing tracing import")
 	}
-	for _, forbidden := range []string{"def setup_langfuse", "def trace_speech_metrics", "Langfuse("} {
+	for _, forbidden := range []string{"def setup_tracing", "def trace_speech_metrics", "Langfuse(", "Telemetry("} {
 		if strings.Contains(bot, forbidden) {
 			t.Errorf("agent.py contains tracing implementation %q", forbidden)
 		}
 	}
-	_ = artifactFile(t, artifact, "utils/tracing.py")
+	_ = artifactFile(t, artifact, tracingSource)
 }
 
 func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
@@ -309,12 +317,13 @@ func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tracing := artifactFile(t, artifact, "utils/tracing.py")
+	tracing := artifactFile(t, artifact, tracingSource)
 	for _, want := range []string{
 		"from livekit.agents.voice import ConversationItemAddedEvent, MetricsCollectedEvent",
 		"def trace_speech_metrics(",
-		`"langfuse.observation.input": input_value`,
-		`"langfuse.observation.output": output_value`,
+		`telemetry.backend.observation(input_value=input_value, output_value=output_value, kind="generation")`,
+		`("langfuse.observation.input", input_value)`,
+		`("langfuse.observation.output", output_value)`,
 		// Langfuse v4 has no trace input or output. The call's overall input and
 		// output go on the root observation, and nothing may write the retired
 		// pair back onto a speech span.
@@ -450,7 +459,7 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	configuredAgent := artifactFile(t, configured, agentSource)
-	configuredTracing := artifactFile(t, configured, "utils/tracing.py")
+	configuredTracing := artifactFile(t, configured, tracingSource)
 	for _, forbidden := range []string{"    RunContext,", "    function_tool,"} {
 		if strings.Contains(configuredAgent, forbidden) {
 			t.Errorf("configured tool-free agent.py contains unused import %q", forbidden)
@@ -460,8 +469,8 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 		t.Error(`configured tracing.py does not import Sequence from collections.abc`)
 	}
 	for _, want := range []string{
-		") -> TracerProvider:",
-		"trace_provider: TracerProvider,",
+		") -> Telemetry:",
+		"telemetry: Telemetry,",
 		"speech_metrics: Sequence[STTMetrics | TTSMetrics]",
 		// start_span returns the API span, not the SDK one on_start receives.
 		"self._turn: trace.Span | None = None",
@@ -711,6 +720,11 @@ func TestLiveKitV1UnknownVendorFailsWithMatrix(t *testing.T) {
 // modules out with agentModules.
 const agentSource = "<agent source>"
 
+// tracingSource names the two modules a traced call runs through, read as one:
+// utils/tracing.py shapes the spans and utils/telemetry.py exports them. A test
+// about what the call traces should not care which of the two holds a line.
+const tracingSource = "<tracing source>"
+
 // agentModulePaths are the files agentSource joins, in order. A target emits
 // one of the lists, so the union reads any of them.
 func agentModulePaths() []string {
@@ -813,6 +827,9 @@ func artifactFile(t *testing.T, artifact Artifact, path string) string {
 			}
 		}
 		return joined.String()
+	}
+	if path == tracingSource {
+		return artifactFile(t, artifact, "utils/tracing.py") + "\n" + artifactFile(t, artifact, "utils/telemetry.py")
 	}
 	for _, file := range artifact.Files {
 		if file.Path == path {

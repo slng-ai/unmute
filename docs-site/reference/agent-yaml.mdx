@@ -174,7 +174,7 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
 </ParamField>
 
 <ParamField path="tracing" type="object">
-  Tracing provider. Accepts `provider: langfuse` or `provider: coval`. If omitted, no
+  Tracing provider. Accepts `provider: langfuse`, `provider: logfire` or `provider: coval`. If omitted, no
   tracing is configured.
 </ParamField>
 
@@ -1233,21 +1233,23 @@ tracing:
 ### Tracing fields
 
 <ParamField path="provider" type="string" required>
-  Accepts `langfuse` or `coval`. Required inside `tracing`; no provider is inferred. Omit
+  Accepts `langfuse`, `logfire` or `coval`. Required inside `tracing`; no provider is inferred. Omit
   the whole `tracing` block to disable tracing. Supported on LiveKit and Pipecat; refused
   on SLNG.
 </ParamField>
 
-`provider` takes one of two values, `langfuse` or `coval`. Tracing works on both
-targets.
+`provider` takes one of three values: `langfuse`, `logfire` or `coval`. Tracing
+works on both code targets.
 
 | Provider | Required environment names |
 |---|---|
 | `langfuse` | `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` |
+| `logfire` | `LOGFIRE_TOKEN` |
 | `coval` | `COVAL_API_KEY` |
 
-LiveKit uses the room name as the Langfuse session ID. Pipecat uses the runner
-session ID as both its conversation ID and the Langfuse session ID.
+LiveKit uses the room name as the session ID. Pipecat uses the runner session ID
+as both its conversation ID and the session ID. Langfuse reads it as
+`langfuse.session.id`, and Logfire as `session.id`.
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
 
 With `coval`, each trace is attached to the Coval simulation that placed the

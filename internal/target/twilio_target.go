@@ -362,6 +362,7 @@ func twilioFields() map[Field]Capability {
 		FieldWarmInstances:         no("twilio target is one process you host, so there is no pool to keep warm: remove warm_instances"),
 		FieldTracingLangfuse:       no("twilio target emits no trace exporter yet: remove tracing, or compile to livekit or pipecat which emit it"),
 		FieldTracingCoval:          no("twilio target emits no trace exporter yet: remove tracing, or compile to livekit or pipecat which emit it"),
+		FieldTracingLogfire:        no("twilio target emits no trace exporter yet: remove tracing, or compile to livekit or pipecat which emit it"),
 		FieldPrefetch:              no("twilio target has no session state, so a prefetch has nowhere to put its value: fold the value into the instructions, or compile to livekit or pipecat"),
 		FieldVariableConfirm:       no(twilioOnlyOne("a value awaiting confirmation")),
 		FieldVariableConversation:  no("twilio target has no session state for a model to record into: remove the variable, or compile to slng"),

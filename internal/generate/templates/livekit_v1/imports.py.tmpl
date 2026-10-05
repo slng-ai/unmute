@@ -317,7 +317,6 @@ from utils import dev_metrics
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}{{if and .TypedState .TypedState.HasState}}from state import State
 {{end}}from utils.dev_metrics import dev_llm_node{{if .NeedsDevSay}}, dev_say{{end}}, install_dev_metrics
-{{if .Tracing}}{{if eq .TracingProvider "coval"}}from utils.tracing import setup_coval
-{{else}}from utils.tracing import setup_langfuse
-{{end}}{{end}}
+{{if .Tracing}}from utils.tracing import setup_tracing
+{{end}}
 {{- end -}}

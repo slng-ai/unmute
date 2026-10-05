@@ -36,7 +36,7 @@ allows everything, which is a decision the user makes out loud.
 6. **Tools.** Which execution kinds, which tool names, and which builtins.
    `../unmute/references/manifests.md` lists the kinds a contract can allow;
    offer those words rather than inventing one.
-7. **Tracing.** Langfuse, Coval, both, or none.
+7. **Tracing.** Any of Langfuse, Logfire and Coval, or none.
 
 Ask what they want restricted before offering the full list of a section. A
 manifest that allows everything in every section is the same as no manifest,

@@ -13,16 +13,16 @@ tracing:
   provider: langfuse
 ```
 
-<ParamField path="provider" type="langfuse | coval" required>
+<ParamField path="provider" type="langfuse | logfire | coval" required>
   Which service the spans go to. `langfuse` is this page. Any other name is
-  refused, with both accepted names in the message, and leaving the whole
+  refused, with the accepted names in the message, and leaving the whole
   `tracing:` block out means the agent exports nothing.
 </ParamField>
 
 There is no second key. Which Langfuse project a trace lands in is decided by
 the three environment names below, read at run time, so the same package can
 point at a test project and a production one with no edit.
-[Tracing](/tracing/overview) compares the two providers side by side.
+[Tracing](/tracing/overview) compares the providers side by side.
 
 ## What you need
 

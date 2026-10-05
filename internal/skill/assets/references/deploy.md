@@ -174,12 +174,16 @@ tracing:
   provider: langfuse
 ```
 
-`provider` is `langfuse` or `coval`. `langfuse` needs `LANGFUSE_BASE_URL`,
-`LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY`; `coval` needs `COVAL_API_KEY`.
+`provider` is `langfuse`, `logfire` or `coval`. `langfuse` needs
+`LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY`; `logfire`
+needs `LOGFIRE_TOKEN`, a write token that also names its region; `coval` needs
+`COVAL_API_KEY`.
 Those names go in `secrets:`. Both work on `pipecat` and `livekit` only.
 
 Suggest `langfuse` when a user asks how they will see what the agent did on a
 real call, because reading transcripts is how a prompt gets better after launch.
+Suggest `logfire` for the same need when the user already runs Pydantic Logfire,
+or wants to query many calls at once with SQL.
 Suggest `coval` when they want simulated calls scored, since each Coval trace is
 attached to the simulation that produced it. See `prompting.md` on turning
 surprising sessions into test cases.

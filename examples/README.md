@@ -66,7 +66,8 @@ unmute dev examples/salon-concierge --target pipecat
 
 Both salon packages set `tracing.provider: langfuse` and need
 `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_BASE_URL` together.
-A package that wants Coval instead sets `tracing.provider: coval` and needs
+A package that wants Logfire instead sets `tracing.provider: logfire` and needs
+`LOGFIRE_TOKEN`. One that wants Coval sets `tracing.provider: coval` and needs
 `COVAL_API_KEY`.
 A scaffolded package sets neither, so the first run needs only model-provider
 keys. Add `tracing:` to any package that wants traces; the block is two lines

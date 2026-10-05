@@ -14,11 +14,12 @@ tracing:
   provider: langfuse
 ```
 
-There are two providers.
+There are three providers.
 
 | Provider | Use it for | Needs |
 |---|---|---|
 | [`langfuse`](/tracing/langfuse) | watching live calls and debugging one conversation at a time | `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` |
+| [`logfire`](/tracing/logfire) | watching live calls and querying many of them with SQL | `LOGFIRE_TOKEN` |
 | [`coval`](/tracing/coval) | scoring simulated calls in Coval, where each trace belongs to one simulation | `COVAL_API_KEY` |
 
 Pick one. `provider` takes a single value.
@@ -26,7 +27,7 @@ Pick one. `provider` takes a single value.
 ## Tracing fields
 
 <ParamField path="provider" type="string" required>
-  Accepts `langfuse` or `coval`. Required inside `tracing`; no provider is inferred. Omit
+  Accepts `langfuse`, `logfire` or `coval`. Required inside `tracing`; no provider is inferred. Omit
   the whole `tracing` block to disable tracing. Supported on LiveKit and Pipecat; refused
   on SLNG.
 </ParamField>
@@ -70,11 +71,14 @@ data until that project's access and retention rules are approved.
 
 ## Where to go next
 
-<Columns cols={2}>
+<Columns cols={3}>
   <Card title="Coval" icon="flask" href="/tracing/coval">
     Attach spans to the simulation that produced the call.
   </Card>
   <Card title="Langfuse" icon="eye" href="/tracing/langfuse">
     Watch a live call and debug one conversation at a time.
+  </Card>
+  <Card title="Logfire" icon="fire" href="/tracing/logfire">
+    Watch live calls and query many of them with SQL.
   </Card>
 </Columns>
