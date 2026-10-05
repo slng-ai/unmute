@@ -534,7 +534,7 @@ Restricts the tracing provider when tracing is enabled. Its only key is
 
 Type: `string[]`. Required within its block.
 
-Any subset of `langfuse` and `coval`. An empty list requires tracing to
+Any subset of `langfuse`, `logfire` and `coval`. An empty list requires tracing to
 remain disabled. Omitting this block adds no provider restriction.
 Target support and credential requirements still apply.
 

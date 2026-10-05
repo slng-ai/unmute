@@ -30,12 +30,8 @@ import asyncio
 import json
 import logging
 import os
-import threading
 import time
-import urllib.error
-import urllib.request
-from collections import deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from itertools import chain
@@ -44,43 +40,22 @@ from typing import Any, TypeGuard
 from livekit import rtc
 from livekit.agents import AgentSession, JobContext
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import SERVICE_NAME, Resource
-from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
+from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import Span, Status, StatusCode
 from opentelemetry.util.types import AttributeValue
 
+from utils.telemetry import (
+    CALL_ORIGIN_ATTR,
+    CONVERSATION_EXPORT_HEADER,
+    TRACE_NAME,
+    Coval,
+    Telemetry,
+)
+
 logger = logging.getLogger("coval_tracing")
-
-AGENT_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .AgentName}}
-
-# Set by `unmute dev` and by nothing else, so a local run and the same build
-# deployed can be told apart in Coval. Read at import rather than baked in at
-# compile time: one build serves both. The name is owned by `LocalRunEnv` in
-# internal/cli/dev_vars.go.
-LOCAL_RUN_ENV = "UNMUTE_LOCAL_RUN"
-
-# What Coval groups and filters by. Trace Search has no service.name filter, so
-# this same value also goes on the `agent.name` attribute, the conversation
-# metadata and the conversation tag.
-TRACE_NAME = AGENT_NAME + "-local" if os.environ.get(LOCAL_RUN_ENV) else AGENT_NAME
-
-
-COVAL_TRACES_ENDPOINT = "https://api.coval.dev/v1/traces"
 
 # Coval puts the simulation ID on the inbound call as a SIP header of this name.
 SIMULATION_HEADER = "x-coval-simulation-id"
-
-# Set by Coval on the OTLP request, not on the call. Different name on purpose.
-SIMULATION_EXPORT_HEADER = "X-Simulation-Id"
-
-# The other way a trace can be correlated. A call no simulation placed is
-# submitted as a Coval conversation once it ends, and its spans go out against
-# the conversation ID that submit returns. Coval accepts exactly one of the two
-# headers, never both.
-COVAL_CONVERSATIONS_ENDPOINT = "https://api.coval.dev/v1/conversations:submit"
-CONVERSATION_EXPORT_HEADER = "X-Conversation-Id"
 
 # Where the ID shows up as a participant attribute. The first is the explicit
 # mapping the emitted inbound trunk configures. The second is what LiveKit writes
@@ -88,27 +63,8 @@ CONVERSATION_EXPORT_HEADER = "X-Conversation-Id"
 # header name, so the key is lowercase even though the SIP header is not.
 SIMULATION_ATTRIBUTES = ("coval.simulation_id", "sip.h." + SIMULATION_HEADER)
 
-MAX_PREACTIVATION_SPANS = 1024
-
-# OpenTelemetry's exporter interface takes its flush budget in milliseconds.
-FLUSH_TIMEOUT_MS = 30000
-
 NS_PER_SECOND = 1_000_000_000
 MS_PER_SECOND = 1000
-
-# Coval's docs require this exact export timeout.
-EXPORT_TIMEOUT_SECONDS = 30
-
-# Registering the call runs inside `flush_trace` below, which is a job shutdown
-# callback, and LiveKit force-kills the job process ten seconds after shutdown
-# begins. So this is deliberately not EXPORT_TIMEOUT_SECONDS: sharing that
-# budget would let a merely slow Coval cost the whole trace instead of a few
-# seconds, and being cut short is logged rather than silent.
-SUBMIT_TIMEOUT_SECONDS = 5
-
-# How the caller reached the agent. Values are fixed: `browser`, `phone`,
-# `websocket`. A route that cannot be determined records nothing.
-CALL_ORIGIN_ATTR = "coval.call.origin"
 
 # Transcripts, prompts and tool payloads are free text, so they are cut before
 # they go out. Coval asks for bounded attributes and counts rather than whole
@@ -124,7 +80,7 @@ MAX_PROMPT_CHARS = 8192
 # What LiveKit puts in a workflow task group's instructions in place of a prompt.
 PLACEHOLDER_INSTRUCTIONS = "*empty*"
 
-_router: _CovalRouter | None = None
+_coval: Coval | None = None
 _recorder: _Conversation | None = None
 
 
@@ -204,146 +160,6 @@ def resolve_call_origin(ctx: JobContext) -> str | None:
     ):
         return "phone"
     return "browser" if participants else None
-
-
-# --------------------------------------------------------------------------
-# Holding spans until that simulation is known
-# --------------------------------------------------------------------------
-
-
-class _CovalRouter(SpanExporter):
-    """Hold spans until the call's simulation ID is known, then export them.
-
-    ponytail: one call per process, which is how a LiveKit worker runs a job.
-    If that ever changes, key the buffer by job id and stamp that key on each
-    span as it starts.
-    """
-
-    def __init__(self, api_key: str) -> None:
-        """Start with no exporter, so every span is held until the ID arrives."""
-        self._api_key = api_key
-        self._lock = threading.RLock()
-        self._buffer: deque[ReadableSpan] = deque(maxlen=MAX_PREACTIVATION_SPANS)
-        self._dropped = 0
-        self._exporter: OTLPSpanExporter | None = None
-        self.simulation_id: str | None = None
-
-    @property
-    def active(self) -> bool:
-        """Whether the call has a correlation ID and is exporting."""
-        return self._exporter is not None
-
-    def held(self) -> list[ReadableSpan]:
-        """The spans waiting for a correlation ID, oldest first."""
-        with self._lock:
-            return list(self._buffer)
-
-    def activate(self, correlation_id: str, header: str = SIMULATION_EXPORT_HEADER) -> None:
-        """Bind the call to a correlation ID and flush the spans held so far."""
-        with self._lock:
-            if self.simulation_id == correlation_id:
-                return
-            self.simulation_id = correlation_id
-            self._exporter = OTLPSpanExporter(
-                endpoint=COVAL_TRACES_ENDPOINT,
-                headers={"x-api-key": self._api_key, header: correlation_id},
-                timeout=EXPORT_TIMEOUT_SECONDS,
-            )
-            held = list(self._buffer)
-            self._buffer.clear()
-            dropped = self._dropped
-            self._dropped = 0
-            exporter = self._exporter
-        if dropped:
-            logger.warning("Dropped %d span(s) before the correlation ID arrived", dropped)
-        if held:
-            logger.info("Flushing %d held span(s) to Coval", len(held))
-            exporter.export(held)
-
-    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        """Export the spans, or hold them until the call has an ID."""
-        with self._lock:
-            exporter = self._exporter
-            if exporter is None:
-                for span in spans:
-                    if len(self._buffer) == MAX_PREACTIVATION_SPANS:
-                        self._dropped += 1
-                    self._buffer.append(span)
-                return SpanExportResult.SUCCESS
-        return exporter.export(spans)
-
-    def force_flush(self, timeout_millis: int = FLUSH_TIMEOUT_MS) -> bool:
-        """Flush the bound exporter, if there is one."""
-        with self._lock:
-            exporter = self._exporter
-        return exporter.force_flush(timeout_millis) if exporter else True
-
-    def shutdown(self) -> None:
-        """Drop held spans and shut the bound exporter down."""
-        with self._lock:
-            exporter = self._exporter
-            self._exporter = None
-            self._buffer.clear()
-        if exporter:
-            exporter.shutdown()
-
-
-def _timed_out(error: BaseException) -> bool:
-    """A read or connect timeout, however urllib wrapped it."""
-    return isinstance(error, TimeoutError) or isinstance(
-        getattr(error, "reason", None), TimeoutError
-    )
-
-
-def submit_conversation(transcript: list[dict[str, str]], session_id: str, origin: str = "") -> str | None:
-    """Register this call with Coval as a conversation, and return its ID.
-
-    This is the route for a call no simulation placed: a local `unmute dev`
-    run, or production traffic. Coval needs the call to exist before spans can
-    be attached to it, so the transcript is submitted first and the ID it
-    returns is what the spans are exported against.
-    """
-    api_key = os.getenv("COVAL_API_KEY", "")
-    if not api_key:
-        logger.warning("COVAL_API_KEY is not set, so this call is not filed with Coval")
-        return None
-    if not transcript:
-        return None
-    metadata = {"agent": TRACE_NAME, "source": "unmute", "session_id": session_id}
-    if origin:
-        metadata["origin"] = origin
-    payload = {
-        "transcript": transcript,
-        "metadata": metadata,
-        "tags": [TRACE_NAME],
-    }
-    if session_id:
-        payload["external_conversation_id"] = session_id
-    request = urllib.request.Request(
-        COVAL_CONVERSATIONS_ENDPOINT,
-        data=json.dumps(payload).encode(),
-        headers={"x-api-key": api_key, "content-type": "application/json"},
-        method="POST",
-    )
-    try:
-        # Not EXPORT_TIMEOUT_SECONDS: this runs in the job's shutdown window,
-        # which is shorter than Coval's required export timeout.
-        with urllib.request.urlopen(request, timeout=SUBMIT_TIMEOUT_SECONDS) as response:
-            body = json.load(response)
-    except (urllib.error.URLError, OSError, ValueError) as error:
-        # A trace is not worth failing a call over, on this path least of all:
-        # the call is already over by the time this runs.
-        if _timed_out(error):
-            logger.warning(
-                "Registering this call with Coval took longer than its %ss budget, "
-                "so this call is not filed",
-                SUBMIT_TIMEOUT_SECONDS,
-            )
-        else:
-            logger.warning("Could not register this call with Coval: %s", error)
-        return None
-    conversation_id = str((body.get("conversation") or {}).get("conversation_id") or "")
-    return conversation_id or None
 
 
 # --------------------------------------------------------------------------
@@ -1113,18 +929,18 @@ class _Conversation:
 # --------------------------------------------------------------------------
 
 
-async def file_this_call(recorder: _Conversation) -> None:
+async def file_this_call(coval: Coval, recorder: _Conversation) -> None:
     """Give this call a Coval identity if nothing has claimed it yet.
 
     Exactly one line is written whichever way this ends, because a trace that
     quietly went nowhere is what made the last defect here invisible.
     """
-    if _router is None or _router.active:
-        if _router is not None:
-            logger.info(
-                "Coval already correlated this call as %s, so its spans are on their way",
-                _router.simulation_id,
-            )
+    router = coval.router
+    if router.active:
+        logger.info(
+            "Coval already correlated this call as %s, so its spans are on their way",
+            router.simulation_id,
+        )
         return
     # Writes the turn still open, if the session's close event has not already
     # done it, so the last exchange is in the transcript.
@@ -1134,19 +950,19 @@ async def file_this_call(recorder: _Conversation) -> None:
         logger.warning(
             "This call produced no transcript, so there is nothing to register with "
             "Coval and its %d held span(s) are dropped",
-            len(_router.held()),
+            len(router.held()),
         )
         return
     # The submit is blocking and this is the event loop, so it goes to a thread.
     conversation_id = await asyncio.to_thread(
-        submit_conversation, transcript, recorder.session_id, recorder.origin
+        coval.submit_conversation, transcript, recorder.session_id, recorder.origin
     )
     if not conversation_id:
         # submit_conversation has already said which way it failed.
         return
     recorder.conversation_found(conversation_id)
-    going_out = len(_router.held())
-    _router.activate(conversation_id, CONVERSATION_EXPORT_HEADER)
+    going_out = len(router.held())
+    router.activate(conversation_id, CONVERSATION_EXPORT_HEADER)
     logger.info(
         "Filed this call as Coval conversation %s with %d span(s)",
         conversation_id,
@@ -1154,40 +970,20 @@ async def file_this_call(recorder: _Conversation) -> None:
     )
 
 
-def setup_coval(
-    ctx: JobContext,
-    session: AgentSession,
-    metadata: dict[str, AttributeValue] | None = None,
-) -> TracerProvider:
+def setup_tracing(ctx: JobContext, session: AgentSession) -> Telemetry:
     """Install Coval tracing for this job and start watching for its ID."""
-    global _router, _recorder
-    api_key = os.getenv("COVAL_API_KEY", "")
-    # Unlike Langfuse, a missing key is not fatal. A Coval key only matters while
-    # a simulation is running, and a live call must not fail because an
-    # evaluation credential is absent.
-    logger.info(
-        "Coval tracing on: agent %s, traces to %s, COVAL_API_KEY %s",
-        TRACE_NAME,
-        COVAL_TRACES_ENDPOINT,
-        "present" if api_key else "MISSING",
+    global _coval, _recorder
+    room = getattr(ctx.room, "name", "") or ""
+    coval = Coval.from_env()
+    _coval = coval
+    telemetry = Telemetry(
+        coval,
+        resource={
+            **coval.call_attributes(room),
+            "agent.provider": "livekit",
+            "coval.agent_type": "sip_inbound_voice",
+        },
     )
-    if not api_key:
-        logger.warning("COVAL_API_KEY is not set, so no trace will reach Coval")
-
-    _router = _CovalRouter(api_key=api_key)
-    attributes: dict[str, AttributeValue] = {
-        SERVICE_NAME: TRACE_NAME,
-        "agent.name": TRACE_NAME,
-        "agent.provider": "livekit",
-        "coval.agent_type": "sip_inbound_voice",
-    }
-    attributes.update(metadata or {})
-    provider = TracerProvider(resource=Resource.create(attributes))
-    # SimpleSpanProcessor on purpose: the router below flushes its own held spans
-    # the moment the simulation ID arrives, and a batching processor could still
-    # be holding a span at that moment, which would export it under no
-    # simulation at all.
-    provider.add_span_processor(SimpleSpanProcessor(_router))
     # livekit.agents.telemetry.set_tracer_provider is deliberately not called.
     # LiveKit's spans are shaped for LiveKit, not for Coval: they nest the
     # caller's speech outside the reply it caused, split one exchange across
@@ -1195,15 +991,15 @@ def setup_coval(
     # Coval has no name for. Coval's spans are built from the session's events
     # below instead, which is what Coval's LiveKit guidance asks for.
 
-    recorder = _Conversation(provider, session, session_id=getattr(ctx.room, "name", "") or "")
+    recorder = _Conversation(telemetry.provider, session, session_id=room)
     _recorder = recorder
 
     async def flush_trace() -> None:
         # Runs before close, while the root span is still open and can still
         # record how the call was correlated.
-        await file_this_call(recorder)
+        await file_this_call(coval, recorder)
         recorder.close()
-        provider.force_flush()
+        telemetry.flush()
 
     ctx.add_shutdown_callback(flush_trace)
 
@@ -1215,11 +1011,9 @@ def setup_coval(
         if origin:
             recorder.origin_found(origin)
         simulation_id, route = resolve_simulation_id(ctx)
-        if not simulation_id or _router is None:
+        if not simulation_id or coval.router.simulation_id == simulation_id:
             return
-        if _router.simulation_id == simulation_id:
-            return
-        _router.activate(simulation_id)
+        coval.router.activate(simulation_id)
         recorder.simulation_found(simulation_id, route, source)
         logger.info("Coval tracing active for simulation %s via %s", simulation_id, route)
 
@@ -1233,7 +1027,7 @@ def setup_coval(
         lambda _changed, _participant: activate("participant_attributes_changed"),
     )
     activate("job_start")
-    if _router is not None and not _router.active:
+    if not coval.router.active:
         # Not "no trace is exported": the conversation route files this call at
         # its end, which is how every real call reaches Coval.
         logger.info(
@@ -1242,7 +1036,7 @@ def setup_coval(
         )
 
     instrument_session(session, recorder)
-    return provider
+    return telemetry
 
 
 def instrument_session(session: AgentSession, recorder: _Conversation) -> None:

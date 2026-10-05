@@ -206,7 +206,7 @@ const MinScoreWarn = 0.25
 
 // TracingProviders is the allowlist both Build and Validate read, so the two
 // cannot drift into disagreeing about which providers exist.
-var TracingProviders = []string{"coval", "langfuse"}
+var TracingProviders = []string{"coval", "langfuse", "logfire"}
 
 func validTracingProvider(provider string) bool {
 	return slices.Contains(TracingProviders, provider)
@@ -218,14 +218,19 @@ func validTracingProvider(provider string) bool {
 var TracingSecrets = map[string][]string{
 	"coval":    {"COVAL_API_KEY"},
 	"langfuse": {"LANGFUSE_BASE_URL", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"},
+	// The write token names its own region, so the exporter needs nothing else.
+	"logfire": {"LOGFIRE_TOKEN"},
 }
 
-// tracingCapability maps a provider onto the capability row that gates it, so a
+// TracingCapability maps a provider onto the capability row that gates it, so a
 // target denies the provider the package actually named rather than whichever
-// one happened to be gated first.
-func tracingCapability(provider string) targetcap.Field {
-	if provider == "coval" {
+// one happened to be gated first. The manifest editor reads it too.
+func TracingCapability(provider string) targetcap.Field {
+	switch provider {
+	case "coval":
 		return targetcap.FieldTracingCoval
+	case "logfire":
+		return targetcap.FieldTracingLogfire
 	}
 	return targetcap.FieldTracingLangfuse
 }

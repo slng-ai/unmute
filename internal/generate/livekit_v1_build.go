@@ -1952,18 +1952,12 @@ func livekitDeps(data livekitData) []string {
 		"httpx",
 	}...)
 	deps = append(deps, sortedKeys(packages)...)
-	switch data.TracingProvider {
-	case "langfuse":
-		// langfuse 4 is the observations-first data model. It is a major with
-		// breaking changes tracing.py depends on (propagate_attributes, the
-		// default span filter), so the floor is 4 and the ceiling stops the
-		// next major arriving unannounced.
-		deps = append(deps, "langfuse>=4,<5", "opentelemetry-sdk>=1.33,<2")
-	case "coval":
-		// livekit-agents brings the OTel API and SDK in through its own
-		// telemetry module, but nothing in the LiveKit stack pulls the OTLP HTTP
-		// exporter, which is the one Coval ingests. Declare both so a clean
-		// install cannot import tracing.py and fail on the exporter.
+	if data.Tracing {
+		// Every backend is plain OTLP over HTTP from utils/telemetry.py, so no
+		// backend brings an SDK of its own. livekit-agents brings the OTel API
+		// and SDK in through its telemetry module, but nothing in the LiveKit
+		// stack pulls the OTLP HTTP exporter. Declare both so a clean install
+		// cannot import telemetry.py and fail on the exporter.
 		deps = append(deps, "opentelemetry-sdk>=1.33,<2", "opentelemetry-exporter-otlp-proto-http>=1.33,<2")
 	}
 	// The connector bridge is a standalone aiohttp server that places outbound

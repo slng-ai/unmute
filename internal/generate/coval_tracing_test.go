@@ -36,7 +36,7 @@ func covalArtifact(t *testing.T, provider ir.Provider) Artifact {
 func TestCovalTracingEmitsItsOwnModule(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
 		artifact := covalArtifact(t, provider)
-		tracing := artifactFile(t, artifact, "utils/tracing.py")
+		tracing := artifactFile(t, artifact, tracingSource)
 		for _, want := range []string{
 			"https://api.coval.dev/v1/traces",
 			`"x-api-key"`,
@@ -73,7 +73,7 @@ func TestCovalTracingEmitsItsOwnModule(t *testing.T) {
 // pinned rather than left to drift back.
 func TestCovalTracingSurvivesAMissingKey(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
-		tracing := artifactFile(t, covalArtifact(t, provider), "utils/tracing.py")
+		tracing := artifactFile(t, covalArtifact(t, provider), tracingSource)
 		if !strings.Contains(tracing, "COVAL_API_KEY is not set") {
 			t.Errorf("%s tracing.py must warn on a missing key", provider)
 		}
@@ -91,7 +91,7 @@ func TestCovalTracingSurvivesAMissingKey(t *testing.T) {
 // Trace Search. Without this the spans are built, held, and then dropped.
 func TestCovalTracingRegistersCallsNoSimulationClaimed(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
-		tracing := artifactFile(t, covalArtifact(t, provider), "utils/tracing.py")
+		tracing := artifactFile(t, covalArtifact(t, provider), tracingSource)
 		for _, want := range []string{
 			// The two routes are separate and Coval accepts exactly one header.
 			`COVAL_CONVERSATIONS_ENDPOINT = "https://api.coval.dev/v1/conversations:submit"`,
@@ -100,7 +100,7 @@ func TestCovalTracingRegistersCallsNoSimulationClaimed(t *testing.T) {
 			`headers={"x-api-key": self._api_key, header: correlation_id}`,
 			// Submit first, then export against what it returned.
 			"def submit_conversation(",
-			"_router.activate(conversation_id, CONVERSATION_EXPORT_HEADER)",
+			"router.activate(conversation_id, CONVERSATION_EXPORT_HEADER)",
 			// A missing key or an empty call must not invent a conversation,
 			// and neither may pass without saying so.
 			`logger.warning("COVAL_API_KEY is not set, so this call is not filed with Coval")`,
@@ -131,7 +131,7 @@ func TestCovalTracingRegistersCallsNoSimulationClaimed(t *testing.T) {
 
 func TestCovalTracingHoldsSpansUntilTheSimulationArrives(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
-		tracing := artifactFile(t, covalArtifact(t, provider), "utils/tracing.py")
+		tracing := artifactFile(t, covalArtifact(t, provider), tracingSource)
 		for _, want := range []string{
 			"deque(maxlen=MAX_PREACTIVATION_SPANS)",
 			"def activate(",
@@ -162,7 +162,7 @@ func TestCovalTracingResolvesEveryDocumentedRoute(t *testing.T) {
 		},
 	}
 	for provider, want := range routes {
-		tracing := artifactFile(t, covalArtifact(t, provider), "utils/tracing.py")
+		tracing := artifactFile(t, covalArtifact(t, provider), tracingSource)
 		for _, route := range want {
 			if !strings.Contains(tracing, route) {
 				t.Errorf("%s resolver missing route %s", provider, route)
@@ -186,7 +186,7 @@ func TestCovalTracingResolvesEveryDocumentedRoute(t *testing.T) {
 func TestCovalTracingNamesEachTargetsService(t *testing.T) {
 	seen := map[string]ir.Provider{}
 	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
-		tracing := artifactFile(t, covalArtifact(t, provider), "utils/tracing.py")
+		tracing := artifactFile(t, covalArtifact(t, provider), tracingSource)
 		found := regexp.MustCompile(`AGENT_NAME = (.+)`).FindStringSubmatch(tracing)
 		if found == nil {
 			t.Fatalf("%s Coval tracing declares no AGENT_NAME", provider)
@@ -199,7 +199,7 @@ func TestCovalTracingNamesEachTargetsService(t *testing.T) {
 }
 
 func TestCovalTracingBuildsOneSpanPerCovalName(t *testing.T) {
-	pipecat := artifactFile(t, covalArtifact(t, ir.ProviderPipecat), "utils/tracing.py")
+	pipecat := artifactFile(t, covalArtifact(t, ir.ProviderPipecat), tracingSource)
 	// Pipecat already emits conversation/turn/llm/stt/tts itself, so the Coval
 	// module must not create a second llm or tts span of its own.
 	for _, forbidden := range []string{`start_span("llm")`, `start_span("tts")`, `start_span("stt")`} {
@@ -211,7 +211,7 @@ func TestCovalTracingBuildsOneSpanPerCovalName(t *testing.T) {
 		t.Error("pipecat Coval tracing must add the tool-call span Pipecat lacks")
 	}
 
-	livekit := artifactFile(t, covalArtifact(t, ir.ProviderLiveKit), "utils/tracing.py")
+	livekit := artifactFile(t, covalArtifact(t, ir.ProviderLiveKit), tracingSource)
 	// LiveKit is the opposite case. Its own spans are shaped for LiveKit:
 	// `user_turn` and `agent_turn` are siblings, so the caller's speech can never
 	// sit inside the reply it caused, and one exchange opens several `agent_turn`s
@@ -252,7 +252,7 @@ func TestCovalTracingBuildsOneSpanPerCovalName(t *testing.T) {
 // look right in the viewer and every latency, token and tool metric reads
 // nothing.
 func TestCovalLiveKitCarriesTheAttributesCovalReads(t *testing.T) {
-	tracing := artifactFile(t, covalArtifact(t, ir.ProviderLiveKit), "utils/tracing.py")
+	tracing := artifactFile(t, covalArtifact(t, ir.ProviderLiveKit), tracingSource)
 	for _, want := range []string{
 		// stt
 		`"transcript": heard.text`,
@@ -310,7 +310,7 @@ func TestCovalLiveKitCarriesTheAttributesCovalReads(t *testing.T) {
 // creates disappears without an error. So the LiveKit module must take its
 // tracers off the provider it built.
 func TestCovalLiveKitTracingNeverReadsTheGlobalProvider(t *testing.T) {
-	tracing := artifactFile(t, covalArtifact(t, ir.ProviderLiveKit), "utils/tracing.py")
+	tracing := artifactFile(t, covalArtifact(t, ir.ProviderLiveKit), tracingSource)
 	if strings.Contains(tracing, "trace.get_tracer(") {
 		t.Error("livekit Coval tracing reads the global tracer provider, which LiveKit does not set")
 	}
@@ -336,7 +336,7 @@ func TestCovalLiveKitTrunkMapsTheSimulationHeader(t *testing.T) {
 		}
 	}
 	// The agent reads the attribute this file names, so the two must agree.
-	if !strings.Contains(artifactFile(t, artifact, "utils/tracing.py"), `"coval.simulation_id"`) {
+	if !strings.Contains(artifactFile(t, artifact, tracingSource), `"coval.simulation_id"`) {
 		t.Fatal("the agent does not read the attribute the trunk maps")
 	}
 
@@ -365,27 +365,26 @@ func TestCovalTracingDeclaresItsExporter(t *testing.T) {
 	}
 }
 
-// The entry point must call its provider's setup, and only its provider's.
+// The entry point calls the one tracing setup every backend shares, and the
+// Coval build resolves the simulation inside it, per call.
 func TestCovalTracingWiresTheEntryPoint(t *testing.T) {
 	bot := artifactFile(t, covalArtifact(t, ir.ProviderPipecat), agentSource)
-	for _, want := range []string{"setup_coval_tracing()", "activate_simulation(runner_args)", "enable_tracing=True"} {
+	for _, want := range []string{"telemetry = setup_tracing()", "start_call(telemetry, runner_args)", "enable_tracing=True"} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing %q", want)
 		}
 	}
-	if strings.Contains(bot, "setup_langfuse_tracing") {
-		t.Error("bot.py calls the Langfuse setup under Coval tracing")
+	tracing := artifactFile(t, covalArtifact(t, ir.ProviderPipecat), tracingSource)
+	if !strings.Contains(tracing, "activate_simulation(telemetry, _coval, runner_args)") {
+		t.Error("pipecat start_call does not resolve the Coval simulation")
 	}
 
 	agentPy := artifactFile(t, covalArtifact(t, ir.ProviderLiveKit), agentSource)
-	if !strings.Contains(agentPy, "from utils.tracing import setup_coval") || !strings.Contains(agentPy, "setup_coval(") {
-		t.Error("agent.py does not wire the Coval setup")
+	if !strings.Contains(agentPy, "from utils.tracing import setup_tracing") || !strings.Contains(agentPy, "setup_tracing(ctx, session)") {
+		t.Error("agent.py does not wire the tracing setup")
 	}
-	if strings.Contains(agentPy, "setup_langfuse") {
-		t.Error("agent.py calls the Langfuse setup under Coval tracing")
-	}
-	// The implementation stays in tracing.py (V31), same as Langfuse.
-	for _, forbidden := range []string{"def setup_coval", "OTLPSpanExporter("} {
+	// The implementation stays in tracing.py and telemetry.py (V31).
+	for _, forbidden := range []string{"def setup_tracing", "OTLPSpanExporter("} {
 		if strings.Contains(agentPy, forbidden) {
 			t.Errorf("agent.py contains tracing implementation %q", forbidden)
 		}
@@ -416,17 +415,18 @@ func TestCovalTracingRequiresOnlyItsOwnSecret(t *testing.T) {
 // shape of the fix in place, and runs in the default suite where the smoke
 // suite does not.
 func TestCovalTracingResetsCorrelationPerCall(t *testing.T) {
-	tracing := artifactFile(t, covalArtifact(t, ir.ProviderPipecat), "utils/tracing.py")
+	tracing := artifactFile(t, covalArtifact(t, ir.ProviderPipecat), tracingSource)
 	for _, want := range []string{
 		// The reset itself, and a token that says which call a span belongs to.
 		"def begin_call(self) -> int:",
 		"self.call_token += 1",
 		"self.simulation_id = None",
-		`_CALL_TOKEN_ATTR = "coval.internal.call_token"`,
-		"span.set_attribute(_CALL_TOKEN_ATTR, router.call_token)",
+		`CALL_TOKEN_ATTR = "coval.internal.call_token"`,
+		"span.set_attribute(CALL_TOKEN_ATTR, router.call_token)",
 		// The export is scoped by that token, so a span that ended after its own
 		// call cannot ride out under the next call's correlation ID.
-		"mine = [s for s in spans if (s.attributes or {}).get(_CALL_TOKEN_ATTR) == token]",
+		"mine = [span for span in spans if self._belongs(span)]",
+		"return token is None or token == self.call_token",
 		"return exporter.export(mine)",
 		"Discarded %d span(s) from a finished call",
 	} {
@@ -434,14 +434,15 @@ func TestCovalTracingResetsCorrelationPerCall(t *testing.T) {
 			t.Errorf("pipecat tracing.py missing per-call correlation: %q", want)
 		}
 	}
-	// The memoized path is the whole bug: returning the process's provider
-	// without resetting the call is what filed every later call under the first.
-	memoized := regexp.MustCompile(`(?s)if _provider is not None:.*?return _provider`).FindString(tracing)
-	if memoized == "" {
-		t.Fatal("pipecat tracing.py no longer memoizes its provider; re-read this gate before deleting it")
+	// The provider is memoized per process, so the reset has to live in the
+	// per-call entry point. Returning the process's provider without resetting
+	// the call is what filed every later call under the first.
+	if !strings.Contains(tracing, "if _TELEMETRY is None:") {
+		t.Fatal("pipecat tracing.py no longer memoizes its telemetry; re-read this gate before deleting it")
 	}
-	if !strings.Contains(memoized, "begin_call()") {
-		t.Error("pipecat setup_coval_tracing returns a warm provider without beginning a new call, so a second call in one process is filed under the first")
+	perCall := regexp.MustCompile(`(?s)def start_call\(.*?return attributes`).FindString(tracing)
+	if !strings.Contains(perCall, "begin_call()") {
+		t.Error("pipecat start_call does not begin a new call, so a second call in one process is filed under the first")
 	}
 	// A processor that has shut down drops every later span in silence, and the
 	// next call in a warm process still needs it.
@@ -456,7 +457,7 @@ func TestCovalTracingResetsCorrelationPerCall(t *testing.T) {
 // them back into one literal is the regression this gate exists for.
 func TestCovalTracingSplitsTheSubmitBudgetFromTheExportTimeout(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
-		tracing := artifactFile(t, covalArtifact(t, provider), "utils/tracing.py")
+		tracing := artifactFile(t, covalArtifact(t, provider), tracingSource)
 		export := regexp.MustCompile(`EXPORT_TIMEOUT_SECONDS = (\d+)`).FindStringSubmatch(tracing)
 		submit := regexp.MustCompile(`SUBMIT_TIMEOUT_SECONDS = (\d+)`).FindStringSubmatch(tracing)
 		if export == nil || submit == nil {
@@ -491,7 +492,7 @@ func TestCovalTracingSplitsTheSubmitBudgetFromTheExportTimeout(t *testing.T) {
 // is what the deployed identity underneath the suffix is for.
 func TestCovalTracingMarksLocalRuns(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
-		tracing := artifactFile(t, covalArtifact(t, provider), "utils/tracing.py")
+		tracing := artifactFile(t, covalArtifact(t, provider), tracingSource)
 		if !strings.Contains(tracing, `TRACE_NAME = AGENT_NAME + "-local" if os.environ.get(LOCAL_RUN_ENV) else AGENT_NAME`) {
 			t.Errorf("%s tracing.py does not derive the local label from the marker at run time", provider)
 		}
@@ -506,8 +507,8 @@ func TestCovalTracingMarksLocalRuns(t *testing.T) {
 	}
 	// FR-004, restated against the new derivation because this is the expression
 	// TestCovalTracingNamesEachTargetsService used to read.
-	pipecat := artifactFile(t, covalArtifact(t, ir.ProviderPipecat), "utils/tracing.py")
-	livekit := artifactFile(t, covalArtifact(t, ir.ProviderLiveKit), "utils/tracing.py")
+	pipecat := artifactFile(t, covalArtifact(t, ir.ProviderPipecat), tracingSource)
+	livekit := artifactFile(t, covalArtifact(t, ir.ProviderLiveKit), tracingSource)
 	pipecatName := regexp.MustCompile(`AGENT_NAME = (.+)`).FindStringSubmatch(pipecat)[1]
 	livekitName := regexp.MustCompile(`AGENT_NAME = (.+)`).FindStringSubmatch(livekit)[1]
 	if pipecatName == livekitName {
@@ -523,7 +524,7 @@ func TestCovalTracingOwnsTheLocalRunMarker(t *testing.T) {
 		t.Fatal("generate.LocalRunEnv is empty")
 	}
 	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
-		tracing := artifactFile(t, covalArtifact(t, provider), "utils/tracing.py")
+		tracing := artifactFile(t, covalArtifact(t, provider), tracingSource)
 		declared := regexp.MustCompile(`LOCAL_RUN_ENV = "([^"]+)"`).FindStringSubmatch(tracing)
 		if declared == nil {
 			t.Fatalf("%s tracing.py declares no LOCAL_RUN_ENV", provider)
@@ -540,18 +541,14 @@ func TestCovalTracingOwnsTheLocalRunMarker(t *testing.T) {
 // marking local runs.
 func TestCovalTracingLabelsEveryPlaceCovalFilters(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
-		tracing := artifactFile(t, covalArtifact(t, provider), "utils/tracing.py")
+		tracing := artifactFile(t, covalArtifact(t, provider), tracingSource)
 		want := []string{
 			`"agent": TRACE_NAME`,  // the conversation's own metadata
 			`"tags": [TRACE_NAME]`, // what Trace Search filters on
 			`"agent.name": TRACE_NAME`,
 		}
-		// The service name is set differently per target, by each framework.
-		if provider == ir.ProviderPipecat {
-			want = append(want, "setup_tracing(service_name=TRACE_NAME")
-		} else {
-			want = append(want, "SERVICE_NAME: TRACE_NAME")
-		}
+		// utils/telemetry.py names the service on both targets.
+		want = append(want, "SERVICE_NAME: TRACE_NAME")
 		for _, w := range want {
 			if !strings.Contains(tracing, w) {
 				t.Errorf("%s tracing.py does not label %s", provider, w)
@@ -565,7 +562,7 @@ func TestCovalTracingLabelsEveryPlaceCovalFilters(t *testing.T) {
 // surfaces and both targets can agree on them.
 func TestCovalTracingRecordsHowTheCallArrived(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
-		tracing := artifactFile(t, covalArtifact(t, provider), "utils/tracing.py")
+		tracing := artifactFile(t, covalArtifact(t, provider), tracingSource)
 		for _, want := range []string{
 			`CALL_ORIGIN_ATTR = "coval.call.origin"`,
 			"def resolve_call_origin(",
@@ -582,7 +579,7 @@ func TestCovalTracingRecordsHowTheCallArrived(t *testing.T) {
 	}
 	// Only Pipecat can receive a non-carrier websocket session; a LiveKit job
 	// always arrives over the room, so it has no websocket origin to report.
-	if !strings.Contains(artifactFile(t, covalArtifact(t, ir.ProviderPipecat), "utils/tracing.py"), `"websocket"`) {
+	if !strings.Contains(artifactFile(t, covalArtifact(t, ir.ProviderPipecat), tracingSource), `"websocket"`) {
 		t.Error("pipecat tracing.py never reports a plain websocket session")
 	}
 }
@@ -594,7 +591,7 @@ func TestCovalTracingRecordsHowTheCallArrived(t *testing.T) {
 // forbidden by shape rather than by string.
 func TestCovalTracingLogsWhatActuallyHappened(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
-		tracing := artifactFile(t, covalArtifact(t, provider), "utils/tracing.py")
+		tracing := artifactFile(t, covalArtifact(t, provider), tracingSource)
 		if strings.Contains(tracing, "so no trace is exported") {
 			t.Errorf("%s tracing.py still claims no trace is exported on a call the conversation route files", provider)
 		}

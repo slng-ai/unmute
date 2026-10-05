@@ -786,6 +786,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldVoicemail:             true, // AMD machine-vm branches (N6)
 	targetcap.FieldTracingLangfuse:       true,
 	targetcap.FieldTracingCoval:          true, // tracing.py exports to Coval off the SIP simulation ID
+	targetcap.FieldTracingLogfire:        true,
 	targetcap.FieldDeploymentMultiRegion: true, // one README deploy row per declared region, own config file
 	targetcap.FieldToolInject:            true, // hidden request values merged from userdata
 	targetcap.FieldWebhookPath:           true, // rendered, URL-encoded path on the base URL
@@ -977,6 +978,17 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		}
 		files = append(files, File{Path: "utils/knowledge.py", Content: content})
 	}
+	// The telemetry module is the shared one too, for the same reason.
+	telemetry, err := telemetryFile(telemetryData{
+		Project:   data.Project,
+		Provider:  data.TracingProvider,
+		Target:    "livekit",
+		AgentName: data.EntryAgent + "-" + data.AgentName,
+	})
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, telemetry...)
 	// Both clouds build from this directory, and LiveKit caps the uploaded
 	// context at 1 GB, so local run leftovers are excluded too.
 	files = append(files, File{Path: ".dockerignore", Content: []byte(".env\n.env.*\n.venv/\n__pycache__/\n")})

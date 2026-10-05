@@ -833,6 +833,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolAnnounceTask:     true, // same frame, queued via FlowManager.worker
 	targetcap.FieldTracingLangfuse:      true,
 	targetcap.FieldTracingCoval:         true, // tracing.py routes Pipecat's own spans to Coval
+	targetcap.FieldTracingLogfire:       true,
 	targetcap.FieldToolInject:           true, // hidden request values merged from State
 	targetcap.FieldWebhookPath:          true, // rendered, URL-encoded path on the base URL
 	targetcap.FieldTemplates:            true, // _render over prompts and the greeting at session start
@@ -972,10 +973,9 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		{"env.example", ".env.example"},
 	}
 	if data.Tracing {
-		// One provider per file: the two attribute models share nothing, so
-		// branching inside one template would make both harder to read. Both
-		// land on tracing.py so bot.py's import site does not care which.
-		outputs = append(outputs, struct{ tmpl, path string }{tracingTemplate(data.TracingProvider), "utils/tracing.py"})
+		// Pipecat's spans fit every backend, so one tracing template serves
+		// all three. Where they go is utils/telemetry.py, emitted below.
+		outputs = append(outputs, struct{ tmpl, path string }{"tracing.py", "utils/tracing.py"})
 	}
 	// Every surviving Pipecat route deploys to Pipecat Cloud, so the deployment
 	// manifest is unconditional. It used to be the default arm of a switch whose
@@ -1004,6 +1004,17 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		}
 		files = append(files, File{Path: "utils/knowledge.py", Content: content})
 	}
+	// The telemetry module is the shared one too, for the same reason.
+	telemetry, err := telemetryFile(telemetryData{
+		Project:   data.Project,
+		Provider:  data.TracingProvider,
+		Target:    "pipecat",
+		AgentName: data.EntryAgent + "-" + data.AgentName,
+	})
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, telemetry...)
 	// Same set as the LiveKit driver's: secrets never reach the image, and a local
 	// `uv run` in this directory leaves a virtualenv behind that would otherwise
 	// be uploaded as build context on every deploy.

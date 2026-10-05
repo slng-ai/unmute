@@ -203,6 +203,17 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // the README bytes of every package that keeps state or runs a step, and
 // nothing else.
 //
+// And on 2026-10-05, for every traced package: tracing is one collector. A new
+// utils/telemetry.py owns the tracer provider and the one backend it exports
+// to (Langfuse, Logfire or Coval), and utils/tracing.py only shapes the spans.
+// Every backend is plain OTLP, so LiveKit no longer installs the langfuse SDK,
+// and agent.py and bot.py call one setup_tracing whatever the provider. The
+// spans and their attributes are the same as before, except that Coval's
+// tool spans on Pipecat now come from the same TracedLLMWorker as the others.
+// The same day, Backend gained two hooks that only Logfire overrides, so a
+// Langfuse package's telemetry.py grew two methods that return nothing and its
+// spans are unchanged.
+//
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {

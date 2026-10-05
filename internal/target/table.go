@@ -127,6 +127,7 @@ const (
 	FieldWarmInstances         Field = "warm_instances"
 	FieldTracingLangfuse       Field = "tracing.provider.langfuse"
 	FieldTracingCoval          Field = "tracing.provider.coval"
+	FieldTracingLogfire        Field = "tracing.provider.logfire"
 	FieldPrefetch              Field = "prefetch"
 	FieldVariableConfirm       Field = "variables.confirm"
 	FieldVariableConversation  Field = "variables.source.conversation"
@@ -706,6 +707,9 @@ func Default() Table {
 			// comment always said and what the slng rows now act on.
 			FieldTracingLangfuse: field(
 				deny(Slng, "slng target instruments no process of yours, so it cannot install a Langfuse exporter: read the traces in the SLNG dashboard, or compile to livekit or pipecat which emit the exporter"),
+			),
+			FieldTracingLogfire: field(
+				deny(Slng, "slng target instruments no process of yours, so it cannot install a Logfire exporter: read the traces in the SLNG dashboard, or compile to livekit or pipecat which emit the exporter"),
 			),
 			FieldTracingCoval: field(
 				deny(Slng, "slng target instruments no process of yours and sees no inbound call, so it can neither install the Coval exporter nor read a simulation ID: run the evaluation against the SLNG agent from Coval, or compile to livekit or pipecat which emit the exporter"),

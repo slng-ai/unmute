@@ -1,35 +1,94 @@
-"""Generated Langfuse tracing for {{.Project}}."""
+{{- $coval := eq .TracingProvider "coval" -}}
+{{- $tools := or .NeedsFunctionCalls .NeedsMCP -}}
+"""Generated tracing for {{.Project}}: Pipecat's own spans, one trace per call.
+
+Pipecat already nests `conversation` over `turn` over its service spans, so
+nothing here re-parents anything. This module stamps each call's attributes on
+every span{{if $tools}}, adds the tool spans Pipecat does not emit{{end}}{{if $coval}}, and finds
+the Coval identity a call belongs to{{end}}. Where the spans go, and under which
+attribute names, is utils/telemetry.py.
+{{- if $coval}}
+
+Spans are held until this call has a Coval identity, then flushed. A call a
+simulation placed gets that identity on the call itself; every other call gets
+one at its end, by registering itself with Coval as a conversation. Either way
+the trace goes out, so a browser session and a production phone call both land.
+
+Correlation state belongs to one call, not to the process. Pipecat Cloud serves
+many sessions from one warm container, so every call starts by resetting that
+state and takes a fresh call token; each span carries the token of the call it
+was created in, and a span from a finished call is discarded rather than filed
+under the live one.
+{{- end}}
+"""
 
 from __future__ import annotations
 
-{{if or .NeedsFunctionCalls .NeedsMCP}}import asyncio
-{{end}}import base64
-{{if or .NeedsFunctionCalls .NeedsMCP}}import functools
+{{if $tools}}import asyncio
+import functools
 {{end}}import json
-import os
-from collections.abc import {{if or .NeedsFunctionCalls .NeedsMCP}}Awaitable, {{end}}Callable, Mapping, Sequence
+{{if $coval}}import logging
+{{end}}import os
+from collections.abc import {{if $tools}}Awaitable, {{end}}{{if or $tools (not $coval)}}Callable, {{end}}Mapping, Sequence
 from contextvars import ContextVar
-from datetime import UTC, datetime
 from typing import Any
 
-from opentelemetry import trace
-from opentelemetry.context import Context
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider
+{{if $tools}}from opentelemetry import trace
+{{end}}from opentelemetry.context import Context
+from opentelemetry.sdk.trace import {{if $coval}}ReadableSpan, {{end}}Span, SpanProcessor
 from opentelemetry.util.types import AttributeValue
 from pipecat.pipeline.worker import PipelineWorker
-from pipecat.utils.tracing.setup import setup_tracing
 from pipecat.workers.llm import LLMWorker
 
-TRACE_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .AgentName}}
-_TRACE_PROVIDER: TracerProvider | None = None
-
-
+from utils.telemetry import (
+{{- if $coval}}
+    CALL_ORIGIN_ATTR,
+    CALL_TOKEN_ATTR,
+    CONVERSATION_EXPORT_HEADER,
+    FLUSH_TIMEOUT_MS,
+    TRACE_NAME,
+    Coval,
+{{- else}}
+    TRACE_NAME,
+    Backend,
+{{- end}}
+    Telemetry,
+)
+{{if $coval}}
+logger = logging.getLogger("coval_tracing")
+{{end}}
 # pipecat's two structural spans: `conversation` wraps the call and `turn` wraps
 # one exchange, the caller's line and the reply to it. A name that is not here
 # still traces, it just does not get read back as the call or as a turn.
 CALL_SPAN = "conversation"
 TURN_SPAN = "turn"
+
+# The process's one telemetry. Pipecat reads OpenTelemetry's global provider,
+# which can be set once, so the first call builds it and later calls reuse it.
+_TELEMETRY: Telemetry | None = None
+{{- if $coval}}
+
+# Coval puts the simulation ID on the call under this name. Header and SIP header
+# lookups are case-insensitive because carriers rewrite header casing freely.
+SIMULATION_KEY = "x-coval-simulation-id"
+
+_SIMULATION_ID_ATTR = "coval.internal.simulation_id"
+
+# Older Pipecat releases named these spans differently. Current Pipecat already
+# emits Coval's canonical names, so this map is a no-op there and only earns its
+# keep if the pinned Pipecat version is rolled back.
+_SPAN_ALIASES = {
+    "llm_request": "llm",
+    "llm_request_run": "llm",
+    "stt_request": "stt",
+    "stt_request_run": "stt",
+    "tts_request": "tts",
+    "tts_request_run": "tts",
+}
+
+_coval: Coval | None = None
+_origin: str | None = None
+{{- end}}
 
 
 class CallTrace(SpanProcessor):
@@ -37,18 +96,15 @@ class CallTrace(SpanProcessor):
 
     Two jobs, in one class because they are the same bookkeeping.
 
-    It copies the call's correlating attributes onto every span, because
-    Langfuse v4 filters and sums over observations and an attribute that sits
-    only on the top span cannot group the spans underneath it. pipecat's own
-    additional_span_attributes reach the conversation span alone, so they do not
-    do this.
+    It copies the call's correlating attributes onto every span, because a
+    backend that filters and sums over spans, as Langfuse v4 does, cannot group
+    the spans underneath an attribute that sits only on the top one. pipecat's
+    own additional_span_attributes reach the conversation span alone, so they
+    do not do this.
 
     And it records the conversation twice over: each line on the turn it
-    belongs to, and the whole thing on the call's root observation, so opening
-    the trace shows what was said rather than an empty envelope.
-
-    pipecat's tree is already the shape we want, `conversation` over `turn` over
-    the service spans, so nothing here re-parents anything.
+    belongs to, and the whole thing on the call's root, so opening the trace
+    shows what was said rather than an empty envelope.
 
     The processor is one per process, because the tracer provider is, but the
     bookkeeping is one per call. A process can run several calls at once (the
@@ -58,9 +114,9 @@ class CallTrace(SpanProcessor):
     so every task its pipeline starts inherits it and sees only its own call.
     """
 
-    def start_call(self, attributes: Mapping[str, AttributeValue]) -> None:
+    def start_call(self, attributes: Mapping[str, AttributeValue], telemetry: Telemetry) -> None:
         """Point tracing at this call, from inside the call's own coroutine."""
-        _CURRENT_CALL.set(_Call(attributes))
+        _CURRENT_CALL.set(_Call(attributes, telemetry))
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
         """Copy the current call's attributes onto a span as it opens."""
@@ -78,8 +134,9 @@ class CallTrace(SpanProcessor):
 class _Call:
     """What one call's spans share: its attributes, its root, its current turn."""
 
-    def __init__(self, attributes: Mapping[str, AttributeValue]) -> None:
+    def __init__(self, attributes: Mapping[str, AttributeValue], telemetry: Telemetry) -> None:
         self._attributes: dict[str, AttributeValue] = dict(attributes)
+        self._backend = telemetry.backend
         self._call: Span | None = None
         self._turn: Span | None = None
         self._transcript: list[dict[str, str]] = []
@@ -91,75 +148,79 @@ class _Call:
             self._call = span
         elif span.name == TURN_SPAN:
             self._turn = span
+            # Pipecat opens no agent span, and its `llm` spans sit right under
+            # `turn`, so a turn is the agent run for a backend that groups by
+            # one. ponytail: named after the package, not the worker that
+            # answered, because the shared tracing context does not say which
+            # worker spoke. Stamp the worker's name once each owns a context.
+            span.set_attributes(self._backend.agent_run(TRACE_NAME))
 
     def said(self, role: str, text: str) -> None:
         """Record one line on the current turn and on the call's root."""
+        backend = self._backend
         self._transcript.append({"role": role, "content": text})
         if self._turn is not None and self._turn.is_recording():
-            side = "input" if role == "user" else "output"
-            self._turn.set_attribute(f"langfuse.observation.{side}", json.dumps(text))
+            line = json.dumps(text)
+            self._turn.set_attributes(
+                backend.observation(input_value=line) if role == "user" else backend.observation(output_value=line)
+            )
         if self._call is not None and self._call.is_recording():
             # The whole conversation goes on the root, because that is the one
             # place a reader opens to see the call rather than one turn of it.
-            self._call.set_attribute(
-                "langfuse.observation.input", json.dumps(self._transcript)
+            self._call.set_attributes(
+                backend.observation(
+                    input_value=json.dumps(self._transcript),
+                    output_value=None if role == "user" else json.dumps(text),
+                )
             )
-            if role != "user":
-                self._call.set_attribute("langfuse.observation.output", json.dumps(text))
 
 
 _CURRENT_CALL: ContextVar[_Call | None] = ContextVar("unmute_call", default=None)
 
 
 CALL = CallTrace()
+{{- if not $coval}}
 
 
-def _patch_pipecat_tracing() -> None:
-    """Expose Pipecat's system prompt, speech payloads, and metrics to Langfuse."""
+def _patch_pipecat_tracing(backend: Backend) -> None:
+    """Record what Pipecat's speech and LLM spans heard and said, under the backend's names."""
     from pipecat.utils.tracing import service_decorators
 
-    if getattr(service_decorators.add_stt_span_attributes, "__langfuse_patch__", False):
+    if getattr(service_decorators.add_stt_span_attributes, "__unmute_patch__", False):
         return
 
     def patch(original: Callable[..., Any], kind: str) -> Any:
-        """Wrap one Pipecat span-attribute function so it also writes Langfuse keys."""
+        """Wrap one Pipecat span-attribute function so it also writes the backend's keys."""
 
         def patched(span: Span, *args: Any, **kwargs: Any) -> None:
             set_attribute = span.set_attribute
+            # The SDK's own, which writes straight to the span and so never
+            # comes back through the wrapper below.
+            set_attributes = span.set_attributes
 
             # ponytail: Pipecat 1.9.0 emits speech data under generic keys that
-            # Langfuse does not map. Remove when Pipecat emits Langfuse I/O.
+            # no backend maps to input and output. Remove when Pipecat does.
             def mapped_set_attribute(key: str, value: Any) -> None:
                 set_attribute(key, value)
                 encoded = json.dumps(value, default=str)
                 if kind == "stt" and key == "transcript":
-                    set_attribute("langfuse.observation.output", encoded)
+                    set_attributes(backend.observation(output_value=encoded))
                     CALL.said("user", value)
                 elif kind == "tts" and key == "text":
-                    set_attribute("langfuse.observation.input", encoded)
+                    set_attributes(backend.observation(input_value=encoded))
                     CALL.said("assistant", value)
-                elif key == "metrics.ttfb":
-                    set_attribute("langfuse.observation.metadata.ttfb_seconds", value)
-                    set_attribute(
-                        "langfuse.observation.completion_start_time",
-                        datetime.now(UTC).isoformat(),
-                    )
-                elif kind == "tts" and key == "metrics.character_count":
-                    set_attribute("langfuse.observation.metadata.character_count", value)
-                    set_attribute(
-                        "langfuse.observation.usage_details",
-                        json.dumps({"characters": value}),
-                    )
+                else:
+                    set_attributes(backend.speech_metric(kind, key, value))
 
             span.set_attribute = mapped_set_attribute  # ty: ignore[invalid-assignment]
             original(span, *args, **kwargs)
-            mapped_set_attribute(
-                "langfuse.observation.input" if kind == "stt" else "langfuse.observation.output",
-                json.dumps("audio"),
+            audio = json.dumps("audio")
+            set_attributes(
+                backend.observation(input_value=audio) if kind == "stt" else backend.observation(output_value=audio)
             )
 
         # Plain assignment fails type checking: a function declares no attributes.
-        setattr(patched, "__langfuse_patch__", True)  # noqa: B010
+        setattr(patched, "__unmute_patch__", True)  # noqa: B010
         return patched
 
     service_decorators.add_stt_span_attributes = patch(
@@ -180,51 +241,250 @@ def _patch_pipecat_tracing() -> None:
         if messages:
             encoded = json.dumps(messages, default=str)
             span.set_attribute("input", encoded)
-            span.set_attribute("langfuse.observation.input", encoded)
+            span.set_attributes(backend.observation(input_value=encoded))
 
-    setattr(patched_llm, "__langfuse_patch__", True)  # noqa: B010 - a function declares no attributes
+    setattr(patched_llm, "__unmute_patch__", True)  # noqa: B010 - a function declares no attributes
     # setattr: the replacement has a looser signature than the function it patches.
     setattr(service_decorators, "add_llm_span_attributes", patched_llm)  # noqa: B010
+{{- end}}
+{{- if $coval}}
 
 
-def setup_langfuse_tracing() -> TracerProvider:
-    """Install the Langfuse OTLP exporter and call processor once per process."""
-    global _TRACE_PROVIDER
-    if _TRACE_PROVIDER is not None:
-        return _TRACE_PROVIDER
-    existing_provider = trace.get_tracer_provider()
-    if isinstance(existing_provider, TracerProvider):
-        raise RuntimeError(
-            "OpenTelemetry already has a TracerProvider; configure Pipecat Langfuse tracing first"
+class _CovalTagger(SpanProcessor):
+    """Stamp each span with the call it belongs to, and its simulation if known."""
+
+    def __init__(self, coval: Coval) -> None:
+        """Read the call token and simulation off this backend's router."""
+        self._router = coval.router
+
+    def on_start(self, span: Span, parent_context: Context | None = None) -> None:
+        """Rename legacy spans, then stamp the call token, simulation and origin."""
+        alias = _SPAN_ALIASES.get(span.name)
+        if alias:
+            span.update_name(alias)
+        router = self._router
+        # Written at start, when the live call is unambiguous. Read at export,
+        # by which time the next call may already have begun.
+        span.set_attribute(CALL_TOKEN_ATTR, router.call_token)
+        if router.simulation_id:
+            span.set_attribute(_SIMULATION_ID_ATTR, router.simulation_id)
+        # Pipecat opens exactly one `conversation` span per call, which is the
+        # root Coval reads, so the origin goes there rather than on every span.
+        if span.name == CALL_SPAN and _origin:
+            span.set_attribute(CALL_ORIGIN_ATTR, _origin)
+
+    def on_end(self, span: ReadableSpan) -> None:
+        """Ignore ended spans, because the router exports them."""
+
+    def shutdown(self) -> None:
+        """Do nothing, because the tagger holds no resources."""
+
+    def force_flush(self, timeout_millis: int = FLUSH_TIMEOUT_MS) -> bool:
+        """Report success, because the tagger buffers nothing."""
+        return True
+
+
+def _simulation_from_mapping(values: Any) -> str | None:
+    """Case-insensitive lookup of the Coval key in one mapping."""
+    if not values:
+        return None
+    try:
+        items = values.items()
+    except AttributeError:
+        return None
+    return next((str(value) for key, value in items if str(key).lower() == SIMULATION_KEY and value), None)
+
+
+def resolve_simulation_id(runner_args: Any) -> tuple[str | None, str]:
+    """Find the Coval simulation ID for this call, and say where it came from.
+
+    Four sources, because this project can be compiled onto four transports and
+    they deliver a per-call payload in three different shapes:
+
+    1. the WebSocket upgrade headers, which is Coval's primary route for a
+       WebSocket agent,
+    2. the SIP headers in a Pipecat Cloud dial-in body,
+    3. a custom parameter on the carrier stream, which is where a Twilio
+       ``<Stream><Parameter>`` lands,
+    4. ``COVAL_SIMULATION_ID`` in the environment, which covers a local run and
+       any route an operator wires that the compiler did not predict.
+
+    Returns ``(None, "none")`` when this is not a Coval call, which is the normal
+    case for a browser session.
+    """
+    websocket = getattr(runner_args, "websocket", None)
+    found = _simulation_from_mapping(getattr(websocket, "headers", None))
+    if found:
+        return found, "websocket_header"
+
+    body = getattr(runner_args, "body", None) or {}
+    if isinstance(body, dict):
+        dialin = body.get("dialin_settings") or {}
+        if isinstance(dialin, dict):
+            found = _simulation_from_mapping(dialin.get("sip_headers"))
+            if found:
+                return found, "sip_header"
+        found = _simulation_from_mapping(body)
+        if found:
+            return found, "call_body"
+
+    call_data = getattr(runner_args, "call_data", None)
+    if call_data is not None:
+        nested = getattr(call_data, "body", None)
+        if nested is None and isinstance(call_data, dict):
+            nested = call_data.get("body")
+        found = _simulation_from_mapping(nested)
+        if found:
+            return found, "carrier_parameter"
+
+    found = os.environ.get("COVAL_SIMULATION_ID")
+    if found:
+        return found, "environment"
+    return None, "none"
+
+
+def resolve_call_origin(runner_args: Any) -> str | None:
+    """How this caller reached the agent, in Coval's vocabulary.
+
+    `phone` is a carrier call, over a SIP dial-in body or a carrier's media
+    websocket. `websocket` is a plain websocket session that named no carrier.
+    `browser` is WebRTC, which is what `unmute dev` and the Daily route are.
+    Returns ``None`` when the route cannot be told, because a guess on the
+    trace is worse than a gap in it.
+    """
+    body = getattr(runner_args, "body", None)
+    if isinstance(body, dict) and body.get("dialin_settings"):
+        return "phone"
+    if getattr(runner_args, "websocket", None) is not None:
+        # The runner overwrites transport_type with the carrier it detected on
+        # the first message, and leaves the placeholder for a plain socket.
+        carrier = getattr(runner_args, "transport_type", None)
+        return "websocket" if carrier in (None, "websocket") else "phone"
+    if getattr(runner_args, "webrtc_connection", None) is not None:
+        return "browser"
+    if getattr(runner_args, "room_url", None):
+        return "browser"
+    return None
+
+
+def _transcript_from(spans: Sequence[ReadableSpan]) -> list[dict[str, str]]:
+    """Rebuild the conversation from the spans that are already held.
+
+    Pipecat puts the caller's words on its `stt` spans and the agent's on its
+    `tts` spans, so a call that ends without a simulation already holds
+    everything Coval needs to register it as a conversation. Nothing extra is
+    recorded for this, and nothing is invented.
+    """
+    roles = {"stt": ("user", "transcript"), "tts": ("assistant", "text")}
+    lines = [
+        (roles[span.name][0], text)
+        for span in sorted((span for span in spans if span.name in roles), key=lambda span: span.start_time or 0)
+        if (text := str((span.attributes or {}).get(roles[span.name][1]) or "").strip())
+    ]
+    transcript: list[dict[str, str]] = []
+    for role, text in lines:
+        # Pipecat emits one span per synthesis segment and one per final
+        # transcript, so consecutive spans from the same side are one message.
+        if transcript and transcript[-1]["role"] == role:
+            transcript[-1]["content"] += " " + text
+        else:
+            transcript.append({"role": role, "content": text})
+    return transcript
+
+
+def _mark_correlation(
+    telemetry: Telemetry, method: str, extra: Mapping[str, AttributeValue] | None = None
+) -> None:
+    """Record on the trace how this call was correlated, so a misfiled span can be diagnosed."""
+    telemetry.tracer("unmute.coval").start_span(
+        "transport",
+        attributes={
+            "coval.correlation.method": method,
+            **(extra or {}),
+            "agent.name": TRACE_NAME,
+            CALL_ORIGIN_ATTR: _origin or "",
+        },
+    ).end()
+
+
+def activate_simulation(telemetry: Telemetry, coval: Coval, runner_args: Any) -> str | None:
+    """Resolve the simulation ID for this call and start exporting against it.
+
+    Also records how the call arrived, which is read off the same arguments and
+    is what saves a reader from decoding a session id to tell a phone call from
+    a browser one.
+    """
+    global _origin
+    _origin = resolve_call_origin(runner_args)
+    simulation_id, route = resolve_simulation_id(runner_args)
+    if not simulation_id:
+        # Not "no trace is exported": the conversation route files this call at
+        # its end, which is how every real call reaches Coval.
+        logger.info(
+            "No Coval simulation placed this %s call, so its trace is filed as a "
+            "Coval conversation when the call ends",
+            _origin or "unknown-origin",
         )
-
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-    base_url = os.getenv("LANGFUSE_BASE_URL")
-    if not public_key or not secret_key or not base_url:
-        raise ValueError(
-            "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and LANGFUSE_BASE_URL must all be set"
-        )
-
-    auth = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
-    os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = f"{base_url.rstrip('/')}/api/public/otel"
-    os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = (
-        f"Authorization=Basic%20{auth},x-langfuse-ingestion-version=4"
+        return None
+    if not coval.api_key:
+        logger.warning("Coval simulation %s found but COVAL_API_KEY is unset", simulation_id)
+        return None
+    coval.router.activate(simulation_id)
+    _mark_correlation(telemetry, route)
+    logger.info(
+        "Coval tracing active for simulation %s via %s (%s call)",
+        simulation_id,
+        route,
+        _origin or "unknown-origin",
     )
-    _patch_pipecat_tracing()
-    if not setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter()):
-        raise RuntimeError("Pipecat OpenTelemetry tracing is unavailable")
-    provider = trace.get_tracer_provider()
-    if not isinstance(provider, TracerProvider):
-        raise RuntimeError("Pipecat did not install an SDK tracer provider")
-    provider.add_span_processor(CALL)
-    _TRACE_PROVIDER = provider
-    return provider
+    return simulation_id
+{{- end}}
 
 
-def start_call(attributes: Mapping[str, AttributeValue]) -> None:
-    """Name this call before its conversation span opens."""
-    CALL.start_call(attributes)
+def setup_tracing() -> Telemetry:
+    """The process's telemetry, built by the first call and shared by every later one."""
+    global _TELEMETRY{{if $coval}}, _coval{{end}}
+    if _TELEMETRY is None:
+{{- if $coval}}
+        coval = Coval.from_env()
+        _coval = coval
+        telemetry = Telemetry.install(coval, resource=_resource())
+        telemetry.add(_CovalTagger(coval))
+{{- else}}
+        telemetry = Telemetry.install(resource=_resource())
+        _patch_pipecat_tracing(telemetry.backend)
+{{- end}}
+        telemetry.add(CALL)
+        _TELEMETRY = telemetry
+    return _TELEMETRY
+
+
+def _resource() -> dict[str, AttributeValue]:
+    """The process attributes Pipecat's own setup_tracing used to set."""
+    return {
+        "service.instance.id": os.getenv("HOSTNAME", "unknown"),
+        "deployment.environment": os.getenv("ENVIRONMENT", "development"),
+    }
+
+
+def start_call(telemetry: Telemetry, runner_args: Any) -> dict[str, AttributeValue]:
+    """Begin tracing one call, and return the attributes for its conversation span."""
+    attributes = telemetry.backend.call_attributes(getattr(runner_args, "session_id", None))
+{{- if $coval}}
+    if _coval is not None:
+        # A warm Pipecat Cloud container reuses this process for the next call.
+        # Reusing its correlation too is the bug this line exists to prevent:
+        # every later call would be appended to the first call's conversation.
+        _coval.router.begin_call()
+        # The simulation ID rides in on the call itself. Until it arrives spans
+        # are held, so a browser session traces nothing and still runs.
+        activate_simulation(telemetry, _coval, runner_args)
+{{- end}}
+    # Pipecat puts its attributes on the conversation span only. They have to
+    # reach every span under it too, and this is also where the container
+    # forgets the call it ran before.
+    CALL.start_call(attributes, telemetry)
+    return attributes
 
 
 def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:
@@ -236,12 +496,55 @@ def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> N
         agent._tracing_context = main._tracing_context
 
 
-def flush_tracing(provider: TracerProvider) -> None:
-    """Send any buffered spans before the process exits."""
-    provider.force_flush()
+def flush_tracing(telemetry: Telemetry, session_id: str = "") -> None:
+    """Send this call's trace{{if $coval}}, registering the call first if nothing claimed it{{end}}."""
+{{- if $coval}}
+    # Pipecat batches spans, so this flush is what moves them into the router.
+    # After it, a call no simulation claimed has its whole trace held, which is
+    # the transcript Coval needs to register it as a conversation. The spans
+    # then go out against that conversation ID, so a local run lands in Trace
+    # Search instead of being dropped.
+    telemetry.flush()
+    if _coval is None:
+        return
+    router = _coval.router
+    if router.active:
+        logger.info(
+            "Coval already correlated this call as %s, so its spans are on their way",
+            router.simulation_id,
+        )
+        return
+    held = router.held()
+    transcript = _transcript_from(held)
+    if not transcript:
+        logger.warning(
+            "This call produced no transcript, so there is nothing to register with "
+            "Coval and its %d held span(s) are dropped",
+            len(held),
+        )
+        return
+    conversation_id = _coval.submit_conversation(transcript, session_id, _origin or "")
+    if not conversation_id:
+        # submit_conversation has already said which way it failed.
+        return
+    _mark_correlation(telemetry, "conversation_submit", {"coval.conversation_id": conversation_id})
+    telemetry.flush()
+    going_out = len(router.held())
+    router.activate(conversation_id, CONVERSATION_EXPORT_HEADER)
+    logger.info(
+        "Filed this call as Coval conversation %s with %d span(s)",
+        conversation_id,
+        going_out,
+    )
+{{- else}}
+    # session_id is Coval's: it files a call no simulation claimed by it. Every
+    # other backend already has the session on the spans.
+    telemetry.flush()
+{{- end}}
+{{- if $tools}}
 
 
-{{if or .NeedsFunctionCalls .NeedsMCP}}# ponytail: Pipecat 1.9.0 has no standard-tool tracing hook. Remove this
+# ponytail: Pipecat 1.9.0 has no standard-tool tracing hook. Remove this
 # subclass when ordinary LLMWorker tools gain native spans.
 class TracedLLMWorker(LLMWorker):
     """Add the tool spans missing from Pipecat's standard LLM tracing."""
@@ -255,36 +558,26 @@ class TracedLLMWorker(LLMWorker):
     ) -> Any:
         """Run one tool call inside its own span, or bare when tracing is off."""
         context = self._tracing_context
-        if not self._enable_tracing or context is None:
+        telemetry = _TELEMETRY
+        if not self._enable_tracing or context is None or telemetry is None:
             return await call(None)
+        backend = telemetry.backend
         parent = context.get_turn_context() or context.get_conversation_context()
-        with trace.get_tracer("unmute.pipecat.tools").start_as_current_span(
-            name, context=parent
+        span_name, attributes = backend.tool_span(name, json.dumps(arguments, default=str), tool_call_id)
+        with telemetry.tracer("unmute.tools").start_as_current_span(
+            span_name, context=parent, attributes=attributes
         ) as span:
-            # The two GenAI semantic-convention keys that make this a tool call
-            # rather than an unlabelled span. Langfuse v4 reads them: the
-            # observation becomes a TOOL and takes its name from
-            # gen_ai.tool.name, whatever the span is called. livekit-agents
-            # sets the same pair, so one call reads the same way on both
-            # targets, which it did not while this span carried only
-            # tool.function_name and arrived as a plain span named `tool:<name>`.
-            span.set_attribute("gen_ai.operation.name", "execute_tool")
-            span.set_attribute("gen_ai.tool.name", name)
-            span.set_attribute("tool.function_name", name)
-            span.set_attribute("langfuse.observation.input", json.dumps(arguments, default=str))
-            if tool_call_id:
-                span.set_attribute("tool.call_id", tool_call_id)
             try:
                 result = await call(span)
             except asyncio.CancelledError:
-                span.set_attribute("tool.result_status", "cancelled")
+                span.set_attributes(backend.tool_outcome("cancelled"))
                 raise
             except Exception:
-                span.set_attribute("tool.result_status", "error")
+                span.set_attributes(backend.tool_outcome("error"))
                 raise
             if result is not None:
-                span.set_attribute("langfuse.observation.output", json.dumps(result, default=str))
-            span.set_attribute("tool.result_status", "completed")
+                span.set_attributes(backend.tool_result(json.dumps(result, default=str)))
+            span.set_attributes(backend.tool_outcome("completed"))
             return result
 
     def _track_tool_call(self, method: Callable[..., Any]) -> Callable[..., Any]:
@@ -294,13 +587,12 @@ class TracedLLMWorker(LLMWorker):
         @functools.wraps(tracked)
         async def wrapper(params: Any, *args: Any, **kwargs: Any) -> Any:
             async def call(span: trace.Span | None) -> Any:
-                if span:
+                if span is not None and _TELEMETRY is not None:
+                    backend = _TELEMETRY.backend
                     result_callback = params.result_callback
 
                     async def traced_result_callback(result: Any, **callback_kwargs: Any) -> Any:
-                        span.set_attribute(
-                            "langfuse.observation.output", json.dumps(result, default=str)
-                        )
+                        span.set_attributes(backend.tool_result(json.dumps(result, default=str)))
                         return await result_callback(result, **callback_kwargs)
 
                     params.result_callback = traced_result_callback
@@ -326,4 +618,4 @@ class TracedLLMWorker(LLMWorker):
             return await self._trace_tool(name, dict(args), call)
 
         return wrapper
-{{end}}
+{{- end}}

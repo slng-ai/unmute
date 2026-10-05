@@ -189,29 +189,11 @@ async def run_call(ctx: JobContext) -> None:
     )
 {{- end}}
 
-{{if .Tracing}}{{if eq .TracingProvider "coval"}}
-    # The simulation ID arrives with the call, and on a SIP call it arrives after
-    # the job starts, so setup_coval watches for it rather than reading it once.
-    setup_coval(
-        ctx,
-        session,
-        metadata={
-            "session.id": ctx.room.name,
-            "agent.name": {{pyq .EntryAgent}} + "-" + {{pyq .AgentName}},
-        },
-    )
+{{if .Tracing}}
+    # utils/telemetry.py names the backend. The room is the call's session.
+    setup_tracing(ctx, session)
 
-{{else}}
-    setup_langfuse(
-        ctx,
-        session,
-        metadata={
-            "langfuse.session.id": ctx.room.name,
-            "langfuse.trace.name": {{pyq .EntryAgent}} + "-" + {{pyq .AgentName}},
-        },
-    )
-
-{{end}}{{end}}
+{{end}}
     # Inert unless the dev loop set UNMUTE_DEV_METRICS. Reads session events, so
     # it never touches the tracer provider an opt-in trace export would own.
     install_dev_metrics(session, call_id=ctx.room.name)

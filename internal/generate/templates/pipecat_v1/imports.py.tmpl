@@ -91,15 +91,12 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 from utils.dev_metrics import DevReporter, install_dev_metrics
 {{if .Tracing}}from utils.tracing import (
-    TRACE_NAME,
 {{if or .NeedsFunctionCalls .NeedsMCP}}    TracedLLMWorker,
-{{end}}{{if eq .TracingProvider "coval"}}    activate_simulation,
 {{end}}    enable_agent_tracing,
     flush_tracing,
-{{if eq .TracingProvider "coval"}}    setup_coval_tracing,
-{{else}}    setup_langfuse_tracing,
+    setup_tracing,
     start_call,
-{{end}})
+)
 {{end}}
 {{range .Imports}}{{.}}
 {{end}}

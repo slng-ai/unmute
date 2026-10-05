@@ -245,7 +245,7 @@ var manifestLanguagePattern = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{
 func ManifestToolKinds() []string { return slices.Clone(executionBlocks) }
 
 // ManifestTracingProviders is shared by validation and the manifest editor.
-func ManifestTracingProviders() []string { return []string{"langfuse", "coval"} }
+func ManifestTracingProviders() []string { return []string{"langfuse", "coval", "logfire"} }
 
 func manifestKnownValues(m *Manifest) error {
 	check := func(path string, rule *ManifestAllow, allowed []string) error {

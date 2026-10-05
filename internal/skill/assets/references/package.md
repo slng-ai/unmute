@@ -322,7 +322,7 @@ yet. `peak_sessions` and `max_sessions` must also be positive,
 `peak_sessions` cannot exceed `max_sessions`, and `avg_session_duration` must
 be a positive Go duration such as `5m`.
 
-`provider` takes one of two values, `langfuse` or `coval`. Tracing works on the
+`provider` takes one of three values: `langfuse`, `logfire` or `coval`. Tracing works on the
 `pipecat` and `livekit` targets only. The `slng` target refuses it: unmute
 instruments no process there, so it can install no exporter. Read those traces
 in SLNG's own dashboard.
@@ -330,17 +330,25 @@ in SLNG's own dashboard.
 | provider | secrets it needs | use it for |
 |---|---|---|
 | `langfuse` | `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | reading one live conversation |
+| `logfire` | `LOGFIRE_TOKEN` | reading live calls in Pydantic Logfire, and querying them with SQL |
 | `coval` | `COVAL_API_KEY` | scoring simulated calls in Coval |
 
 Those names go in `secrets:` like any others.
 
-LiveKit uses the room name as the Langfuse session ID. Pipecat uses the runner
-session ID as both its conversation ID and the Langfuse session ID. Either way
+LiveKit uses the room name as the session ID. Pipecat uses the runner session ID
+as both its conversation ID and the session ID. Langfuse reads it as
+`langfuse.session.id`, Logfire as `session.id`. Either way
 one call is one trace, its root observation holds the whole conversation, and
 each exchange inside it is a `turn` span holding what the caller said and what
 the agent replied, which is the pair an evaluator reads. The session ID and
 trace name are on every observation, because Langfuse v4 filters and adds up
 over observations rather than over traces.
+Every backend is plain OpenTelemetry over HTTP from the emitted
+`utils/telemetry.py`, so no provider SDK is installed and Logfire needs no
+`logfire.configure()`. A Logfire token like `pylf_v1_eu_...` picks the EU region
+on its own. On Logfire a call shows on the Agents page as one run per agent
+turn, with its model calls and tools inside it; on Pipecat each run is named
+after the package, not the agent that answered.
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
 
 With `coval`, each trace is attached to the Coval simulation that placed the

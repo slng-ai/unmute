@@ -187,7 +187,8 @@
           "dev/overview",
           "tracing/overview",
           "tracing/coval",
-          "tracing/langfuse"
+          "tracing/langfuse",
+          "tracing/logfire"
         ]
       },
       {

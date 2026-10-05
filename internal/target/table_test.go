@@ -128,7 +128,7 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	// Tracing needs a process to instrument, which every remaining target has.
 	// The other half of this check used to assert both fields were Gated on the
 	// two managed targets; those are retired, so only the passing half is left.
-	for _, field := range []Field{FieldTracingLangfuse, FieldTracingCoval} {
+	for _, field := range []Field{FieldTracingLangfuse, FieldTracingCoval, FieldTracingLogfire} {
 		if table.Capability(field, LiveKit).Tag != Core || table.Capability(field, Pipecat).Tag != Core {
 			t.Fatalf("%s must pass on code drivers", field)
 		}

@@ -1,0 +1,146 @@
+---
+title: "Logfire"
+description: "Send spans to Pydantic Logfire to watch live calls and query them with SQL."
+---
+
+[Logfire](https://pydantic.dev/logfire) collects traces from live calls. Use it
+when you want to open one conversation and read what happened in it, or query
+many calls at once.
+
+## Every key the tracing block takes
+
+```yaml agent.yaml
+tracing:
+  provider: logfire
+```
+
+<ParamField path="provider" type="langfuse | logfire | coval" required>
+  Which service the spans go to. `logfire` is this page. Any other name is
+  refused, with the accepted names in the message, and leaving the whole
+  `tracing:` block out means the agent exports nothing.
+</ParamField>
+
+There is no second key. Which Logfire project a trace lands in is decided by the
+write token below, read at run time, so the same package can point at a test
+project and a production one with no edit.
+[Tracing](/tracing/overview) compares the providers side by side.
+
+## What you need
+
+One secret: `LOGFIRE_TOKEN`, a Logfire write token for the project. The agent
+fails at startup if it is missing. A missing token means the deployment is
+wrong, and failing loudly is better than running for a week without traces.
+
+The token also names the region. A token that starts `pylf_v1_eu_` goes to
+`logfire-eu.pydantic.dev`, and one that starts `pylf_v1_us_` goes to
+`logfire-us.pydantic.dev`. An older token names no region, and goes to the US
+region. That is how the Logfire SDK reads a token, so nothing else needs setting.
+
+To make a write token for a project you already have, run the Logfire CLI:
+
+```bash
+logfire --region eu --org <your-org> --no-input --output json token write
+```
+
+The command prints the token once. Put it in the package's `.env`, never in a
+committed file.
+
+## Service and session names
+
+The service name is `<entry-agent>-<agent-name>`, where `agent-name` is the
+package's `name:` joined to the target it was compiled for. Both targets build
+it the same way, so a trace from either one names the same agent the same way.
+
+Each target picks its own session ID from something it already has:
+
+| Target | `session.id` |
+|---|---|
+| `livekit` | the LiveKit room name |
+| `pipecat` | the Pipecat runner session ID, which is also its conversation ID |
+
+`session.id` and `agent.name` go on every span in the call, not only on the top
+one, so a query that filters by session finds all of it.
+
+## What the spans look like
+
+A call is one trace. Its root span holds the whole conversation in
+`input.value`. Inside it each exchange is a `turn` span, with what the caller
+said in `input.value` and what the agent replied in `output.value`.
+
+Every row is labelled the way Logfire's own integrations label theirs:
+
+| Row | Label |
+|---|---|
+| the call | `call <session>` |
+| one exchange | `turn: <what the caller said>` |
+| an agent answering | `agent <agent name>` |
+| a model call | `chat <model>` |
+| a tool call | `tool <tool name>` |
+| speech | `stt <model>`, `tts <model>` |
+
+| Target | The tree of one call |
+|---|---|
+| `pipecat` | `conversation`, then a `turn` per exchange, then `stt`, `llm` and `tts` |
+| `livekit` | `agent_session`, then a `turn` per exchange, then `user_turn` and `agent_turn` with `llm_node`, `llm_request`, `stt` and `tts` under them |
+
+Every tool call is its own span, with the tool's name in `gen_ai.tool.name`, its
+arguments, and, once the call finishes, its result.
+
+## Agents and model calls
+
+The call also shows on Logfire's **Agents** page, as one run per agent turn.
+Each run holds its model calls, their tokens and their messages, and its tool
+calls. Click a `chat` row to open it in the LLM panel.
+
+Logfire counts a model call toward a run only when it sits right under the run's
+span. The emitted project arranges that on each target:
+
+| Target | The agent run | What changes for Logfire |
+|---|---|---|
+| `livekit` | livekit's `agent_turn` | the model call is started under `agent_turn` itself, not under livekit's `llm_node` |
+| `pipecat` | each `turn` | Pipecat opens no agent span, so each `turn` is marked as the run |
+
+Pipecat keeps a model call's messages under its own `input` and `output`
+attributes. The emitted project copies them to the names the LLM panel reads,
+`gen_ai.input.messages` and `gen_ai.output.messages`.
+
+On `pipecat` every run is named after the package, not after the agent that
+answered. Pipecat's tracing does not record which of several agents spoke.
+
+Spans go to Logfire as plain OpenTelemetry over HTTP. The emitted project does
+not use the Logfire SDK, so there is no `logfire.configure()` to call.
+
+Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
+
+## What a trace records
+
+<Warning>
+  Traces can contain caller speech, model input and output, and tool arguments and results.
+  Use only fake identities and fake customer data for release tests.
+</Warning>
+
+## Checking it works
+
+Starting the worker proves nothing on its own. Complete at least one user turn
+before you look for the trace, or you will be reading an empty one and
+concluding the wrong thing. Then open the project's **Live** view, or query the
+newest spans for your service name:
+
+```sql
+select start_timestamp, span_name, attributes->>'session.id' as session
+from records
+where service_name = '<entry-agent>-<agent-name>'
+order by start_timestamp desc
+limit 20
+```
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Langfuse" icon="eye" href="/tracing/langfuse">
+    The other provider for live calls.
+  </Card>
+  <Card title="Coval" icon="flask" href="/tracing/coval">
+    Attach spans to the simulation that produced the call.
+  </Card>
+</Columns>

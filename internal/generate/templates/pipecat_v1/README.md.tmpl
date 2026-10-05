@@ -1759,6 +1759,37 @@ Use only fake identities and fake customer data for release tests, and do not
 send real customer data until your Coval project's access and retention rules
 are approved.
 
+{{else if eq .TracingProvider "logfire"}}
+## Trace with Logfire
+
+Tracing is configured. Set `LOGFIRE_TOKEN` in `.env` to a Logfire write token.
+That is the only value it needs. The token names its region (`pylf_v1_eu_...`
+goes to `logfire-eu.pydantic.dev`), and a token with no region goes to the US
+region, the way the Logfire SDK reads it.
+
+The service name is `{{.EntryAgent}}-{{.AgentName}}`. The Pipecat runner
+session ID is the `session.id` on every span.
+Tracing owns the process OpenTelemetry provider, and startup fails if another
+SDK provider is installed first.
+
+Starting the worker proves nothing on its own. Complete at least one user turn
+before you look for the trace. One call is one trace. Its root span holds the
+whole conversation in `input.value`, and each exchange is a `turn` span with
+what the caller said and what the agent replied. Each tool call is its own span,
+with the tool's name in `gen_ai.tool.name`.
+
+The call also shows on Logfire's **Agents** page, one run per agent turn, with
+its model calls, tokens, messages and tool calls. Every row is labelled, such as
+`chat <model>` or `tool <name>`.
+
+Spans go to Logfire as plain OpenTelemetry over HTTP. The project does not use
+the Logfire SDK, so `logfire.configure()` is not needed.
+
+Traces can contain caller speech, model input and output, and tool arguments and results.
+Use only fake identities and fake customer data for release tests. Use a separate
+Logfire project for those tests, and do not send real customer data until its
+access and retention rules are approved.
+
 {{else if .Tracing}}
 ## Trace with Langfuse
 

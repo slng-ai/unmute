@@ -393,22 +393,12 @@ async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
         call_context["direction"] = _markup.get("direction") or "inbound"
         call_context["from_number"] = _markup.get("from_number") or ""
         call_context["to_number"] = _markup.get("to_number") or ""
-{{end}}{{if .Tracing}}{{if eq .TracingProvider "coval"}}
-    trace_provider = setup_coval_tracing()
-    trace_attributes = {"agent.name": TRACE_NAME}
-    # The simulation ID rides in on the call itself. Until it arrives spans are
-    # held, so a browser or console session traces nothing and still runs.
-    activate_simulation(runner_args)
-{{else}}
-    trace_provider = setup_langfuse_tracing()
-    trace_attributes = {"langfuse.trace.name": TRACE_NAME}
-    if runner_args.session_id is not None:
-        trace_attributes["langfuse.session.id"] = runner_args.session_id
-    # Pipecat puts these on the conversation span only. Langfuse v4 filters and
-    # sums over observations, so they have to reach every span under it too, and
-    # this is also where the container forgets the call it ran before.
-    start_call(trace_attributes)
-{{end}}{{end}}
+{{end}}{{if .Tracing}}
+    # utils/telemetry.py names the backend. The attributes tie every span of
+    # this call together, whichever backend reads them.
+    telemetry = setup_tracing()
+    trace_attributes = start_call(telemetry, runner_args)
+{{end}}
 {{if and .HasColdTransfer (not .CloudWebsocket)}}    call_context["_transport"] = transport
 {{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
@@ -720,7 +710,7 @@ async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
 {{if .Tracing}}        primary_error = sys.exception()
         if primary_error is not None:
             try:
-                await asyncio.to_thread(flush_tracing, trace_provider{{if eq .TracingProvider "coval"}}, runner_args.session_id or ""{{end}})
+                await asyncio.to_thread(flush_tracing, telemetry, runner_args.session_id or "")
             except BaseException as cleanup_error:  # noqa: BLE001 - the primary error is what propagates
                 logger.error(
                     "Tracing flush failed while preserving the primary error ({})",
@@ -732,13 +722,13 @@ async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
             )
 {{end}}        else:
 {{if .NeedsMCP}}            try:
-                await asyncio.to_thread(flush_tracing, trace_provider{{if eq .TracingProvider "coval"}}, runner_args.session_id or ""{{end}})
+                await asyncio.to_thread(flush_tracing, telemetry, runner_args.session_id or "")
             finally:
                 await _close_mcp(
                     (agent.close_mcp() for agent in mcp_agents),
                     suppress=sys.exception() is not None,
                 )
-{{else}}            await asyncio.to_thread(flush_tracing, trace_provider{{if eq .TracingProvider "coval"}}, runner_args.session_id or ""{{end}})
+{{else}}            await asyncio.to_thread(flush_tracing, telemetry, runner_args.session_id or "")
 {{end}}
 {{else}}        await _close_mcp(
             (agent.close_mcp() for agent in mcp_agents),

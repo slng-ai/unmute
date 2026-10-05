@@ -81,10 +81,11 @@ _SUBMIT_ENDPOINT = _BASE + "/v1/conversations:submit"
 os.environ["COVAL_API_KEY"] = "smoke-key-not-a-real-secret"
 os.environ.pop("COVAL_SIMULATION_ID", None)
 
+from utils import telemetry as emitted_telemetry
 from utils import tracing
 
-tracing.COVAL_TRACES_ENDPOINT = _ENDPOINT
-tracing.COVAL_CONVERSATIONS_ENDPOINT = _SUBMIT_ENDPOINT
+emitted_telemetry.COVAL_TRACES_ENDPOINT = _ENDPOINT
+emitted_telemetry.COVAL_CONVERSATIONS_ENDPOINT = _SUBMIT_ENDPOINT
 `
 
 const covalPipecatTracingSmokeScript = covalTracingSmokeSink + `
@@ -95,7 +96,11 @@ const covalPipecatTracingSmokeScript = covalTracingSmokeSink + `
 # Hand-resetting is exactly what hid the warm-container bug from this suite: the
 # module has to do it itself, on every call, or the second call is appended to
 # the first call's Coval conversation.
-provider = tracing.setup_coval_tracing()
+bare = types.SimpleNamespace(websocket=None, body={}, call_data=None, session_id="local-session-1")
+telemetry = tracing.setup_tracing()
+tracing.start_call(telemetry, bare)
+provider = telemetry.provider
+router = tracing._coval.router
 
 # Before any simulation ID exists, a span must be held rather than sent.
 provider.get_tracer("smoke").start_span("llm").end()
@@ -125,7 +130,6 @@ param = types.SimpleNamespace(
 assert tracing.resolve_simulation_id(param) == ("sim-param", "carrier_parameter")
 
 # A browser session carries nothing, and that is not an error.
-bare = types.SimpleNamespace(websocket=None, body={}, call_data=None)
 assert tracing.resolve_simulation_id(bare) == (None, "none")
 
 # A call no simulation claimed still reaches Coval: flush_tracing registers it
@@ -146,7 +150,7 @@ assert RECEIVED == [], f"exported with no correlation ID at all: {RECEIVED}"
 # must never ride out under the next call's Coval identity.
 straggler = provider.get_tracer("smoke").start_span("llm")
 
-tracing.flush_tracing(provider, "local-session-1")
+tracing.flush_tracing(telemetry, "local-session-1")
 assert len(SUBMITTED) == 1, SUBMITTED
 submit = SUBMITTED[0]
 assert submit["headers"].get("x-api-key") == "smoke-key-not-a-real-secret", submit["headers"]
@@ -162,30 +166,31 @@ assert conv_export.get("x-conversation-id") == "conv-1", conv_export
 assert "x-simulation-id" not in conv_export, conv_export
 
 # A second flush must not register the same call twice.
-tracing.flush_tracing(provider, "local-session-1")
+tracing.flush_tracing(telemetry, "local-session-1")
 assert len(SUBMITTED) == 1, SUBMITTED
 
-first_token = tracing._router.call_token
+first_token = router.call_token
 RECEIVED.clear()
 
 # ── Session 2: the same warm process takes another call ───────────────────────
 #
-# Nothing is reset by hand. setup_coval_tracing has to hand back the process's
-# one provider and still begin a new call on it, because Pipecat installs one
-# provider per process and refuses a second.
-provider2 = tracing.setup_coval_tracing()
-assert provider2 is provider, "a warm process must reuse its one provider"
-assert tracing._router.call_token != first_token, "the second call reused the first call's token"
-assert tracing._router.simulation_id is None, "the second call inherited a correlation ID"
-assert not tracing._router.active, "the second call inherited the first call's exporter"
-assert tracing._router.held() == [], "the second call inherited held spans"
+# Nothing is reset by hand. setup_tracing has to hand back the process's one
+# telemetry, and start_call has to begin a new call on it, because Pipecat reads
+# one global provider per process and OpenTelemetry refuses a second.
+telemetry2 = tracing.setup_tracing()
+assert telemetry2 is telemetry, "a warm process must reuse its one telemetry"
+tracing.start_call(telemetry2, bare)
+assert router.call_token != first_token, "the second call reused the first call's token"
+assert router.simulation_id is None, "the second call inherited a correlation ID"
+assert not router.active, "the second call inherited the first call's exporter"
+assert router.held() == [], "the second call inherited held spans"
 
 # The straggler from session one ends now, while session two is live. It must be
 # discarded rather than filed under session two.
 straggler.end()
 provider.force_flush()
-live = tracing._router.call_token
-for span in tracing._router.held():
+live = router.call_token
+for span in router.held():
     token = (span.attributes or {}).get("coval.internal.call_token")
     assert token == live, f"a span from call {token} is held for call {live}"
 
@@ -198,7 +203,7 @@ said2.end()
 provider.force_flush()
 assert RECEIVED == [], f"session two exported before it had an ID: {RECEIVED}"
 
-tracing.flush_tracing(provider, "local-session-2")
+tracing.flush_tracing(telemetry, "local-session-2")
 assert len(SUBMITTED) == 2, f"the second call was not registered on its own: {SUBMITTED}"
 second = SUBMITTED[1]
 # Only session two's words. The first call's transcript must not come along.
@@ -219,13 +224,13 @@ RECEIVED.clear()
 
 # ── Session 3: a simulation claims a call that is not the first ───────────────
 #
-# The per-call reset clears the simulation ID, and it runs inside
-# setup_coval_tracing just before activate_simulation. That ordering is
-# load-bearing: reverse it and every Coval simulation on a warm process loses
-# its ID and is filed as an unrelated conversation instead.
-provider3 = tracing.setup_coval_tracing()
-assert provider3 is provider
-assert tracing.activate_simulation(ws) == "sim-ws"
+# The per-call reset clears the simulation ID, and it runs inside start_call
+# just before the simulation is resolved. That ordering is load-bearing: reverse
+# it and every Coval simulation on a warm process loses its ID and is filed as
+# an unrelated conversation instead.
+assert tracing.setup_tracing() is telemetry
+tracing.start_call(telemetry, ws)
+assert router.simulation_id == "sim-ws", router.simulation_id
 claimed = provider.get_tracer("smoke").start_span("llm")
 claimed.end()
 provider.force_flush()
@@ -237,7 +242,7 @@ for export in RECEIVED:
     assert "x-conversation-id" not in export, export
 
 # A call a simulation already claimed is not registered as a conversation too.
-tracing.flush_tracing(provider, "sim-session-3")
+tracing.flush_tracing(telemetry, "sim-session-3")
 assert len(SUBMITTED) == 2, f"a claimed call was also registered as a conversation: {SUBMITTED}"
 
 print(
@@ -321,12 +326,12 @@ ctx = types.SimpleNamespace(
 )
 session = _Session()
 
-provider = tracing.setup_coval(ctx, session, metadata={"session.id": room.name})
+provider = tracing.setup_tracing(ctx, session).provider
 
 # Everything the module exports passes through the router, so recording there
 # captures the finished spans with their parents and attributes intact.
 EXPORTED = []
-_real_export = tracing._router.export
+_real_export = tracing._coval.router.export
 
 
 def _recording_export(spans):
@@ -334,7 +339,7 @@ def _recording_export(spans):
     return _real_export(spans)
 
 
-tracing._router.export = _recording_export
+tracing._coval.router.export = _recording_export
 
 # Nothing may leave before the call is claimed by a simulation.
 provider.force_flush()
@@ -816,12 +821,12 @@ ctx2 = types.SimpleNamespace(
     add_shutdown_callback=shutdown_callbacks.append,
 )
 session2 = _Session()
-provider2 = tracing.setup_coval(ctx2, session2, metadata={"session.id": room2.name})
+provider2 = tracing.setup_tracing(ctx2, session2).provider
 local = shutdown_callbacks[-1]
 
 # A fresh call means a fresh router, so this one is recorded separately.
 LOCAL_EXPORTED = []
-_real_export2 = tracing._router.export
+_real_export2 = tracing._coval.router.export
 
 
 def _recording_export2(spans):
@@ -829,7 +834,7 @@ def _recording_export2(spans):
     return _real_export2(spans)
 
 
-tracing._router.export = _recording_export2
+tracing._coval.router.export = _recording_export2
 
 session2.fire(
     "conversation_item_added",
