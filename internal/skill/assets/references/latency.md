@@ -103,7 +103,7 @@ is no models listing endpoint, so a route has to be tried.
 ### 3. Hold the TTS socket open
 
 Both targets. LiveKit since the SLNG plugin shipped it, Pipecat since
-`pipecat-slng` 0.5.2, which is the catalog floor.
+`pipecat-slng` 0.5.2. The catalog floor is now 0.6.0.
 
 Off by default. It removes the provider's session setup from the front of every
 segment, which shows up most on the first segment of a call and on the fastest
@@ -187,7 +187,7 @@ with LiveKit's column; the inconsistency is the finding.
 That third stage was the largest until recently. A transcriber that never marks a
 transcript final leaves Pipecat waiting out a safety-net timer, one second by
 default, however fast the transcript arrived. Every Unmute package hit that until
-`pipecat-slng` 0.5.0; the Pipecat catalog rows now require 0.5.2 or newer. If you are
+`pipecat-slng` 0.5.0; the Pipecat catalog rows now require 0.6.0 or newer. If you are
 reading old advice that says `stop_secs` is the real window on Pipecat, that was
 true of the setting and not of the wait.
 

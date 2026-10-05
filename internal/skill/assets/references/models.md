@@ -616,9 +616,10 @@ LiveKit's compute names come from its
 [agent region list](https://docs.livekit.io/deploy/admin/regions/endpoints/#agent-deployment-regions).
 
 <ParamField path="listen/speak.params.world_part" type="string">
-  Accepts the speech gateway values in the table. Omit to use the plugin's
-  default endpoint. An empty or unknown value is refused. Do not combine it
-  with `params.base_url` or `params.slng_base_url`.
+  Accepts the speech gateway values in the table. Required on Pipecat, where
+  omission is refused. On LiveKit, omit it to use the plugin's default
+  endpoint. An empty or unknown value is refused. Do not combine it with
+  `params.base_url` or `params.slng_base_url`.
 </ParamField>
 
 <ParamField path="think.params.world_part" type="string" required>
@@ -660,12 +661,15 @@ models:
 ```
 
 The accepted values are `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`,
-`za`, `il`, `jp`, `sg`, `id`, `in`, and `au`. Unmute consumes the key and emits
-the host `{world_part}.api.slng.ai`: `slng_base_url="eu-north.api.slng.ai"` on
-LiveKit and `base_url="eu-north.api.slng.ai"` on Pipecat. It sends no scheme or
-path and does not forward `world_part` to the plugin.
+`za`, `il`, `jp`, `sg`, `id`, `in`, and `au`. Each one is served at the host
+`{world_part}.api.slng.ai`. On Pipecat, Unmute passes the key through as
+`world_part="eu-north"`, because `pipecat-slng` 0.6.0 takes the world part
+itself and builds the host. On LiveKit, Unmute consumes the key and emits
+`slng_base_url="eu-north.api.slng.ai"`, with no scheme or path.
 
-Omitting `world_part` keeps the existing default URL. An empty,
+Pipecat requires `world_part` on every SLNG listen and speak model: the plugin
+has no default gateway, so validate refuses the model without one. On LiveKit,
+omitting `world_part` keeps the existing default URL. An empty,
 non-string, or unknown value is refused. The old speech values `na`, `eu`, and
 `ap` are refused too: choose one of the new values explicitly. There is no
 automatic mapping from the old broad areas. `params.base_url` and

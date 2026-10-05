@@ -53,6 +53,8 @@ models:
       provider: slng
       model: "slng/deepgram/aura:2-en"
       voice: "aura-2-thalia-en"
+      params:
+        world_part: eu-north
   listen:
     transcriber:
       description: default STT

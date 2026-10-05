@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -165,7 +166,10 @@ func TestValidateWarmStandbyIsSilentOnBothTargets(t *testing.T) {
 		agent := safeAgent(t)
 		target := targetFor(agent, provider)
 		b := target.Models.Speak["front_desk"]
-		b.Params = map[string]any{"warm_standby_enabled": true}
+		// Keep the fixture's world_part: Pipecat refuses SLNG speech without one.
+		params := map[string]any{"warm_standby_enabled": true}
+		maps.Copy(params, b.Params)
+		b.Params = params
 		target.Models.Speak["front_desk"] = b
 		report, err := Validate(agent, []Target{target}, targetcap.Default())
 		if err != nil {

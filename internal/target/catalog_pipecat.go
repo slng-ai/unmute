@@ -5,8 +5,11 @@ package target
 // voice/params nested in Class.Settings(...) (flat forms deprecated since
 // v0.0.105; verified against the per-service docs 2026-07-15). The SLNG
 // plugin is a standalone package with flat kwargs (verified against the
-// published pipecat_slng-0.5.2 wheel 2026-09-09; that release is tagged
-// v0.5.3 upstream but publishes as 0.5.2, so the pin names 0.5.2).
+// published pipecat_slng-0.6.0 wheel 2026-10-02). Its pin has a ceiling,
+// unlike the rest of this catalog: 0.6.0 made world_part a required kwarg,
+// and a floor alone installed it under every package compiled for 0.5.2. The
+// GitHub tag can differ from the PyPI version (v0.5.3 published as 0.5.2), so
+// the pin names the PyPI version.
 
 const pipecatServicesDocs = "https://docs.pipecat.ai/api-reference/server/services/supported-services"
 
@@ -113,8 +116,8 @@ var pipecatCatalog = []Entry{
 	{
 		Framework: Pipecat, Role: Listen, Vendor: "slng",
 		Distributes: []string{"deepgram"},
-		Verified:    "2026-09-09", Docs: pipecatServicesDocs,
-		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.5.2"},
+		Verified:    "2026-10-02", Docs: pipecatServicesDocs,
+		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.6.0,<0.7"},
 		Import:  "from pipecat_slng import SlngSTTService",
 		Call: &CallSpec{
 			Class: "SlngSTTService", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
@@ -122,7 +125,7 @@ var pipecatCatalog = []Entry{
 			Language: FieldSpec{Arg: "language"},
 			Params:   ParamsKwargs,
 		},
-		Notes: []string{"routes by api_key + region params; endpoint_env has no slot (driver-pipecat B1/C10)"},
+		Notes: []string{"routes by api_key + the required world_part kwarg; endpoint_env has no slot (driver-pipecat B1/C10)"},
 	},
 	{
 		Framework: Pipecat, Role: Listen, Vendor: "*",
@@ -267,8 +270,8 @@ var pipecatCatalog = []Entry{
 	{
 		Framework: Pipecat, Role: Speak, Vendor: "slng",
 		Distributes: []string{"cartesia", "deepgram"},
-		Verified:    "2026-09-09", Docs: pipecatServicesDocs,
-		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.5.2"},
+		Verified:    "2026-10-02", Docs: pipecatServicesDocs,
+		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.6.0,<0.7"},
 		Import:  "from pipecat_slng import SlngTTSService",
 		Call: &CallSpec{
 			Class: "SlngTTSService", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
@@ -277,7 +280,7 @@ var pipecatCatalog = []Entry{
 			Language: FieldSpec{Arg: "language"},
 			Params:   ParamsKwargs,
 		},
-		Notes: []string{"routes by api_key + region params; endpoint_env has no slot (driver-pipecat B1/C10)"},
+		Notes: []string{"routes by api_key + the required world_part kwarg; endpoint_env has no slot (driver-pipecat B1/C10)"},
 	},
 	{
 		Framework: Pipecat, Role: Speak, Vendor: "*",

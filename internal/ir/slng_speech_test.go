@@ -48,14 +48,19 @@ func TestValidateSlngSpeechGateway(t *testing.T) {
 					case "fallback":
 						tgt.Models.ListenFallbacks = []ListenFallback{{Name: "backup", Binding: binding}}
 					}
+					// pipecat-slng 0.6.0 has no default gateway; the LiveKit plugin does.
+					want := tc.want
+					if tc.params == nil && provider == ProviderPipecat {
+						want = "is required for SLNG speech on pipecat"
+					}
 					report, err := Validate(agent, []Target{tgt}, target.Default())
 					got := strings.Join(report.PerTarget[0].Errors, "\n")
-					if tc.want == "" {
+					if want == "" {
 						if err != nil {
 							t.Fatal(got)
 						}
-					} else if err == nil || !strings.Contains(got, tc.want) || !strings.Contains(got, "params.world_part ") || !strings.Contains(got, binding.Model) {
-						t.Fatalf("want %q and model name in gateway refusal; got %s", tc.want, got)
+					} else if err == nil || !strings.Contains(got, want) || !strings.Contains(got, "params.world_part ") || !strings.Contains(got, binding.Model) {
+						t.Fatalf("want %q and model name in gateway refusal; got %s", want, got)
 					}
 				})
 			}

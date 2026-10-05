@@ -133,15 +133,21 @@ models:
       provider: slng
       model: "slng/deepgram/aura:2-en"
       voice: "aura-2-thalia-en"
+      params:
+        world_part: eu-north
     desk:
       description: "calm, precise booking voice"
       provider: slng
       model: "slng/deepgram/aura:2-en"
       voice: "aura-2-orion-en"
+      params:
+        world_part: eu-north
   listen:
     transcriber:
       provider: slng
       model: "slng/deepgram/nova:3-en"
+      params:
+        world_part: eu-north
   turn:
     detector:
       provider: livekit

@@ -169,16 +169,14 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 		}
 	}
 	if vendor == "slng" && (role == targetcap.Listen || role == targetcap.Speak) {
-		url, err := targetcap.SlngSpeechBaseURL(params)
+		gateway, err := targetcap.ParseSlngSpeechGateway(fw, params)
 		if err != nil {
 			return ServiceCall{}, entry, fmt.Errorf("%s %s binding: %w", fw, role, err)
 		}
-		if url != "" {
-			key := "base_url"
-			if fw == targetcap.LiveKit {
-				key = "slng_base_url"
-			}
-			flat(pyKV{Key: key, Value: pyQuote(url)})
+		// pipecat-slng 0.6.0 takes world_part itself, so on Pipecat it stays a
+		// params kwarg. The LiveKit plugin only knows a host.
+		if fw == targetcap.LiveKit && gateway.Host() != "" {
+			flat(pyKV{Key: "slng_base_url", Value: pyQuote(gateway.Host())})
 			// New gateway codes are not the SDK's legacy routing headers.
 			params = withoutParams(params, []string{"world_part"})
 		}

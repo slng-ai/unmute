@@ -787,6 +787,7 @@ def build_billing_tts() -> TTSService:
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-orion-en",
         model="slng/deepgram/aura:2-en",
+        world_part="eu-north",
     )
 
 
@@ -906,6 +907,7 @@ def build_intake_tts() -> TTSService:
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-thalia-en",
         model="slng/deepgram/aura:2-en",
+        world_part="eu-north",
     )
 
 

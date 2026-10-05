@@ -152,6 +152,15 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // customer-intake and salon-concierge on both targets, and the text harnesses
 // ran both examples through to the end on both targets.
 //
+// And on 2026-10-02, for every Pipecat package with SLNG speech: the pin moved
+// to pipecat-slng>=0.6.0,<0.7, and 0.6.0 takes world_part as a required kwarg
+// instead of a base_url host. Pipecat now emits `world_part="eu-north"` where it
+// emitted `base_url="eu-north.api.slng.ai"`, and refuses a package without one,
+// because the bot would raise TypeError at import. Fourteen fixtures under
+// internal/testdata gained `world_part: eu-north` for that reason, which also
+// moves their LiveKit bytes (slng_base_url). LiveKit output for a package that
+// did not change is the same.
+//
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {

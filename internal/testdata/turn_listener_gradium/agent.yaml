@@ -28,6 +28,8 @@ models:
       provider: slng
       model: "deepgram/aura:2"
       voice: "aura-2-thalia-en"
+      params:
+        world_part: eu-north
   listen:
     transcriber:
       provider: gradium
