@@ -3,6 +3,7 @@ package generate
 import (
 	"encoding/json"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -231,6 +232,53 @@ func TestSlngV1WritesEmptyVariableMapsRatherThanNone(t *testing.T) {
 	for _, want := range []string{`"template_defaults": {}`, `"template_variable_options": {}`} {
 		if !strings.Contains(files["agent.json"], want) {
 			t.Errorf("agent.json does not carry %s; a null map says something different from an empty one:\n%s", want, files["agent.json"])
+		}
+	}
+}
+
+// world_part picks the speech gateway on the code targets, and Pipecat requires
+// it. On SLNG the agent's region picks the gateway and SLNG refuses world_part
+// as a kwarg, so the same package must compile without it. Other params stay.
+func TestSlngV1DropsSpeechWorldPart(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "slng_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := buildWithState(t, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tgt := targetByProvider(t, agent, ir.ProviderSlng)
+	if tgt.Models.Listen == nil {
+		t.Fatal("fixture has no listen binding")
+	}
+	listen := *tgt.Models.Listen
+	listen.Params = map[string]any{"world_part": "eu-north", "punctuate": true}
+	tgt.Models.Listen = &listen
+	speak := maps.Clone(tgt.Models.Speak)
+	for name, binding := range speak {
+		binding.Params = map[string]any{"world_part": "eu-north", "speed": 1.1}
+		speak[name] = binding
+	}
+	tgt.Models.Speak = speak
+
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	files := map[string]string{}
+	for _, file := range artifact.Files {
+		files[file.Path] = string(file.Content)
+	}
+	models := slngBodyOf(t, files)["models"].(map[string]any)
+	want := map[string]map[string]any{
+		"stt_kwargs": {"punctuate": true},
+		"tts_kwargs": {"speed": 1.1},
+	}
+	for field, expected := range want {
+		got, _ := models[field].(map[string]any)
+		if !maps.Equal(got, expected) {
+			t.Errorf("%s = %v, want %v", field, got, expected)
 		}
 	}
 }
