@@ -172,7 +172,7 @@ saved, the confirmation marks and the rendering.
 
 | Target | What `state.py` may hold |
 |---|---|
-| SLNG | plain `str`, `int`, `float`, `bool` only. A model, list, `Literal` or checked format is refused. `str \| None` is fine |
+| SLNG | a value a task's `assign:` saves, or `source: conversation`: `str`, `int`, `float`, `bool`, a phone number, `EmailStr`, `NameEmail`, `date`, `time`, `Literal[...]`, `list[...]` and BaseModels of these, each optionally `\| None`, with a `Field(description=...)`. A `datetime`, a `dict` or a constrained string is refused. A value the dispatch fills is plain `str` only |
 | LiveKit and Pipecat | everything above |
 | Twilio | no `state.py`. A package with one is refused |
 

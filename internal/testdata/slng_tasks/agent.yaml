@@ -1,0 +1,87 @@
+# The smallest package that uses every task feature the slng target writes:
+# a task with its own when:, a task only a group runs, a group step skipped
+# once a value is confirmed, a typed value with a shape, an appended list,
+# and a tool only a task can call. It validates clean on slng, so a test that
+# breaks one thing knows the error came from the thing it broke.
+version: 1
+name: slng-tasks-fixture
+entry_agent: support
+
+models:
+  think:
+    reasoning:
+      description: answers the caller
+      provider: openai
+      model: gpt-5.6-luna
+  speak:
+    front_desk:
+      description: warm, concise
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      description: default STT
+      provider: deepgram
+      model: slng/deepgram/nova:3-en
+      language: en
+
+agents:
+  support:
+    instructions: instructions.md
+    think: reasoning
+    speak: front_desk
+    tools:
+      - end_call
+    tasks:
+      - name: verify_identity
+        when: The caller needs to confirm who they are before a booking is looked up or changed.
+        instructions: tasks/verify.md
+        assign:
+          - phone_number: result.phone_number
+        context:
+          history: messages
+
+      # No when: on purpose. The book group is the only way in.
+      - name: take_booking
+        instructions: tasks/booking.md
+        announce: Let me have a look.
+        tools:
+          - check_availability
+        assign:
+          - booking: result.booking
+          - notes+: result.note
+        context:
+          history: last_n
+          max_messages: 6
+    task_groups:
+      - book
+
+task_groups:
+  book:
+    when: The caller wants to book an appointment.
+    steps:
+      - task: verify_identity
+        skip_when_confirmed: phone_number
+      - take_booking
+    context_scope: shared
+    then: return
+
+variables:
+  - name: phone_number
+    confirm: verify_identity
+
+tools:
+  - check_availability
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi {{state.customer_name}}, you have reached the salon. How can I help?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio

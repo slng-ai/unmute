@@ -92,8 +92,10 @@ func TestEveryVoiceaiCommandNamedExists(t *testing.T) {
 		// and nothing runs without --confirm-side-effects. It is what an author
 		// iterates a code tool with between pushes, so the runbook names it and
 		// this must know it. Arrived in 0.1.16; the `tool` group had list and get
-		// only at 0.1.15.
-		"tool": {"list": true, "get": true, "run": true},
+		// only at 0.1.15. `create`, `update`, `build` and `publish` arrived in
+		// 0.1.20: they take a code tool from a Python file to a published version.
+		"tool": {"list": true, "get": true, "run": true,
+			"create": true, "update": true, "build": true, "publish": true},
 		// `run` connects to the server and refreshes its stored capability
 		// snapshot. It is the fix unmute points at when a push refuses a snapshot
 		// as stale, so it is a command the surfaces name and this must know.

@@ -123,6 +123,34 @@ func TestSlngV1ToolsGolden(t *testing.T) {
 	slngGolden(t, artifact, "slng_v1_tools.txt")
 }
 
+// TestSlngV1TasksGolden is every task feature the target writes: a task with
+// its own when:, a group-only step, a skip, typed values with a shape, an
+// append, a last_n history and a tool only a task can call.
+func TestSlngV1TasksGolden(t *testing.T) {
+	artifact, _ := compileSlng(t, "slng_tasks")
+	slngGolden(t, artifact, "slng_v1_tasks.txt")
+}
+
+// A task names its tool by the name the tool's reference carries, and that
+// reference carries no attachment_id: the push chooses one and rewrites the
+// task to match, so a compiled task holding an id would hold one nobody chose.
+func TestSlngTaskToolsAreTheirReferencesNames(t *testing.T) {
+	_, files := compileSlng(t, "slng_tasks")
+	body := slngBodyOf(t, files)
+	refs := map[any]bool{}
+	for _, ref := range body["tool_refs"].([]any) {
+		refs[ref.(map[string]any)["tool"]] = true
+	}
+	for _, task := range body["tasks"].([]any) {
+		tools, _ := task.(map[string]any)["tools"].([]any)
+		for _, tool := range tools {
+			if !refs[tool] {
+				t.Errorf("task names %v, which no tool_refs entry carries", tool)
+			}
+		}
+	}
+}
+
 // Two files, and the reason there are two rather than four is the shape of this
 // target now: it references tools SLNG already owns and creates none, so there
 // is no tool body to write beside the agent body.

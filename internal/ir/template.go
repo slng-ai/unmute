@@ -121,6 +121,21 @@ func FlattenPaths(text string) string {
 	})
 }
 
+// DottedPaths undoes FlattenPaths for a reader that takes dots: a SLNG task's
+// instructions accept {{customer.status}} and refuse a name it does not
+// declare, which customer__status is. A Vault token keeps its "__", because
+// its name may carry one and names no field.
+func DottedPaths(text string) string {
+	return templatePattern.ReplaceAllStringFunc(text, func(token string) string {
+		inner := templatePattern.FindStringSubmatchIndex(token)
+		ref := token[inner[2]:inner[3]]
+		if strings.HasPrefix(ref, "$") {
+			return token
+		}
+		return token[:inner[2]] + strings.ReplaceAll(ref, emittedPathSep, ".") + token[inner[3]:]
+	})
+}
+
 // pathParts splits a reference in either form into its root and fields. A
 // Vault token is one part: its name may carry "__" and names no field.
 func pathParts(ref string) []string {

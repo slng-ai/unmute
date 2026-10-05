@@ -50,6 +50,9 @@ type slngRunbook struct {
 	// ToolCount is every tool reference in the body. A builtin and a hosted tool
 	// both need their tool_id resolved by the push.
 	ToolCount int
+	// HasTasks says the body carries tasks or task groups, whose tool names the
+	// push also rewrites and whose saved values are runtime variables.
+	HasTasks bool
 	// ToolRefNames are the tool references in the body, in the order they appear
 	// there, so the worked example in the runbook can name a real one from this
 	// package rather than an invented tool.
@@ -117,6 +120,7 @@ func slngRunbookFor(agent *ir.Agent, tgt ir.Target, built slngArtifacts) slngRun
 		runbook.HostedRefs = append(runbook.HostedRefs, fmt.Sprintf("`%s`", hosted.Name))
 	}
 	runbook.ToolCount = len(built.Body.ToolRefs)
+	runbook.HasTasks = len(built.Body.Tasks)+len(built.Body.TaskGroups) > 0
 	for _, ref := range built.Body.ToolRefs {
 		runbook.ToolRefNames = append(runbook.ToolRefNames, ref.Tool)
 		if agent.Tools[ref.origin].Execution == ir.ToolBuiltin {

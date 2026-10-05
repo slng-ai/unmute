@@ -302,8 +302,8 @@ assignments, and confirmation.
 | `reset` | No earlier conversation. Its own instructions and explicit placeholders still apply. |
 | `summary` | A generated summary. Compiles on LiveKit only; Pipecat refuses this value. |
 
-A task needs a code target, Pipecat or LiveKit. SLNG and Twilio refuse
-tasks, including every task history value.
+Tasks compile on Pipecat, LiveKit and SLNG. SLNG takes every history value
+except `summary`. Twilio refuses tasks, including every task history value.
 
 ```yaml agent.yaml
       - name: reschedule_booking

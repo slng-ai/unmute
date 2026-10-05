@@ -44,22 +44,33 @@ type slngBody struct {
 	ToolMode      string     `json:"tool_mode"`
 	ToolRefs      []slngRef  `json:"tool_refs"`
 	MCPRefs       []slngMCP  `json:"mcp_refs"`
-	// RuntimeVars are the package's `source: conversation` variables: values the
-	// model records during the call through the platform's own
-	// set_runtime_variables tool. Never nil, so a package with none says [] and
-	// not null (see the comment where the body is built).
+	// RuntimeVars are the values saved during the call: what a task's assign:
+	// writes, and the package's `source: conversation` variables, which the
+	// model records through the platform's own set_runtime_variables tool.
+	// Never nil, so a package with none says [] and not null (see the comment
+	// where the body is built).
 	RuntimeVars []slngRuntimeVar `json:"runtime_variables"`
 	Defaults    slngStrings      `json:"template_defaults"`
 	Variables   slngOptions      `json:"template_variable_options"`
+	// Never nil either, and for a reason of the platform's: a replace that
+	// leaves out both tasks and task_groups keeps the stored ones
+	// (app/services/agent_config.py OmittedTaskFields), so [] is the only way
+	// a push can say "this agent has none".
+	Shapes     []slngShape `json:"shapes"`
+	Tasks      []slngTask  `json:"tasks"`
+	TaskGroups []slngGroup `json:"task_groups"`
 }
 
-// slngRuntimeVar is RuntimeVariableDefinition (agent_config.py): a name and a
-// description the model reads, nothing else. A runtime variable has no default
-// and no required flag, and its name may not collide with a template variable,
-// which the two loops in buildSlng keep apart by construction.
+// slngRuntimeVar is RuntimeVariableDefinition (agent_config.py). A runtime
+// variable has no default and no required flag, and its name may not collide
+// with a template variable, which the two loops in buildSlng keep apart by
+// construction. Type is left out when it is str, and Confirm when no task
+// confirms the value, the two defaults SLNG drops when it stores one.
 type slngRuntimeVar struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Type        string `json:"type,omitempty"`
+	Confirm     string `json:"confirm,omitempty"`
 }
 
 // slngStrings and slngOptions are named map types so a nil map still encodes as
@@ -145,6 +156,9 @@ type slngRef struct {
 	// ToolConfigOverrides is a seven-member union with no code member, so a code
 	// tool cannot be tuned per agent through config at all.
 	Config map[string]any `json:"config_overrides,omitempty"`
+	// Visible is false for a tool only a task lists, and absent otherwise,
+	// which SLNG reads as true (shared_tool_contract.py visible_to_agent).
+	Visible *bool `json:"visible_to_agent,omitempty"`
 
 	// origin is the package tool this reference was built from, and it is not
 	// always Tool: a hosted reference emits the name the organisation holds,
@@ -213,6 +227,8 @@ type slngMCP struct {
 	Server     string `json:"server"`
 	Tool       string `json:"tool_name"`
 	Invocation string `json:"invocation,omitempty"`
+	// Visible is slngRef.Visible, for an MCP tool only a task lists.
+	Visible *bool `json:"visible_to_agent,omitempty"`
 	// ServerID and SchemaHash are the resolved half, filled only by
 	// SlngResolvedBody for the same reason and under the same omitempty rule as
 	// slngRef's two above.
@@ -263,6 +279,9 @@ func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
 		RuntimeVars: []slngRuntimeVar{},
 		Defaults:    slngStrings{},
 		Variables:   slngOptions{},
+		Shapes:      []slngShape{},
+		Tasks:       []slngTask{},
+		TaskGroups:  []slngGroup{},
 	}}
 	if agent.Conversation != nil && agent.Conversation.Greeting != nil {
 		built.Body.Greeting = agent.Conversation.Greeting.Text
@@ -292,7 +311,7 @@ func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
 	built.Body.Models = slngModelsFor(agent, tgt, entry)
 	built.Body.Language = slngLanguage(tgt)
 
-	refs, mcp, err := slngTools(agent, tgt, entry)
+	refs, mcp, toolNames, err := slngTools(agent, tgt, entry)
 	if err != nil {
 		return slngArtifacts{}, err
 	}
@@ -303,12 +322,13 @@ func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
 	// declared set from the union of the two maps' keys, so a variable missing
 	// from template_variable_options would be rejected at dispatch even with a
 	// default present.
+	runtime := ir.SlngRuntimeVariables(agent)
 	for _, name := range slices.Sorted(maps.Keys(agent.Variables)) {
 		variable := agent.Variables[name]
-		// A value the model records is a runtime variable, and SLNG refuses a
-		// name that is both a runtime and a template variable, so it goes in one
-		// list and not the other.
-		if variable.Source == ir.VariableSourceConversation {
+		// A value saved during the call is a runtime variable, and SLNG refuses
+		// a name that is both a runtime and a template variable, so it goes in
+		// one list and not the other.
+		if runtime[name] {
 			built.Body.RuntimeVars = append(built.Body.RuntimeVars, slngRuntimeVar{Name: name, Description: variable.Description})
 			continue
 		}
@@ -316,6 +336,9 @@ func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
 		if text, ok := variable.Default.(string); ok {
 			built.Body.Defaults[name] = text
 		}
+	}
+	if err := slngTaskBody(agent, &built.Body, toolNames); err != nil {
+		return slngArtifacts{}, err
 	}
 	// Before the runbook, which renders half of it. Deriving it here rather than
 	// inside slngRunbookFor keeps the runbook a renderer: what a package needs
@@ -451,24 +474,39 @@ func slngKwargs(params map[string]any) map[string]any {
 }
 
 // slngTools walks the entry agent's tools in the order the package lists them,
-// so the emitted body's order follows the package rather than a map iteration.
-func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []slngMCP, error) {
+// then each task's, so the emitted body's order follows the package rather
+// than a map iteration. A tool only a task lists is attached hidden from the
+// main agent, which is how SLNG keeps it in the task. It also returns the
+// names each package tool is attached under, which is how a task names it.
+func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []slngMCP, map[string][]string, error) {
 	refs := []slngRef{}
 	mcpRefs := []slngMCP{}
-	for _, name := range entry.Tools {
+	names := map[string][]string{}
+	walk := slices.Clone(entry.Tools)
+	for _, task := range slices.Sorted(maps.Keys(agent.Tasks)) {
+		walk = append(walk, agent.Tasks[task].Tools...)
+	}
+	hidden := new(bool) // false, shared: one pointer reads the same everywhere
+	for i, name := range walk {
 		tool, ok := agent.Tools[name]
-		if !ok {
-			// A control, not a tool. Controls reach SLNG as curated capabilities
-			// attached in the dashboard, which the capability table already says.
+		if !ok || names[name] != nil {
+			// A control, not a tool, or a tool already attached. Controls reach
+			// SLNG as curated capabilities attached in the dashboard, which the
+			// capability table already says.
 			continue
+		}
+		var visible *bool
+		if i >= len(entry.Tools) {
+			visible = hidden
 		}
 		if tool.Execution == ir.ToolMCP {
 			for _, exposed := range tool.MCPTools {
 				mcpRefs = append(mcpRefs, slngMCP{
 					Server: mcpServerName(name, tool), Tool: exposed,
-					Invocation: slngInvocation, origin: name,
+					Invocation: slngInvocation, Visible: visible, origin: name,
 				})
 			}
+			names[name] = tool.MCPTools
 			continue
 		}
 		// The emitted name is the hosted one for a `slng:` reference and the
@@ -484,9 +522,11 @@ func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []
 			Tool:        emitted,
 			Description: tool.Description,
 			Invocation:  slngInvocation,
+			Visible:     visible,
 			origin:      name,
 			hosted:      hosted,
 		}
+		names[name] = []string{emitted}
 		// An attachment description is an override, so only an authored one is
 		// written. A hosted tool with no `description:` inherits the published
 		// one, and removing the field restores that inheritance rather than
@@ -524,7 +564,7 @@ func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []
 		}
 		refs = append(refs, ref)
 	}
-	return refs, mcpRefs, nil
+	return refs, mcpRefs, names, nil
 }
 
 // slngPrebuiltConfig is one member of ToolConfigOverrides

@@ -152,9 +152,18 @@ write it into a new tool file; write the scalar name instead.
 ### Why this block exists
 
 The SLNG platform owns a tool's code, version and gate pipeline. So on an slng
-target `local:` and `webhook:` are refused: unmute creates no tool there, and a
-brand new tool starts in the SLNG dashboard. `slng:` is how a package reaches
-one that is already there.
+target `local:` and `webhook:` are refused: unmute creates no tool there. A new
+code tool starts from a Python file with `voiceai tool create`, and a new
+request tool in the SLNG dashboard. `slng:` is how a package reaches one that is
+already there.
+
+```sh
+voiceai tool create hosted/check_availability.py --description "..."   # Input, Output, handler
+voiceai tool run check_availability --input sample.json --confirm-side-effects
+voiceai tool publish check_availability    # a push attaches only a published version
+```
+
+`voiceai tool update <name> --file <path>` changes it later.
 
 It costs no portability, for a package that wants livekit or pipecat too. A
 pulled mirror carries the platform's own introspected schema and, for a code

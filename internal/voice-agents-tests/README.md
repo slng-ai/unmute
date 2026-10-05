@@ -34,6 +34,11 @@ package: reset tasks receive only the saved variables named in their prompts.
 It also exercises omitted `history`, whose default is spoken messages. v2 is
 the control it is measured against.
 
+[`slng-tasks`](slng-tasks/) is the slng target's task acceptance package:
+two tasks, a group with a skipped step, typed values, and a hosted code tool
+only a task can call, with that tool's Python source beside it. Its README is
+the test plan for tasks on SLNG managed agents.
+
 [`relay-desk`](relay-desk/) is the Twilio ConversationRelay acceptance
 package: one agent, one inbound phone channel, one read-only tool and
 `end_call`, compiled twice, once thinking on OpenAI and once on Gemini through

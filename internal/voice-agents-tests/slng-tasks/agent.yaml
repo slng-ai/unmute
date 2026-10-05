@@ -1,0 +1,86 @@
+# The slng target's task acceptance package: a task with its own when:, a task
+# only a group runs, a skipped group step, typed values with a shape, an
+# append, and a hosted tool only a task can call. Deployed to find what only a
+# real push and a real call find. hosted/ holds that tool's Python source.
+version: 1
+name: slng-tasks-test
+entry_agent: support
+
+models:
+  think:
+    reasoning:
+      description: answers the caller
+      provider: gemini
+      model: "gemini/google/gemini-3.1-flash-lite:latest"
+  speak:
+    front_desk:
+      description: warm, concise
+      provider: slng
+      model: "cartesia/sonic:3"
+      voice: "39d518b7-fd0b-4676-9b8b-29d64ff31e12"
+  listen:
+    transcriber:
+      description: default STT
+      provider: slng
+      model: "soniox/speech-ai:rt-v5"
+      language: en
+
+agents:
+  support:
+    instructions: instructions.md
+    think: reasoning
+    speak: front_desk
+    tools:
+      - end_call
+    tasks:
+      - name: verify_identity
+        when: The caller needs to confirm who they are before a booking is looked up or changed.
+        instructions: tasks/verify.md
+        assign:
+          - phone_number: result.phone_number
+        context:
+          history: messages
+
+      # No when: on purpose. The book group is the only way in.
+      - name: take_booking
+        instructions: tasks/booking.md
+        announce: Let me have a look.
+        tools:
+          - check_availability
+        assign:
+          - booking: result.booking
+          - notes+: result.note
+        context:
+          history: last_n
+          max_messages: 6
+    task_groups:
+      - book
+
+task_groups:
+  book:
+    when: The caller wants to book an appointment.
+    steps:
+      - task: verify_identity
+        skip_when_confirmed: phone_number
+      - take_booking
+    context_scope: shared
+    then: return
+
+variables:
+  - name: phone_number
+    confirm: verify_identity
+
+tools:
+  - check_availability
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi {{state.customer_name}}, you have reached the salon. How can I help?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio

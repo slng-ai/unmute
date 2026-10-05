@@ -1,8 +1,9 @@
-# Deploying `{{.Target}}` to SLNG
+=== README.md ===
+# Deploying `slng` to SLNG
 
 Unmute's compiler wrote the files in this directory and stopped. It opens no
 connection to SLNG at any point, so nothing here has been pushed, checked
-against your account, or reserved. `{{.DeployCommand}}` does that part, by
+against your account, or reserved. `unmute deploy .` does that part, by
 handing these files to the `voiceai` CLI.
 
 Everything in this directory is disposable. Edit the package and compile again.
@@ -13,81 +14,41 @@ Everything in this directory is disposable. Edit the package and compile again.
 | `README.md` | this file |
 | `compile-report.json` | what was compiled, and which checks were left to deployment |
 
-The agent deploys to region **{{.Region}}**.
+The agent deploys to region **eu-north**.
 
-{{if .NeedsVault -}}
-## 1. Create these Vault entries first
-
-SLNG reads these from its own secret store. No secret value appears in any file
-in this directory or on any command line below, and unmute has never seen one.
-
-This is only what compiling your package could find written in it: a declared
-`auth:`, or a name a tool reads its credential by.{{if or .HostedRefs .MCPRefs}} A hosted tool or MCP
-server's own credential is not on this list either way: SLNG holds it, and this
-compile never asked SLNG anything.{{end}} `unmute deploy` reads your
-organisation directly and checks or creates whatever the resolved tools
-actually need, so a run may ask about an entry that never appears below.
-
-You do not have to create these by hand. `unmute deploy` checks this list, and
-whatever else it finds, against your organisation before it writes anything,
-and offers to create what is missing: it hands the prompt to `voiceai`, which
-masks what you type, so the value never passes through unmute. Create them in
-the SLNG dashboard instead if you prefer. A name is {{.NameShape}}.
-
-{{if .VaultSecrets -}}
-**Secrets** — credentials a tool authenticates with.
-
-| Vault name | Needed because |
-|---|---|
-{{range .VaultSecrets}}| `{{.Name}}` | {{.Where}} |
-{{end}}
-{{end -}}
-{{if .VaultVariables -}}
-**Variables** — values SLNG substitutes at run time, written in the package as
-`{{"{{$NAME}}"}}` tokens. Nothing declares them in the package: SLNG holds the
-value. SLNG substitutes one into an MCP server URL and nowhere else, so a token
-in a prompt or a greeting is refused rather than listed here; a value your
-prompt varies per call is a field on `State` in `state.py`, written `{{"{{state.name}}"}}`.
-
-| Vault name | Needed because |
-|---|---|
-{{range .VaultVariables}}| `{{.Name}}` | {{.Where}} |
-{{end}}
-{{end -}}
-{{else -}}
 ## 1. Vault entries
 
-This package needs none, as far as this compile can tell.{{if or .HostedRefs .MCPRefs}} A hosted tool or MCP server's own credential is invisible from
+This package needs none, as far as this compile can tell. A hosted tool or MCP server's own credential is invisible from
 here either way: SLNG holds it, and this compile never asked SLNG anything, so
 `unmute deploy` may still find one to check or create before it changes the
-agent.{{else}} Nothing in it names a secret or a Vault variable token, so there is nothing to create before you push.{{end}}
-{{end}}
+agent.
+
 ## 2. Deploy
 
 One command validates the package, compiles it again, and pushes it:
 
 ```bash
-{{.DeployCommand}}
+unmute deploy .
 ```
 
 Run it from the package root, the directory above `build/`.
 
-It reads the key from `{{.RouterKeyEnv}}`, falling back to `{{.CredentialEnv}}`
-and then to whatever profile `{{.LoginCommand}}` stored:
+It reads the key from `SLNG_API_KEY`, falling back to `VOICEAI_API_KEY`
+and then to whatever profile `voiceai login` stored:
 
 ```bash
-export {{.RouterKeyEnv}}=...
+export SLNG_API_KEY=...
 ```
 
 One SLNG key serves every SLNG role, so this is the same key a generated livekit
-or pipecat project reads at run time. `{{.CredentialEnv}}` is the name the push
+or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push
 tool itself reads, and either works.
 
 The organisation the push resolved is printed on every run. That matters because
 an exported key and a stored profile can belong to **different** organisations,
 and nothing else on screen would tell you which one you just wrote to.
 
-Deployment requires a compatible `voiceai`; this flow was verified with 0.1.18{{if .HasTasks}}, and a task that lists tools needs 0.1.20 or later{{end}}.
+Deployment requires a compatible `voiceai`; this flow was verified with 0.1.18, and a task that lists tools needs 0.1.20 or later.
 Use `--dry-run` to preview checked versions and attachment changes without
 changing SLNG. Future session inputs remain runtime checks. The result is saved
 in `deploy-report.json` beside these files.
@@ -102,13 +63,13 @@ and a field that differs from the live agent is overwritten. `--dry-run` names
 both before anything happens.
 
 **Which agent it replaces is decided by the name.** This package pushes
-**{{.AgentName}}**: the `name:` in your `agent.yaml` joined to the `{{.Target}}`
+**slng-tasks-fixture-slng**: the `name:` in your `agent.yaml` joined to the `slng`
 target, never the target alone. SLNG names are unique in your organisation and a
 push writes whichever agent matches, so before the first push of a new package,
 check the name is free:
 
 ```bash
-{{.ListCommand}}
+voiceai agents list
 ```
 
 Rename in `agent.yaml` and compile again if it is taken. Renaming later does not
@@ -128,16 +89,15 @@ local state about your account.
 The standalone push command is also available:
 
 ```bash
-{{.PushCommand}}
+voiceai agents push build/slng
 ```
 
 It takes the package root or this directory, but bypasses Unmute's published
-binding checks and checked-version staging. Use `{{.DeployCommand}}` for the
+binding checks and checked-version staging. Use `unmute deploy .` for the
 checked deployment flow. Do **not** post `agent.json` with
 `voiceai agents create` instead: that sends the body verbatim, and the body
 carries a name in every place the API wants an identifier.
 
-{{if .NeedsPushResolution -}}
 ### What the push resolves for you
 
 `agent.json` carries a name where the API wants an id, because no compiler can
@@ -149,20 +109,19 @@ same shape.
 The push step resolves those names against your organisation's tools and mints
 the attachment ids. It creates none of them: every name here is a tool your
 organisation already holds. Nothing here is yours to edit by hand.
-{{if .HasTasks}}
+
 A task names its tools the same way, by the name the tool's reference carries,
 and SLNG wants the attachment id there too. The push writes the id it chose
 into every task. A `voiceai` that does not rewrite task tools sends the names
 as they are, and SLNG refuses the agent.
-{{end}}
+
 **A curated capability is no exception.** A builtin such as `end_call` needs
 nothing *created*, and its `tool_id` still has to be filled in, which the push
 does. A setting the package pinned with `inject:` rides the attachment as
 `config_overrides`, so it is this agent's and does not change the shared tool.
-{{if .Builtins}}
-This package's curated references: {{range $i, $name := .Builtins}}{{if $i}}, {{end}}`{{$name}}`{{end}}.
-{{end}}
-{{if .HostedRefs -}}
+
+This package's curated references: `end_call`.
+
 **This target creates no tool.** Every tool the body names is one your
 organisation already holds, referenced by name, and the deploy resolves each
 name to its identifier and its latest published version. A name your
@@ -172,8 +131,8 @@ request tool in the SLNG dashboard.
 
 These are the hosted names; deployment selects and checks their published versions:
 
-{{range .HostedRefs}}- {{.}}
-{{end}}
+- `check_availability`
+
 The published version supplies each tool's description and its parameters, so
 nothing about them is written here and there is no local copy to keep in step.
 Your tool file names the tool and holds what you add to it: an `inject:` value,
@@ -193,7 +152,7 @@ the same package has a tool to compile. A SLNG-only package needs no mirror.
 
 To try one on its own, first write a JSON input file matching its published
 parameters at `samples/<tool>.json`; this compiler creates no sample file.
-Use the same account with `export {{.CredentialEnv}}="${{.RouterKeyEnv}}"`.
+Use the same account with `export VOICEAI_API_KEY="$SLNG_API_KEY"`.
 
 ```
 voiceai tool run <tool> --input samples/<tool>.json --confirm-side-effects
@@ -202,24 +161,7 @@ voiceai tool run <tool> --input samples/<tool>.json --confirm-side-effects
 That runs the copy SLNG already has, against your real dependencies, so it
 changes whatever the tool changes.
 
-{{end -}}
-{{if .MCPRefs -}}
-Each MCP reference is written by name. `unmute deploy` resolves the hosted
-server and passes its checked tool hashes to the guarded push:
 
-{{range .MCPRefs}}- {{.}}
-{{end}}
-A real deploy refreshes an unusable snapshot once and checks it again. A dry
-run reports the stale snapshot without refreshing it. Discovery executes no
-business tool.
-
-{{end -}}
-{{else -}}
-### This body needs nothing resolved
-
-This agent references no tools, so nothing in `agent.json` carries a name where
-the API wants an identifier.
-{{end}}
 ## 3. Talk to it
 
 For a browser test, open the deployed agent in the SLNG dashboard, choose
@@ -229,7 +171,7 @@ access. See [the test panel guide](https://docs.slng.ai/dashboard/agent-infra#te
 For your own LiveKit client, use the agent id step 2 printed and the same account:
 
 ```bash
-export {{.CredentialEnv}}="${{.RouterKeyEnv}}"
+export VOICEAI_API_KEY="$SLNG_API_KEY"
 ```
 
 Supply a request body with `--file`. Write a `session.json`, filling in any
@@ -241,29 +183,22 @@ required session arguments:
 
 `arguments` is where this agent's variables get their value for one session. It
 takes strings only, at most 32 of them.
-{{if .VariableNames}}
-This agent declares: {{range $i, $name := .VariableNames}}{{if $i}}, {{end}}`{{$name}}`{{end}}.
+
+This agent declares: `customer_name`.
 A default in `state.py` can fill an omitted value. Supply any value a required
 tool binding uses when it has no default; otherwise session creation is refused.
 Inbound phone calls supply no session arguments. Every required injected input
 needs a valid default before SLNG can attach an inbound trunk.
-{{end}}{{if .MemoryVariables}}
-This agent records during the call: {{range $i, $name := .MemoryVariables}}{{if $i}}, {{end}}`{{$name}}`{{end}}.
-{{if .HasTasks -}}
+
+This agent records during the call: `booking`, `notes`, `phone_number`.
 No session argument supplies these. A task saves the values its `assign:`
 names when it finishes, the model records any other one with SLNG's own
 `set_runtime_variables` tool, and the call record returns them under
 `memory_variables`, so you can read what was captured without reading the
 transcript.
-{{- else -}}
-No session argument supplies these. The model fills each one with SLNG's own
-`set_runtime_variables` tool once the caller has given and confirmed the value,
-and the call record returns them under `memory_variables`, so you can read what
-was captured without reading the transcript.
-{{- end}}
-{{end}}
+
 ```bash
-{{.WebSessionCommand}}
+voiceai agents web-sessions create <agent_id> --file session.json
 ```
 
 That returns LiveKit connection details and requests a worker. Connect a
@@ -370,3 +305,205 @@ Compile from the package instead. That is the shape this file is.
   - it is one of your own models and SLNG's router is off;
   - it is not served in the region and language this agent asked for. Not every
     model exists in every region. Choose a region that serves the model.
+=== agent.json ===
+{
+  "schema_version": 2,
+  "name": "slng-tasks-fixture-slng",
+  "system_prompt": "You are the front desk of a hair salon. Answer briefly. When the caller wants\nan appointment, start the booking flow.\n",
+  "greeting": "Hi {{customer_name}}, you have reached the salon. How can I help?",
+  "language": "en",
+  "region": "eu-north",
+  "models": {
+    "stt": "slng/deepgram/nova:3-en",
+    "llm": "openai/gpt-5.6-luna",
+    "tts": "slng/deepgram/aura:2-en",
+    "tts_voice": "aura-2-thalia-en",
+    "stt_kwargs": {},
+    "llm_kwargs": {},
+    "tts_kwargs": {}
+  },
+  "enable_interruptions": true,
+  "tool_mode": "shared",
+  "tool_refs": [
+    {
+      "tool": "end_call",
+      "description": "End the call when the caller is finished or says goodbye.",
+      "invocation": "model",
+      "argument_overrides": {}
+    },
+    {
+      "tool": "check_availability",
+      "description": "Check whether a day has a free slot for a service.",
+      "invocation": "model",
+      "argument_overrides": {},
+      "visible_to_agent": false
+    }
+  ],
+  "mcp_refs": [],
+  "runtime_variables": [
+    {
+      "name": "booking",
+      "description": "The appointment the caller asked for.",
+      "type": "Booking | None"
+    },
+    {
+      "name": "notes",
+      "description": "Anything the caller asked us to pass on, one entry each.",
+      "type": "list[str]"
+    },
+    {
+      "name": "phone_number",
+      "description": "The caller's number in E.164, confirmed with them.",
+      "type": "Phone | None",
+      "confirm": "verify_identity"
+    }
+  ],
+  "template_defaults": {
+    "customer_name": "there"
+  },
+  "template_variable_options": {
+    "customer_name": {
+      "required": true
+    }
+  },
+  "shapes": [
+    {
+      "name": "Booking",
+      "fields": [
+        {
+          "name": "day",
+          "type": "Date",
+          "description": "The day of the appointment, written year-month-day."
+        },
+        {
+          "name": "service",
+          "type": "Literal[\"cut\", \"colour\"]"
+        }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "name": "take_booking",
+      "instructions": "The caller is {{customer_name}} on {{phone_number}}. If a booking\nfor {{booking.day}} is already saved, the caller is changing it. Ask\nfor the day and the service, check the day is free, then save the booking.\n",
+      "tools": [
+        "check_availability"
+      ],
+      "assign": [
+        {
+          "booking": "result.booking"
+        },
+        {
+          "notes+": "result.note"
+        }
+      ],
+      "announce": "Let me have a look.",
+      "context": {
+        "history": "last_n",
+        "max_messages": 6
+      }
+    },
+    {
+      "name": "verify_identity",
+      "instructions": "Ask for the phone number on the booking. Read it back and wait for the caller\nto say it is right. Save it only once they agree.\n",
+      "when": "The caller needs to confirm who they are before a booking is looked up or changed.",
+      "assign": [
+        {
+          "phone_number": "result.phone_number"
+        }
+      ]
+    }
+  ],
+  "task_groups": [
+    {
+      "name": "book",
+      "when": "The caller wants to book an appointment.",
+      "steps": [
+        {
+          "task": "verify_identity",
+          "skip_when_confirmed": "phone_number"
+        },
+        "take_booking"
+      ],
+      "context_scope": "shared",
+      "then": "return"
+    }
+  ]
+}
+=== compile-report.json ===
+{
+  "target": "slng",
+  "provider": "slng",
+  "region": "eu-north",
+  "agent": "slng-tasks-fixture-slng",
+  "files": [
+    "README.md",
+    "agent.json",
+    "compile-report.json"
+  ],
+  "tool_refs": [
+    {
+      "source": "end_call",
+      "tool": "end_call",
+      "description": "End the call when the caller is finished or says goodbye."
+    },
+    {
+      "source": "check_availability",
+      "tool": "check_availability",
+      "hosted": true,
+      "description": "Check whether a day has a free slot for a service."
+    }
+  ],
+  "requires": {
+    "builtins": [
+      {
+        "name": "end_call",
+        "source": "end_call",
+        "where": "tools/end_call.yaml is a builtin, so SLNG must already have a tool of that name"
+      }
+    ],
+    "hosted": [
+      {
+        "name": "check_availability",
+        "source": "check_availability",
+        "where": "tools/check_availability.yaml references a tool SLNG hosts, so SLNG must already have one of that name"
+      }
+    ]
+  },
+  "deferred_checks": [
+    {
+      "check": "that the organisation publishes a tool of this name, and which published version is the latest",
+      "by": "unmute deploy",
+      "refs": [
+        "check_availability"
+      ]
+    },
+    {
+      "check": "that each injected argument is a parameter of the published version, and that a fixed value is of the type it declares",
+      "by": "unmute deploy",
+      "refs": [
+        "check_availability"
+      ]
+    },
+    {
+      "check": "which vault entries the published version needs, which are read from the organisation rather than declared here",
+      "by": "unmute deploy",
+      "refs": [
+        "check_availability"
+      ]
+    },
+    {
+      "check": "that the organisation holds a curated capability of this name",
+      "by": "unmute deploy",
+      "refs": [
+        "end_call"
+      ]
+    }
+  ],
+  "notes": [
+    "slng target: model strings are forwarded to SLNG exactly as written; SLNG owns its own model list, so unmute checks no vendor or model name here",
+    "slng target: every tool is referenced by name and none is created; `unmute deploy` resolves each name against the organisation and attaches the version it checked",
+    "slng target: a hosted tool's description, parameters and credential requirements are the published version's, so this compile checked the reference's shape and left its existence, its argument contract and its vault entries to deployment",
+    "slng target: region eu-north is written as declared"
+  ]
+}

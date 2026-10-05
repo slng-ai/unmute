@@ -28,6 +28,7 @@ On this page:
 - [The pushed agent's name](#the-pushed-agents-name) - where the deployed name comes from
 - [Model names](#model-names) - how a vendor and a model are joined
 - [Push it](#push-it) - deployment and tool resolution
+- [Tasks and task groups](#tasks-and-task-groups) - what compiles, and how a task names its tools
 - [Hosted tool dependencies](#hosted-tool-dependencies) - only for a package that also targets code
 - [The Vault](#the-vault) - where secrets live, and what a compile can see
 - [What a slng package may not ask for](#what-a-slng-package-may-not-ask-for) - the refusals in full
@@ -207,8 +208,28 @@ The runbook says which case your package is in.
 ### A push replaces
 
 Updates replace the agent with what the package declares, including its tool
-attachments. Preview the changes with `unmute deploy --dry-run`; follow
+attachments and its tasks. A package with no tasks removes tasks somebody built
+in the dashboard. Preview the changes with `unmute deploy --dry-run`; follow
 [Every later deploy](/deploy/slng#every-later-deploy) for the full sequence.
+
+## Tasks and task groups
+
+[Tasks](/build/orchestration/tasks) and
+[task groups](/build/orchestration/task-groups) compile to SLNG's own tasks,
+with the same meaning they have on LiveKit and Pipecat:
+
+- a task's `when:`, `instructions`, `tools`, `assign:`, one `announce:` line,
+  `opening: listen`, and a `context.history` of `messages`, `full`, `last_n` or
+  `reset`
+- a group's `steps`, `skip_when_confirmed`, `context_scope` and `then: return`
+- `confirm:` on a variable, for a task with its own `when:`
+- a typed `state.py` value that a task saves, including a model, a list, a
+  `Literal`, a phone number, an email address, a date or a time
+
+A task names its tools by the names in `tool_refs`, and the push writes SLNG's
+attachment ids in their place. A tool that only a task lists is attached hidden
+from the main agent. Every value a task saves becomes a runtime variable, so
+its `Field` in `state.py` needs a `description=`.
 
 ### Do not push a dashboard export back
 
@@ -264,7 +285,10 @@ None is dropped quietly.
 
 | Package feature | Why SLNG cannot take it |
 |---|---|
-| tasks, task groups, handoffs | the create body carries one prompt and one greeting |
+| handoffs | the create body carries one agent |
+| a task's `think:`, `finish:`, `history: summary` or `include_tool_calls: false` | SLNG runs every task on the agent's one model, has no summary, and takes a tool's result shape from the tool it hosts, so a `finish:` rule has no `output:` to read |
+| a second `announce:` line, an optional `result.x?`, a group with `then: end` or `then: transfer` | SLNG speaks one line, saves every assigned value, and returns from a group to the agent |
+| a task that lists another task or a handoff in its `tools:` | a SLNG task cannot start another task |
 | a `turn:` section, `semantic_endpointing`, `endpointing_delay`, `pace` | SLNG owns its own turn taking |
 | an `mcp:` tool with no `mcp.tools` list | unmute compiles offline and cannot expand "every tool on the server" into a reference list: name the tools you want |
 | `placement: local` on any model | SLNG runs the pipeline; there is no machine of yours |
@@ -276,7 +300,8 @@ None is dropped quietly.
 | a second `deployment_region` | SLNG takes exactly one |
 | outbound calling, `on_voicemail` | a package declares no carrier state on SLNG; `unmute deploy` attaches an existing trunk after a push |
 | a warm human transfer | SLNG's curated transfer places a single blind transfer |
-| a `state.py` field that is a model, a list, a `Literal` or a checked format | SLNG runs no code from your package and has nowhere to check one. A plain `str`, `int`, `float` or `bool` is fine, and so is `str \| None` |
+| a typed `state.py` field the dispatch fills, rather than a task | SLNG holds a dispatch value as plain text. Make it `str`, or save it with a task's `assign:` |
+| a `datetime`, a `dict`, or a pattern other than the `Id` one | SLNG's type grammar has no word for them |
 
 A package with a `state.py` needs `uv` on `PATH` to validate and compile, even
 when SLNG is its only target, because unmute reads the file by running it. The

@@ -60,8 +60,9 @@ reaches nothing, and the next compile refuses because the hash no longer
 matches. Write `slng: {}` and say to run `unmute pull`.
 
 **`local:` and `webhook:` are refused on an slng target.** unmute creates no
-tool on SLNG: the platform owns a tool's code, version and gate pipeline, so a
-brand new tool starts in the SLNG dashboard and the package references it. Both
+tool on SLNG: the platform owns a tool's code, version and gate pipeline. A new
+code tool starts from a Python file with `voiceai tool create`, a new request
+tool in the SLNG dashboard, and the package references it by name. Both
 blocks still work exactly as before on livekit and pipecat.
 
 `--agent` narrows which assistants to write for and takes `all`, `claude`,

@@ -356,7 +356,7 @@ question the first time and on a diary read every time after has no such
 sentence, and a skipped first step would hear a line about work that never
 happened.
 
-Denied on the `slng` target, which writes one agent with no steps.
+On the `slng` target a task or a group takes one line, not alternatives.
 
 ### Ending a step on its tool
 
@@ -403,7 +403,8 @@ Rules worth knowing before you write one:
 - Do not also write "call finish as soon as the tool succeeds" in the step's
   prompt. The generated tail says the opposite, and the two contradict.
 
-Denied on the `slng` target.
+Denied on the `slng` target: a success rule reads the tool's `output:`, and
+SLNG takes a tool's result shape from the tool it hosts.
 
 ### Opening a step by listening
 
@@ -422,8 +423,6 @@ The line is the `announce:` line, spoken once and recorded as the step's own
 first turn. The default, `generate`, is what every step did before this key. A
 listening step with no `announce:` warns: the caller hears nothing until they
 speak. Tell the step's prompt that the question has already been asked.
-
-Denied on the `slng` target.
 
 ## Order steps with the prompt
 
@@ -638,7 +637,7 @@ variable nobody confirms, or one another step confirms, is refused.
 The side effect is the point: a step some group names this way withdraws what it
 confirms every time it is entered, standalone entry included, so a caller
 correcting the value re-verifies it and the next run does not skip on the
-strength of what they just replaced. Denied on the `slng` target.
+strength of what they just replaced.
 
 A group also stops when a step ends unserved: the later steps do not run and the
 owner is handed the unserved status.

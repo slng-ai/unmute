@@ -252,8 +252,18 @@ That is also why [`local:`](/build/tools/python) and
 [`webhook:`](/build/tools/webhook) are refused on an slng target: SLNG owns a
 tool's code, version and gate pipeline, so there is nowhere in a package for
 either block to write to. Both still work exactly as before on livekit and
-pipecat. A brand new tool starts in the SLNG dashboard; `slng:` is how your
+pipecat. A new code tool starts from a Python file with `voiceai tool create`,
+and a new request tool starts in the SLNG dashboard. `slng:` is how your
 package reaches it once it exists there.
+
+```sh
+voiceai tool create hosted/check_availability.py --description "..."
+voiceai tool run check_availability --input sample.json --confirm-side-effects
+voiceai tool publish check_availability
+```
+
+The file defines a pydantic `Input` and `Output` and a `handler(input: Input) -> Output`.
+A push attaches only a published version.
 
 ## Which block for which job
 

@@ -29,10 +29,10 @@ The difference that matters most is whether control comes back. A task returns. 
 handoff does not.
 
 <Note>
-  These shapes need a code target, Pipecat or LiveKit. SLNG and Twilio compile one agent
-  with one prompt and refuse tasks, task groups and handoffs.
-  `unmute validate` says so and names the way out: fold the step into the
-  agent's instructions, or compile to LiveKit or Pipecat.
+  Tasks and task groups compile on Pipecat, LiveKit and SLNG. Handoffs need
+  Pipecat or LiveKit, because SLNG writes one agent. Twilio compiles one agent
+  with one prompt and refuses all three. `unmute validate` says so and names
+  the way out.
 </Note>
 
 None of these is how you reach a person: that is an

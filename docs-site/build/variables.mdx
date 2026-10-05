@@ -314,9 +314,10 @@ can honestly come back with nothing.
 `list[T]` holds many. See [Keep several records](#keep-several-records) below.
 
 <Note>
-  LiveKit and Pipecat support every type on this page. The SLNG target supports
-  plain `str`, `int`, `float` and `bool` fields only. It runs none of your
-  package's code, so it has nowhere to check a model or a format. The
+  LiveKit and Pipecat support every type on this page. On the SLNG target, a
+  value a task saves, or one with `source: conversation`, can use most of them.
+  [Tasks and task groups](/targets/slng#tasks-and-task-groups) lists which. A
+  value the dispatch fills stays plain `str`, because SLNG holds it as text. The
   [Twilio target](/targets/twilio) refuses a `state.py`.
 </Note>
 
