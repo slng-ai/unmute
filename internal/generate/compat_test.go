@@ -212,7 +212,12 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // tool spans on Pipecat now come from the same TracedLLMWorker as the others.
 // The same day, Backend gained two hooks that only Logfire overrides, so a
 // Langfuse package's telemetry.py grew two methods that return nothing and its
-// spans are unchanged.
+// spans are unchanged. Later that day one of them, transparent_spans, moved out
+// of every package's telemetry.py into LiveKit's tracing.py as WRAPPER_SPANS:
+// livekit's llm_node, tts_node and the spans inside them are no longer
+// exported on Langfuse or Logfire, and their children start one level up. Each
+// only repeated a row the trace keeps, and both backends counted llm_node as a
+// second model call. Pipecat and Coval packages move only by that deleted line.
 //
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.

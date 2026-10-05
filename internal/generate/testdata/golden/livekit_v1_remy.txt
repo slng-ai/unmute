@@ -407,9 +407,10 @@ Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
 session ID.
 
 Starting the worker or exporting a synthetic span proves connectivity only.
-Complete at least one user turn before reviewing the trace. A traced request
-contains `llm_node` and `llm_request` generation observations in addition to
-the session and agent spans.
+Complete at least one user turn before reviewing the trace. Each model call is
+one `llm_request` generation observation, beside the session and agent spans.
+livekit's wrapper spans (`llm_node`, `tts_node` and the spans inside them) are
+not sent, because each one only repeats a row the trace keeps.
 
 Each tool call is its own observation, typed as a tool and named after the tool
 that ran. The framework names every span `function_tool` and carries the real
@@ -3867,7 +3868,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import ClassVar, Self
+from typing import Self
 
 from opentelemetry import trace
 from opentelemetry.context import Context
@@ -3896,10 +3897,6 @@ class Backend(ABC):
     """
 
     __slots__ = ()
-
-    # Span names whose children are started in their parent instead. Empty by
-    # default: only a backend that cannot read through a span in between asks.
-    transparent_spans: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod
     @abstractmethod
@@ -4181,6 +4178,24 @@ CALL_SPAN = "agent_session"
 # rather than losing spans or misparenting them.
 TURN_SPANS = ("user_turn", "agent_turn")
 
+# The livekit spans that only wrap another row, so a trace never shows them. A
+# span started inside one is started in its parent instead, so no exported span
+# points at a parent that was never sent.
+#
+#   llm_node         wraps llm_request, the model call itself. Logfire counts
+#                    both as model calls and Langfuse lists both as
+#                    generations, so the call was counted twice.
+#   llm_request_run  sits inside llm_request.
+#   tts_node         wraps tts_request. The `tts` span under the turn already
+#   tts_request      carries the text, the model and the time to first byte.
+#   tts_request_run  sits inside tts_request.
+#
+# The two `_run` spans carry `lk.retry_count` and `lk.provider_request_ids`,
+# which go with them. livekit logs a retry, with the provider's request ID.
+# ponytail: matched by name, so a livekit that renames a wrapper brings that
+# row back and breaks nothing else.
+WRAPPER_SPANS = frozenset({"llm_node", "llm_request_run", "tts_node", "tts_request", "tts_request_run"})
+
 
 class CallTrace(SpanProcessor):
     """One trace for the whole call, with a turn span you can open inside it.
@@ -4216,8 +4231,8 @@ class CallTrace(SpanProcessor):
         self._turn: trace.Span | None = None
         self._turn_context: Context | None = None
         self._transcript: list[dict[str, str]] = []
-        # Where the children of a span the backend reads through start instead:
-        # the context that span itself was started in, by its span ID.
+        # Where the children of a wrapper span start instead: the context that
+        # wrapper was itself started in, by its span ID.
         self._lifted: dict[int, Context] = {}
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
@@ -4230,11 +4245,11 @@ class CallTrace(SpanProcessor):
             self._call = span
             self._call_context = trace.set_span_in_context(span)
         # The span is not current yet, so the current context is its parent's.
-        if span.name in self._backend.transparent_spans:
+        if span.name in WRAPPER_SPANS:
             self._lifted[span.get_span_context().span_id] = parent_context or get_current()
 
     def on_end(self, span: ReadableSpan) -> None:
-        """Forget a span the backend reads through, once it is over."""
+        """Forget a wrapper span, once it is over."""
         if span.context is not None:
             self._lifted.pop(span.context.span_id, None)
 
@@ -4270,10 +4285,10 @@ class CallTrace(SpanProcessor):
     def context_for(self, name: str, context: Context | None) -> Context | None:
         """The context a livekit span should be started in.
 
-        A turn span goes inside the call's turn. A span whose parent the backend
-        reads through goes in that parent's parent: Logfire counts a model call
-        toward an agent run only when it sits right under `agent_turn`, and
-        livekit puts `llm_node` in between.
+        A turn span goes inside the call's turn. A span whose parent is a
+        wrapper goes in that wrapper's parent, because the wrapper is never
+        exported. That also puts the model call right under `agent_turn`, which
+        is the only place Logfire counts it toward the agent's run.
         """
         if name in TURN_SPANS:
             return self.ensure()
@@ -4348,7 +4363,7 @@ def install_turn_spans(provider: TracerProvider, call: CallTrace) -> None:
 
 
 def _export_call_spans(span: ReadableSpan) -> bool:
-    """Export the whole call except one span, a parentless loop stall.
+    """Export the whole call except a parentless loop stall and the wrapper spans.
 
     This used to rename livekit's tool spans as well. livekit-agents starts
     every one as the literal "function_tool" (voice/generation.py) and carries
@@ -4361,14 +4376,17 @@ def _export_call_spans(span: ReadableSpan) -> bool:
     2026-09-16 by renaming the span locally, watching the write land, and
     reading the tool's bare name back off a deployed call.
 
-    The one span it drops is livekit's `event_loop_blocked` when it has no
-    parent. The loop monitor files one, back-dated and already ended, for any
-    stall past 100ms, and when it finds no span to nest under it becomes a trace
-    of its own: three concurrent Coval calls on 2026-09-24 each arrived as three
+    The stall is livekit's `event_loop_blocked` when it has no parent. The loop
+    monitor files one, back-dated and already ended, for any stall past 100ms,
+    and when it finds no span to nest under it becomes a trace of its own: three concurrent Coval calls on 2026-09-24 each arrived as three
     traces. Nothing is lost by dropping it, because the monitor also logs the
     stall and records it as an event on the session span.
+
+    It also drops the wrapper spans named in WRAPPER_SPANS above, which only
+    repeat a row the trace keeps.
     """
-    return not (span.name == "event_loop_blocked" and span.parent is None)
+    stall = span.name == "event_loop_blocked" and span.parent is None
+    return not stall and span.name not in WRAPPER_SPANS
 
 
 def setup_tracing(ctx: JobContext, session: AgentSession) -> Telemetry:

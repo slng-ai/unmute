@@ -22,7 +22,7 @@ import urllib.request
 {{end}}from collections.abc import Callable, Mapping{{if ne .Provider "langfuse"}}, Sequence{{end}}
 {{if ne .Provider "coval"}}from dataclasses import dataclass
 {{end}}{{if eq .Provider "langfuse"}}from datetime import UTC, datetime
-{{end}}from typing import {{if eq .Provider "logfire"}}Any, {{end}}ClassVar, Self
+{{end}}from typing import {{if eq .Provider "logfire"}}Any, {{end}}Self
 
 from opentelemetry import trace
 from opentelemetry.context import Context
@@ -70,10 +70,6 @@ class Backend(ABC):
     """
 
     __slots__ = ()
-
-    # Span names whose children are started in their parent instead. Empty by
-    # default: only a backend that cannot read through a span in between asks.
-    transparent_spans: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod
     @abstractmethod
@@ -383,14 +379,11 @@ class Logfire(Backend):
     """Logfire's OTLP endpoint, in the region the write token names.
 
     Logfire groups a call into agent runs, and counts a model call toward a run
-    only when it sits directly under the run's span. So this backend asks the
-    span shapers to read through LiveKit's `llm_node`, and marks a span as an
-    agent run where a framework opens none.
+    only when it sits directly under the run's span. So this backend marks a
+    span as an agent run where a framework opens none.
     """
 
     token: str
-
-    transparent_spans: ClassVar[frozenset[str]] = frozenset({"llm_node"})
 
     @classmethod
     def from_env(cls) -> Self:
