@@ -162,7 +162,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 
 	for _, name := range sortedVarNames(agent) {
 		v := agent.Variables[name]
-		pt, def := stateField(v, false)
+		pt, def := stateField(v)
 		data.Variables = append(data.Variables, pipecatVariable{
 			Name: name, PyType: pt, Default: def, Source: string(v.Source), Description: oneLine(v.Description),
 			LiteralDefault: defaultOutsideLiteral(pt, def),
@@ -172,7 +172,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		// same payload out of UNMUTE_CALL_START (I.dispatch).
 		if v.Source == ir.VariableSourceCallStart || v.Source == "" {
 			data.CallStartVars = append(data.CallStartVars, pipecatCallStartVar{
-				Name: name, Type: string(v.Type), Required: v.Default == nil && v.Source == ir.VariableSourceCallStart,
+				Name: name, Type: authoredType(v), Required: v.Default == nil && v.Source == ir.VariableSourceCallStart,
 			})
 		}
 		// A fact the call itself carries, lifted into call_context by whichever
@@ -268,8 +268,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		}
 		data.TypingImports = strings.Join(typingNames, ", ")
 	}
-	data.PydanticImports = PydanticImports(false, data.TypedState)
-	data.NeedsDataclassField = StateNeedsDataclassField(agent) || PrefetchUnconfirmed(agent)
+	data.PydanticImports = PydanticImports(false, len(data.Variables) > 0, data.TypedState)
 	data.NeedsPrefetchUnconfirmed = PrefetchUnconfirmed(agent)
 	if block, needed := Prefetch(agent, prefetchStateExpr, func(entry ir.Prefetch) PrefetchRequest {
 		return prefetchRequestFor(agent, entry)

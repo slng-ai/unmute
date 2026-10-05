@@ -1,17 +1,6 @@
-"""The call's state: its typed variables, how they are read, and what is known first."""
+"""How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
 
-{{if .TypedState}}
-{{.TypedState.Source}}
-{{end}}{{if .Variables}}
-@dataclass
-class State:
-    """Typed call variables, shared across agents."""
-{{if .NeedsPrefetchUnconfirmed}}    _unconfirmed: set[str] = field(default_factory=lambda: set(_STATE_CONFIRM))
-{{end}}
-{{range .Variables}}{{if .Description}}    # {{.Description}}
-{{end}}    {{.Name}}: {{.PyType}} = {{.Default}}{{if .LiteralDefault}}  # ty: ignore[invalid-assignment]{{end}}
-{{end}}
-{{if .CallStartVars}}
+{{if .Variables}}{{if .CallStartVars}}
 def _dispatched_call_start(call_context: dict[str, Any] | None) -> dict[str, Any]:
     """Read the input variables that arrived with the dispatch.
 
@@ -49,15 +38,15 @@ def build_state(call_context: dict[str, Any] | None = None) -> State:
 
     Returns:
         The state every agent on the call shares.
-{{if .RequiredCallStart}}
+{{if .CallStartVars}}
     Raises:
-        RuntimeError: When a required input variable was not dispatched.
+        RuntimeError: When a required input variable was not dispatched, or a
+            dispatched value does not fit its declared type.
 {{end}}    """
     state = State()
 {{if .CallStartVars}}    call_start = _dispatched_call_start(call_context)
-{{range .CallStartVars}}    if {{pyq .Name}} in call_start:
-        state.{{.Name}} = call_start[{{pyq .Name}}]
-{{end}}{{if .RequiredCallStart}}    missing = [
+    _save_call_start(state, call_start, {{.CallStartNames}})
+{{if .RequiredCallStart}}    missing = [
         name for name in ({{range .RequiredCallStart}}{{pyq .}}, {{end}}) if name not in call_start
     ]
 {{end}}{{end}}{{if .SystemSourceVars}}    # A variable declaring `source: <call fact>` reads the fact the route lifted
@@ -71,7 +60,7 @@ def build_state(call_context: dict[str, Any] | None = None) -> State:
     # and hold an empty string on every live call.
 {{range .SystemSourceVars}}    _value = (call_context or {}).get({{pyq .Source}})
     if _value:
-        state.{{.Name}} = _value
+        _save_fact(state, {{pyq .Name}}, _value)
 {{end}}{{end}}{{if .RequiredCallStart}}    if missing:
         raise RuntimeError(f"Missing call context fields: {', '.join(missing)}")
 {{end}}    return state

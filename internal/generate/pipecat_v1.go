@@ -647,12 +647,9 @@ type pipecatData struct {
 	// PydanticImports is the whole `from pydantic import ...` line, "" if none.
 	PydanticImports string
 	// TypingImports is the `from typing import ...` names, "" if none.
-	TypingImports string
-	// NeedsDataclassField is `field` beside `dataclass`, wanted only by a
-	// declared list, which starts empty through a default_factory.
-	NeedsDataclassField bool
-	NeedsStateBind      bool // any flow tool reading state (inject inside a task)
-	NeedsRefusal        bool // any tool whose injected variables can be unset (V4)
+	TypingImports  string
+	NeedsStateBind bool // any flow tool reading state (inject inside a task)
+	NeedsRefusal   bool // any tool whose injected variables can be unset (V4)
 	// NeedsLastN gates the emitted _last_n helper, so a package that authors no
 	// last_n window emits nothing new. Same pattern as LiveKit's own NeedsLastN.
 	NeedsLastN bool
@@ -934,6 +931,7 @@ var pipecatModules = []struct{ tmpl, path string }{
 	{"utils_context.py", "utils/context.py"},
 	{"utils_mcp.py", "utils/mcp.py"},
 	{"utils_telephony.py", "utils/telephony.py"},
+	{"state.py", "state.py"},
 	{"session.py", "session.py"},
 	{"utils_router.py", "utils/router.py"},
 	{"agents.py", "agents.py"},
@@ -1243,6 +1241,15 @@ func (d pipecatData) RequiredCallStart() []string {
 	return names
 }
 
+// CallStartNames is the Python tuple of variables a dispatch may fill.
+func (d pipecatData) CallStartNames() string {
+	names := make([]string, len(d.CallStartVars))
+	for i, v := range d.CallStartVars {
+		names[i] = v.Name
+	}
+	return "(" + pyTuple(names) + ")"
+}
+
 // botImportWidth is ruff's default line length, the width isort wraps at.
 const botImportWidth = 88
 
@@ -1259,7 +1266,7 @@ var (
 	// beside its entry file, which ruff files apart from third-party imports.
 	firstPartyModules = map[string]bool{
 		"agents": true, "brain": true, "call": true, "dev_metrics": true, "handoff": true,
-		"knowledge": true, "logic": true, "prompts": true, "session": true, "settings": true,
+		"knowledge": true, "logic": true, "prompts": true, "session": true, "settings": true, "state": true,
 		"telephony_helper": true, "tool_runner": true, "tools": true, "tracing": true, "utils": true,
 	}
 )

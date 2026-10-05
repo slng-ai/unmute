@@ -150,7 +150,7 @@ def _livekit_call_context(room_name: str, participant: rtc.RemoteParticipant | N
 
 {{- if .HasVars}}
 def _hydrate_livekit_context(userdata: Userdata, context: dict, *, require_all: bool = True) -> None:
-    """Copy the call facts a prompt names onto the session state.
+    """Save the call facts a prompt names onto the session state.
 
     Args:
         userdata: The state to fill.
@@ -158,15 +158,13 @@ def _hydrate_livekit_context(userdata: Userdata, context: dict, *, require_all: 
         require_all: Fail when a fact the package reads is absent.
 
     Raises:
-        RuntimeError: A required fact is absent.
+        RuntimeError: A required fact is absent, or does not fit its type.
     """
     missing: list[str] = []
 {{- range .Telephony.SystemSources}}
     value = context.get({{pyq .Source}})
-    if value in (None, ""):
+    if value in (None, "") or not _save_fact(userdata, {{pyq .Variable}}, value):
         missing.append({{pyq .Source}})
-    else:
-        userdata.{{.Variable}} = value
 {{- end}}
     if missing and require_all:
         raise RuntimeError("Missing LiveKit SIP context fields: " + ", ".join(missing))

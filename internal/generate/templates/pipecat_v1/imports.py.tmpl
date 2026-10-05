@@ -32,7 +32,6 @@ from collections.abc import {{.ABCImports}}
 {{end}}{{if or .NeedsRender (and .TypedState .TypedState.NeedsRe)}}import re
 {{end}}import sys
 {{if .Slng.Any}}import uuid
-{{end}}{{if .Variables}}from dataclasses import {{if .NeedsDataclassField}}dataclass, field{{else}}dataclass{{end}}
 {{end}}{{if .NeedsPrefetchClock}}from datetime import datetime
 {{end}}from typing import {{.TypingNames}}
 {{if .NeedsRender}}from urllib.parse import quote
@@ -50,7 +49,8 @@ from pipecat.utils.http import connection_limits
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
 from loguru import logger{{if .PydanticImports}}
-from pydantic import {{.PydanticImports}}{{end}}
+from pydantic import {{.PydanticImports}}{{end}}{{if .TypedState}}
+from pydantic_core import to_json, to_jsonable_python{{end}}
 {{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
 {{end}}
 {{if .NeedsFunctionSchema}}from pipecat.adapters.schemas.function_schema import FunctionSchema

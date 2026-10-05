@@ -209,27 +209,25 @@ func artifactKind(provider ir.Provider) ArtifactKind {
 // drivers emit the same expression, so there is one of it.
 func envRef(name string) string { return "os.environ[" + pyQuote(name) + "]" }
 
-// primitiveTypes is the one place a schema primitive is named. Three different
-// outputs are needed from it — the JSON Schema name, the Python annotation, and
-// the runtime isinstance check — so the table carries three columns and the
-// accessors below stay separate. Merging the outputs themselves would be wrong;
+// primitiveTypes is the one place a schema primitive is named. Two different
+// outputs are needed from it — the JSON Schema name and the Python annotation —
+// so the table carries two columns and the accessors below stay separate. Merging the outputs themselves would be wrong;
 // what was wrong was writing the key set out five times.
 var primitiveTypes = map[ir.PrimitiveType]struct {
-	json  string
-	py    string
-	check string
+	json string
+	py   string
 }{
-	ir.PrimitiveBoolean: {"boolean", "bool", "isinstance(value, bool)"},
-	ir.PrimitiveInteger: {"integer", "int", "isinstance(value, int) and not isinstance(value, bool)"},
-	ir.PrimitiveNumber:  {"number", "float", "isinstance(value, (int, float)) and not isinstance(value, bool)"},
-	ir.PrimitiveString:  {"string", "str", "isinstance(value, str)"},
+	ir.PrimitiveBoolean: {"boolean", "bool"},
+	ir.PrimitiveInteger: {"integer", "int"},
+	ir.PrimitiveNumber:  {"number", "float"},
+	ir.PrimitiveString:  {"string", "str"},
 }
 
 // primitiveString is the fallback row: anything unrecognised is a string, which
 // is what all five original switches did in their default arm.
 var primitiveString = primitiveTypes[ir.PrimitiveString]
 
-func primitiveRow(t ir.PrimitiveType) struct{ json, py, check string } {
+func primitiveRow(t ir.PrimitiveType) struct{ json, py string } {
 	if row, ok := primitiveTypes[t]; ok {
 		return row
 	}
@@ -253,5 +251,11 @@ func pyTypeForJSON(name string) string {
 	return primitiveString.py
 }
 
-// livekitTypeCheck is a primitive's runtime isinstance expression.
-func livekitTypeCheck(t ir.PrimitiveType) string { return primitiveRow(t).check }
+// authoredType is a variable's type as its author wrote it: `CustomerRecord`
+// or `Phone`, and the primitive's JSON Schema name for a plain value.
+func authoredType(variable ir.Variable) string {
+	if variable.Shape != nil {
+		return variable.Shape.String()
+	}
+	return string(variable.Type)
+}

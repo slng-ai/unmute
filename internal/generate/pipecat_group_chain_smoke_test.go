@@ -191,7 +191,7 @@ async def main():
     assert "customer_phone" not in state._unconfirmed, state._unconfirmed
     # Saved once, from the tool's own result, with no model request in between.
     assert state.appointment is not None, "the booking step saved nothing"
-    assert state.appointment["action"] == "book", state.appointment
+    assert state.appointment.action == "book", state.appointment
     # Each step spoke its own line as it was entered, which is what the
     # pre-action could not do.
     assert len(Passthrough.spoken) == 2, Passthrough.spoken
@@ -208,7 +208,7 @@ async def main():
     # 2. The same caller, already verified, moving what they just booked. This
     # is the turn the skip exists for: on a booking after the first the caller
     # hears the diary line and is never asked for their number again.
-    booked = state.appointment["booking_id"]
+    booked = state.appointment.booking_id
     asked, state, owner, seen = await run([
         ("book", {}),
         ("find_slots", {"date": TOMORROW, "service": "haircut"}),
@@ -224,7 +224,7 @@ async def main():
     ], asked
     assert owner._book_plan == ["manage_booking"], owner._book_plan
     assert state.appointment is not None, ("the verified caller's move did not save", owner._book_results, asked)
-    assert state.appointment["action"] == "move", state.appointment
+    assert state.appointment.action == "move", state.appointment
     # One line, because a step that does not run says nothing.
     assert len(Passthrough.spoken) == 1, Passthrough.spoken
 

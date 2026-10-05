@@ -273,6 +273,7 @@ from copy import deepcopy
 for name in json.load(open("compile-report.json"))["required_env"]: os.environ.setdefault(name,"smoke-placeholder")
 generated = _project("` + module + `")
 state=generated.` + state + `
+def snapshot(s): return deepcopy((vars(s),s._unconfirmed,s._prefetch_provenance))
 def seed():
     generated._save_batch(state,{"caller_phone":"+34600111222"},inputs=())
     generated._save_batch(state,{"caller_name":"OLD_PROFILE"},inputs=("caller_phone",))
@@ -285,17 +286,17 @@ generated._save_result("verify_caller",state,{"caller_phone":"+34600111222"})
 assert generated._prompt_value(state,"caller_name")[1]=="OLD_PROFILE"
 assert generated._prompt_value(state,"customer_id")[1]=="OLD_RELATED"
 generated._save_result("verify_caller",state,{"caller_phone":"+34600999888"})
-assert state.caller_name is None and state.customer_id is None
+assert state.caller_name==generated._default(state,"caller_name") and state.customer_id==generated._default(state,"customer_id")
 assert state.booking_date=="2026-09-06"
 seed()
-before=deepcopy(vars(state))
+before=snapshot(state)
 try: generated._save_batch(state,{"caller_phone":"+34600999888","verified":"invalid"},step="verify_caller")
 except generated._StateRefused: pass
 else: raise AssertionError("invalid batch saved")
-assert vars(state)==before
+assert snapshot(state)==before
 # Explicit replacements in the same valid batch survive input invalidation.
 generated._save_batch(state,{"caller_phone":"+34600999888","caller_name":"NEW_PROFILE"},step="verify_caller")
-assert state.caller_name=="NEW_PROFILE" and state.customer_id is None
+assert state.caller_name=="NEW_PROFILE" and state.customer_id==generated._default(state,"customer_id")
 assert "caller_name" not in state._prefetch_provenance
 # Another writer is not agreement, even when it repeats an agreed value.
 generated._save_batch(state,{"caller_phone":"+34600999888"},step="another_task")
@@ -325,6 +326,7 @@ func TestSmokePrefetchDeadlinePipecat(t *testing.T) {
 }
 func deadlineScript(module, state string) string {
 	return `import os,json,asyncio,time
+from copy import deepcopy
 for name in json.load(open("compile-report.json"))["required_env"]: os.environ.setdefault(name,"smoke-placeholder")
 os.environ.pop("UNMUTE_CALL_FACTS",None)
 generated = _project("` + module + `")
@@ -343,9 +345,9 @@ async def main():
     elapsed=time.monotonic()-start
     assert elapsed<0.16,("fresh budget or waited for cancellation",elapsed)
     assert len(calls)==2,calls
-    before=dict(vars(state))
+    before=deepcopy((vars(state),state._unconfirmed,state._prefetch_provenance))
     await asyncio.sleep(0.15)
-    assert vars(state)==before,"late task mutated saved state"
+    assert deepcopy((vars(state),state._unconfirmed,state._prefetch_provenance))==before,"late task mutated saved state"
     def blocking(**kwargs):
         time.sleep(0.25)
         return {"name":"BLOCKING_NAME","customer_id":"BLOCKING_ID"}

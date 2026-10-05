@@ -106,15 +106,12 @@ def _caller_turns(chat_ctx: llm.ChatContext) -> int:
         The number of caller messages.
     """
     return sum(1 for message in chat_ctx.messages() if message.role == "user")
-"""The call's state: its typed variables, how they are read, and what is known first."""
+"""The call's declared state: its types, the state class, and the one way a value is saved."""
 
 from __future__ import annotations
 
-import json
-import os
-from dataclasses import dataclass
-
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, PrivateAttr, TypeAdapter, ValidationError
+from pydantic_core import to_json, to_jsonable_python
 
 from settings import logger
 
@@ -165,10 +162,63 @@ def _typed(field: str, adapter: TypeAdapter, value: object) -> object:
     try:
         return adapter.validate_python(value)
     except ValidationError as error:
-        first = error.errors()[0]
-        where = ".".join(str(part) for part in first["loc"])
-        named = f"{field}.{where}" if where else field
-        raise _StateRefused(f"{named}: {first['msg']}") from None
+        raise _StateRefused(_refusal_text(error, field)) from None
+
+
+def _refusal_text(error: ValidationError, field: str = "") -> str:
+    """Word the first problem in a refusal the way the model is shown it.
+
+    Args:
+        error: What Pydantic refused.
+        field: The declared value the error is about, when its location does
+            not already start with it.
+
+    Returns:
+        The path to the value and Pydantic's own message, such as
+        "record.record_id: Field required".
+    """
+    first = error.errors()[0]
+    where = ".".join(str(part) for part in (field, *first["loc"]) if part != "")
+    return f"{where}: {first['msg']}"
+
+
+def _checked(state: Userdata, values: dict) -> dict:
+    """Validate one batch against the state model, before any of it is saved.
+
+    The batch is built into one fresh model, so each value is checked by its
+    own field's annotation, and the state itself is not touched until every
+    value has passed. A field the batch leaves out takes its default, which
+    Pydantic does not validate, so a default outside its declared set never
+    refuses a save of something else.
+
+    Args:
+        state: The call's shared state object.
+        values: Declared value names mapped to what to save.
+
+    Returns:
+        The validated values, by name: models where the type is a shape.
+
+    Raises:
+        _StateRefused: If a value does not fit its declared type.
+    """
+    try:
+        checked = type(state).model_validate(values)
+    except ValidationError as error:
+        raise _StateRefused(_refusal_text(error)) from None
+    return {name: getattr(checked, name) for name in values}
+
+
+def _default(state: Userdata, name: str) -> object:
+    """Read the value a declared field starts the call with.
+
+    Args:
+        state: The call's shared state object.
+        name: Name of the declared value.
+
+    Returns:
+        A fresh copy of the field's default.
+    """
+    return type(state).model_fields[name].get_default(call_default_factory=True)
 
 
 def _append_entry(entries: list, value: object) -> None:
@@ -195,31 +245,10 @@ def _append_entry(entries: list, value: object) -> None:
     """
     if value is None:
         return
-    if isinstance(value, (dict, list)) and value in entries:
+    if isinstance(value, (BaseModel, dict, list)) and value in entries:
         return
     entries.append(value)
 
-
-def _plain(value: object) -> object:
-    """Turn a validated value into plain data.
-
-    Plain data is the only shape both frameworks accept back from a tool: one
-    refuses a BaseModel outright and drops the whole tool result with a log
-    line, the other cannot serialise one at all.
-
-    Args:
-        value: A validated value, possibly holding models.
-
-    Returns:
-        The same value with every model replaced by its JSON-mode dict.
-    """
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, list):
-        return [_plain(entry) for entry in value]
-    if isinstance(value, dict):
-        return {key: _plain(entry) for key, entry in value.items()}
-    return value
 
 
 def _schema(adapter: TypeAdapter) -> object:
@@ -322,7 +351,8 @@ def _typed_result(step: str, values: dict) -> dict:
         values: The step's finish values.
 
     Returns:
-        The values with each declared field validated and made plain.
+        The values with each declared field validated, as a model where its
+        type is a shape.
 
     Raises:
         _StateRefused: If a declared field does not fit its type.
@@ -341,13 +371,10 @@ def _typed_result(step: str, values: dict) -> dict:
     # the result, and the assignment that reads it by name raised a
     # KeyError inside the finish handler on the target whose framework
     # validates no argument of its own.
-    validated = {name: _plain(_typed(name, adapter, values.get(name))) for name, adapter in adapters.items()}
+    validated = {name: _typed(name, adapter, values.get(name)) for name, adapter in adapters.items()}
     return values | validated
 
 
-_STATE_TYPES = {
-    "caller_phone": TypeAdapter(str),
-}
 _TASK_ASSIGNMENTS = {
     "confirm_booking": [
     ],
@@ -371,8 +398,8 @@ def _save_result(step: str, state: Userdata, values: dict) -> dict:
         values: The step's finish values.
 
     Returns:
-        The validated values, or the unserved request alone when the step could
-        not help.
+        The validated values as plain data, or the unserved request alone when
+        the step could not help.
 
     Raises:
         _StateRefused: If an assigned value does not fit its declared type.
@@ -382,19 +409,24 @@ def _save_result(step: str, state: Userdata, values: dict) -> dict:
         return values
     pending = {}
     for name, path, append in _TASK_ASSIGNMENTS.get(step, ()):
-        # A dotted path walks nested dicts, and is None past any missing link.
+        # A dotted path walks the result's fields, a dict at the top and a model
+        # below it, and is None past any missing link.
         value = values
         for part in path.split("."):
-            value = value.get(part) if isinstance(value, dict) else None
+            if value is None:
+                break
+            value = value.get(part) if isinstance(value, dict) else getattr(value, part, None)
         if append:
             if value is None:
                 continue
-            entries = list(getattr(state, name, None) or [])
+            entries = list(getattr(state, name))
             _append_entry(entries, value)
             value = entries
-        pending[name] = _plain(_typed(name, _STATE_TYPES[name], value))
+        pending[name] = value
     _save_batch(state, pending, step=step)
-    return values
+    # Plain data for the framework: one refuses a BaseModel in a tool result and
+    # drops the whole result, the other cannot serialise one at all.
+    return to_jsonable_python(values)
 
 
 def _save_batch(state: Userdata, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
@@ -412,9 +444,9 @@ def _save_batch(state: Userdata, values: dict, *, step: str | None = None, input
     """
     if not values:
         return
-    pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
-    unconfirmed: set[str] = set(getattr(state, "_unconfirmed", ()))
-    provenance = dict(getattr(state, "_prefetch_provenance", {}))
+    pending = _checked(state, values)
+    unconfirmed = set(state._unconfirmed)
+    provenance = dict(state._prefetch_provenance)
     affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
     # Grow the changed set with everything derived from it, until nothing new joins.
     while more := {name for name, reads in provenance.items() if set(reads) & affected} - affected:
@@ -439,9 +471,10 @@ def _save_batch(state: Userdata, values: dict, *, step: str | None = None, input
             name: Name of the declared value.
 
         Returns:
-            The pending value, none if it was invalidated, else what state holds.
+            The pending value, the starting value if it was invalidated, else
+            what state holds.
         """
-        return None if name in invalidated else pending.get(name, getattr(state, name, None))
+        return _default(state, name) if name in invalidated else pending.get(name, getattr(state, name, None))
 
     # Dependencies are acyclic: prefetch can only read earlier entries. Each pass
     # reads what the previous one settled, so this runs to a fixed point.
@@ -456,14 +489,37 @@ def _save_batch(state: Userdata, values: dict, *, step: str | None = None, input
                 unconfirmed.add(name)
         if before == unconfirmed:
             break
+    # An invalidated value goes back to what the call started with, which for a
+    # value with no default is None, and for a list is empty: never a None the
+    # field's own annotation would refuse.
     for name in invalidated:
-        setattr(state, name, None)
+        setattr(state, name, _default(state, name))
     for name, value in pending.items():
         setattr(state, name, value)
-    if hasattr(state, "_unconfirmed"):
-        setattr(state, "_unconfirmed", unconfirmed)  # noqa: B010 - state is typed object
-    if inputs is not None or hasattr(state, "_prefetch_provenance"):
-        setattr(state, "_prefetch_provenance", provenance)  # noqa: B010 - state is typed object
+    state._unconfirmed = unconfirmed
+    state._prefetch_provenance = provenance
+
+
+def _save_call_start(state: Userdata, values: dict, names: tuple[str, ...]) -> None:
+    """Save the values the dispatch sent, each checked against its declared type.
+
+    A value that does not fit stops the call before it starts. The dispatch is
+    the author's own payload, so a wrong value in it is a defect to fix, and a
+    call started anyway would run on a value nobody declared. Nothing is saved
+    when one value is refused.
+
+    Args:
+        state: The call's shared state object.
+        values: The dispatched values, by variable name.
+        names: The variables a dispatch may fill.
+
+    Raises:
+        RuntimeError: If a dispatched value does not fit its declared type.
+    """
+    try:
+        _save_batch(state, {name: values[name] for name in names if name in values})
+    except _StateRefused as refused:
+        raise RuntimeError(f"call_start: {refused.message}") from None
 
 
 _STATE_STRUCTURED = {}
@@ -495,7 +551,7 @@ def _state_text(name: str, value: object) -> str:
     if value is None or value == "":
         return _STATE_EMPTY
     if not isinstance(value, str):
-        value = json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
+        value = to_json(value).decode()
     text = str(value)
     if len(text) > _STATE_VALUE_MAX:
         # The length is only knowable here, at run time, so this cannot be a
@@ -557,11 +613,27 @@ def _state_lookup(state: Userdata | None, name: str) -> tuple[str, object]:
 
 
 # --- shared state ------------------------------------------------------------
-# Typed session state: tasks assign into it, transfers read it.
-@dataclass
-class Userdata:
+# Typed session state: tasks assign into it, transfers read it. Each field's
+# annotation is the check a save goes through.
+class Userdata(BaseModel):
     """The session state every agent and task of one call shares."""
+
+    # A misspelt name is refused, never saved somewhere nothing reads it.
+    model_config = ConfigDict(extra="forbid")
+    # Facts about the values, not values: which ones still wait for the caller
+    # to confirm them, and which inputs each pre-fetched one was derived from.
+    # Private, so no save, prompt or dispatch payload can ever set them.
+    _unconfirmed: set[str] = PrivateAttr(default_factory=lambda: set(_STATE_CONFIRM))
+    _prefetch_provenance: dict[str, tuple[str, ...]] = PrivateAttr(default_factory=dict)
     caller_phone: str | None = None
+"""How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
+
+from __future__ import annotations
+
+import json
+import os
+
+from state import Userdata, _save_call_start
 
 
 # --- job metadata ------------------------------------------------------------
@@ -599,11 +671,12 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
         metadata: The parsed job metadata, if any.
 
     Returns:
-        The variables, checked against their declared types.
+        The variables. Their types are checked when _hydrate_call_start saves
+        them.
 
     Raises:
-        RuntimeError: A value has the wrong type, a required one is missing, or
-            UNMUTE_CALL_START is not a JSON object.
+        RuntimeError: A required value is missing, or UNMUTE_CALL_START is not a
+            JSON object.
     """
     values = dict((metadata or {}).get("call_start", {}))
     raw = os.getenv("UNMUTE_CALL_START")
@@ -617,25 +690,22 @@ def _dispatched_call_start(metadata: dict | None = None) -> dict:
         # The dispatch wins: env is the local stand-in for it.
         values = supplied | values
     missing: list[str] = []
-    if "caller_phone" in values:
-        value = values["caller_phone"]
-        if not (isinstance(value, str)):
-            raise RuntimeError("call_start.caller_phone must be string")
     if missing:
         raise RuntimeError("Missing call_start fields: " + ", ".join(missing))
     return values
 
 
 def _hydrate_call_start(userdata: Userdata, values: dict) -> None:
-    """Copy the dispatched input variables onto the session state.
+    """Save the dispatched input variables onto the session state.
 
     Args:
         userdata: The state to fill.
         values: The variables from _dispatched_call_start.
+
+    Raises:
+        RuntimeError: A value does not fit its declared type.
     """
-    if "caller_phone" in values:
-        userdata.caller_phone = values["caller_phone"]
-    return None
+    _save_call_start(userdata, values, ("caller_phone",))
 """The agents and the task steps they delegate to, with their tools."""
 
 from __future__ import annotations
@@ -673,8 +743,8 @@ from prompts import (
     QUALIFY_EVENT_PROMPT,
     RESERVATIONS_PROMPT,
 )
-from session import _group_status, _save_result, _StateRefused, _task_status
 from settings import _TASK_MAX_ATTEMPTS, logger
+from state import _group_status, _save_result, _StateRefused, _task_status
 from utils import dev_metrics
 from utils.context import _caller_turns
 from utils.dev_metrics import dev_llm_node, dev_say
@@ -1496,13 +1566,9 @@ from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import openai, silero, slng
 
 from agents import Greeter
-from session import (
-    Userdata,
-    _dispatched_call_start,
-    _hydrate_call_start,
-    _livekit_job_metadata,
-)
+from session import _dispatched_call_start, _hydrate_call_start, _livekit_job_metadata
 from settings import require_env
+from state import Userdata
 from utils.dev_metrics import install_dev_metrics
 
 # The loop keeps only a weak reference to a task, so a timer nobody holds can be

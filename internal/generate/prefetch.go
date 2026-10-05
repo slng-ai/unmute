@@ -617,7 +617,7 @@ func prefetchRequestFor(agent *ir.Agent, entry ir.Prefetch) PrefetchRequest {
 	tool := agent.Tools[entry.Tool]
 	values := make([]injectedValue, 0, len(entry.Args)+len(tool.Inject))
 	for _, pair := range entry.Args {
-		values = append(values, injectedValue{Key: pair.Key, Expr: injectExpr(pair.Value, prefetchStateExpr)})
+		values = append(values, injectedValue{Key: pair.Key, Expr: injectExpr(pair.Value, prefetchStateExpr, agent.Variables)})
 	}
 	injected, _ := loweredInject(tool, agent.Variables, SupplierIndex(agent.Tasks), prefetchStateExpr)
 	values = append(values, injected...)

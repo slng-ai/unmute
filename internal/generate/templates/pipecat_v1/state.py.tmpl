@@ -1,0 +1,21 @@
+"""The call's declared state: its types, the state class, and the one way a value is saved."""
+
+{{if .TypedState}}
+{{.TypedState.Source}}
+{{end}}{{if .Variables}}
+# Each field's annotation is the check a save goes through.
+class State(BaseModel):
+    """Typed call variables, shared across agents."""
+
+    # A misspelt name is refused, never saved somewhere nothing reads it.
+    model_config = ConfigDict(extra="forbid")
+    # Facts about the values, not values: which ones still wait for the caller
+    # to confirm them, and which inputs each pre-fetched one was derived from.
+    # Private, so no save, prompt or dispatch payload can ever set them.
+    _unconfirmed: set[str] = PrivateAttr(default_factory=lambda: set(_STATE_CONFIRM))
+    _prefetch_provenance: dict[str, tuple[str, ...]] = PrivateAttr(default_factory=dict)
+
+{{range .Variables}}{{if .Description}}    # {{.Description}}
+{{end}}    {{.Name}}: {{.PyType}} = {{.Default}}{{if .LiteralDefault}}  # ty: ignore[invalid-assignment]{{end}}
+{{end}}
+{{end}}

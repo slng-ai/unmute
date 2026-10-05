@@ -106,7 +106,7 @@ async def check_livekit():
     step._begin_terminal()
     assert await step._end_on_book_it(ctx, BOOKED) is None
     assert step.done()
-    assert fresh.booking["reference"] == "bkg_0001"
+    assert fresh.booking.reference == "bkg_0001"
     assert step._terminal is not None
     assert step._terminal_settled.is_set() and not step._terminal_pending
     # Delivered again after completion: nothing is saved a second time.
@@ -190,7 +190,7 @@ async def check_pipecat():
     finally:
         generated._save_result = original_save
     assert len(saves) == 1, saves
-    assert fresh.booking["reference"] == "bkg_0001"
+    assert fresh.booking.reference == "bkg_0001"
     assert worker._do_book_terminal is not None
     assert worker._do_book_settled.is_set() and not worker._do_book_pending
     assert worker._do_book_carried_turn == {"role": "user", "content": "book it"}
@@ -247,7 +247,7 @@ async def check_pipecat():
         )
     finally:
         generated._flow_tool_book_it = original_tool
-    assert later.booking["reference"] == "bkg_0001"
+    assert later.booking.reference == "bkg_0001"
     assert ended == ({"status": "completed"}, generated.NO_RESPONSE), ended
     assert moved == ({"transferred": True}, generated.NO_RESPONSE), moved
     assert activations == [("care", True)], activations

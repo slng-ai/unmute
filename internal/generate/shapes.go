@@ -180,6 +180,11 @@ type TypedStateBlock struct {
 	// NeedsWithdrawal says some group step carries `skip_when_confirmed:`, which
 	// is the one thing that emits the confirmation helpers.
 	NeedsWithdrawal bool
+	// NeedsCallStart says some variable can be filled by the dispatch, and
+	// NeedsFacts that some variable reads a fact the carrier sends. Each emits
+	// the helper that saves that kind of arrival, and nothing else does.
+	NeedsCallStart bool
+	NeedsFacts     bool
 	// NeedsShaped says any text type with a validated shape is used, which is
 	// what needs AfterValidator and typing.Annotated.
 	NeedsShaped    bool
@@ -302,6 +307,10 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 			block.NeedsWithdrawal = true
 		}
 	}
+	for _, variable := range agent.Variables {
+		block.NeedsCallStart = block.NeedsCallStart || variable.Source == ir.VariableSourceCallStart || variable.Source == ""
+		block.NeedsFacts = block.NeedsFacts || ir.IsSystemSource(variable.Source)
+	}
 	used := usedShapedText(agent)
 	if len(classes) == 0 && len(agent.Variables) == 0 && len(finish) == 0 && len(agent.Tasks) == 0 {
 		return TypedStateBlock{}, nil
@@ -376,16 +385,7 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 		b.WriteString("    },\n")
 	}
 	b.WriteString(stateFinishHelpers)
-	b.WriteString("\n\n_STATE_TYPES = {\n")
-	for _, name := range sortedKeys(agent.Variables) {
-		variable := agent.Variables[name]
-		anno := pyType(variable.Type)
-		if variable.Shape != nil {
-			anno = PyAnno(variable.Shape)
-		}
-		fmt.Fprintf(&b, "    %s: TypeAdapter(%s),\n", pyQuote(name), anno)
-	}
-	b.WriteString("}\n_TASK_ASSIGNMENTS = {\n")
+	b.WriteString("\n\n_TASK_ASSIGNMENTS = {\n")
 	for _, name := range sortedKeys(agent.Tasks) {
 		fmt.Fprintf(&b, "    %s: [\n", pyQuote(name))
 		for _, entry := range agent.Tasks[name].Assign {
@@ -415,6 +415,12 @@ func TypedState(agent *ir.Agent) (TypedStateBlock, error) {
 		}
 	}
 	b.WriteString(stateSaveHelpers)
+	if block.NeedsCallStart {
+		b.WriteString(stateCallStartHelper)
+	}
+	if block.NeedsFacts {
+		b.WriteString(stateFactHelper)
+	}
 	if block.NeedsTerminal {
 		b.WriteString(stateTerminalHelpers)
 	}
@@ -510,6 +516,7 @@ func emittedClassNames(agent *ir.Agent) map[string]string {
 		"Agent": "the framework", "AgentTask": "the framework", "AgentSession": "the framework",
 		"BaseModel": "Pydantic", "Field": "Pydantic", "TypeAdapter": "Pydantic",
 		"AfterValidator": "Pydantic", "ValidationError": "Pydantic",
+		"ConfigDict": "Pydantic", "PrivateAttr": "Pydantic",
 		"Annotated": "the typing module", "Literal": "the typing module",
 		"NodeConfig": "the framework", "LLMWorker": "the framework",
 	}
@@ -680,56 +687,47 @@ func walkTypeRefs(agent *ir.Agent, visit func(*ir.TypeRef)) {
 
 }
 
-// stateField is one declared value as a shared-state dataclass declares it:
-// the annotation, and the default.
+// stateField is one declared value as the state model declares it: the
+// annotation, and the default.
 //
-// A declared list starts empty rather than absent, so an append never has to
-// create it, and through a factory because a shared mutable default on a
-// dataclass is one call's state leaking into the next.
-//
-// nullableWithDefault is the one place the two targets differ, and the
-// divergence is older than this feature: LiveKit annotates every field
-// `| None` whatever its default, while Pipecat annotates a field carrying a
-// default with its bare type. Passed in rather than decided here, so this file
-// does not quietly pick a winner and no package written before this feature
-// emits a byte differently.
-func stateField(variable ir.Variable, nullableWithDefault bool) (anno, def string) {
+// The annotation is the check, so it says exactly what a save may hold, and
+// both targets write the same one. A value with an authored default holds its
+// declared type and never None. A value with no default starts as None, which
+// is "no value yet", so its annotation admits None and a save of None is a
+// value nobody has given yet rather than a wrong one. A declared list starts
+// empty rather than absent, so an append never has to create it; Pydantic
+// copies the empty list for each call, so one call's entries cannot leak into
+// the next.
+func stateField(variable ir.Variable) (anno, def string) {
 	anno = pyType(variable.Type)
 	if variable.Shape != nil {
 		anno = PyAnno(variable.Shape)
 	}
 	if variable.Shape.IsList() {
-		return anno, "field(default_factory=list)"
+		return anno, "[]"
 	}
-	def = "None"
 	if variable.Default != nil {
-		def = pyLiteral(variable.Default)
+		return anno, pyLiteral(variable.Default)
 	}
-	if variable.Default == nil || nullableWithDefault {
-		if !strings.HasSuffix(anno, " | None") {
-			anno += " | None"
-		}
+	if !strings.HasSuffix(anno, " | None") {
+		anno += " | None"
 	}
-	return anno, def
-}
-
-// StateNeedsDataclassField reports whether any declared value starts as an
-// empty list, which is the one thing that needs `field` beside `dataclass`.
-func StateNeedsDataclassField(agent *ir.Agent) bool {
-	for _, variable := range agent.Variables {
-		if variable.Shape.IsList() {
-			return true
-		}
-	}
-	return false
+	return anno, "None"
 }
 
 // PydanticImports is the `from pydantic import ...` line each module needs.
 // One computed list rather than two conditional lines, because Field is wanted
 // by a tool argument description as well as by a shape field and importing it
 // twice is what a linter reads as a redefinition.
-func PydanticImports(needsField bool, typed *TypedStateBlock) string {
+//
+// stateClass says the module defines the state model, which is a BaseModel
+// with a config and private attributes whether or not anything is typed: a
+// LiveKit package on the SLNG router alone has one.
+func PydanticImports(needsField, stateClass bool, typed *TypedStateBlock) string {
 	var names []string
+	if stateClass {
+		names = append(names, "BaseModel", "ConfigDict", "PrivateAttr")
+	}
 	if typed != nil {
 		if typed.NeedsShaped {
 			names = append(names, "AfterValidator")
@@ -744,6 +742,7 @@ func PydanticImports(needsField bool, typed *TypedStateBlock) string {
 		names = append(names, "Field")
 	}
 	slices.Sort(names)
+	names = slices.Compact(names)
 	return strings.Join(names, ", ")
 }
 
@@ -861,10 +860,63 @@ def _typed(field: str, adapter: TypeAdapter, value: object) -> object:
     try:
         return adapter.validate_python(value)
     except ValidationError as error:
-        first = error.errors()[0]
-        where = ".".join(str(part) for part in first["loc"])
-        named = f"{field}.{where}" if where else field
-        raise _StateRefused(f"{named}: {first['msg']}") from None
+        raise _StateRefused(_refusal_text(error, field)) from None
+
+
+def _refusal_text(error: ValidationError, field: str = "") -> str:
+    """Word the first problem in a refusal the way the model is shown it.
+
+    Args:
+        error: What Pydantic refused.
+        field: The declared value the error is about, when its location does
+            not already start with it.
+
+    Returns:
+        The path to the value and Pydantic's own message, such as
+        "record.record_id: Field required".
+    """
+    first = error.errors()[0]
+    where = ".".join(str(part) for part in (field, *first["loc"]) if part != "")
+    return f"{where}: {first['msg']}"
+
+
+def _checked(state: STATE_CLASS, values: dict) -> dict:
+    """Validate one batch against the state model, before any of it is saved.
+
+    The batch is built into one fresh model, so each value is checked by its
+    own field's annotation, and the state itself is not touched until every
+    value has passed. A field the batch leaves out takes its default, which
+    Pydantic does not validate, so a default outside its declared set never
+    refuses a save of something else.
+
+    Args:
+        state: The call's shared state object.
+        values: Declared value names mapped to what to save.
+
+    Returns:
+        The validated values, by name: models where the type is a shape.
+
+    Raises:
+        _StateRefused: If a value does not fit its declared type.
+    """
+    try:
+        checked = type(state).model_validate(values)
+    except ValidationError as error:
+        raise _StateRefused(_refusal_text(error)) from None
+    return {name: getattr(checked, name) for name in values}
+
+
+def _default(state: STATE_CLASS, name: str) -> object:
+    """Read the value a declared field starts the call with.
+
+    Args:
+        state: The call's shared state object.
+        name: Name of the declared value.
+
+    Returns:
+        A fresh copy of the field's default.
+    """
+    return type(state).model_fields[name].get_default(call_default_factory=True)
 
 
 def _append_entry(entries: list, value: object) -> None:
@@ -891,31 +943,10 @@ def _append_entry(entries: list, value: object) -> None:
     """
     if value is None:
         return
-    if isinstance(value, (dict, list)) and value in entries:
+    if isinstance(value, (BaseModel, dict, list)) and value in entries:
         return
     entries.append(value)
 
-
-def _plain(value: object) -> object:
-    """Turn a validated value into plain data.
-
-    Plain data is the only shape both frameworks accept back from a tool: one
-    refuses a BaseModel outright and drops the whole tool result with a log
-    line, the other cannot serialise one at all.
-
-    Args:
-        value: A validated value, possibly holding models.
-
-    Returns:
-        The same value with every model replaced by its JSON-mode dict.
-    """
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, list):
-        return [_plain(entry) for entry in value]
-    if isinstance(value, dict):
-        return {key: _plain(entry) for key, entry in value.items()}
-    return value
 `
 
 // stateSchemaHelper resolves every $ref in one declared type's schema.
@@ -1016,7 +1047,8 @@ def _typed_result(step: str, values: dict) -> dict:
         values: The step's finish values.
 
     Returns:
-        The values with each declared field validated and made plain.
+        The values with each declared field validated, as a model where its
+        type is a shape.
 
     Raises:
         _StateRefused: If a declared field does not fit its type.
@@ -1035,7 +1067,7 @@ def _typed_result(step: str, values: dict) -> dict:
     # the result, and the assignment that reads it by name raised a
     # KeyError inside the finish handler on the target whose framework
     # validates no argument of its own.
-    validated = {name: _plain(_typed(name, adapter, values.get(name))) for name, adapter in adapters.items()}
+    validated = {name: _typed(name, adapter, values.get(name)) for name, adapter in adapters.items()}
     return values | validated
 `
 
@@ -1053,8 +1085,8 @@ def _save_result(step: str, state: STATE_CLASS, values: dict) -> dict:
         values: The step's finish values.
 
     Returns:
-        The validated values, or the unserved request alone when the step could
-        not help.
+        The validated values as plain data, or the unserved request alone when
+        the step could not help.
 
     Raises:
         _StateRefused: If an assigned value does not fit its declared type.
@@ -1064,19 +1096,24 @@ def _save_result(step: str, state: STATE_CLASS, values: dict) -> dict:
         return values
     pending = {}
     for name, path, append in _TASK_ASSIGNMENTS.get(step, ()):
-        # A dotted path walks nested dicts, and is None past any missing link.
+        # A dotted path walks the result's fields, a dict at the top and a model
+        # below it, and is None past any missing link.
         value = values
         for part in path.split("."):
-            value = value.get(part) if isinstance(value, dict) else None
+            if value is None:
+                break
+            value = value.get(part) if isinstance(value, dict) else getattr(value, part, None)
         if append:
             if value is None:
                 continue
-            entries = list(getattr(state, name, None) or [])
+            entries = list(getattr(state, name))
             _append_entry(entries, value)
             value = entries
-        pending[name] = _plain(_typed(name, _STATE_TYPES[name], value))
+        pending[name] = value
     _save_batch(state, pending, step=step)
-    return values
+    # Plain data for the framework: one refuses a BaseModel in a tool result and
+    # drops the whole result, the other cannot serialise one at all.
+    return to_jsonable_python(values)
 
 
 def _save_batch(state: STATE_CLASS, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
@@ -1094,9 +1131,9 @@ def _save_batch(state: STATE_CLASS, values: dict, *, step: str | None = None, in
     """
     if not values:
         return
-    pending = {name: _plain(_typed(name, _STATE_TYPES[name], value)) for name, value in values.items()}
-    unconfirmed: set[str] = set(getattr(state, "_unconfirmed", ()))
-    provenance = dict(getattr(state, "_prefetch_provenance", {}))
+    pending = _checked(state, values)
+    unconfirmed = set(state._unconfirmed)
+    provenance = dict(state._prefetch_provenance)
     affected = {name for name, value in pending.items() if getattr(state, name, None) != value}
     # Grow the changed set with everything derived from it, until nothing new joins.
     while more := {name for name, reads in provenance.items() if set(reads) & affected} - affected:
@@ -1121,9 +1158,10 @@ def _save_batch(state: STATE_CLASS, values: dict, *, step: str | None = None, in
             name: Name of the declared value.
 
         Returns:
-            The pending value, none if it was invalidated, else what state holds.
+            The pending value, the starting value if it was invalidated, else
+            what state holds.
         """
-        return None if name in invalidated else pending.get(name, getattr(state, name, None))
+        return _default(state, name) if name in invalidated else pending.get(name, getattr(state, name, None))
 
     # Dependencies are acyclic: prefetch can only read earlier entries. Each pass
     # reads what the previous one settled, so this runs to a fixed point.
@@ -1138,14 +1176,71 @@ def _save_batch(state: STATE_CLASS, values: dict, *, step: str | None = None, in
                 unconfirmed.add(name)
         if before == unconfirmed:
             break
+    # An invalidated value goes back to what the call started with, which for a
+    # value with no default is None, and for a list is empty: never a None the
+    # field's own annotation would refuse.
     for name in invalidated:
-        setattr(state, name, None)
+        setattr(state, name, _default(state, name))
     for name, value in pending.items():
         setattr(state, name, value)
-    if hasattr(state, "_unconfirmed"):
-        setattr(state, "_unconfirmed", unconfirmed)  # noqa: B010 - state is typed object
-    if inputs is not None or hasattr(state, "_prefetch_provenance"):
-        setattr(state, "_prefetch_provenance", provenance)  # noqa: B010 - state is typed object
+    state._unconfirmed = unconfirmed
+    state._prefetch_provenance = provenance
+`
+
+// stateCallStartHelper saves what the dispatch sent, through the same check
+// every other save goes through.
+const stateCallStartHelper = `
+
+def _save_call_start(state: STATE_CLASS, values: dict, names: tuple[str, ...]) -> None:
+    """Save the values the dispatch sent, each checked against its declared type.
+
+    A value that does not fit stops the call before it starts. The dispatch is
+    the author's own payload, so a wrong value in it is a defect to fix, and a
+    call started anyway would run on a value nobody declared. Nothing is saved
+    when one value is refused.
+
+    Args:
+        state: The call's shared state object.
+        values: The dispatched values, by variable name.
+        names: The variables a dispatch may fill.
+
+    Raises:
+        RuntimeError: If a dispatched value does not fit its declared type.
+    """
+    try:
+        _save_batch(state, {name: values[name] for name in names if name in values})
+    except _StateRefused as refused:
+        raise RuntimeError(f"call_start: {refused.message}") from None
+`
+
+// stateFactHelper saves one fact the carrier sent. Separate from the call-start
+// helper because a refusal means something different: the author can fix a
+// dispatch, nobody can fix a caller who withholds their number.
+const stateFactHelper = `
+
+def _save_fact(state: STATE_CLASS, name: str, value: object) -> bool:
+    """Save one fact the carrier sent, unless it does not fit its declared type.
+
+    A caller who withholds their number arrives as "anonymous", which is not a
+    phone number and is nobody's mistake. Ending the call for it would hang up
+    on the caller, so a fact that does not fit is logged, left unsaved, and
+    treated as a fact that never arrived. Each fact is saved on its own, so one
+    odd value never drops the others.
+
+    Args:
+        state: The call's shared state object.
+        name: The declared variable the fact fills.
+        value: The fact as the carrier sent it.
+
+    Returns:
+        Whether the fact was saved.
+    """
+    try:
+        _save_batch(state, {name: value})
+    except _StateRefused as refused:
+        logger.warning(f"call fact {name}: {refused.message}; treated as missing")
+        return False
+    return True
 `
 
 // stateTerminalHelpers is what a task ending on its own tool needs.
@@ -1235,7 +1330,7 @@ def _is_confirmed(state: STATE_CLASS, name: str) -> bool:
         True when the value is filled and nobody has withdrawn its confirmation.
     """
     value = getattr(state, name, None)
-    return name not in getattr(state, "_unconfirmed", ()) and value is not None and value != ""
+    return name not in state._unconfirmed and value is not None and value != ""
 
 
 def _withdraw_confirmation(state: STATE_CLASS, step: str) -> None:
@@ -1256,7 +1351,7 @@ def _withdraw_confirmation(state: STATE_CLASS, step: str) -> None:
     withdrawn = {name for name, owner in _STATE_CONFIRM.items() if owner == step}
     if not withdrawn:
         return
-    unconfirmed = set(getattr(state, "_unconfirmed", ())) | withdrawn
+    unconfirmed = state._unconfirmed | withdrawn
     # Dependencies are acyclic, so one pass per entry settles them. The same
     # loop _save_batch runs, deliberately not shared with it: sharing would mean
     # editing a function every package emits, and every package that writes none
@@ -1268,8 +1363,7 @@ def _withdraw_confirmation(state: STATE_CLASS, step: str) -> None:
                 unconfirmed.add(name)
         if before == unconfirmed:
             break
-    if hasattr(state, "_unconfirmed"):
-        setattr(state, "_unconfirmed", unconfirmed)  # noqa: B010 - state is typed object
+    state._unconfirmed = unconfirmed
     logger.info("withdrew confirmation on entering " + step)
 `
 
@@ -1301,7 +1395,7 @@ const stateRenderHelpers = `def _state_text(name: str, value: object) -> str:
     if value is None or value == "":
         return _STATE_EMPTY
     if not isinstance(value, str):
-        value = json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)
+        value = to_json(value).decode()
     text = str(value)
     if len(text) > _STATE_VALUE_MAX:
         # The length is only knowable here, at run time, so this cannot be a

@@ -20,7 +20,7 @@ func TestStateBlockRendersJSONAndNotARepr(t *testing.T) {
 	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 		module := emitted(t, agent, provider)
 		for _, want := range []string{
-			`json.dumps(_plain(value), separators=(",", ":"), ensure_ascii=False)`,
+			"value = to_json(value).decode()",
 			"_STATE_VALUE_MAX",
 			"value = _state_text(*_prompt_value(",
 			"text = _state_text(*_prompt_value(state, name,",
@@ -33,7 +33,7 @@ func TestStateBlockRendersJSONAndNotARepr(t *testing.T) {
 		// The bound is measured after the JSON rendering, which is what
 		// _state_text does: the length check is inside it, below the dumps.
 		body := functionBody(t, module, "def _state_text(name: str, value: object) -> str:")
-		dumps := strings.Index(body, "json.dumps")
+		dumps := strings.Index(body, "to_json(value)")
 		bound := strings.Index(body, "len(text) > _STATE_VALUE_MAX")
 		if dumps < 0 || bound < 0 || bound < dumps {
 			t.Errorf("%s measures the bound before rendering the JSON, so a structured value is bounded by "+

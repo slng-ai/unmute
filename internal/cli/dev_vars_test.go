@@ -126,6 +126,30 @@ func TestCallStartPayload(t *testing.T) {
 	}
 }
 
+// An object or a list is passed as JSON, which the docs promise, and reaches the
+// agent as JSON rather than as one quoted string its type check would refuse.
+// Text with a checked format stays text: a Phone is not JSON.
+func TestCallStartPayloadDecodesStructuredValues(t *testing.T) {
+	agent := &ir.Agent{Variables: map[string]ir.Variable{
+		"record": {Type: ir.PrimitiveString, Shape: &ir.TypeRef{Shape: "CustomerRecord"}},
+		"notes":  {Type: ir.PrimitiveString, Shape: &ir.TypeRef{List: &ir.TypeRef{Primitive: ir.PrimitiveString}}},
+		"phone":  {Type: ir.PrimitiveString, Shape: &ir.TypeRef{Shaped: ir.ShapedPhone}},
+	}}
+	got, err := callStartPayload(agent, []string{
+		`record={"record_id":"R1"}`, `notes=["one","two"]`, "phone=+34600111222",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"notes":["one","two"],"phone":"+34600111222","record":{"record_id":"R1"}}`; got != want {
+		t.Errorf("payload = %s, want %s", got, want)
+	}
+	_, err = callStartPayload(agent, []string{"record=R1"})
+	if err == nil || !strings.Contains(err.Error(), "is not JSON for a CustomerRecord") {
+		t.Errorf("a structured value that is not JSON must be refused by name, got %v", err)
+	}
+}
+
 // Every fact --source accepts is one the compiler agrees is a call fact. Two
 // lists of the same eight names is two lists that drift.
 func TestCallFactNamesMatchTheCompiler(t *testing.T) {

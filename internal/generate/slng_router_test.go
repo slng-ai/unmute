@@ -1123,7 +1123,7 @@ func TestSlngRouterLiveKitClosesTheClientItOwns(t *testing.T) {
 	if got := strings.Count(source, "= _slng_router_client()"); got != 1 {
 		t.Errorf("the router client is built in %d places, want 1: a second one is a second connection pool with no owner", got)
 	}
-	if !strings.Contains(source, "client=slng_state.slng_client") {
+	if !strings.Contains(source, "client=slng_state._slng_client") {
 		t.Errorf("the session model is not given the client this call owns, so its response hook never runs:\n%s", source)
 	}
 	if !strings.Contains(source, "ctx.add_shutdown_callback") {
