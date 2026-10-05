@@ -448,7 +448,7 @@ func Default() Table {
 			// target output: is refused because SLNG takes a tool's result shape
 			// from the tool it hosts. Reading that shape from the hosted tool is
 			// the way to open this row.
-			FieldTaskFinish: field(deny(Slng, "slng target cannot check a step's tool result: a finish: rule names a field of the tool's output:, which SLNG takes from the tool it hosts and not from the package: end the step with its finish call, or compile to livekit or pipecat")),
+			FieldTaskFinish:       field(deny(Slng, "slng target cannot check a step's tool result: a finish: rule names a field of the tool's output:, which SLNG takes from the tool it hosts and not from the package: end the step with its finish call, or compile to livekit or pipecat")),
 			FieldTaskOpening:      field(allow(Slng)),
 			FieldTaskGroup:        field(allow(Slng)),
 			FieldTaskGroupReturn:  field(allow(Slng)),

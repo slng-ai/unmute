@@ -918,4 +918,3 @@ func TestSlngKeepsOneAnnounceLine(t *testing.T) {
 		t.Errorf("one announce line was refused:\n%s", joined)
 	}
 }
-

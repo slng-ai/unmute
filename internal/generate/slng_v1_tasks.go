@@ -18,9 +18,9 @@ import (
 // after it has chosen them, the same way it fills tool_refs.
 
 type slngTask struct {
-	Name         string `json:"name"`
-	Instructions string `json:"instructions"`
-	When         string `json:"when,omitempty"`
+	Name         string   `json:"name"`
+	Instructions string   `json:"instructions"`
+	When         string   `json:"when,omitempty"`
 	Tools        []string `json:"tools,omitempty"`
 	// Each entry holds one key, the variable (with a trailing + to append), and
 	// its result path.
