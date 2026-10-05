@@ -138,8 +138,9 @@ This package's curated references: `end_call`.
 **This target creates no tool.** Every tool the body names is one your
 organisation already holds, referenced by name, and the deploy resolves each
 name to its identifier and its latest published version. A name your
-organisation does not have is a refusal, not something the push makes for you: a
-new tool starts in the SLNG dashboard.
+organisation does not have is a refusal, not something the push makes for you. A
+new code tool starts from a Python file with `voiceai tool create`, and a new
+request tool in the SLNG dashboard.
 
 These are the hosted names; deployment selects and checks their published versions:
 

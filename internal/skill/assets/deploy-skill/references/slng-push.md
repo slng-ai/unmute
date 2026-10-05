@@ -193,7 +193,9 @@ or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push too
 itself reads.
 
 A real push needs a `voiceai` release that supports a checked, resolved
-attachment, verified with 0.1.18. `unmute deploy` checks for that support first:
+attachment, verified with 0.1.18, and 0.1.20 or later when a task lists tools,
+because push turns a task's tool names into attachment ids. `unmute deploy`
+checks for that support first:
 an older `voiceai` is refused with upgrade guidance naming the install command,
 rather than falling back to a push that resolves and attaches whatever is newest
 without having checked it. Tell the user this if their run refuses early, naming
@@ -272,9 +274,11 @@ this push had already started writing, so some tools above exist on SLNG.
 `deploy-report.json` records `"outcome": "partial"`. Say so, rather than implying
 nothing happened.
 
-**Never suggest creating a tool, an MCP server or a trunk from the CLI.** There is
-no command for any of them. They are created in the SLNG dashboard, and
-`unmute deploy` says so when one is missing. The one resource unmute writes is a
+**A code tool is the one tool the CLI creates.** `voiceai tool create <file.py>`
+uploads it, then `voiceai tool run` and `voiceai tool publish` prove and publish
+it. Never suggest creating a request tool, an MCP server or a trunk from the
+CLI. There is no command for any of them. They are created in the SLNG
+dashboard, and `unmute deploy` says so when one is missing. The one resource unmute writes is a
 vault entry, and it offers that during a deploy.
 
 **Never suggest passing a secret value on a command line.** `voiceai secret

@@ -87,7 +87,7 @@ The organisation the push resolved is printed on every run. That matters because
 an exported key and a stored profile can belong to **different** organisations,
 and nothing else on screen would tell you which one you just wrote to.
 
-Deployment requires a compatible `voiceai`; this flow was verified with 0.1.18.
+Deployment requires a compatible `voiceai`; this flow was verified with 0.1.18{{if .HasTasks}}, and a task that lists tools needs 0.1.20 or later{{end}}.
 Use `--dry-run` to preview checked versions and attachment changes without
 changing SLNG. Future session inputs remain runtime checks. The result is saved
 in `deploy-report.json` beside these files.
@@ -166,8 +166,9 @@ This package's curated references: {{range $i, $name := .Builtins}}{{if $i}}, {{
 **This target creates no tool.** Every tool the body names is one your
 organisation already holds, referenced by name, and the deploy resolves each
 name to its identifier and its latest published version. A name your
-organisation does not have is a refusal, not something the push makes for you: a
-new tool starts in the SLNG dashboard.
+organisation does not have is a refusal, not something the push makes for you. A
+new code tool starts from a Python file with `voiceai tool create`, and a new
+request tool in the SLNG dashboard.
 
 These are the hosted names; deployment selects and checks their published versions:
 
