@@ -50,7 +50,7 @@ organisation the key belongs to.
 Validate, compile, and push in one command. A real push needs a `voiceai`
 release that supports a checked, resolved attachment; an older one is refused
 with upgrade guidance before anything is written. This flow has been verified
-with `voiceai 0.1.18`:
+with `voiceai 0.1.21`:
 
 ```bash
 export SLNG_API_KEY=...

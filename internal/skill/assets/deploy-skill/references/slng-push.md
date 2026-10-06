@@ -198,8 +198,11 @@ or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push too
 itself reads.
 
 A real push needs a `voiceai` release that supports a checked, resolved
-attachment, verified with 0.1.18, and 0.1.20 or later when a task lists tools,
-because push turns a task's tool names into attachment ids. `unmute deploy`
+attachment, last verified with 0.1.21. A task that lists tools needs 0.1.20 or
+later, because push turns a task's tool names into attachment ids. A hosted code
+tool needs 0.1.21 or later: an older push reported `version unchanged` while
+SLNG was still preparing the tool's dependencies, and the old agent stayed live.
+`unmute deploy`
 checks for that support first:
 an older `voiceai` is refused with upgrade guidance naming the install command,
 rather than falling back to a push that resolves and attaches whatever is newest

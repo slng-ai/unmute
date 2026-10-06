@@ -555,7 +555,16 @@ type pushResult struct {
 	// as they are, and SLNG refuses an agent whose task names a tool by name.
 	// A task with no tools is unaffected.
 	TaskTools int `json:"task_tools"`
+
+	// InboundNotReady holds the push's stderr lines that say the agent saved
+	// but phone calls will not reach it (voiceai 0.1.21). They are the only
+	// stderr lines kept: the rest is progress, and the result is in the JSON.
+	InboundNotReady []string `json:"-"`
 }
+
+// inboundNotReadyPrefix starts the stderr line voiceai prints when the saved
+// agent's inbound dispatch refresh failed.
+const inboundNotReadyPrefix = "inbound calls are not ready"
 
 // runPush shells out and returns the parsed document. A non-zero exit is not an
 // error here: the tool exits 1 whenever it refuses, and the reason is in the
@@ -613,6 +622,11 @@ func runPushWith(bin, dir string, env []string, key string, opts deployOptions, 
 		return result, fmt.Errorf("`%s %s` produced no readable result: %s",
 			deployPushBinary, strings.Join(args, " "), detail)
 	}
+	for line := range strings.Lines(stderr.String()) {
+		if line = strings.TrimSpace(line); strings.HasPrefix(line, inboundNotReadyPrefix) {
+			result.InboundNotReady = append(result.InboundNotReady, line)
+		}
+	}
 	return result, nil
 }
 
@@ -654,6 +668,9 @@ func printPushResult(out, errOut io.Writer, name, deployName, outDir, keySource 
 		printPushPlan(out, name, deployName, result)
 	default:
 		printPushOutcome(out, name, result)
+	}
+	for _, line := range result.InboundNotReady {
+		warnf(errOut, "%s: the agent is saved, but %s\n", name, line)
 	}
 	return nil
 }

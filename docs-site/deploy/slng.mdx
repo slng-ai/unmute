@@ -124,7 +124,9 @@ voiceai --profile production whoami
 
 Unmute needs a `voiceai` release that supports checked, resolved pushes.
 It checks that capability before pushing and gives upgrade guidance if it is
-missing. `voiceai 0.1.18` supports this flow. No Python SDK version is yours
+missing. Use `voiceai 0.1.21` or later. An older release can report a push as
+unchanged while SLNG is still preparing a hosted code tool, and the old agent
+stays live. No Python SDK version is yours
 to install for this target.
 
 <Warning>

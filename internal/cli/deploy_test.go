@@ -1546,6 +1546,32 @@ esac`
 	}
 }
 
+// TestDeployRelaysInboundNotReady. voiceai 0.1.21 reports on stderr when the
+// agent saved but its inbound dispatch did not refresh. The push still exits 0
+// with a good JSON result, so the line is the only sign phone calls will not
+// arrive, and deploy used to drop it with the rest of stderr.
+func TestDeployRelaysInboundNotReady(t *testing.T) {
+	stub := `case "$*" in
+  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"task_tools":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
+  *"agents push"*"--require-resolved"*) printf 'pushing\ninbound calls are not ready: dispatch rule refresh failed\n' >&2; printf '{"ok":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"},"version":{"number":1,"label":"x"}}' ;;
+  *"tool list"*) printf '[{"id":"t-end_call","scope":"global","name":"end_call","tool_type":"end_call","latest_version":1},{"id":"t-check","scope":"organisation","name":"check_availability","tool_type":"code","latest_version":1}]' ;;
+` + resolvedToolStubIn("o", "check_availability", "t-check", "1", openSchema) + `
+  *"agents get"*) printf '{"id":"agent-1","organisation_id":"o","name":"slng-tasks-fixture-slng","tool_refs":[],"mcp_refs":[]}' ;;
+  *) printf '[]' ;;
+esac`
+	_, _, errOut, err := deployFixture(t, "slng_tasks", "", stub)
+	if err != nil {
+		t.Fatalf("deploy: %v\n%s", err, errOut)
+	}
+	if !strings.Contains(errOut, "the agent is saved, but inbound calls are not ready: dispatch rule refresh failed") {
+		t.Errorf("the inbound dispatch failure was not relayed:\n%s", errOut)
+	}
+	if strings.Contains(errOut, "pushing") {
+		t.Errorf("progress stderr from the push was relayed too:\n%s", errOut)
+	}
+}
+
 // TestDeployReadsTheAgentBeforeItReplacesIt.
 //
 // The bug this exists to stop was in the first version of this flow: the live

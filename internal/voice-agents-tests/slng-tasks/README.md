@@ -41,7 +41,8 @@ Every command runs from the root of the unmute checkout.
 export SLNG_API_KEY=...            # Nicola Croon's Workspace
 export VOICEAI_API_KEY="$SLNG_API_KEY"
 
-# The released voiceai: 0.1.20 or newer.
+# The released voiceai: 0.1.21 or newer. 0.1.21 waits while SLNG prepares
+# check_availability's dependencies; 0.1.20 could report "unchanged" instead.
 brew upgrade slng-ai/tap/voiceai && hash -r
 voiceai --version
 
@@ -51,8 +52,8 @@ bin/unmute --version
 ```
 
 If `voiceai whoami` fails with "Couldn't reach SLNG to check your key",
-`api.slng.ai` is still down. Run `export VOICEAI_BASE_URL=https://eu-west.api.slng.ai`
-and carry on.
+`api.slng.ai` does not resolve. On 2026-10-06 it still did not. Run
+`export VOICEAI_BASE_URL=https://eu-west.api.slng.ai` and carry on.
 
 ### 1. The tool, from Python to a published version
 
