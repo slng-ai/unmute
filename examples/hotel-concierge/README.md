@@ -171,15 +171,14 @@ brew install slng-ai/tap/voiceai
 ```
 
 Every `voiceai` command below runs against the same organisation `unmute`
-deploys to:
+deploys to, because they use the same key:
 
 ```bash
 export VOICEAI_API_KEY="$SLNG_API_KEY"
-voiceai whoami
 ```
 
-Check the organisation it names. A stored `voiceai login` profile can belong
-to a different one, and that one will not have these resources.
+A stored `voiceai login` profile can belong to a different organisation, and
+that one will not have these resources.
 
 This example references resources in the organisation it was written for.
 Inspect yours with `unmute resources`, then make sure it holds each of these.
@@ -349,11 +348,10 @@ voiceai agents web-sessions create <agent_id> --file session.json
 The push creates nothing. Both hosted tools and the MCP server have to exist
 before the push, in the organisation the key belongs to.
 
-**Fix:** list what the organisation holds, and check the name on the key:
+**Fix:** list what the key's organisation holds:
 
 ```bash
 unmute resources
-voiceai whoami
 ```
 
 Then create whatever is missing from the table in

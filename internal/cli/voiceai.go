@@ -173,34 +173,6 @@ func firstLine(text string) string {
 // Captured documents live in testdata/voiceai; see that directory's README for
 // which parts are real and which are synthesised.
 
-// slngAccount is `voiceai whoami`. A lightweight auth probe that spends no
-// credits, which is what makes it affordable on every deploy.
-type slngAccount struct {
-	OK      bool   `json:"ok"`
-	Profile string `json:"profile"`
-	Account struct {
-		OrgID   string `json:"org_id"`
-		OrgName string `json:"org_name"`
-	} `json:"account"`
-}
-
-// String renders the account for the line a run prints before it checks
-// anything, when whoami answered. An environment key and a stored profile can
-// belong to different organisations, so this is not decoration.
-func (a slngAccount) String() string {
-	name := a.Account.OrgName
-	switch {
-	case name != "" && a.Account.OrgID != "":
-		name = fmt.Sprintf("%s (%s)", name, a.Account.OrgID)
-	case name == "":
-		name = a.Account.OrgID
-	}
-	if a.Profile != "" {
-		return fmt.Sprintf("%s, profile %s", name, a.Profile)
-	}
-	return name
-}
-
 // slngVaultEntry is one row of `voiceai secret list`. Three fields answer every
 // vault question this feature asks, which is why there is no lookup per name.
 type slngVaultEntry struct {
@@ -289,7 +261,6 @@ type slngTrunk struct {
 
 // slngResources is what one preflight learned about the account.
 type slngResources struct {
-	Account   slngAccount
 	Vault     []slngVaultEntry
 	Tools     []slngAccountTool
 	MCPServer []slngMCPServer
@@ -307,12 +278,11 @@ type slngResources struct {
 }
 
 // readResources asks the account everything the preflight needs, in a fixed
-// number of reads: one for the account itself, one per resource kind, then one
-// per distinct MCP server the package actually names and the account actually
-// has.
+// number of reads: one per resource kind, then one per distinct MCP server the
+// package actually names and the account actually has. Nothing asks which
+// organisation this is: the key decides it, and every call gets the same key.
 func readResources(runner *voiceaiRunner, servers []string) slngResources {
 	resources := slngResources{MCPTools: map[string][]slngMCPTool{}}
-	resources.Account = readAccount(runner)
 
 	// Each of the three listings is independent: one failing leaves the other two
 	// worth having, so a failure is recorded and the run continues.
@@ -339,21 +309,6 @@ func readResources(runner *voiceaiRunner, servers []string) slngResources {
 
 	resources.Notes = runner.notes
 	return resources
-}
-
-// readAccount asks `voiceai whoami` which organisation the key belongs to, and
-// is best effort. The key decides the organisation whatever this says, and
-// whoami's host can be down while every other read works. A failed read leaves
-// the account unknown (OK false) and drops its stderr, so no line replaces the
-// organisation line.
-func readAccount(runner *voiceaiRunner) slngAccount {
-	var account slngAccount
-	notes := len(runner.notes)
-	if err := runner.read(target.SlngWhoami, &account); err != nil {
-		runner.notes = runner.notes[:notes]
-		return slngAccount{}
-	}
-	return account
 }
 
 // readTool fetches one tool's whole definition, which is what a hosted

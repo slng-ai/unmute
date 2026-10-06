@@ -196,8 +196,7 @@ profile `voiceai login` stored. Those are two names for one token: a single SLNG
 key serves every SLNG role, including the Context Router key a generated livekit
 or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push
 tool itself reads. The key decides the organisation, and every call in a deploy
-uses the same key. `unmute deploy` prints a `slng: organisation` line only when
-`voiceai whoami` answers, and carries on without it when whoami does not.
+uses the same key, so no command asks which organisation it is.
 
 A real push needs `voiceai` 0.1.22 or later. It attaches a checked, resolved
 version, turns a task's tool names into attachment ids, waits while SLNG

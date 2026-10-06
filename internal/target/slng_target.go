@@ -121,13 +121,6 @@ const SlngPushBinary = "voiceai"
 // CLI's own spelling, not a typo here, and TestSlngPushCommandsAgree guards the
 // plural `voiceai tools`, which still does not exist.
 var (
-	// SlngWhoami names the account before anything else runs. A lightweight auth
-	// probe that spends no TTS or STT credits, so it is cheap enough to run on
-	// every deploy and is the only way to say which organisation a run resolved
-	// *before* writing to it. An environment key and a stored profile can belong
-	// to different ones.
-	SlngWhoami = SlngCommand{"whoami"}
-
 	// SlngSecretList answers every vault question in one read: each entry carries
 	// its name, its kind and whether it holds a value, so absent, empty and
 	// wrong-kind are all decidable without a lookup per name.

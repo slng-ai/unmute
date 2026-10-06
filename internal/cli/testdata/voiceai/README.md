@@ -22,7 +22,6 @@ reports success.
 
 | File | Command | Notes |
 |---|---|---|
-| `whoami.json` | `voiceai whoami --json` | `account.name` and `account.email` really are null on a key-only profile |
 | `secret_list.json` | `voiceai secret list --json` | reduced from 44 entries. `HALF_MADE_TOKEN` is **synthesised**: every entry on the captured account had a value, and `has_value: false` is a state the code must handle |
 | `tool_list.json` | `voiceai tool list --json` | all seven, unmodified. Six are curated capabilities, which is the fact that makes a `builtin:` check positive |
 | `mcp_list_empty.json` | `voiceai mcp list --json` | the captured account has no MCP servers, so this is the real response |

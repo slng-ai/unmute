@@ -56,11 +56,6 @@ pull acme-support
   agent.yaml                              1 secret added
 ```
 
-When `voiceai whoami` answers, a `slng: organisation` line comes before the
-files. It is not decoration. Two organisations can be reachable from one
-checkout, provisioned differently, so a listing from one says nothing about
-the other.
-
 `unchanged` is printed rather than skipped: a pull that fetched and found
 nothing new looks identical to a pull that did not run, and this is the line
 that tells them apart.
@@ -113,7 +108,7 @@ header a pull would turn a clean build red.
 
 ## Refusals
 
-Each names the organisation that was read, because the answer depends on it.
+Each says what to do next.
 
 **A name your organisation does not hold.** Unmute creates no tool, so this is
 the end of the road until somebody makes one:

@@ -386,8 +386,8 @@ func buildDeployReport(
 	// `end_call` be reported as attached and detached in one preview.
 	attaching := append(append([]resolvedTool(nil), deployment.Resolution.Tools...), deployment.Resolution.Builtins...)
 	return deployReport{
-		Target: name, Organisation: deployment.Account.String(),
-		Agent: deployName, AgentID: agentID, Action: action,
+		Target: name,
+		Agent:  deployName, AgentID: agentID, Action: action,
 		DryRun: dryRun, Outcome: outcome,
 		Tools: compareAttachments(attaching,
 			deployment.Proposed,

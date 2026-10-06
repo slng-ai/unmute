@@ -121,6 +121,14 @@ var retiredOutputs = []retiredOutput{
 		instead: "deploy passes only --require-resolved: the key decides the organisation, and voiceai 0.1.22 removed --expect-org",
 	},
 	{
+		needles: []string{"slng: organisation "},
+		instead: "nothing: deploy and pull no longer name the organisation, because the key decides it and `voiceai whoami` is gone",
+	},
+	{
+		needles: []string{"voiceai whoami"},
+		instead: "unmute resources, which lists what the key's organisation holds; unmute no longer runs whoami",
+	},
+	{
 		needles: []string{"the checks ran against", "the push reported"},
 		instead: "nothing: deploy no longer compares the organisation the checks read with the one the push reported",
 	},

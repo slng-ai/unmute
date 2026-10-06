@@ -115,14 +115,7 @@ func runPull(cmd *cobra.Command, args []string, force, check bool) error {
 	}
 	runner := newVoiceaiRunner(bin, readEnv, "")
 
-	// The organisation before any finding, when whoami answers. Two are
-	// reachable from one checkout and are provisioned differently, so a reader
-	// who knows which was read can act on the rest.
-	account := readAccount(runner)
 	printHeader(out, "pull "+displayDir(dir))
-	if account.OK {
-		fmt.Fprintf(out, "  slng: organisation %s\n\n", account)
-	}
 
 	// Every tool is fetched before anything is written. A package whose second
 	// tool cannot be fetched must not be left holding a mirror of its first:

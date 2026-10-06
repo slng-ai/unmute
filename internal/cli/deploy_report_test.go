@@ -331,7 +331,7 @@ func TestReportCarriesNoSecretAndNoRawPayload(t *testing.T) {
 		"headers": []any{map[string]any{"name": "X-Region", "secret_name": "REGION"}},
 	}
 	report := deployReport{
-		Target: "slng", Organisation: "Example (org-1)", Agent: "acme-support-slng",
+		Target: "slng", Agent: "acme-support-slng",
 		Outcome: "previewed", DryRun: true,
 		Tools: compareAttachments([]resolvedTool{reference}, proposedSettings{Arguments: suppliesQuery}, liveWith(func(*slngLiveTool) {}), true, nil),
 		Checks: reportChecks([]finding{{

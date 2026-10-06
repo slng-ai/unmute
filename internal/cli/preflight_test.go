@@ -25,7 +25,6 @@ import (
 // holding one of each kind, one healthy MCP server and one whose probe failed.
 func account() slngResources {
 	return slngResources{
-		Account: slngAccount{OK: true, Profile: "default"},
 		Tools: []slngAccountTool{
 			{Name: "end_call", ToolType: "end_call"},
 			{Name: "transfer_call", ToolType: "transfer_call"},
@@ -726,7 +725,6 @@ func TestDeployWritesNothingButSecrets(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "calls.log")
 	stub := `printf '%s\n' "$*" >> ` + log + `
 case "$*" in
-  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"n"}}' ;;
   *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"n"},"agent":{"id":"a1","action":"create"}}' ;;
   *"agents push"*) printf '{"ok":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"n"},"agent":{"id":"a1","name":"a","action":"create"},"version":"unchanged"}' ;;
 ` + provisionedCatalogue + `

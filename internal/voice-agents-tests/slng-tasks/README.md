@@ -42,7 +42,6 @@ export SLNG_API_KEY=...            # Nicola Croon's Workspace
 export VOICEAI_API_KEY="$SLNG_API_KEY"
 
 # The released voiceai: 0.1.22 or newer. unmute deploy refuses an older one.
-# 0.1.22 needs no organisation, so a dead whoami host does not stop a deploy.
 brew upgrade slng-ai/tap/voiceai && hash -r
 voiceai --version
 
