@@ -191,7 +191,7 @@ include `email-validator` when you use an email type, and
 
 | Target | What `state.py` may hold |
 |---|---|
-| SLNG | Plain `str`, `int`, `float` and `bool` fields. A model, a list, a `Literal` or a checked format is refused, because SLNG runs no code from your package and has nowhere to check one. `str \| None` is fine. Also the only target that takes `source: conversation`, a value the model records mid-call |
+| SLNG | A field a task saves may be a model, a list, a `Literal`, a phone number, an email address, a date or a time. A field the dispatch fills must be plain `str`, `int`, `float` or `bool`. A `datetime`, a `dict`, or a pattern other than the `Id` one is refused. `str \| None` is fine. Also the only target that takes `source: conversation`, a value the model records mid-call |
 | LiveKit and Pipecat | Everything on this page |
 | Twilio | No `state.py`. A package that has one is refused |
 
