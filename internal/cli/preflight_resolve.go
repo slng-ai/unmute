@@ -113,10 +113,13 @@ func scopeNotes(resolved []resolvedTool, catalogue []slngAccountTool) []string {
 		if reference.ToolID == "" {
 			continue
 		}
+		// Only another organisation tool counts. An organisation tool that shares
+		// a name with a global one is the normal case, the resolver already picks
+		// the organisation's, and nobody can rename the global one.
 		var others []string
 		for _, tool := range catalogue {
-			if tool.Name == reference.Requirement.Name && tool.ID != reference.ToolID {
-				others = append(others, fmt.Sprintf("%s at %s scope", tool.ID, tool.Scope))
+			if tool.Name == reference.Requirement.Name && tool.ID != reference.ToolID && tool.Scope == "organisation" {
+				others = append(others, tool.ID)
 			}
 		}
 		if len(others) == 0 {

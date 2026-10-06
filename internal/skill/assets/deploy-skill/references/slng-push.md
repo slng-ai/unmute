@@ -120,17 +120,22 @@ slng's alone.
 ### One name, held twice
 
 SLNG publishes a capability to everybody and an organisation can hold its own
-copy of the same name. `unmute deploy` prefers the organisation's, which is what
-the dashboard attaches, and names both so the choice is visible:
+copy of the same name. `unmute deploy` attaches the organisation's, which is what
+the dashboard attaches, and says nothing: that is the normal case.
+
+A bare `voiceai agents push` prefers the global one, which is how a single
+package has attached `end_call` v3 through `unmute deploy` and v1 through a
+direct push. Deploy through unmute.
+
+Two organisation tools with one name are an ambiguity the author can fix, so
+deploy names both:
 
 ```text
 note: slng: this organisation holds "end_call" more than once: fd25f5c5-… was attached,
-  and 952eb6b1-… at global scope was not. Rename one of them in the SLNG dashboard if the
+  and 952eb6b1-… was not. Rename one of them in the SLNG dashboard if the
   wrong one is running
 ```
 
-A bare `voiceai agents push` prefers the other one, which is how a single package
-has attached `end_call` v3 through `unmute deploy` and v1 through a direct push.
 Read the note out when it appears.
 
 ### A governed model writes its provider

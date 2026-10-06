@@ -119,6 +119,11 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 	// Local refusals first. The slng target refuses things SLNG will not run, and
 	// every one of them is cheaper to hear now than as a rejected push.
 	report, validateErr := ir.Validate(agent, pushable, target.Default())
+	// A row's scope names what validate leaves to deploy. This is deploy, and it
+	// checks all of it next, so the line would only contradict the run.
+	for i := range report.PerTarget {
+		report.PerTarget[i].Scope = ""
+	}
 	printValidationReport(out, errOut, report)
 	if validateErr != nil {
 		return fmt.Errorf("deploy %s: %w", dir, validateErr)
