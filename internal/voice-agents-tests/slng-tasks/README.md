@@ -26,12 +26,11 @@ flowchart LR
   A -->|unmute deploy| G
 ```
 
-1. The tool goes from the Python file to a published version with the new
+1. The tool goes from the Python file to a published version with the
    `voiceai tool` commands.
-2. The package compiles, and the unreleased `voiceai` pushes it directly. That
-   proves the task tool rewrite before any release.
+2. The package compiles, and `voiceai` pushes it directly. That proves the
+   task tool rewrite on its own.
 3. `unmute deploy` pushes it through the guarded path, which is what users run.
-4. After the voiceai release, the same deploy runs on the released binary.
 
 Every command runs from the root of the unmute checkout.
 
@@ -42,15 +41,12 @@ Every command runs from the root of the unmute checkout.
 export SLNG_API_KEY=...            # Nicola Croon's Workspace
 export VOICEAI_API_KEY="$SLNG_API_KEY"
 
-# The voiceai branch, built as the binary that ships.
-SDKS=../slng_sdks                  # your voiceai checkout
-git -C "$SDKS" fetch origin && git -C "$SDKS" switch feat/push-task-tool-refs
-(cd "$SDKS" && bun install && cd cli && bun test && bunx tsc --noEmit -p . && bun run build)
-export PATH="$PWD/$SDKS/cli/bin:$PATH"   # use an absolute path if SDKS is not relative
+# The released voiceai: 0.1.20 or newer.
+brew upgrade slng-ai/tap/voiceai && hash -r
 voiceai --version
 
-# The unmute branch.
-git switch feat/slng-managed-tasks && make build
+# unmute from main.
+git switch main && make build
 bin/unmute --version
 ```
 
@@ -59,6 +55,11 @@ If `voiceai whoami` fails with "Couldn't reach SLNG to check your key",
 and carry on.
 
 ### 1. The tool, from Python to a published version
+
+`check_availability.py` uses `day: date`, so its schema carries
+`"format": "date"`. SLNG accepts that since backend
+[#955](https://github.com/slng-ai/backend/pull/955), released 2026-10-06.
+Before #955, build, run and publish passed, but connect failed.
 
 ```sh
 H=internal/voice-agents-tests/slng-tasks/hosted
@@ -88,7 +89,7 @@ voiceai tool create "$H/check_availability.py" --name ok --dependency 'orjson>=3
 # Expected: "is not an exact pin", exit 1.
 ```
 
-### 2. Push the package with the unreleased voiceai
+### 2. Push the package with voiceai
 
 ```sh
 PKG=internal/voice-agents-tests/slng-tasks
@@ -131,35 +132,14 @@ bin/unmute deploy "$PKG"
 # to published versions, and the second real run changes nothing.
 ```
 
-An old voiceai must be refused before anything is written:
+A voiceai older than 0.1.20 sends task tool names, not attachment ids.
+`unmute deploy` refuses it before anything is written.
+`internal/cli/deploy_test.go` covers that refusal.
 
-```sh
-PATH="/opt/homebrew/bin:$PATH" bin/unmute deploy "$PKG" --dry-run
-# Expected, with voiceai 0.1.18: "cannot push, the installed `voiceai` is too
-# old for tasks ... Nothing was changed: upgrade with
-# `brew upgrade slng-ai/tap/voiceai`, then deploy again", and exit 1.
-```
+### 4. Talk to it
 
-Release voiceai once 1 to 3 pass.
-
-### 4. After the voiceai release
-
-```sh
-brew upgrade voiceai && hash -r && which voiceai && voiceai --version
-make test && make lint
-bin/unmute deploy internal/voice-agents-tests/slng-tasks
-```
-
-Then open the agent in the SLNG dashboard, start a web session, and ask to book
+Open the agent in the SLNG dashboard, start a web session, and ask to book
 a cut next Wednesday. The agent should confirm your number, say "Let me have a
 look.", and call `check_availability`. Wednesday 2026-10-07 is free. A Sunday
 is refused, and so is colour on a Monday.
 
-### Clean up
-
-`unmute-tasks-test-slng` (`767c2617-8967-4357-806b-aec0299a6b00`) is the
-scratch agent from the first live run, and nothing deploys it any more:
-
-```sh
-voiceai agents delete 767c2617-8967-4357-806b-aec0299a6b00
-```
