@@ -263,6 +263,9 @@ voiceai tool publish check_availability
 ```
 
 The file defines a pydantic `Input` and `Output` and a `handler(input: Input) -> Output`.
+SLNG refuses a few schema keywords in `Input`, so a `Field(pattern=...)`, a
+`Decimal` or a fixed-length tuple fails the build. A date, a time, a UUID or an
+email address is fine.
 A push attaches only a published version.
 
 ## Which block for which job
