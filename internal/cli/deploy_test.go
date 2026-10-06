@@ -1446,6 +1446,11 @@ func TestDeployWritesTheReportAndNamesTheVersionsItAttached(t *testing.T) {
 			t.Errorf("stdout does not say %q, so a reader cannot tell which version is running:\n%s", want, out)
 		}
 	}
+	// validate's row says these checks are left to deploy. Printed by deploy, the
+	// row would contradict the lines that make them.
+	if strings.Contains(out, "not by this command") {
+		t.Errorf("deploy prints validate's deferred-scope sentence:\n%s", out)
+	}
 
 	raw, readErr := os.ReadFile(filepath.Join(dir, "build", "slng", "deploy-report.json"))
 	if readErr != nil {

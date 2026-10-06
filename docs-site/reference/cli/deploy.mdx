@@ -66,7 +66,7 @@ guidance before anything is written. See [Hosted tools](/build/tools/hosted).
 A clean run reads:
 
 ```text
-✓ slng (slng)  local checks only: a hosted tool's existence, its published description and argument contract, and every vault entry it needs, are confirmed by `unmute deploy`, not by this command
+✓ slng (slng)
 slng: organisation Your Workspace (<org_id>)
 slng: <n> requirements satisfied
 slng: credential from SLNG_API_KEY
@@ -80,9 +80,8 @@ slng: agent created <agent_id>
 slng: deployed. Talk to it: voiceai agents web-sessions create <agent_id> --file session.json
 ```
 
-The first line is `validate`'s own row, and the sentence after it is there
-because a clean local result is narrower than a clean deploy: it says which
-checks this command has not made.
+The first line is `validate`'s own row. Every line after it is a check
+`validate` cannot make, made against your organisation.
 
 Each `attached` line names a reference this run resolved and checked against
 your organisation, never one it created. Every tool it names already existed,
