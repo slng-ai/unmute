@@ -53,11 +53,6 @@ const (
 	// name and expecting the other tool to see it, which is why `unmute deploy`
 	// reads both and passes on whichever it found.
 	SlngPushCredentialEnv = "VOICEAI_API_KEY"
-	// SlngPushBaseURLEnv is the push tool's API host. Every SLNG host carries a
-	// world part and bare api.slng.ai has no DNS record, but voiceai still
-	// defaults to the bare host. So `unmute deploy` sets this to the target's
-	// region unless the author already set it.
-	SlngPushBaseURLEnv = "VOICEAI_BASE_URL"
 	// SlngLoginCommand is the alternative to exporting the key by hand. The CLI
 	// also takes `voiceai config set apiKey <token>`.
 	SlngLoginCommand = "voiceai login"
@@ -244,13 +239,6 @@ const (
 	// to whatever is newest. Unmute promises to attach a checked version, and it
 	// cannot keep that promise through a push that re-resolves.
 	SlngRequireResolvedFlag = "--require-resolved"
-
-	// SlngExpectOrgFlag names the organisation the checks ran against, so the
-	// push refuses before writing if its credential belongs to another one. A
-	// matching profile name is not evidence: an exported key and a stored profile
-	// can resolve to different organisations, and nothing else on screen says
-	// which one was written to.
-	SlngExpectOrgFlag = "--expect-org"
 )
 
 // SlngResolutionContract is the marker a compatible push returns, and reading it

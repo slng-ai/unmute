@@ -46,10 +46,10 @@ type deployReport struct {
 	ReportVersion int    `json:"report_version"`
 	Target        string `json:"target"`
 	Provider      string `json:"provider"`
-	// Organisation is the account every read and write in this run used. It is
-	// here because an exported key and a stored profile can resolve to
-	// different ones, and a report that did not say which would be unreadable a
-	// week later.
+	// Organisation is the account every read and write in this run used, as
+	// `voiceai whoami` named it. It is here because an exported key and a
+	// stored profile can resolve to different ones. Empty when whoami did not
+	// answer.
 	Organisation string `json:"organisation"`
 	// Agent is the deployed name, which is the package's `name:` joined to this
 	// target, and the id when one was established.

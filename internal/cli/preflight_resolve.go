@@ -210,28 +210,14 @@ func resolveOneHosted(
 		return out
 	}
 
-	// The metadata read, for the two fields the version envelope does not carry.
-	identity, err := readToolIdentity(runner, cache, chosen.ID)
-	if err != nil {
+	// The metadata read proves the listed id answers as itself. A record that
+	// does not is a failed read, not a tool to check.
+	if _, err := readToolIdentity(runner, cache, chosen.ID); err != nil {
 		found.State = notChecked
 		found.Detail = fmt.Sprintf("%v, so this reference's version and contract were not checked", err)
 		out.finding = found
 		return out
 	}
-	// A curated record carries no organisation, so the account comparison below
-	// has nothing to compare and correctly lets it through: `identity.Source ==
-	// "curated"` used to refuse it here, which was the last of the three gates.
-	if account := resources.Account.Account.OrgID; account != "" && identity.OrganisationID != "" && identity.OrganisationID != account {
-		// The listing and the record disagree about whose tool this is. Reading
-		// on would validate a contract belonging to another organisation.
-		found.State = wrongKind
-		found.Detail = fmt.Sprintf(
-			"the tool of this name belongs to organisation %s and this run resolved %s: the checks and the push must use one account, so select the right profile or key and run again",
-			identity.OrganisationID, account)
-		out.finding = found
-		return out
-	}
-
 	snapshot, err := readPublishedVersion(runner, cache, chosen.ID, chosen.LatestVersion)
 	if err != nil {
 		found.State = notChecked

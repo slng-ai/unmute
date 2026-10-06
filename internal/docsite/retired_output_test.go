@@ -116,6 +116,14 @@ var retiredOutputs = []retiredOutput{
 		needles: []string{"driver must verify a max-duration cap"},
 		instead: "nothing: this was a note to a maintainer that had leaked into the author's terminal",
 	},
+	{
+		needles: []string{"--expect-org"},
+		instead: "deploy passes only --require-resolved: the key decides the organisation, and voiceai 0.1.22 removed --expect-org",
+	},
+	{
+		needles: []string{"the checks ran against", "the push reported"},
+		instead: "nothing: deploy no longer compares the organisation the checks read with the one the push reported",
+	},
 }
 
 // TestNoPageQuotesRetiredCLIOutput fails when a reader-facing surface quotes a

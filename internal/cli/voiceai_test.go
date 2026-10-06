@@ -223,9 +223,7 @@ esac`)
 	runner := newVoiceaiRunner(bin, nil, "")
 	// Two tools on one server, and the same server named twice, because a package
 	// may reference one server from several tools. Neither may cost a second read.
-	if _, err := readResources(runner, []string{"firecrawl-mcp"}); err != nil {
-		t.Fatalf("readResources: %v", err)
-	}
+	readResources(runner, []string{"firecrawl-mcp"})
 	if _, _, err := readTrunks(runner); err != nil {
 		t.Fatalf("readTrunks: %v", err)
 	}
@@ -284,10 +282,7 @@ func TestVoiceaiKeepsReadingAfterOneKindFails(t *testing.T) {
 esac`)
 
 	runner := newVoiceaiRunner(bin, nil, "")
-	resources, err := readResources(runner, nil)
-	if err != nil {
-		t.Fatalf("one failed listing aborted the whole read: %v", err)
-	}
+	resources := readResources(runner, nil)
 	if len(resources.Unchecked) != 1 {
 		t.Fatalf("recorded %d unchecked reads, want 1: %v", len(resources.Unchecked), resources.Unchecked)
 	}
@@ -299,16 +294,24 @@ esac`)
 	}
 }
 
-// TestVoiceaiStopsWhenItCannotNameTheAccount. Every finding is a statement about
-// one organisation. A run that cannot say which one has nothing to report, so
-// this is the single fatal read.
-func TestVoiceaiStopsWhenItCannotNameTheAccount(t *testing.T) {
-	bin, _ := stubVoiceai(t, `printf 'error: invalid api key\n' >&2; exit 1`)
+// TestVoiceaiCarriesOnWhenItCannotNameTheAccount. whoami is best effort: the
+// key decides the organisation, so a failed whoami leaves the account unknown,
+// keeps its stderr out of the notes, and the listings are still read.
+func TestVoiceaiCarriesOnWhenItCannotNameTheAccount(t *testing.T) {
+	bin, _ := stubVoiceai(t, `case "$*" in
+  *whoami*) printf 'getaddrinfo ENOTFOUND api.slng.ai\n' >&2; exit 1 ;;
+  *) printf '[]' ;;
+esac`)
 	runner := newVoiceaiRunner(bin, nil, "")
-	if _, err := readResources(runner, nil); err == nil {
-		t.Fatal("a run that could not identify the account carried on checking it")
-	} else if !strings.Contains(err.Error(), "which SLNG organisation") {
-		t.Errorf("the error %q does not say what could not be determined", err)
+	resources := readResources(runner, nil)
+	if resources.Account.OK {
+		t.Errorf("a failed whoami produced an account: %+v", resources.Account)
+	}
+	if len(resources.Notes) != 0 {
+		t.Errorf("whoami's failure became a note: %v", resources.Notes)
+	}
+	if runner.reads["tool list"] != 1 || len(resources.Unchecked) != 0 {
+		t.Errorf("the listings were not read after whoami failed: %v %v", runner.reads, resources.Unchecked)
 	}
 }
 
@@ -322,10 +325,7 @@ func TestVoiceaiSkipsToolsForAServerItDoesNotHave(t *testing.T) {
 esac`)
 
 	runner := newVoiceaiRunner(bin, nil, "")
-	resources, err := readResources(runner, []string{"absent-mcp"})
-	if err != nil {
-		t.Fatalf("readResources: %v", err)
-	}
+	resources := readResources(runner, []string{"absent-mcp"})
 	if runner.reads["mcp tools"] != 0 {
 		t.Error("a server the account does not have was interrogated for its tools")
 	}

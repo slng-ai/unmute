@@ -46,7 +46,6 @@ unmute resources
 
 ```text
 ━━ resources
-organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd), profile default
 
 tools (7)
   api_request              api_request
@@ -68,6 +67,10 @@ phone numbers (4 trunks)
   inbound  2_inbound                +447700900222        in use by acme-support-slng
   outbound demo-general             +447700900333        in use by acme-support-slng
 ```
+
+When `voiceai whoami` answers, an `organisation` line comes first. It names the
+organisation the key belongs to. When whoami does not answer, the listing
+starts at `tools`.
 
 ## Reading it
 

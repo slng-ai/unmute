@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/generate"
-	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/target"
 )
 
@@ -205,7 +204,7 @@ func TestBlockerHintOnlyAddsWhatTheToolCannotKnow(t *testing.T) {
 // read from the wrong one and told the author to rename the wrong thing.
 func TestPushResultWarnsThatAnUpdateReplaces(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if err := printPushResult(&out, &errOut, "slng", "acme-support-slng", "build/slng", target.SlngRouterKeyEnv, slngAccount{}, decodePush(t, pushOutcomeJSON)); err != nil {
+	if err := printPushResult(&out, &errOut, "slng", "acme-support-slng", "build/slng", target.SlngRouterKeyEnv, decodePush(t, pushOutcomeJSON)); err != nil {
 		t.Fatalf("a successful outcome returned %v", err)
 	}
 	warned := errOut.String()
@@ -230,13 +229,13 @@ func TestPushResultWarnsThatAnUpdateReplaces(t *testing.T) {
 func TestPushResultReturnsAnErrorWheneverItPrintedOne(t *testing.T) {
 	for name, raw := range map[string]string{"blocked": pushBlockedJSON, "errored": pushErrorJSON} {
 		var out, errOut bytes.Buffer
-		err := printPushResult(&out, &errOut, "slng", "acme-support-slng", "build/slng", "", slngAccount{}, decodePush(t, raw))
+		err := printPushResult(&out, &errOut, "slng", "acme-support-slng", "build/slng", "", decodePush(t, raw))
 		if err == nil {
 			t.Errorf("%s: printPushResult returned nil, so unmute would exit 0 after printing:\n%s", name, errOut.String())
 		}
 	}
 	var out, errOut bytes.Buffer
-	if err := printPushResult(&out, &errOut, "slng", "acme-support-slng", "build/slng", target.SlngRouterKeyEnv, slngAccount{}, decodePush(t, pushPlanJSON)); err != nil {
+	if err := printPushResult(&out, &errOut, "slng", "acme-support-slng", "build/slng", target.SlngRouterKeyEnv, decodePush(t, pushPlanJSON)); err != nil {
 		t.Errorf("a dry run that found nothing wrong returned %v", err)
 	}
 }
@@ -479,7 +478,7 @@ func deployFixture(t *testing.T, fixture, input, script string, args ...string) 
 // The `--require-resolved` case has to come before the plain `agents push` case
 // in a shell `case`, because the first match wins and every guarded push
 // contains both strings.
-const contractStub = `  *"agents push"*"--require-resolved"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"organisation":{"id":"org-1","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;`
+const contractStub = `  *"agents push"*"--require-resolved"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"org-1","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;`
 
 // resolvedToolStub answers the two ID-addressed reads a hosted reference needs:
 // the metadata that says whose tool it is, and the immutable published version
@@ -557,21 +556,24 @@ func TestDeployNamesTheOrganisationBeforeChecking(t *testing.T) {
 	}
 }
 
-// TestDeployStopsWhenItCannotNameTheAccount. With no account, every finding
-// would be about an organisation the run cannot identify, so there is nothing
-// worth reporting.
-func TestDeployStopsWhenItCannotNameTheAccount(t *testing.T) {
-	dir, _, errOut, err := deployWithStub(t, `printf 'error: invalid api key\n' >&2; exit 1`)
-	if err == nil {
-		t.Fatal("a run that could not identify the account carried on")
+// TestDeployCarriesOnWhenWhoamiFails. The key decides the organisation, so a
+// whoami that cannot answer (its host stopped resolving) is no reason to stop.
+// The organisation line is left out rather than replaced, and the push is not
+// handed --expect-org, which voiceai 0.1.22 no longer takes.
+func TestDeployCarriesOnWhenWhoamiFails(t *testing.T) {
+	stub := strings.Replace(provisionedStub(`printf '[]'`), `case "$*" in`, `case "$*" in
+  *whoami*) printf 'getaddrinfo ENOTFOUND api.slng.ai\n' >&2; exit 1 ;;
+  *"--expect-org"*) printf "error: unknown option '--expect-org'\n" >&2; exit 1 ;;`, 1)
+	_, out, errOut, err := deployWithStub(t, stub)
+	if err != nil {
+		t.Fatalf("a deploy whose whoami failed was refused: %v\n%s", err, errOut)
 	}
-	if !strings.Contains(err.Error(), "which SLNG organisation") {
-		t.Errorf("the error does not say what could not be determined: %v", err)
+	if strings.Contains(out, "organisation ") {
+		t.Errorf("an organisation line was printed with no account to name:\n%s", out)
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, "build")); !os.IsNotExist(statErr) {
-		t.Error("a run that never identified the account still wrote a build directory")
+	if strings.Contains(out+errOut, "ENOTFOUND") {
+		t.Errorf("whoami's failure reached the output:\n%s%s", out, errOut)
 	}
-	_ = errOut
 }
 
 // TestDeployPreflightDegrades. A read that could not be made is never counted
@@ -871,8 +873,8 @@ const provisionedCatalogue = `  *"tool list"*) printf '[{"id":"t-end_call","scop
 func provisionedStub(trunks string) string {
 	return `case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
-  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
-  *"agents push"*"--require-resolved"*) printf '{"ok":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"},"version":"unchanged"}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
+  *"agents push"*"--require-resolved"*) printf '{"ok":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"},"version":"unchanged"}' ;;
   *"tool list"*) printf '[{"id":"t-end_call","scope":"global","name":"end_call","tool_type":"end_call","latest_version":1},{"id":"t-check_order","scope":"organisation","name":"check_order","tool_type":"code","latest_version":1},{"id":"t-refund","scope":"organisation","name":"refund","tool_type":"api_request","latest_version":2}]' ;;
 ` + resolvedToolStubIn("o", "check_order", "t-check_order", "1", openSchema) + `
 ` + resolvedToolStubIn("o", "refund", "t-refund", "2", openSchema) + `
@@ -1284,32 +1286,6 @@ func TestDeployNamesTheOrganisationExactlyOnce(t *testing.T) {
 	}
 }
 
-// But a real difference is not a duplicate. The preflight reads with the
-// resolved credential and the push runs as its own process; if those land in
-// different organisations then everything just checked was about somewhere else,
-// and saying nothing would be the worst possible outcome.
-func TestDeployWarnsWhenThePushLandsElsewhere(t *testing.T) {
-	stub := `case "$*" in
-  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"org-CHECKED","org_name":"Checked"}}' ;;
-  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"organisation":{"id":"org-CHECKED","name":"Checked"},"agent":{"id":"agent-1","action":"create"}}' ;;
-  *"agents push"*) printf '{"ok":true,"resolution_contract":1,"organisation":{"id":"org-WRITTEN","name":"Written"},"agent":{"id":"agent-1","name":"slng-tools-slng","action":"create"},"version":"unchanged"}' ;;
-` + provisionedCatalogue + `
-` + provisionedContract("org-CHECKED") + `
-  *"agents get"*) printf '{"id":"agent-1","organisation_id":"org-CHECKED","name":"slng-tools-fixture-slng","tool_refs":[],"mcp_refs":[]}' ;;
-  *) printf '[]' ;;
-esac`
-	_, _, errOut, err := deployWithStub(t, stub)
-	if err != nil {
-		t.Fatalf("deploy: %v", err)
-	}
-	if !strings.Contains(errOut, "different organisations") {
-		t.Errorf("a push that landed in another organisation was not reported:\n%s", errOut)
-	}
-	if !strings.Contains(errOut, "not what was written") {
-		t.Errorf("the warning does not say what the consequence is:\n%s", errOut)
-	}
-}
-
 // TestDryRunMakesNoRemoteChange is the read-only promise, held by refusing
 // every mutating command rather than by inspecting output.
 //
@@ -1331,7 +1307,7 @@ func TestDryRunMakesNoRemoteChange(t *testing.T) {
 	recorder := `printf '%s\n' "$*" >> ` + log + `
 case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
-  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"update"}}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"update"}}' ;;
 ` + provisionedCatalogue + `
 ` + provisionedContract("o") + `
 ` + provisionedAgent + `
@@ -1530,8 +1506,8 @@ func TestDeployRefusesAPushToolThatLeavesTaskToolsAsNames(t *testing.T) {
 	stub := func(marker string) string {
 		return `case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
-  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1` + marker + `,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
-  *"agents push"*"--require-resolved"*) printf '{"ok":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"},"version":"unchanged"}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"org_optional":1` + marker + `,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
+  *"agents push"*"--require-resolved"*) printf '{"ok":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"},"version":"unchanged"}' ;;
   *"tool list"*) printf '[{"id":"t-end_call","scope":"global","name":"end_call","tool_type":"end_call","latest_version":1},{"id":"t-check","scope":"organisation","name":"check_availability","tool_type":"code","latest_version":1}]' ;;
 ` + resolvedToolStubIn("o", "check_availability", "t-check", "1", openSchema) + `
   *"agents get"*) printf '{"id":"agent-1","organisation_id":"o","name":"slng-tasks-fixture-slng","tool_refs":[],"mcp_refs":[]}' ;;
@@ -1547,17 +1523,19 @@ esac`
 	}
 }
 
-// TestDeployPointsVoiceaiAtTheTargetRegion. Bare api.slng.ai has no DNS record,
-// so voiceai's default host fails. Deploy names the target's region host, and
-// keeps a base URL the author set.
-func TestDeployPointsVoiceaiAtTheTargetRegion(t *testing.T) {
-	slng := ir.Target{DeploymentRegions: []string{"eu-north"}}
-	if got := envValue(withSlngBaseURL([]string{"A=b"}, slng), target.SlngPushBaseURLEnv); got != "https://eu-north.api.slng.ai" {
-		t.Errorf("base URL = %q, want the eu-north host", got)
+// TestDeployRefusesAVoiceaiWithoutOrgOptional. voiceai 0.1.21 and older want
+// --expect-org, which deploy no longer sends, and their guarded answer carries
+// no org_optional marker. That is refused with the upgrade command before
+// anything is written.
+func TestDeployRefusesAVoiceaiWithoutOrgOptional(t *testing.T) {
+	stub := strings.ReplaceAll(provisionedStub(`printf '[]'`), `"org_optional":1,`, "")
+	dir, _, _, err := deployWithStub(t, stub)
+	if err == nil || !strings.Contains(err.Error(), "the installed `voiceai` is too old") ||
+		!strings.Contains(err.Error(), "brew upgrade slng-ai/tap/voiceai") {
+		t.Fatalf("a push tool with no org_optional was not refused with upgrade guidance: %v", err)
 	}
-	set := []string{target.SlngPushBaseURLEnv + "=https://eu-west.api.slng.ai"}
-	if got := envValue(withSlngBaseURL(set, slng), target.SlngPushBaseURLEnv); got != "https://eu-west.api.slng.ai" {
-		t.Errorf("an exported base URL was replaced: %q", got)
+	if _, statErr := os.Stat(filepath.Join(dir, "build")); !os.IsNotExist(statErr) {
+		t.Errorf("a refused push left a build directory behind (%v)", statErr)
 	}
 }
 
@@ -1568,8 +1546,8 @@ func TestDeployPointsVoiceaiAtTheTargetRegion(t *testing.T) {
 func TestDeployRelaysInboundNotReady(t *testing.T) {
 	stub := `case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
-  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"task_tools":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
-  *"agents push"*"--require-resolved"*) printf 'pushing\ninbound calls are not ready: dispatch rule refresh failed\n' >&2; printf '{"ok":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"},"version":{"number":1,"label":"x"}}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"org_optional":1,"task_tools":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
+  *"agents push"*"--require-resolved"*) printf 'pushing\ninbound calls are not ready: dispatch rule refresh failed\n' >&2; printf '{"ok":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"},"version":{"number":1,"label":"x"}}' ;;
   *"tool list"*) printf '[{"id":"t-end_call","scope":"global","name":"end_call","tool_type":"end_call","latest_version":1},{"id":"t-check","scope":"organisation","name":"check_availability","tool_type":"code","latest_version":1}]' ;;
 ` + resolvedToolStubIn("o", "check_availability", "t-check", "1", openSchema) + `
   *"agents get"*) printf '{"id":"agent-1","organisation_id":"o","name":"slng-tasks-fixture-slng","tool_refs":[],"mcp_refs":[]}' ;;
@@ -1603,8 +1581,8 @@ func TestDeployReadsTheAgentBeforeItReplacesIt(t *testing.T) {
 	stub := `printf '%s\n' "$*" >> ` + log + `
 case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
-  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"update"}}' ;;
-  *"agents push"*) printf '{"ok":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"update"},"version":{"number":9,"label":"l"}}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"update"}}' ;;
+  *"agents push"*) printf '{"ok":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"update"},"version":{"number":9,"label":"l"}}' ;;
 ` + provisionedCatalogue + `
 ` + provisionedContract("o") + `
   *"agents get"*) printf '{"id":"agent-1","organisation_id":"o","name":"slng-tools-fixture-slng","tool_refs":[{"attachment_id":"att-1","tool_id":"t-check_order","version":1,"invocation":"system","description":"Edited in the dashboard.","system":{"triggers":[{"event":"call_start"}],"arguments":[{"name":"caller","type":"string"}]}}],"mcp_refs":[]}' ;;
@@ -1682,7 +1660,7 @@ func TestDryRunChecksAStaleSnapshotWithoutConnecting(t *testing.T) {
 	stale := `{"id":"s-internal_docs","name":"internal_docs","capability_status":"healthy","capability_observed_at":"2020-01-01T00:00:00Z","next_refresh_at":"2020-01-01T00:05:00Z","capabilities":{"truncated":false,"tools":[{"name":"search_docs","schema_hash":"h"},{"name":"read_doc","schema_hash":"h"}]}}`
 	stub := `case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
-  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
 ` + provisionedCatalogue + `
 ` + resolvedToolStubIn("o", "check_order", "t-check_order", "1", openSchema) + `
 ` + resolvedToolStubIn("o", "refund", "t-refund", "2", openSchema) + `
@@ -1717,8 +1695,8 @@ func TestRealDeployRefreshesAStaleSnapshotOnceAndSaysSo(t *testing.T) {
 	stub := `printf '%s\n' "$*" >> ` + log + `
 case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
-  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
-  *"agents push"*) printf '{"ok":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"},"version":"unchanged"}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
+  *"agents push"*) printf '{"ok":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"},"version":"unchanged"}' ;;
 ` + provisionedCatalogue + `
 ` + resolvedToolStubIn("o", "check_order", "t-check_order", "1", openSchema) + `
 ` + resolvedToolStubIn("o", "refund", "t-refund", "2", openSchema) + `
@@ -1824,7 +1802,7 @@ func TestDeployReadsEachResourceOnce(t *testing.T) {
 	stub := `printf '%s\n' "$*" >> ` + log + `
 case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
-  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"update"}}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"update"}}' ;;
 ` + provisionedCatalogue + `
 ` + provisionedContract("o") + `
 ` + attached + `
@@ -1911,7 +1889,7 @@ func TestDeployRefusesTwoReferencesToOneHostedTool(t *testing.T) {
 	stub := `printf '%s\n' "$*" >> ` + log + `
 case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
-  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"update"}}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"update"}}' ;;
 ` + provisionedCatalogue + `
 ` + provisionedContract("o") + `
 ` + provisionedAgent + `
@@ -2034,7 +2012,7 @@ func TestDeployReportsNoPhantomRemovalOfAnAuthoredAnnouncement(t *testing.T) {
 		t.Helper()
 		stub := `case "$*" in
   *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
-  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"update"}}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"org_optional":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"update"}}' ;;
 ` + provisionedCatalogue + `
 ` + provisionedContract("o") + `
 ` + attachedSaying(spoken) + `

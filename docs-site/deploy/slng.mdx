@@ -53,8 +53,7 @@ unmute deploy my-agent --target slng --profile production
 ```
 
 The profile name `production` is your local label for a credential. Use your
-own name. Before deploying, check the organisation shown by the preview and
-supply any missing resources it names.
+own name. Before deploying, supply any missing resources the preview names.
 
 A successful deploy prints the agent ID. Open that agent in the SLNG dashboard
 and choose **Test → Web session**. The sections below explain each step.
@@ -124,21 +123,17 @@ voiceai --profile production whoami
 
 Unmute needs a `voiceai` release that supports checked, resolved pushes.
 It checks that capability before pushing and gives upgrade guidance if it is
-missing. Use `voiceai 0.1.21` or later. An older release can report a push as
-unchanged while SLNG is still preparing a hosted code tool, and the old agent
-stays live. No Python SDK version is yours
-to install for this target.
+missing. Use `voiceai 0.1.22` or later. Unmute refuses an older release before
+it writes anything, with the command that upgrades it. No Python SDK version is
+yours to install for this target.
 
 <Warning>
   Environment keys override the selected profile. Unmute reads `SLNG_API_KEY`,
   then `VOICEAI_API_KEY`, then the profile. It also loads the package's `.env`
   and `.env.local`. Remove unintended deployment keys from those files and
-  your shell when using a profile. Check the preview's organisation before deploying.
+  your shell when using a profile. The `credential from` line names the key a
+  deploy used.
 </Warning>
-
-Unmute sends every `voiceai` call to the host of the target's first
-`deployment_region`, such as `https://eu-north.api.slng.ai`. An exported
-`VOICEAI_BASE_URL` takes precedence.
 
 There is no separate Unmute project selector for SLNG. The credential selects
 the organisation, and `--profile` selects a saved credential when no environment
@@ -375,7 +370,7 @@ browser and does not prove a worker joined. Keep deployment keys on your server.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| The preview names the wrong organisation | An environment key overrides the profile | Check the package's `.env` files and shell keys, then preview again with the intended profile |
+| The agent lands in the wrong organisation | An environment key overrides the profile | Read the `credential from` line, check the package's `.env` files and shell keys, then preview again with the intended profile |
 | A second agent appears | The package name, target name or destination changed | Find both with `agents list`; restore the intended name and select the correct ID |
 | `agent ambiguous` | More than one agent matches the name | Pass `--agent-id <agent_id>` after checking the destination |
 | `vault missing` | A required secret is absent or exists as a variable | Create the exact case-sensitive name with the required Vault kind |

@@ -184,9 +184,9 @@ type slngAccount struct {
 	} `json:"account"`
 }
 
-// String renders the account for the one line a run prints before it checks
-// anything. An environment key and a stored profile can belong to different
-// organisations, so this is not decoration.
+// String renders the account for the line a run prints before it checks
+// anything, when whoami answered. An environment key and a stored profile can
+// belong to different organisations, so this is not decoration.
 func (a slngAccount) String() string {
 	name := a.Account.OrgName
 	switch {
@@ -310,16 +310,9 @@ type slngResources struct {
 // number of reads: one for the account itself, one per resource kind, then one
 // per distinct MCP server the package actually names and the account actually
 // has.
-//
-// Failing to name the account is the one fatal case. Every finding a preflight
-// could report would otherwise be a statement about an organisation this run
-// cannot identify, and the author has no way to tell which one.
-func readResources(runner *voiceaiRunner, servers []string) (slngResources, error) {
+func readResources(runner *voiceaiRunner, servers []string) slngResources {
 	resources := slngResources{MCPTools: map[string][]slngMCPTool{}}
-
-	if err := runner.read(target.SlngWhoami, &resources.Account); err != nil {
-		return resources, fmt.Errorf("cannot tell which SLNG organisation this would deploy to: %w", err)
-	}
+	resources.Account = readAccount(runner)
 
 	// Each of the three listings is independent: one failing leaves the other two
 	// worth having, so a failure is recorded and the run continues.
@@ -345,7 +338,22 @@ func readResources(runner *voiceaiRunner, servers []string) (slngResources, erro
 	}
 
 	resources.Notes = runner.notes
-	return resources, nil
+	return resources
+}
+
+// readAccount asks `voiceai whoami` which organisation the key belongs to, and
+// is best effort. The key decides the organisation whatever this says, and
+// whoami's host can be down while every other read works. A failed read leaves
+// the account unknown (OK false) and drops its stderr, so no line replaces the
+// organisation line.
+func readAccount(runner *voiceaiRunner) slngAccount {
+	var account slngAccount
+	notes := len(runner.notes)
+	if err := runner.read(target.SlngWhoami, &account); err != nil {
+		runner.notes = runner.notes[:notes]
+		return slngAccount{}
+	}
+	return account
 }
 
 // readTool fetches one tool's whole definition, which is what a hosted

@@ -48,8 +48,6 @@ tool file itself is never touched. For the **legacy** block (`slng: {hash:
 ```text expandable
 pull acme-support
 
-  slng: organisation Your Workspace (550fffde-98d0-4407-b6ea-96d739a5a5bd)
-
   tools/check_order.slng.json             written
   tools/check_order.slng.py               written
   tools/check_order.slng.meta.json        pinned
@@ -58,9 +56,10 @@ pull acme-support
   agent.yaml                              1 secret added
 ```
 
-The organisation line is not decoration. Two organisations can be reachable
-from one checkout, provisioned differently, so a listing from one says
-nothing about the other.
+When `voiceai whoami` answers, a `slng: organisation` line comes before the
+files. It is not decoration. Two organisations can be reachable from one
+checkout, provisioned differently, so a listing from one says nothing about
+the other.
 
 `unchanged` is printed rather than skipped: a pull that fetched and found
 nothing new looks identical to a pull that did not run, and this is the line

@@ -41,22 +41,14 @@ Every command runs from the root of the unmute checkout.
 export SLNG_API_KEY=...            # Nicola Croon's Workspace
 export VOICEAI_API_KEY="$SLNG_API_KEY"
 
-# The released voiceai: 0.1.21 or newer. 0.1.21 waits while SLNG prepares
-# check_availability's dependencies; 0.1.20 could report "unchanged" instead.
+# The released voiceai: 0.1.22 or newer. unmute deploy refuses an older one.
+# 0.1.22 needs no organisation, so a dead whoami host does not stop a deploy.
 brew upgrade slng-ai/tap/voiceai && hash -r
 voiceai --version
 
 # unmute from main.
 git switch main && make build
 bin/unmute --version
-```
-
-Every SLNG host carries a world part, and bare `api.slng.ai` does not resolve.
-`unmute deploy` points voiceai at the target's region by itself. A plain
-`voiceai` command needs it exported:
-
-```sh
-export VOICEAI_BASE_URL=https://eu-west.api.slng.ai
 ```
 
 ### 1. The tool, from Python to a published version
@@ -133,8 +125,8 @@ voiceai agents get "$ID" --json | jq '{
 bin/unmute deploy "$PKG" --dry-run
 bin/unmute deploy "$PKG"
 bin/unmute deploy "$PKG"
-# Expected: the organisation is named, check_availability and end_call resolve
-# to published versions, and the second real run changes nothing.
+# Expected: check_availability and end_call resolve to published versions,
+# and the second real run changes nothing.
 ```
 
 A voiceai older than 0.1.20 sends task tool names, not attachment ids.
