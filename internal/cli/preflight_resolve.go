@@ -210,28 +210,14 @@ func resolveOneHosted(
 		return out
 	}
 
-	// The metadata read, for the two fields the version envelope does not carry.
-	identity, err := readToolIdentity(runner, cache, chosen.ID)
-	if err != nil {
+	// The metadata read proves the listed id answers as itself. A record that
+	// does not is a failed read, not a tool to check.
+	if _, err := readToolIdentity(runner, cache, chosen.ID); err != nil {
 		found.State = notChecked
 		found.Detail = fmt.Sprintf("%v, so this reference's version and contract were not checked", err)
 		out.finding = found
 		return out
 	}
-	// A curated record carries no organisation, so the account comparison below
-	// has nothing to compare and correctly lets it through: `identity.Source ==
-	// "curated"` used to refuse it here, which was the last of the three gates.
-	if account := resources.Account.Account.OrgID; account != "" && identity.OrganisationID != "" && identity.OrganisationID != account {
-		// The listing and the record disagree about whose tool this is. Reading
-		// on would validate a contract belonging to another organisation.
-		found.State = wrongKind
-		found.Detail = fmt.Sprintf(
-			"the tool of this name belongs to organisation %s and this run resolved %s: the checks and the push must use one account, so select the right profile or key and run again",
-			identity.OrganisationID, account)
-		out.finding = found
-		return out
-	}
-
 	snapshot, err := readPublishedVersion(runner, cache, chosen.ID, chosen.LatestVersion)
 	if err != nil {
 		found.State = notChecked
@@ -496,6 +482,11 @@ func resolveMCPAt(
 		records[requirement.Name] = record
 
 		switch {
+		case !record.usableAt(now) && !refresh && record.healthy() && !record.Capabilities.Truncated:
+			// Only its age is wrong. A dry run does not connect, so the tools are
+			// checked against the stored list, and the real deploy refreshes it
+			// first. Refusing here sent authors to fix something deploy fixes.
+			found.State = satisfied
 		case !record.usableAt(now) && !refresh:
 			found.State = notChecked
 			found.Detail = fmt.Sprintf("its stored capability snapshot is %s. A dry run does not connect to a server, so this was reported and not refreshed: a real deploy refreshes it once and checks it again",

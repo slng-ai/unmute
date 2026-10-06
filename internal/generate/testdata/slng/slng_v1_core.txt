@@ -41,11 +41,10 @@ One SLNG key serves every SLNG role, so this is the same key a generated livekit
 or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push
 tool itself reads, and either works.
 
-The organisation the push resolved is printed on every run. That matters because
-an exported key and a stored profile can belong to **different** organisations,
-and nothing else on screen would tell you which one you just wrote to.
+The key decides the organisation. An exported key wins over a stored profile,
+and the `credential from` line names the key a deploy used.
 
-Deployment requires a compatible `voiceai`; this flow was verified with 0.1.18.
+Deployment requires `voiceai` 0.1.22 or later.
 Use `--dry-run` to preview checked versions and attachment changes without
 changing SLNG. Future session inputs remain runtime checks. The result is saved
 in `deploy-report.json` beside these files.
@@ -127,8 +126,8 @@ For your own LiveKit client, use the agent id step 2 printed and the same accoun
 export VOICEAI_API_KEY="$SLNG_API_KEY"
 ```
 
-Supply a request body with `--file`. Write a `session.json`, filling in any
-required session arguments:
+The command below takes every default, and needs `voiceai` 0.1.22 or later. To
+set session arguments, write a `session.json` and add `--file session.json`:
 
 ```json
 {"arguments": {}, "participant_name": "you"}
@@ -144,7 +143,7 @@ Inbound phone calls supply no session arguments. Every required injected input
 needs a valid default before SLNG can attach an inbound trunk.
 
 ```bash
-voiceai agents web-sessions create <agent_id> --file session.json
+voiceai agents web-sessions create <agent_id>
 ```
 
 That returns LiveKit connection details and requests a worker. Connect a

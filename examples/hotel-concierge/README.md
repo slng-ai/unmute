@@ -50,7 +50,7 @@ organisation the key belongs to.
 Validate, compile, and push in one command. A real push needs a `voiceai`
 release that supports a checked, resolved attachment; an older one is refused
 with upgrade guidance before anything is written. This flow has been verified
-with `voiceai 0.1.18`:
+with `voiceai 0.1.22`:
 
 ```bash
 export SLNG_API_KEY=...
@@ -171,15 +171,14 @@ brew install slng-ai/tap/voiceai
 ```
 
 Every `voiceai` command below runs against the same organisation `unmute`
-deploys to:
+deploys to, because they use the same key:
 
 ```bash
 export VOICEAI_API_KEY="$SLNG_API_KEY"
-voiceai whoami
 ```
 
-Check the organisation it names. A stored `voiceai login` profile can belong
-to a different one, and that one will not have these resources.
+A stored `voiceai login` profile can belong to a different organisation, and
+that one will not have these resources.
 
 This example references resources in the organisation it was written for.
 Inspect yours with `unmute resources`, then make sure it holds each of these.
@@ -317,10 +316,7 @@ trunk at all.
 To use your own LiveKit client instead, with the defaults:
 
 ```bash
-cat > session.json <<'JSON'
-{"arguments":{},"participant_name":"you"}
-JSON
-voiceai agents web-sessions create <agent_id> --file session.json
+voiceai agents web-sessions create <agent_id>
 ```
 
 `unmute deploy` prints this command with the agent id already filled in. The
@@ -352,11 +348,10 @@ voiceai agents web-sessions create <agent_id> --file session.json
 The push creates nothing. Both hosted tools and the MCP server have to exist
 before the push, in the organisation the key belongs to.
 
-**Fix:** list what the organisation holds, and check the name on the key:
+**Fix:** list what the key's organisation holds:
 
 ```bash
 unmute resources
-voiceai whoami
 ```
 
 Then create whatever is missing from the table in

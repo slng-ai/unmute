@@ -35,7 +35,6 @@ import (
 
 // slngDeployment is what one target's run established.
 type slngDeployment struct {
-	Account    slngAccount
 	Resolution resolution
 	Bindings   []bindingCheck
 	// Proposed is what the package declares for each attachment, so the preview
@@ -73,12 +72,7 @@ func deployResolution(
 	out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
 	deployment := slngDeployment{Refreshed: map[string]bool{}, Previous: map[string]slngPublishedVersion{}}
 
-	resources, err := readResources(runner, artifact.Requires.ServerNames())
-	if err != nil {
-		return deployment, preflightReport{}, err
-	}
-	deployment.Account = resources.Account
-	fmt.Fprintf(out, "%s: organisation %s\n", name, resources.Account)
+	resources := readResources(runner, artifact.Requires.ServerNames())
 
 	// The builtins and the package's own declared vault names go through the
 	// existing name-based comparison. The hosted references and the MCP

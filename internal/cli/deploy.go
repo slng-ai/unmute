@@ -148,8 +148,7 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 	env := packageEnv(dir, errOut)
 	key, keySource := deployCredential(env)
 	if keySource == "" {
-		warnf(errOut, "neither %s nor %s is set, so the push uses whatever profile `%s` stored; "+
-			"check the organisation printed below is the one you meant\n",
+		warnf(errOut, "neither %s nor %s is set, so the push uses whatever profile `%s` stored\n",
 			target.SlngRouterKeyEnv, target.SlngPushCredentialEnv, target.SlngLoginCommand)
 	}
 
@@ -189,7 +188,6 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		if err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
 		}
-		account := deployment.Account
 
 		// The refusal comes before the write, and that ordering is the promise
 		// the whole command rests on: Generate returned an artifact and
@@ -258,7 +256,7 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		// preview would be the version just attached.
 		preview := opts
 		preview.dryRun = true
-		planned, err := runResolvedPush(bin, staged, env, key, account.Account.OrgID, preview)
+		planned, err := runResolvedPush(bin, staged, env, key, preview)
 		if err != nil {
 			// A push that printed nothing readable, given the two options an
 			// older tool has never heard of, is overwhelmingly an older tool:
@@ -269,6 +267,13 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		}
 		if err := checkResolutionContract(planned); err != nil {
 			return fmt.Errorf("deploy %s: slng target %q: %w", dir, resolved.Name, err)
+		}
+		// voiceai 0.1.21 and older want --expect-org, which this run no longer
+		// sends, and answer a document without the marker.
+		if planned.OrgOptional < 1 {
+			return fmt.Errorf("deploy %s: slng target %q: cannot push, the installed `%s` is too old. "+
+				"Nothing was changed: upgrade with `brew upgrade slng-ai/tap/%s`, then deploy again",
+				dir, resolved.Name, deployPushBinary, deployPushBinary)
 		}
 		// Only a task that lists a tool needs it: a package whose tasks list
 		// none pushes the same through any push tool.
@@ -307,7 +312,7 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		// real, and its result is what actually happened.
 		result := planned
 		if !opts.dryRun && len(planned.Blockers) == 0 && planned.OK {
-			result, err = runResolvedPush(bin, staged, env, key, account.Account.OrgID, opts)
+			result, err = runResolvedPush(bin, staged, env, key, opts)
 			if err != nil {
 				return fmt.Errorf("deploy %s: %w", dir, err)
 			}
@@ -336,7 +341,7 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		if !opts.dryRun && result.OK && len(result.Blockers) == 0 {
 			printAttachedVersions(out, resolved.Name, report)
 		}
-		if err := printPushResult(out, errOut, resolved.Name, deployName, outDir, keySource, account, result); err != nil {
+		if err := printPushResult(out, errOut, resolved.Name, deployName, outDir, keySource, result); err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
 		}
 		// After the push and only after it succeeded, because both of these are
@@ -355,31 +360,16 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 
 // runResolvedPush hands the staged body to a push running in the guarded mode.
 //
-// Two flags separate it from runPush: --require-resolved, which says attach
-// exactly what this body carries rather than resolving names again, and
-// --expect-org, which says refuse before writing if the credential belongs to
-// another organisation. A matching profile name is not evidence of that: an
-// exported key and a stored profile can resolve to different organisations, and
-// nothing else on screen would say which one was written to.
+// One flag separates it from runPush: --require-resolved, which says attach
+// exactly what this body carries rather than resolving names again. No
+// organisation is named: the key decides it, and every call gets the same key.
 //
 // runPreflight used to live here. deployResolution owns that flow now, because
 // resolving a published version, checking a binding against it and reading the
 // agent it would replace are all part of the same ordered run, and splitting
 // them across two functions made the order the thing nobody could see.
-func runResolvedPush(bin, staged string, env []string, key, organisation string, opts deployOptions) (pushResult, error) {
-	// An empty organisation is refused here rather than sent. `--expect-org`
-	// with nothing after it is a malformed command line, and the guarded push
-	// refuses the flag's absence anyway, so the useful message is this one: the
-	// account could not be identified, which is a credential problem rather than
-	// a push problem.
-	if organisation == "" {
-		return pushResult{}, fmt.Errorf(
-			"this run could not establish which organisation it resolved, and a checked deployment has to name it so the push refuses if its own credential belongs to another: check the key or the profile with `%s`",
-			target.SlngWhoami)
-	}
-	return runPushWith(bin, staged, env, key, opts, []string{
-		target.SlngRequireResolvedFlag, target.SlngExpectOrgFlag, organisation,
-	})
+func runResolvedPush(bin, staged string, env []string, key string, opts deployOptions) (pushResult, error) {
+	return runPushWith(bin, staged, env, key, opts, []string{target.SlngRequireResolvedFlag})
 }
 
 // buildDeployReport assembles the report from what the run established.
@@ -396,8 +386,8 @@ func buildDeployReport(
 	// `end_call` be reported as attached and detached in one preview.
 	attaching := append(append([]resolvedTool(nil), deployment.Resolution.Tools...), deployment.Resolution.Builtins...)
 	return deployReport{
-		Target: name, Organisation: deployment.Account.String(),
-		Agent: deployName, AgentID: agentID, Action: action,
+		Target: name,
+		Agent:  deployName, AgentID: agentID, Action: action,
 		DryRun: dryRun, Outcome: outcome,
 		Tools: compareAttachments(attaching,
 			deployment.Proposed,
@@ -496,11 +486,6 @@ type pushResult struct {
 	Changed bool   `json:"changed"`
 	Error   string `json:"error"`
 
-	Organisation struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"organisation"`
-
 	// Agent carries no name: `voiceai agents push --json` reports the id and the
 	// action only, and prints the name on its human stream alone. A Name field
 	// here decoded as "" on every run, and "" compares equal to a free trunk's
@@ -555,7 +540,21 @@ type pushResult struct {
 	// as they are, and SLNG refuses an agent whose task names a tool by name.
 	// A task with no tools is unaffected.
 	TaskTools int `json:"task_tools"`
+
+	// OrgOptional is 1 from voiceai 0.1.22, which takes no --expect-org. Zero
+	// is an older tool, which refuses a guarded push that names no
+	// organisation.
+	OrgOptional int `json:"org_optional"`
+
+	// InboundNotReady holds the push's stderr lines that say the agent saved
+	// but phone calls will not reach it (voiceai 0.1.21). They are the only
+	// stderr lines kept: the rest is progress, and the result is in the JSON.
+	InboundNotReady []string `json:"-"`
 }
+
+// inboundNotReadyPrefix starts the stderr line voiceai prints when the saved
+// agent's inbound dispatch refresh failed.
+const inboundNotReadyPrefix = "inbound calls are not ready"
 
 // runPush shells out and returns the parsed document. A non-zero exit is not an
 // error here: the tool exits 1 whenever it refuses, and the reason is in the
@@ -613,26 +612,18 @@ func runPushWith(bin, dir string, env []string, key string, opts deployOptions, 
 		return result, fmt.Errorf("`%s %s` produced no readable result: %s",
 			deployPushBinary, strings.Join(args, " "), detail)
 	}
+	for line := range strings.Lines(stderr.String()) {
+		if line = strings.TrimSpace(line); strings.HasPrefix(line, inboundNotReadyPrefix) {
+			result.InboundNotReady = append(result.InboundNotReady, line)
+		}
+	}
 	return result, nil
 }
 
 // printPushResult renders one push. Facts go to stdout in the `name: fact` form
 // the rest of the CLI uses; anything the author has to act on goes to stderr and
 // comes back as an error, so the exit code matches what was printed.
-func printPushResult(out, errOut io.Writer, name, deployName, outDir, keySource string, named slngAccount, result pushResult) error {
-	// The organisation is named once per target, by the preflight, before any
-	// finding: a finding is a statement about one account, so the reader needs
-	// the account first. Restating it here was a second identical line.
-	//
-	// What is worth saying is a *difference*. The preflight reads with the
-	// resolved credential and the push runs as its own process; if those ever
-	// land in different organisations, every check just performed was about
-	// somewhere else, and that is a warning rather than a duplicate.
-	if org := organisationLine(result); org != "" && !sameOrganisation(named, result) {
-		warnf(errOut, "%s: the checks ran against %s and the push reported %s. "+
-			"Those are different organisations, so what was checked is not what was written\n",
-			name, named, org)
-	}
+func printPushResult(out, errOut io.Writer, name, deployName, outDir, keySource string, result pushResult) error {
 	// Pushing REPLACES: a reference or field the package no longer names is
 	// removed, not merged. Which agent gets replaced is decided by the name in
 	// the body, so the warning quotes that name and not this target's: they were
@@ -655,28 +646,10 @@ func printPushResult(out, errOut io.Writer, name, deployName, outDir, keySource 
 	default:
 		printPushOutcome(out, name, result)
 	}
+	for _, line := range result.InboundNotReady {
+		warnf(errOut, "%s: the agent is saved, but %s\n", name, line)
+	}
 	return nil
-}
-
-// sameOrganisation compares by id, because that is the identity; a workspace can
-// be renamed. A push that reported no id at all cannot be compared, and an
-// unanswerable question is not a mismatch.
-func sameOrganisation(named slngAccount, result pushResult) bool {
-	if result.Organisation.ID == "" || named.Account.OrgID == "" {
-		return true
-	}
-	return named.Account.OrgID == result.Organisation.ID
-}
-
-func organisationLine(result pushResult) string {
-	switch {
-	case result.Organisation.Name != "" && result.Organisation.ID != "":
-		return fmt.Sprintf("%s (%s)", result.Organisation.Name, result.Organisation.ID)
-	case result.Organisation.Name != "":
-		return result.Organisation.Name
-	default:
-		return result.Organisation.ID
-	}
 }
 
 // printPushBlockers relays each blocker as the push tool stated it: the items,

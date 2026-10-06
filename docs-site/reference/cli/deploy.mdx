@@ -59,15 +59,13 @@ unmute deploy examples/hotel-concierge
 
 A `slng:` reference needs no `unmute pull` first, no mirror, and no hash:
 `unmute deploy` resolves it directly against your organisation, checks it,
-and attaches the version it checked. This needs a `voiceai` release that
-supports that checked, resolved push; an older one is refused with upgrade
-guidance before anything is written. See [Hosted tools](/build/tools/hosted).
+and attaches the version it checked. This needs `voiceai` 0.1.22 or later. An
+older one is refused with upgrade guidance before anything is written. See [Hosted tools](/build/tools/hosted).
 
 A clean run reads:
 
 ```text
 ✓ slng (slng)
-slng: organisation Your Workspace (<org_id>)
 slng: <n> requirements satisfied
 slng: credential from SLNG_API_KEY
 slng: compiled examples/hotel-concierge/build/slng (3 files)
@@ -77,7 +75,7 @@ slng: attached end_call v<n>
 slng: attached firecrawl-mcp-2 firecrawl_scrape
 slng: attached firecrawl-mcp-2 firecrawl_search
 slng: agent created <agent_id>
-slng: deployed. Talk to it: voiceai agents web-sessions create <agent_id> --file session.json
+slng: deployed. Talk to it: voiceai agents web-sessions create <agent_id>
 ```
 
 The first line is `validate`'s own row. Every line after it is a check
@@ -98,9 +96,8 @@ target compiles to a project that somebody else's platform runs, so it is
 no slng target names the block that would add one. A twilio target is deployed
 only when `--target` names it; see [A twilio target](#a-twilio-target).
 
-The organisation is printed on every run because an exported key and a stored
-profile can belong to different ones, and nothing else on screen would tell you
-which you just wrote to.
+No line names the organisation. The key decides it, and the `credential from`
+line names the key.
 
 ## Four stages
 
@@ -118,7 +115,7 @@ written to `build/slng/`. Compiling as part of deploying is deliberate: it means
 you cannot push an artifact that is older than the package.
 
 **Push.** Checked references are staged with their resolved IDs and versions,
-then passed to `voiceai agents push` with `--require-resolved` and `--expect-org`.
+then passed to `voiceai agents push` with `--require-resolved`.
 A direct push of `build/slng` skips Unmute's binding checks and resolved staging;
 use `unmute deploy` for this workflow.
 

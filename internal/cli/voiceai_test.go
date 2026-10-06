@@ -62,19 +62,10 @@ func calls(t *testing.T, log string) []string {
 
 // TestVoiceaiDecodesEveryCapturedShape. Each of these was captured from a live
 // organisation, and each one has at least one field that a hand-written struct
-// would plausibly get wrong: whoami nests the organisation under `account`, a
-// vault entry's populated bit is `has_value` and not `value`, and a trunk's
-// `in_use_by` is a single name rather than the list its plural reading suggests.
+// would plausibly get wrong: a vault entry's populated bit is `has_value` and
+// not `value`, and a trunk's `in_use_by` is a single name rather than the list
+// its plural reading suggests.
 func TestVoiceaiDecodesEveryCapturedShape(t *testing.T) {
-	var account slngAccount
-	fixture(t, "whoami.json", &account)
-	if !account.OK || account.Account.OrgName == "" || account.Account.OrgID == "" {
-		t.Errorf("whoami decoded to %+v, losing the organisation", account)
-	}
-	if !strings.Contains(account.String(), "profile default") {
-		t.Errorf("the account line %q does not name the profile it resolved", account)
-	}
-
 	var vault []slngVaultEntry
 	fixture(t, "secret_list.json", &vault)
 	var sawSecret, sawVariable, sawEmpty bool
@@ -214,7 +205,6 @@ func TestVoiceaiPutsTheProfileBeforeTheSubcommand(t *testing.T) {
 // count would leave the expensive half ungoverned.
 func TestVoiceaiReadsEachResourceKindOnce(t *testing.T) {
 	bin, log := stubVoiceai(t, `case "$*" in
-  *whoami*) printf '{"ok":true,"profile":"p","account":{"org_id":"o","org_name":"n"}}' ;;
   *"mcp tools"*) printf '[{"name":"firecrawl_scrape"}]' ;;
   *"mcp list"*) printf '[{"name":"firecrawl-mcp","capability_status":"healthy"}]' ;;
   *) printf '[]' ;;
@@ -223,9 +213,7 @@ esac`)
 	runner := newVoiceaiRunner(bin, nil, "")
 	// Two tools on one server, and the same server named twice, because a package
 	// may reference one server from several tools. Neither may cost a second read.
-	if _, err := readResources(runner, []string{"firecrawl-mcp"}); err != nil {
-		t.Fatalf("readResources: %v", err)
-	}
+	readResources(runner, []string{"firecrawl-mcp"})
 	if _, _, err := readTrunks(runner); err != nil {
 		t.Fatalf("readTrunks: %v", err)
 	}
@@ -235,8 +223,8 @@ esac`)
 			t.Errorf("`voiceai %s` ran %d times; each resource kind is read once per deploy", command, count)
 		}
 	}
-	if got := len(calls(t, log)); got != 6 {
-		t.Errorf("a full deploy made %d account reads, want 6 (whoami, secret, tool, mcp, mcp tools, trunks)", got)
+	if got := len(calls(t, log)); got != 5 {
+		t.Errorf("a full deploy made %d account reads, want 5 (secret, tool, mcp, mcp tools, trunks)", got)
 	}
 }
 
@@ -278,16 +266,12 @@ func TestVoiceaiTreatsAFailedReadAsUnchecked(t *testing.T) {
 // findings the author could still act on.
 func TestVoiceaiKeepsReadingAfterOneKindFails(t *testing.T) {
 	bin, _ := stubVoiceai(t, `case "$*" in
-  *whoami*) printf '{"ok":true,"profile":"p","account":{"org_id":"o","org_name":"n"}}' ;;
   *"tool list"*) printf 'error: forbidden\n' >&2; exit 1 ;;
   *) printf '[]' ;;
 esac`)
 
 	runner := newVoiceaiRunner(bin, nil, "")
-	resources, err := readResources(runner, nil)
-	if err != nil {
-		t.Fatalf("one failed listing aborted the whole read: %v", err)
-	}
+	resources := readResources(runner, nil)
 	if len(resources.Unchecked) != 1 {
 		t.Fatalf("recorded %d unchecked reads, want 1: %v", len(resources.Unchecked), resources.Unchecked)
 	}
@@ -299,33 +283,16 @@ esac`)
 	}
 }
 
-// TestVoiceaiStopsWhenItCannotNameTheAccount. Every finding is a statement about
-// one organisation. A run that cannot say which one has nothing to report, so
-// this is the single fatal read.
-func TestVoiceaiStopsWhenItCannotNameTheAccount(t *testing.T) {
-	bin, _ := stubVoiceai(t, `printf 'error: invalid api key\n' >&2; exit 1`)
-	runner := newVoiceaiRunner(bin, nil, "")
-	if _, err := readResources(runner, nil); err == nil {
-		t.Fatal("a run that could not identify the account carried on checking it")
-	} else if !strings.Contains(err.Error(), "which SLNG organisation") {
-		t.Errorf("the error %q does not say what could not be determined", err)
-	}
-}
-
 // TestVoiceaiSkipsToolsForAServerItDoesNotHave. Asking a server that is already
 // a finding reports a second problem caused by the first, and costs a read to
 // do it.
 func TestVoiceaiSkipsToolsForAServerItDoesNotHave(t *testing.T) {
 	bin, _ := stubVoiceai(t, `case "$*" in
-  *whoami*) printf '{"ok":true,"profile":"p","account":{"org_id":"o","org_name":"n"}}' ;;
   *) printf '[]' ;;
 esac`)
 
 	runner := newVoiceaiRunner(bin, nil, "")
-	resources, err := readResources(runner, []string{"absent-mcp"})
-	if err != nil {
-		t.Fatalf("readResources: %v", err)
-	}
+	resources := readResources(runner, []string{"absent-mcp"})
 	if runner.reads["mcp tools"] != 0 {
 		t.Error("a server the account does not have was interrogated for its tools")
 	}

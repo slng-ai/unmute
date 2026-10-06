@@ -194,14 +194,14 @@ the files to the `voiceai` CLI, which must be on PATH
 The key is read from `SLNG_API_KEY`, then `VOICEAI_API_KEY`, then whatever
 profile `voiceai login` stored. Those are two names for one token: a single SLNG
 key serves every SLNG role, including the Context Router key a generated livekit
-or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push tool
-itself reads.
+or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push
+tool itself reads. The key decides the organisation, and every call in a deploy
+uses the same key, so no command asks which organisation it is.
 
-A real push needs a `voiceai` release that supports a checked, resolved
-attachment, verified with 0.1.18, and 0.1.20 or later when a task lists tools,
-because push turns a task's tool names into attachment ids. `unmute deploy`
-checks for that support first:
-an older `voiceai` is refused with upgrade guidance naming the install command,
+A real push needs `voiceai` 0.1.22 or later. It attaches a checked, resolved
+version, turns a task's tool names into attachment ids, waits while SLNG
+prepares a hosted code tool, and needs no organisation flag. `unmute deploy`
+checks for that support first: an older `voiceai` is refused with upgrade guidance naming the install command,
 rather than falling back to a push that resolves and attaches whatever is newest
 without having checked it. Tell the user this if their run refuses early, naming
 `--require-resolved`. `unmute validate` and `unmute compile` are unaffected
@@ -209,14 +209,13 @@ either way; neither reads the account at all.
 
 **`unmute deploy` already pushes in guarded mode.** It passes
 `--require-resolved`, so only the exact `tool_id` and version the staged package
-carries is attached rather than re-resolving names at push time, and
-`--expect-org`, which confirms the organisation before any write. Add both
+carries is attached rather than re-resolving names at push time. Add it
 yourself when you run `voiceai agents push` by hand, especially against a shared
-organisation: without them the same tool name can resolve to a different version
+organisation: without it the same tool name can resolve to a different version
 depending on which command pushed.
 
 ```sh
-voiceai agents push build/slng --require-resolved --expect-org <org-id> --dry-run
+voiceai agents push build/slng --require-resolved --dry-run
 ```
 
 ## What the refusals mean
@@ -335,15 +334,13 @@ matches.
 
 ```sh
 export VOICEAI_API_KEY="$SLNG_API_KEY"
-cat > session.json <<'JSON'
-{"arguments": {}}
-JSON
-voiceai agents web-sessions create <agent_id> --file session.json
+voiceai agents web-sessions create <agent_id>
 ```
 
-The command takes the agent id `unmute deploy` printed, and a `--file` holding at
-least `{"arguments": {}}`: every field in that body is optional in the API schema,
-but a required input without a default must be supplied in `arguments`. It returns
+The command takes the agent id `unmute deploy` printed. With no `--file` it sends
+an empty body (voiceai 0.1.22 or later), so every input takes its default. A
+required input without a default goes in a body, passed as
+`--file session.json` holding `{"arguments": {...}}`. It returns
 LiveKit connection details, not a browser call. For a microphone test, open the
 deployed agent in the dashboard and choose **Test**, then **Web session**.
 

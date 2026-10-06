@@ -95,7 +95,6 @@ type finding struct {
 
 // preflightReport is what one deploy learned before writing anything.
 type preflightReport struct {
-	Account   slngAccount
 	Findings  []finding
 	Unchecked []*unchecked
 	Notes     []string
@@ -137,7 +136,6 @@ func (r preflightReport) satisfiedCount() int {
 // in one go rather than across four refused pushes.
 func comparePreflight(requires generate.Requirements, resources slngResources) preflightReport {
 	report := preflightReport{
-		Account:   resources.Account,
 		Unchecked: resources.Unchecked,
 		Notes:     resources.Notes,
 	}

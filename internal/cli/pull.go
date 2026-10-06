@@ -115,16 +115,7 @@ func runPull(cmd *cobra.Command, args []string, force, check bool) error {
 	}
 	runner := newVoiceaiRunner(bin, readEnv, "")
 
-	// The organisation before any finding. Two are reachable from one checkout
-	// and are provisioned differently, so a listing from one says nothing about
-	// the other and a reader who does not know which was read cannot act on any
-	// of the rest.
-	var account slngAccount
-	if err := runner.read(target.SlngWhoami, &account); err != nil {
-		return fmt.Errorf("pull %s: cannot tell which SLNG organisation this would read: %w", displayDir(dir), err)
-	}
 	printHeader(out, "pull "+displayDir(dir))
-	fmt.Fprintf(out, "  slng: organisation %s\n\n", account)
 
 	// Every tool is fetched before anything is written. A package whose second
 	// tool cannot be fetched must not be left holding a mirror of its first:
@@ -136,7 +127,7 @@ func runPull(cmd *cobra.Command, args []string, force, check bool) error {
 	for _, ref := range refs {
 		mirror, err := readTool(runner, ref.Hosted)
 		if err != nil || mirror.Name == "" {
-			return fmt.Errorf("pull %s: %s", displayDir(dir), missingToolGuidance(ref, listing, listErr, account, err))
+			return fmt.Errorf("pull %s: %s", displayDir(dir), missingToolGuidance(ref, listing, listErr, err))
 		}
 		if mirror.Source == "curated" {
 			return fmt.Errorf("pull %s: `%s` is a capability SLNG curates, not a tool with a definition to mirror: "+
@@ -474,14 +465,14 @@ func editedPaths(files []pullFile) []string {
 }
 
 // missingToolGuidance says what to do about a name the organisation does not
-// hold, and names the organisation, because the answer depends on it.
+// hold.
 //
 // unmute creates no tool, so this is the end of the road until somebody makes
 // one. The message says that rather than implying a flag would fix it. The fix
 // itself differs by reference form: a legacy block resolves by the tool
 // file's own name, so renaming the file is the fix; a scalar reference names
 // the hosted tool on its own line, so the fix is changing that line instead.
-func missingToolGuidance(ref hostedRef, listing []slngAccountTool, listErr error, account slngAccount, readErr error) string {
+func missingToolGuidance(ref hostedRef, listing []slngAccountTool, listErr, readErr error) string {
 	var names []string
 	for _, tool := range listing {
 		if !slices.Contains(names, tool.Name) {
@@ -499,16 +490,16 @@ func missingToolGuidance(ref hostedRef, listing []slngAccountTool, listErr error
 		switch {
 		case listErr != nil:
 			// Neither read worked, so nothing here is evidence either way.
-			return fmt.Sprintf("could not read `%s` from %s: %v", ref.Hosted, account, readErr)
+			return fmt.Sprintf("could not read `%s` from the organisation: %v", ref.Hosted, readErr)
 		case slices.Contains(names, ref.Hosted):
 			// The listing names it and the read failed. Reporting this as an
 			// absence produced a self-contradicting sentence, seen for real:
 			// "this organisation has no tool called `check_order` (it has
 			// `check_order`)". A truncated response or a partial outage is
 			// exactly this shape.
-			return fmt.Sprintf("`%s` is listed in %s and its definition could not be read: %v. "+
+			return fmt.Sprintf("`%s` is listed in the organisation and its definition could not be read: %v. "+
 				"That is a failed read rather than a missing tool, so nothing was written: run this again",
-				ref.Hosted, account, readErr)
+				ref.Hosted, readErr)
 		}
 		// The listing worked and does not name it, so it really is absent and
 		// the guidance below is right.

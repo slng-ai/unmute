@@ -77,17 +77,12 @@ const (
 	SlngListCommand = "voiceai agents list"
 	// SlngWebSessionCommand opens a browser session against one agent.
 	//
-	// It takes two things that both look optional and are not. The agent id is
-	// positional, and leaving it off is an error rather than a shorter spelling.
-	// And --file is required in practice: AgentWebSessionCreate has no required
-	// properties, but the endpoint declares requestBody required, and the CLI
-	// sends no body at all when --file is absent. Measured 2026-08-25 and again on
-	// 0.1.16 on 2026-09-03: without it the call fails AGENT_VALIDATION_FAILED with
-	// an empty field path, which reads like a problem with the agent and is a
-	// problem with the request. `web-sessions create --help` calls --file an
-	// "optional JSON body" as of 0.1.16, so the help is the thing that is wrong
-	// here, and re-reading it is not a way to re-check this.
-	SlngWebSessionCommand = "voiceai agents web-sessions create <agent_id> --file session.json"
+	// The agent id is positional, and leaving it off is an error rather than a
+	// shorter spelling. --file is optional since voiceai 0.1.21, which sends {}
+	// without it. Up to 0.1.20 the CLI sent no body and the call failed
+	// AGENT_VALIDATION_FAILED. A session that needs arguments still passes
+	// `--file session.json`; the runbook shows that body.
+	SlngWebSessionCommand = "voiceai agents web-sessions create <agent_id>"
 )
 
 // SlngResourcesVerified is when the shared-resource commands below were last
@@ -126,13 +121,6 @@ const SlngPushBinary = "voiceai"
 // CLI's own spelling, not a typo here, and TestSlngPushCommandsAgree guards the
 // plural `voiceai tools`, which still does not exist.
 var (
-	// SlngWhoami names the account before anything else runs. A lightweight auth
-	// probe that spends no TTS or STT credits, so it is cheap enough to run on
-	// every deploy and is the only way to say which organisation a run resolved
-	// *before* writing to it. An environment key and a stored profile can belong
-	// to different ones.
-	SlngWhoami = SlngCommand{"whoami"}
-
 	// SlngSecretList answers every vault question in one read: each entry carries
 	// its name, its kind and whether it holds a value, so absent, empty and
 	// wrong-kind are all decidable without a lookup per name.
@@ -244,13 +232,6 @@ const (
 	// to whatever is newest. Unmute promises to attach a checked version, and it
 	// cannot keep that promise through a push that re-resolves.
 	SlngRequireResolvedFlag = "--require-resolved"
-
-	// SlngExpectOrgFlag names the organisation the checks ran against, so the
-	// push refuses before writing if its credential belongs to another one. A
-	// matching profile name is not evidence: an exported key and a stored profile
-	// can resolve to different organisations, and nothing else on screen says
-	// which one was written to.
-	SlngExpectOrgFlag = "--expect-org"
 )
 
 // SlngResolutionContract is the marker a compatible push returns, and reading it

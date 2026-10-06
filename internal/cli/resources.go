@@ -62,11 +62,7 @@ func runResources(out, errOut io.Writer, runner *voiceaiRunner) error {
 	// No package, so no requirements, so no MCP server to interrogate by name.
 	// The servers are listed and each one's tools are read below instead.
 	printHeader(out, "resources")
-	resources, err := readResources(runner, nil)
-	if err != nil {
-		return fmt.Errorf("resources: %w", err)
-	}
-	fmt.Fprintf(out, "organisation %s\n", resources.Account)
+	resources := readResources(runner, nil)
 
 	fmt.Fprintf(out, "\ntools (%d)\n", len(resources.Tools))
 	if len(resources.Tools) == 0 {

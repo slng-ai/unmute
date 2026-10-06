@@ -17,7 +17,6 @@ func TestResourcesShowsNamesInTheSpellingAPackageMustUse(t *testing.T) {
 		t.Skip("the stub voiceai is a POSIX shell script")
 	}
 	stub := `case "$*" in
-  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"org-1","org_name":"Example"}}' ;;
   *"tool list"*) printf '[{"name":"end_call","tool_type":"end_call"},{"name":"api_request","tool_type":"api_request"}]' ;;
   *"mcp list"*) printf '[{"name":"firecrawl-mcp","transport":"streamable_http","capability_status":"healthy"}]' ;;
   *"mcp tools"*) printf '[{"name":"firecrawl_scrape"}]' ;;
@@ -27,7 +26,6 @@ esac`
 	out, errOut := runResourcesWithStub(t, stub)
 
 	for _, want := range []string{
-		"organisation Example (org-1), profile default",
 		"end_call", "api_request",
 		"firecrawl-mcp", "firecrawl_scrape",
 		"1_inbound", "+447700900111",
@@ -62,7 +60,6 @@ func TestResourcesSaysWhenNothingIsAttached(t *testing.T) {
 		t.Skip("the stub voiceai is a POSIX shell script")
 	}
 	stub := `case "$*" in
-  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"org-1","org_name":"Example"}}' ;;
   *) printf '[]' ;;
 esac`
 	out, _ := runResourcesWithStub(t, stub)
@@ -83,7 +80,6 @@ func TestResourcesReadsNoPackage(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	stub := `case "$*" in
-  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"org-1","org_name":"Example"}}' ;;
   *) printf '[]' ;;
 esac`
 	if _, _ = runResourcesWithStub(t, stub); false {

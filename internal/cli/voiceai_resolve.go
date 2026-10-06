@@ -50,16 +50,12 @@ func templateVaultNames(text string) []string {
 // remembers an account, so the cache is a cost control and never a source of
 // truth.
 
-// slngToolIdentity is an ID-addressed metadata read. It carries the two fields
-// the immutable version envelope does not, and they are the two that decide
-// eligibility: Source separates a tool the organisation owns from a capability
-// SLNG curates, and OrganisationID is what proves the record belongs to the
-// account this run confirmed.
+// slngToolIdentity is an ID-addressed metadata read. Source separates a tool
+// the organisation owns from a capability SLNG curates.
 type slngToolIdentity struct {
-	ID             string `json:"id"`
-	OrganisationID string `json:"organisation_id"`
-	Name           string `json:"name"`
-	ToolType       string `json:"tool_type"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	ToolType string `json:"tool_type"`
 	// Source is "org" for a tool the organisation owns and "curated" for one
 	// SLNG publishes to everybody. A `slng:` reference selects the first;
 	// `builtin:` selects the second.

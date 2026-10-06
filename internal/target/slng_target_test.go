@@ -120,7 +120,7 @@ func TestEveryVoiceaiCommandNamedExists(t *testing.T) {
 	// every surface at once. This is not circular: the two maps above come from
 	// `voiceai --help`, not from these values.
 	for _, command := range []SlngCommand{
-		SlngWhoami, SlngSecretList, SlngSecretCreate, SlngToolList, SlngToolGet,
+		SlngSecretList, SlngSecretCreate, SlngToolList, SlngToolGet,
 		SlngMCPList, SlngMCPTools, SlngTrunksList, SlngCallDispatch,
 	} {
 		sub := ""
@@ -144,7 +144,7 @@ func TestEveryVoiceaiCommandNamedExists(t *testing.T) {
 		filepath.Join(root, "internal", "skill", "assets", "deploy-skill", "references", "slng-push.md"),
 	}
 	// A word, then optionally a second, skipping any leading root flag so that
-	// `voiceai --profile work whoami` is read as `whoami`.
+	// `voiceai --profile work agents push` is read as `agents push`.
 	mention := regexp.MustCompile(`voiceai (?:--[a-z-]+ \S+ )*([a-z][a-z0-9-]*)(?: ([a-z][a-z0-9-]*))?`)
 	for _, path := range surfaces {
 		raw, err := os.ReadFile(path)

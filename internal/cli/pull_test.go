@@ -141,7 +141,6 @@ func fixtureJSON(t *testing.T, name string) string {
 func happyStub(t *testing.T) string {
 	t.Helper()
 	return `case "$*" in
-  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"550fffde","org_name":"[SLNG] Example Workspace"}}' ;;
   *"tool get check_order"*) ` + fixtureJSON(t, "tool_get_code.json") + ` ;;
   *"tool get search_places_text"*) ` + fixtureJSON(t, "tool_get_api_request.json") + ` ;;
   *"tool list"*) printf '[{"name":"check_order","tool_type":"code","latest_version":1},{"name":"search_places_text","tool_type":"api_request","latest_version":3}]' ;;
@@ -156,16 +155,6 @@ func TestPullWritesTheMirrorAndStampsThePin(t *testing.T) {
 	dir, out, _, err := pullWithStub(t, happyStub(t), "--force")
 	if err != nil {
 		t.Fatalf("pull failed: %v\n%s", err, out)
-	}
-
-	// The organisation, before any other output. Two are reachable from one
-	// checkout and are provisioned differently, so a reader who does not know
-	// which was read cannot act on any of the rest.
-	if !strings.Contains(out, "slng: organisation [SLNG] Example Workspace (550fffde") {
-		t.Errorf("the pull does not name the organisation it read:\n%s", out)
-	}
-	if org, first := strings.Index(out, "organisation"), strings.Index(out, "tools/"); org > first {
-		t.Errorf("the organisation line comes after a finding:\n%s", out)
 	}
 
 	for _, want := range []string{
@@ -296,11 +285,8 @@ func TestPullReportsUnchangedRatherThanSkipping(t *testing.T) {
 	}
 }
 
-// TestPullRefusalsNameTheOrganisationAndTheFix. Every refusal has to say what to
-// do next, and the account ones have to name the organisation, because the
-// answer depends on which of the two was read.
-func TestPullRefusalsNameTheOrganisationAndTheFix(t *testing.T) {
-	const account = `*whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"550fffde","org_name":"[SLNG] Example Workspace"}}' ;;`
+// TestPullRefusalsNameTheFix. Every refusal has to say what to do next.
+func TestPullRefusalsNameTheFix(t *testing.T) {
 
 	for _, tc := range []struct {
 		name   string
@@ -311,7 +297,6 @@ func TestPullRefusalsNameTheOrganisationAndTheFix(t *testing.T) {
 		{
 			name: "a name the organisation does not hold",
 			stub: `case "$*" in
-  ` + account + `
   *"tool list"*) printf '[{"name":"check_order_v2","tool_type":"code","latest_version":1}]' ;;
   *"tool get"*) printf 'error: tool not found\n' >&2; exit 1 ;;
   *) printf '[]' ;;
@@ -330,7 +315,6 @@ esac`,
 		{
 			name: "a name that resolves to a curated capability",
 			stub: `case "$*" in
-  ` + account + `
   *"tool get"*) ` + fixtureJSON(t, "tool_get_curated.json") + ` ;;
   *) printf '[]' ;;
 esac`,
@@ -767,7 +751,6 @@ func TestPullCheckDetectsStaleScalarMetadata(t *testing.T) {
 func TestPullMissingScalarToolNamesTheSlngLineNotTheFile(t *testing.T) {
 	dir := scalarPullFixture(t)
 	stub := `case "$*" in
-  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"550fffde","org_name":"[SLNG] Example Workspace"}}' ;;
   *"tool list"*) printf '[{"name":"check_order_v2","tool_type":"code","latest_version":1}]' ;;
   *"tool get"*) printf 'error: tool not found\n' >&2; exit 1 ;;
   *) printf '[]' ;;
@@ -858,7 +841,6 @@ func hostedTargets(agent *ir.Agent) []ir.Target {
 func TestPullSeparatesAFailedReadFromAMissingTool(t *testing.T) {
 	// The listing succeeds and names the tool; the per-tool read does not.
 	stub := `case "$*" in
-  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
   *"tool list"*) printf '[{"id":"t-co","scope":"organisation","name":"check_order","tool_type":"code","latest_version":1},{"id":"t-sp","scope":"organisation","name":"search_places_text","tool_type":"api_request","latest_version":3}]' ;;
   *"tool get"*) printf 'error: upstream timeout\n' >&2; exit 1 ;;
   *) printf '[]' ;;
@@ -882,7 +864,6 @@ esac`
 	// listing that worked and does not name the tool IS evidence of absence,
 	// and that case keeps its dashboard guidance.
 	absent := `case "$*" in
-  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
   *"tool list"*) printf '[{"id":"t-x","scope":"organisation","name":"something_else","tool_type":"code","latest_version":1}]' ;;
   *"tool get"*) printf 'error: tool not found\n' >&2; exit 1 ;;
   *) printf '[]' ;;
