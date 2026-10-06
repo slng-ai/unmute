@@ -56,9 +56,10 @@ and carry on.
 
 ### 1. The tool, from Python to a published version
 
-`check_availability.py` uses `day: date`, which needs backend
-[#955](https://github.com/slng-ai/backend/pull/955) deployed. Before that,
-build, run and publish pass, but connect fails.
+`check_availability.py` uses `day: date`, so its schema carries
+`"format": "date"`. SLNG accepts that since backend
+[#955](https://github.com/slng-ai/backend/pull/955), released 2026-10-06.
+Before #955, build, run and publish passed, but connect failed.
 
 ```sh
 H=internal/voice-agents-tests/slng-tasks/hosted
