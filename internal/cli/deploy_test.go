@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/target"
 )
 
@@ -219,7 +220,7 @@ func TestPushResultWarnsThatAnUpdateReplaces(t *testing.T) {
 	// The closing line has to be runnable, agent id included: the web-session
 	// command's id is not optional, which is what target.SlngWebSessionCommand
 	// and its own gate exist to hold.
-	if got := out.String(); !strings.Contains(got, "01998a7c --file session.json") {
+	if got := out.String(); !strings.Contains(got, "web-sessions create 01998a7c\n") {
 		t.Errorf("the outcome does not name a runnable web-session command:\n%s", got)
 	}
 }
@@ -1546,6 +1547,20 @@ esac`
 	}
 }
 
+// TestDeployPointsVoiceaiAtTheTargetRegion. Bare api.slng.ai has no DNS record,
+// so voiceai's default host fails. Deploy names the target's region host, and
+// keeps a base URL the author set.
+func TestDeployPointsVoiceaiAtTheTargetRegion(t *testing.T) {
+	slng := ir.Target{DeploymentRegions: []string{"eu-north"}}
+	if got := envValue(withSlngBaseURL([]string{"A=b"}, slng), target.SlngPushBaseURLEnv); got != "https://eu-north.api.slng.ai" {
+		t.Errorf("base URL = %q, want the eu-north host", got)
+	}
+	set := []string{target.SlngPushBaseURLEnv + "=https://eu-west.api.slng.ai"}
+	if got := envValue(withSlngBaseURL(set, slng), target.SlngPushBaseURLEnv); got != "https://eu-west.api.slng.ai" {
+		t.Errorf("an exported base URL was replaced: %q", got)
+	}
+}
+
 // TestDeployRelaysInboundNotReady. voiceai 0.1.21 reports on stderr when the
 // agent saved but its inbound dispatch did not refresh. The push still exits 0
 // with a good JSON result, so the line is the only sign phone calls will not
@@ -1657,6 +1672,28 @@ esac`
 	}
 	if !strings.Contains(out, "attached check_order v1") {
 		t.Errorf("stdout does not name the version attached:\n%s", out)
+	}
+}
+
+// TestDryRunChecksAStaleSnapshotWithoutConnecting. A snapshot that is only old
+// is renewed by the real deploy, so a dry run checks the tools against the
+// stored list instead of refusing. It still never connects to the server.
+func TestDryRunChecksAStaleSnapshotWithoutConnecting(t *testing.T) {
+	stale := `{"id":"s-internal_docs","name":"internal_docs","capability_status":"healthy","capability_observed_at":"2020-01-01T00:00:00Z","next_refresh_at":"2020-01-01T00:05:00Z","capabilities":{"truncated":false,"tools":[{"name":"search_docs","schema_hash":"h"},{"name":"read_doc","schema_hash":"h"}]}}`
+	stub := `case "$*" in
+  *whoami*) printf '{"ok":true,"profile":"default","account":{"org_id":"o","org_name":"Example"}}' ;;
+  *"agents push"*"--dry-run"*) printf '{"ok":true,"dry_run":true,"resolution_contract":1,"organisation":{"id":"o","name":"Example"},"agent":{"id":"agent-1","action":"create"}}' ;;
+` + provisionedCatalogue + `
+` + resolvedToolStubIn("o", "check_order", "t-check_order", "1", openSchema) + `
+` + resolvedToolStubIn("o", "refund", "t-refund", "2", openSchema) + `
+  *"mcp get s-internal_docs"*) printf '%s' '` + stale + `' ;;
+  *"mcp run"*) printf 'a dry run connected to a server\n' >&2; exit 1 ;;
+` + provisionedAgent + `
+  *) printf '[]' ;;
+esac`
+	_, _, errOut, err := deployWithStub(t, stub, "--dry-run")
+	if err != nil {
+		t.Fatalf("a dry run refused a snapshot the real deploy would refresh: %v\n%s", err, errOut)
 	}
 }
 

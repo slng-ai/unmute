@@ -496,6 +496,11 @@ func resolveMCPAt(
 		records[requirement.Name] = record
 
 		switch {
+		case !record.usableAt(now) && !refresh && record.healthy() && !record.Capabilities.Truncated:
+			// Only its age is wrong. A dry run does not connect, so the tools are
+			// checked against the stored list, and the real deploy refreshes it
+			// first. Refusing here sent authors to fix something deploy fixes.
+			found.State = satisfied
 		case !record.usableAt(now) && !refresh:
 			found.State = notChecked
 			found.Detail = fmt.Sprintf("its stored capability snapshot is %s. A dry run does not connect to a server, so this was reported and not refreshed: a real deploy refreshes it once and checks it again",

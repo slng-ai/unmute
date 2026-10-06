@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -164,6 +165,7 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 
 	caps := target.Default()
 	for _, resolved := range pushable {
+		env, pushEnv := withSlngBaseURL(env, resolved), withSlngBaseURL(pushEnv, resolved)
 		artifact, err := generate.Generate(agent, resolved, caps)
 		if err != nil {
 			return fmt.Errorf("deploy %s: %w", dir, err)
@@ -565,6 +567,17 @@ type pushResult struct {
 // inboundNotReadyPrefix starts the stderr line voiceai prints when the saved
 // agent's inbound dispatch refresh failed.
 const inboundNotReadyPrefix = "inbound calls are not ready"
+
+// withSlngBaseURL points voiceai at the target's first region, because every
+// SLNG host carries a world part and voiceai still defaults to bare
+// api.slng.ai, which has no DNS record. A base URL the author set is kept.
+func withSlngBaseURL(env []string, resolved ir.Target) []string {
+	if len(resolved.DeploymentRegions) == 0 || envValue(env, target.SlngPushBaseURLEnv) != "" {
+		return env
+	}
+	host := target.SlngSpeechGateway{WorldPart: resolved.DeploymentRegions[0]}.Host()
+	return append(slices.Clone(env), target.SlngPushBaseURLEnv+"=https://"+host)
+}
 
 // runPush shells out and returns the parsed document. A non-zero exit is not an
 // error here: the tool exits 1 whenever it refuses, and the reason is in the

@@ -317,10 +317,7 @@ trunk at all.
 To use your own LiveKit client instead, with the defaults:
 
 ```bash
-cat > session.json <<'JSON'
-{"arguments":{},"participant_name":"you"}
-JSON
-voiceai agents web-sessions create <agent_id> --file session.json
+voiceai agents web-sessions create <agent_id>
 ```
 
 `unmute deploy` prints this command with the agent id already filled in. The

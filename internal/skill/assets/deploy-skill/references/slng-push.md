@@ -194,7 +194,10 @@ the files to the `voiceai` CLI, which must be on PATH
 The key is read from `SLNG_API_KEY`, then `VOICEAI_API_KEY`, then whatever
 profile `voiceai login` stored. Those are two names for one token: a single SLNG
 key serves every SLNG role, including the Context Router key a generated livekit
-or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push tool
+or pipecat project reads at run time. `unmute deploy` also sets
+`VOICEAI_BASE_URL` to the host of the target's first `deployment_region`, unless
+it is already set, because bare `api.slng.ai` does not resolve. A plain
+`voiceai` command needs that variable exported. `VOICEAI_API_KEY` is the name the push tool
 itself reads.
 
 A real push needs a `voiceai` release that supports a checked, resolved
@@ -338,15 +341,13 @@ matches.
 
 ```sh
 export VOICEAI_API_KEY="$SLNG_API_KEY"
-cat > session.json <<'JSON'
-{"arguments": {}}
-JSON
-voiceai agents web-sessions create <agent_id> --file session.json
+voiceai agents web-sessions create <agent_id>
 ```
 
-The command takes the agent id `unmute deploy` printed, and a `--file` holding at
-least `{"arguments": {}}`: every field in that body is optional in the API schema,
-but a required input without a default must be supplied in `arguments`. It returns
+The command takes the agent id `unmute deploy` printed. With no `--file` it sends
+an empty body (voiceai 0.1.21 or later), so every input takes its default. A
+required input without a default goes in a body, passed as
+`--file session.json` holding `{"arguments": {...}}`. It returns
 LiveKit connection details, not a browser call. For a microphone test, open the
 deployed agent in the dashboard and choose **Test**, then **Web session**.
 

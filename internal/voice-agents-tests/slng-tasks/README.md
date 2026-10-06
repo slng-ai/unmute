@@ -51,9 +51,13 @@ git switch main && make build
 bin/unmute --version
 ```
 
-If `voiceai whoami` fails with "Couldn't reach SLNG to check your key",
-`api.slng.ai` does not resolve. On 2026-10-06 it still did not. Run
-`export VOICEAI_BASE_URL=https://eu-west.api.slng.ai` and carry on.
+Every SLNG host carries a world part, and bare `api.slng.ai` does not resolve.
+`unmute deploy` points voiceai at the target's region by itself. A plain
+`voiceai` command needs it exported:
+
+```sh
+export VOICEAI_BASE_URL=https://eu-west.api.slng.ai
+```
 
 ### 1. The tool, from Python to a published version
 

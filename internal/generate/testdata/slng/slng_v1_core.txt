@@ -127,8 +127,8 @@ For your own LiveKit client, use the agent id step 2 printed and the same accoun
 export VOICEAI_API_KEY="$SLNG_API_KEY"
 ```
 
-Supply a request body with `--file`. Write a `session.json`, filling in any
-required session arguments:
+The command below takes every default, and needs `voiceai` 0.1.21 or later. To
+set session arguments, write a `session.json` and add `--file session.json`:
 
 ```json
 {"arguments": {}, "participant_name": "you"}
@@ -144,7 +144,7 @@ Inbound phone calls supply no session arguments. Every required injected input
 needs a valid default before SLNG can attach an inbound trunk.
 
 ```bash
-voiceai agents web-sessions create <agent_id> --file session.json
+voiceai agents web-sessions create <agent_id>
 ```
 
 That returns LiveKit connection details and requests a worker. Connect a

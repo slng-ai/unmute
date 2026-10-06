@@ -136,6 +136,10 @@ to install for this target.
   your shell when using a profile. Check the preview's organisation before deploying.
 </Warning>
 
+Unmute sends every `voiceai` call to the host of the target's first
+`deployment_region`, such as `https://eu-north.api.slng.ai`. An exported
+`VOICEAI_BASE_URL` takes precedence.
+
 There is no separate Unmute project selector for SLNG. The credential selects
 the organisation, and `--profile` selects a saved credential when no environment
 key overrides it. Use the same profile for every command below.
@@ -347,7 +351,13 @@ its own outbound connection; an inbound attachment does not enable it.
 
 ### Create a session for your own client
 
-Save this complete request body, filling any required call inputs in `arguments`:
+With every input at its default, no request body is needed:
+
+```sh Terminal
+voiceai --profile production agents web-sessions create <agent_id>
+```
+
+To fill call inputs, save a request body and pass it with `--file`:
 
 ```json session.json
 {"arguments": {}, "participant_name": "tester"}
