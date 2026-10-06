@@ -332,7 +332,11 @@ func buildSlng(agent *ir.Agent, tgt ir.Target) (slngArtifacts, error) {
 			built.Body.RuntimeVars = append(built.Body.RuntimeVars, slngRuntimeVar{Name: name, Description: variable.Description})
 			continue
 		}
-		built.Body.Variables[name] = slngVariableOption{Required: true}
+		// A call fact (call_id, from_number, ...) is filled by the phone adapter
+		// on the code targets. SLNG fills none of them, and an inbound call
+		// carries no arguments, so a required one refuses every inbound call
+		// that names it. Optional, it renders empty.
+		built.Body.Variables[name] = slngVariableOption{Required: !ir.IsSystemSource(variable.Source)}
 		if text, ok := variable.Default.(string); ok {
 			built.Body.Defaults[name] = text
 		}
@@ -402,16 +406,16 @@ func slngModelsFor(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) slngModels
 	}
 	if listen := tgt.Models.Listen; listen != nil {
 		models.STT = slngModelName(*listen)
-		models.STTKwargs = slngSpeechKwargs(listen.Params)
+		models.STTKwargs = slngModelKwargs(listen.Params)
 	}
 	if reason := tgt.Models.Reason[entry.Model]; reason.Model != "" {
 		models.LLM = slngModelName(reason)
-		models.LLMKwargs = slngKwargs(reason.Params)
+		models.LLMKwargs = slngModelKwargs(reason.Params)
 	}
 	if speak, ok := tgt.Models.Speak[entry.Voice]; ok {
 		models.TTS = slngModelName(speak)
 		models.TTSVoice = firstNonEmpty(speak.VoiceID, speak.Voice)
-		models.TTSKwargs = slngSpeechKwargs(speak.Params)
+		models.TTSKwargs = slngModelKwargs(speak.Params)
 	}
 	models.Fallbacks = slngFallbacksFor(agent, tgt, entry)
 	return models
@@ -456,11 +460,13 @@ func slngModelName(binding ir.Binding) string {
 	return binding.Provider + "/" + binding.Model
 }
 
-// slngSpeechKwargs is slngKwargs minus world_part. On the code targets it picks
-// the speech gateway; on SLNG the agent's region does, and SLNG refuses
-// world_part as a model kwarg. Same reason the LiveKit driver drops it.
-func slngSpeechKwargs(params map[string]any) map[string]any {
-	return slngKwargs(withoutParams(params, []string{"world_part"}))
+// slngModelKwargs is slngKwargs minus the world part keys, for all three models.
+// On the code targets world_part picks the speech gateway, and on a think model
+// it (or the older world_part_override) builds the Context Router base URL. On
+// SLNG the agent's region does both, and SLNG refuses world_part as a model
+// kwarg. Same reason the LiveKit driver drops it.
+func slngModelKwargs(params map[string]any) map[string]any {
+	return slngKwargs(withoutParams(params, []string{"world_part", "world_part_override"}))
 }
 
 // slngKwargs forwards a binding's params as written. It exists to turn a nil map

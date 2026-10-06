@@ -265,9 +265,10 @@ func TestSlngV1WritesEmptyVariableMapsRatherThanNone(t *testing.T) {
 }
 
 // world_part picks the speech gateway on the code targets, and Pipecat requires
-// it. On SLNG the agent's region picks the gateway and SLNG refuses world_part
-// as a kwarg, so the same package must compile without it. Other params stay.
-func TestSlngV1DropsSpeechWorldPart(t *testing.T) {
+// it. On a think model it builds the Context Router base URL. On SLNG the
+// agent's region does both and SLNG refuses world_part as a kwarg, so the same
+// package must compile without it, on all three models. Other params stay.
+func TestSlngV1DropsWorldPart(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "slng_core"))
 	if err != nil {
 		t.Fatal(err)
@@ -289,6 +290,12 @@ func TestSlngV1DropsSpeechWorldPart(t *testing.T) {
 		speak[name] = binding
 	}
 	tgt.Models.Speak = speak
+	reasons := maps.Clone(tgt.Models.Reason)
+	for name, binding := range reasons {
+		binding.Params = map[string]any{"world_part": "eu-west", "world_part_override": "eu-west", "temperature": 0.2}
+		reasons[name] = binding
+	}
+	tgt.Models.Reason = reasons
 
 	artifact, err := Generate(agent, tgt, target.Default())
 	if err != nil {
@@ -301,6 +308,7 @@ func TestSlngV1DropsSpeechWorldPart(t *testing.T) {
 	models := slngBodyOf(t, files)["models"].(map[string]any)
 	want := map[string]map[string]any{
 		"stt_kwargs": {"punctuate": true},
+		"llm_kwargs": {"temperature": 0.2},
 		"tts_kwargs": {"speed": 1.1},
 	}
 	for field, expected := range want {
@@ -308,6 +316,37 @@ func TestSlngV1DropsSpeechWorldPart(t *testing.T) {
 		if !maps.Equal(got, expected) {
 			t.Errorf("%s = %v, want %v", field, got, expected)
 		}
+	}
+}
+
+// A call fact is filled by the phone adapter on the code targets. SLNG fills
+// none, and an inbound call carries no arguments, so a required call_id would
+// refuse every inbound call that names it. It must be written optional, while
+// an ordinary variable stays required.
+func TestSlngV1CallFactsAreOptional(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "slng_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := buildWithState(t, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Variables["call_id"] = ir.Variable{Type: ir.PrimitiveString, Source: ir.VariableSourceCallID}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderSlng), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	files := map[string]string{}
+	for _, file := range artifact.Files {
+		files[file.Path] = string(file.Content)
+	}
+	options := slngBodyOf(t, files)["template_variable_options"].(map[string]any)
+	if got := options["call_id"].(map[string]any)["required"]; got != false {
+		t.Errorf("call_id required = %v, want false", got)
+	}
+	if got := options["customer_name"].(map[string]any)["required"]; got != true {
+		t.Errorf("customer_name required = %v, want true", got)
 	}
 }
 
