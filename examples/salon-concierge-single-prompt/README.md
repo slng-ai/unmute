@@ -38,7 +38,8 @@ as the optimized package. A baseline that did not run would prove nothing.
 
 | Path | What it holds |
 |---|---|
-| `agent.yaml` | one agent, no tasks, no handoffs, no variables, no pre-fetch |
+| `agent.yaml` | one agent, no tasks, no handoffs, the same pre-fetch as the optimized package |
+| `state.py` | what the pre-fetch reads before the greeting: today's date and the caller ID |
 | `targets.yaml` | the same two routes as the optimized package |
 | `instructions.md` | the one prompt, holding routing, verification, booking and complaints together |
 | `tools/` | the same local Python tools plus the `end_call` builtin, all offered to the agent on every turn |
@@ -54,18 +55,19 @@ tool result when a caller refers to that booking.
 
 What the one agent does differently:
 
-- The caller is asked for a phone number out loud, even on a route where the
-  carrier already supplied one.
-- The model calls a tool to find out what day it is, so a caller saying
-  "tomorrow" costs two chained requests.
-- The number is not a declared variable, so the model reads it off the
-  transcript and retypes it into every tool call.
+- One prompt holds verification, booking and complaints, and the model reads
+  all of it on every turn.
+- Every tool is offered on every turn, where the optimized package offers each
+  step only its own.
+- The model carries the caller's number itself. Nothing confirms the number
+  without a task, so `inject:` cannot read it from state. The prompt reads the
+  caller ID back, and the model passes the agreed number into each tool call.
 
 Everything else is held identical on purpose, and that is what makes the
-comparison worth reading. Both packages speak to OpenAI directly, with the same
-three think params, at the same `pace: snappy`. So a difference you hear between
-them is a difference the structure made, not a model, a transport or a turn
-setting.
+comparison worth reading. Both packages run the same tools and the same
+pre-fetch, on native Gemini through Google's EU Vertex endpoint, at the same
+`pace: snappy`. So a difference you hear between them is a difference the
+structure made, not a model, a tool or a turn setting.
 
 ## Routes and speech gateway
 
@@ -89,13 +91,12 @@ out of whatever you hear. Both packages trace to Langfuse, so one call through
 each is enough to compare what a request carries:
 
 ```sh
-unmute dev examples/salon-concierge-single-prompt --target livekit
+unmute dev examples/salon-concierge-single-prompt --target livekit --source from_number=<E.164 number>
 unmute dev examples/salon-concierge --target livekit --source from_number=<E.164 number>
 ```
 
-`--source` seeds the call fact the optimized package's pre-fetch reads. This
-package has no pre-fetch, so it has nothing to seed. It asks for the number out
-loud, which is the point.
+`--source` seeds the caller ID that both packages' pre-fetch reads. Without it
+a browser call has no caller ID, and both ask for the number out loud.
 
 [`scripts/read_langfuse_trace.py`](../../scripts/read_langfuse_trace.py) reads
 the newest trace back: transcript, tool calls, and per-span latency.
@@ -104,27 +105,15 @@ the newest trace back: transcript, tool calls, and per-span latency.
 
 ### The agent will not start
 
-The run reads its credentials from `.env`. This package declares the OpenAI key,
-the SLNG key and the three Langfuse values in `agent.yaml`, and it traces to
-Langfuse on every call.
+The run reads its credentials from `.env`. This package declares the OpenAI and
+Google keys, the SLNG key and the three Langfuse values in `agent.yaml`, and it
+traces to Langfuse on every call.
 
 **Fix:** compile first, then copy the generated example and fill it in.
 
 ```sh
 unmute compile examples/salon-concierge-single-prompt
 cp examples/salon-concierge-single-prompt/build/livekit/.env.example examples/salon-concierge-single-prompt/.env
-```
-
-### I passed `--source` and it still asks for my number
-
-This package declares no variables and no pre-fetch, so a seeded call fact has
-nothing to land in.
-
-**Fix:** there is nothing to change here, because that is the baseline. Seed the
-optimized package instead, which reads the fact before the first word.
-
-```sh
-unmute dev examples/salon-concierge --target livekit --source from_number=<E.164 number>
 ```
 
 ### Asking for a manager does not transfer
@@ -142,5 +131,6 @@ MANAGER_PHONE_NUMBER=<E.164 number>
 ## Where to go next
 
 - [`salon-concierge`](../salon-concierge/) - the same salon, optimized
+- [`salon-concierge-unoptimized`](../salon-concierge-unoptimized/) - this prompt with the pre-fetch taken out too
 - [`examples/README.md`](../README.md) - every shipped example
 - [SLNG gateway](../../docs-site/optimization/regional-infrastructure.mdx) - pick another world part

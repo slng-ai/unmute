@@ -1,0 +1,64 @@
+{
+  "source": "examples/salon-concierge-single-prompt/state.py",
+  "digest": "4f13c524163cc27dea01ce8af67aad759b4d9d01be8a93610c35e5a2b0952507",
+  "report": {
+    "schema": {
+      "description": "What one call knows before anybody speaks. Nothing writes to it later.",
+      "properties": {
+        "booking_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Today's date in the salon's own timezone, YYYY-MM-DD.",
+          "title": "Booking Date"
+        },
+        "booking_weekday": {
+          "default": "",
+          "description": "The weekday today falls on, spelled out in English: Monday to Sunday.",
+          "title": "Booking Weekday",
+          "type": "string"
+        },
+        "salon_local_time": {
+          "anyOf": [
+            {
+              "format": "time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The salon's own wall clock when the call began, HH:MM on a 24 hour clock.",
+          "title": "Salon Local Time"
+        },
+        "customer_phone": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The number the carrier says is calling, in E.164. Empty on a browser call. Only a suggestion: the prompt reads it back and the caller may give another.",
+          "title": "Customer Phone"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

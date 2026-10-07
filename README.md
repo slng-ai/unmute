@@ -535,9 +535,13 @@ per feature of the compiler, held to every gate in this repository.
   cold manager transfer, tracing, and inbound phone on both code targets. Every
   tool is local Python, so nothing remote has to be up before the greeting.
 - [`salon-concierge-single-prompt`](examples/salon-concierge-single-prompt/) is
-  the same salon with the structural features taken back out, so the one above
-  can be read against something. Model, transport and turn taking are held
-  identical, so a difference you hear is a difference the structure made.
+  the same salon in one prompt, with no tasks and no handoffs, so the one above
+  can be read against something. Tools, pre-fetch, model, transport and turn
+  taking are held identical, so a difference you hear is a difference the
+  structure made.
+- [`salon-concierge-unoptimized`](examples/salon-concierge-unoptimized/) is the
+  same one prompt with the pre-fetch taken out as well, so it has none of the
+  optimizations: the starting point to measure them against.
 - [`hotel-concierge`](examples/hotel-concierge/) is the hosted target's
   showcase: a concierge line whose tools are all references SLNG already holds,
   with template variables, an injected argument, a tool announcement, named MCP

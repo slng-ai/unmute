@@ -595,8 +595,8 @@ decision the author is making rather than an implementation detail.
   count of them.
 
 Full page: [Context Router](https://docs.slng.ai/context-router/). No shipped
-example binds to it today: `salon-concierge` reaches Google Vertex directly and
-`salon-concierge-single-prompt` reaches OpenAI directly, so an author who wants
+example binds to it today: both salon packages reach Google Vertex directly, so
+an author who wants
 to see what the router is worth compiles one of them twice, once as it ships
 and once with the think binding pointed at the router.
 
@@ -714,7 +714,7 @@ repeat `provider`, `model` and `reasoning_effort` verbatim to keep them, and a
 duplicated binding is one somebody edits on one side only. Pipecat drops both
 and builds `OpenAILLMService` either way; `unmute validate` warns per param,
 naming the target, so the drop is reported rather than silent.
-`salon-concierge-single-prompt` shows this binding.
+No shipped example uses this binding.
 
 `use_websocket: true` keeps a WebSocket connection for Responses requests.
 HTTP clients can also reuse connections. Compare several calls with the same

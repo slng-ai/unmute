@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -79,6 +80,33 @@ func loadExample(t *testing.T, name string) *ir.Agent {
 		t.Fatal(err)
 	}
 	return resolved
+}
+
+// The salon packages are read side by side, and a token or latency figure from
+// one is compared with the others. That comparison only measures structure
+// while each target resolves the same think model and the same turn binding in
+// all of them, at pace snappy. They drifted apart once (OpenAI on one, Gemini
+// and balanced on the other, 2026-10-07), and a 39% token gap read as an
+// architecture result was partly a model difference.
+func TestSalonPackagesShareModelAndTurnTaking(t *testing.T) {
+	steps := loadExample(t, "salon-concierge")
+	for _, name := range []string{"salon-concierge-single-prompt", "salon-concierge-unoptimized"} {
+		other := loadExample(t, name)
+		for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+			a, b := targetByProvider(t, steps, provider), targetByProvider(t, other, provider)
+			if !reflect.DeepEqual(a.Models.Reason["reasoning"], b.Models.Reason["reasoning"]) {
+				t.Errorf("%s think binding differs:\nsalon-concierge %#v\n%s %#v", provider, a.Models.Reason["reasoning"], name, b.Models.Reason["reasoning"])
+			}
+			if !reflect.DeepEqual(a.Models.Turn, b.Models.Turn) {
+				t.Errorf("%s turn binding differs:\nsalon-concierge %#v\n%s %#v", provider, a.Models.Turn, name, b.Models.Turn)
+			}
+		}
+	}
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		if turn := targetByProvider(t, steps, provider).Models.Turn; turn == nil || turn.Pace != ir.PaceSnappy {
+			t.Errorf("%s turn pace = %#v, want snappy on every salon package", provider, turn)
+		}
+	}
 }
 
 func TestSalonConciergeFeatureContract(t *testing.T) {
@@ -1368,8 +1396,9 @@ func TestPublicExamplePackages(t *testing.T) {
 	//
 	// salon-concierge-single-prompt is the third, added 2026-09-01, and it is the
 	// one exception to the rule that a shipped example is something to copy. It is
-	// salon-concierge with the structural optimizations removed: one prompt, no
-	// variables, no prefetch, framework-default turn taking, no router. It exists
+	// salon-concierge with the structure removed: one prompt, no tasks, no
+	// handoffs, no confirmed variables. Model, turn taking, tools and prefetch are
+	// held identical (TestSalonPackagesShareModelAndTurnTaking). It exists
 	// so the optimized package can be read against something, and it is held to
 	// every gate the others are, because a baseline that did not validate, compile
 	// and run would prove nothing about the package it is compared with.
@@ -1414,6 +1443,7 @@ func TestPublicExamplePackages(t *testing.T) {
 		"pharmacy-refills",
 		"salon-concierge",
 		"salon-concierge-single-prompt",
+		"salon-concierge-unoptimized",
 		"takeaway-orders",
 		// The one twilio target example: a ConversationRelay app the reader
 		// hosts, on a phone number and nothing else.

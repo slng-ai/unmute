@@ -31,7 +31,7 @@ import (
 func TestResponsesOnlyParamsReachLiveKitAndNoRequestBody(t *testing.T) {
 	load := func(t *testing.T) *ir.Agent {
 		t.Helper()
-		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge-single-prompt"))
+		pkg, err := spec.Load(filepath.Join("..", "testdata", "responses_params"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -46,7 +46,7 @@ func TestResponsesOnlyParamsReachLiveKitAndNoRequestBody(t *testing.T) {
 	agent := load(t)
 	for _, name := range []string{"api", "use_websocket"} {
 		if _, ok := agent.Models["reasoning"].Params[name]; !ok {
-			t.Fatalf("the salon package no longer authors params.%s on its base think binding, so this test proves nothing", name)
+			t.Fatalf("the responses_params package no longer authors params.%s on its base think binding, so this test proves nothing", name)
 		}
 	}
 
@@ -99,7 +99,7 @@ func TestResponsesOnlyParamsReachLiveKitAndNoRequestBody(t *testing.T) {
 // such fields. Refusing is not the answer either, because one think binding
 // serving both targets is the shape this change exists to allow.
 func TestResponsesOnlyParamsWarnOnTheTargetThatCannotUseThem(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge-single-prompt"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "responses_params"))
 	if err != nil {
 		t.Fatal(err)
 	}

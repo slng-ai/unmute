@@ -50,6 +50,16 @@ def _booking_today() -> date:
     return datetime.now(ZoneInfo(_SALON_TIMEZONE)).date()
 
 
+def get_current_date():
+    """Today, in the salon's zone. The tool the optimized packages do not have.
+
+    The only difference from their copy of this file. They read the same clock
+    once, before the greeting, through `prefetch:`. This package has no
+    pre-fetch, so the model calls this and pays a request to find out.
+    """
+    return {"date": _booking_today().isoformat()}
+
+
 def _normalize_phone(phone):
     """Digits only, and the store's one key.
 
