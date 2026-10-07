@@ -126,15 +126,15 @@ func SlngInjectedArguments(agent *ir.Agent) map[string]map[string]any {
 
 // SlngAuthoredConfig is each package tool file's config override, keyed by the
 // tool file's own name: a builtin's `inject:`, which pins one of the settings
-// that capability declares and which the driver writes as the attachment's
-// config_overrides. It exists for the same reason SlngAuthoredAnnouncements
+// that capability declares, and end_call's `announce:`, which is its goodbye.
+// The driver writes both as the attachment's config_overrides. It exists for the same reason SlngAuthoredAnnouncements
 // does: a preview cannot compare a setting it was never given, and without it
 // the deploy report told an author that writing their own sender would delete
 // it.
 func SlngAuthoredConfig(agent *ir.Agent) map[string]map[string]any {
 	out := map[string]map[string]any{}
 	for name, tool := range agent.Tools {
-		if tool.Execution != ir.ToolBuiltin || len(tool.Inject) == 0 {
+		if tool.Execution != ir.ToolBuiltin {
 			continue
 		}
 		prebuilt, known := targetcap.LookupPrebuilt(tool.Builtin)
@@ -163,7 +163,8 @@ func SlngAuthoredAnnouncements(agent *ir.Agent) map[string]string {
 	out := map[string]string{}
 	for name, tool := range agent.Tools {
 		// One line: a list never reaches this target, ir.Validate refuses it.
-		if len(tool.Announce) > 0 {
+		// end_call's announce is its goodbye, which SlngAuthoredConfig carries.
+		if len(tool.Announce) > 0 && !slngEndCall(tool) {
 			out[name] = tool.Announce[0]
 		}
 	}

@@ -170,10 +170,11 @@ number the caller confirmed is recorded on the call.
 
 Neither takes a setting. `user_phone_number` reads the number from the call leg.
 
-`end_call` has settings on the platform, a goodbye line and whether to wait for
-it, that a package cannot declare. Use [`announce:`](#speaking-before-it-runs)
-for a goodbye instead. A goodbye set by hand in the dashboard is removed by the
-next push, and `unmute deploy --dry-run` says so before it happens.
+On `slng`, `end_call` always says a goodbye before it hangs up. Without
+`announce:` it is SLNG's default line, "Thanks for calling. Goodbye!". Write
+[`announce:`](#speaking-before-it-runs) to choose your own. A goodbye set by
+hand in the dashboard is removed by the next push, and
+`unmute deploy --dry-run` says so before it happens.
 
 ## What the registry decides for you
 
@@ -251,10 +252,12 @@ announce: Thanks for calling, goodbye.
   attachment carries a single pre-action message. No `{{variables}}`.
 </ParamField>
 
-A tool whose effect is `ends_conversation` waits for its own sentence to finish,
-because the hangup would otherwise cut it off mid-word. Every other announcement
-runs alongside the tool, which is the point of it: a sentence so a slow call is
-not silence.
+On `end_call` the line is the goodbye. It replaces SLNG's own goodbye, so the
+caller hears it once, then the call ends. Do not also tell the model to say
+goodbye before it calls `end_call`, or the caller hears two.
+
+Every other announcement runs alongside the tool, which is the point of it: a
+sentence so a slow call is not silence.
 
 A code target refuses `announce:` on a prebuilt. It builds the capability from
 its own SDK and has no seam in front of it, and the refusal says so.

@@ -178,9 +178,10 @@ type proposedSettings struct {
 	// Announce is each tool file's own `announce:`, which compiles to the
 	// attachment's execution_policy.pre_action_message.
 	Announce map[string]string
-	// Config is each tool file's own config override, which today is a builtin
-	// send_sms's sender, so the preview compares it rather than calling every
-	// config override a setting the package cannot declare.
+	// Config is each tool file's own config override: a builtin's `inject:`
+	// settings and end_call's goodbye from `announce:`, so the preview compares
+	// them rather than calling every config override a setting the package
+	// cannot declare.
 	Config map[string]map[string]any
 }
 
@@ -323,9 +324,9 @@ func attachmentChanges(attached slngLiveTool, reference resolvedTool, proposed p
 			switch {
 			case sameArgument(have, want):
 			case have == nil:
-				changes = append(changes, fmt.Sprintf("config_overrides.%s, which this package's `inject:` pins and the agent does not have now", key))
+				changes = append(changes, fmt.Sprintf("config_overrides.%s, which this package pins and the agent does not have now", key))
 			default:
-				changes = append(changes, fmt.Sprintf("config_overrides.%s, from %s to this package's `inject:`", key, settingValue(have)))
+				changes = append(changes, fmt.Sprintf("config_overrides.%s, from %s to this package's value", key, settingValue(have)))
 			}
 		}
 		for _, key := range sortedMapKeys(attached.ConfigOverrides) {
@@ -366,6 +367,21 @@ func attachmentChanges(attached slngLiveTool, reference resolvedTool, proposed p
 func settingValue(value any) string {
 	if text, ok := value.(string); ok {
 		return fmt.Sprintf("%q", text)
+	}
+	// A template setting, such as end_call's goodbye_message, reads as its text.
+	if template, ok := value.(map[string]any); ok {
+		if segments, ok := template["segments"].([]any); ok {
+			text := ""
+			for _, segment := range segments {
+				part, _ := segment.(map[string]any)
+				if value, ok := part["value"].(string); ok {
+					text += value
+				} else if expression, ok := part["expression"].(string); ok {
+					text += expression
+				}
+			}
+			return fmt.Sprintf("%q", text)
+		}
 	}
 	return fmt.Sprint(value)
 }
