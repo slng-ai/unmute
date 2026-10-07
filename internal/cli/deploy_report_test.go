@@ -605,6 +605,10 @@ func TestPreviewComparesTheAnnouncementItWouldWrite(t *testing.T) {
 	}
 }
 
+func goodbye(text string) map[string]any {
+	return map[string]any{"segments": []any{map[string]any{"type": "literal", "value": text}}}
+}
+
 // TestPreviewComparesTheSenderItWouldWrite.
 //
 // `inject: from_number` on a builtin send_sms compiles to the attachment's
@@ -626,7 +630,7 @@ func TestPreviewComparesTheSenderItWouldWrite(t *testing.T) {
 			onAgent: map[string]any{"type": "send_sms", "from_number": sender}, declared: proposed,
 			wantNot: "config_overrides"},
 		{name: "only the package has one", onAgent: nil, declared: proposed,
-			want: "config_overrides.from_number, which this package's `inject:` pins and the agent does not have now"},
+			want: "config_overrides.from_number, which this package pins and the agent does not have now"},
 		// The generalisation this comparison needed. current_datetime's zone is a
 		// setting like the sender, and the live record carries `prompt: null`
 		// beside it: a key nobody has set is not something a replacement removes,
@@ -634,11 +638,21 @@ func TestPreviewComparesTheSenderItWouldWrite(t *testing.T) {
 		{name: "a zone the package pins, beside a setting nobody set",
 			onAgent:  map[string]any{"type": "current_datetime", "timezone": "UTC", "prompt": nil},
 			declared: map[string]map[string]any{"search_places_text": {"type": "current_datetime", "timezone": "America/Los_Angeles"}},
-			want:     `config_overrides.timezone, from "UTC" to this package's ` + "`inject:`",
+			want:     `config_overrides.timezone, from "UTC" to this package's value`,
 			wantNot:  "config_overrides.prompt"},
 		{name: "both, and they differ",
 			onAgent: map[string]any{"type": "send_sms", "from_number": "+447700900999"}, declared: proposed,
-			want: `config_overrides.from_number, from "+447700900999" to this package's ` + "`inject:`"},
+			want: `config_overrides.from_number, from "+447700900999" to this package's value`},
+		// end_call's goodbye is written by `announce:`, as a template, and the
+		// live record holds the same shape back.
+		{name: "the same goodbye on both sides",
+			onAgent:  map[string]any{"type": "end_call", "goodbye_message": goodbye("Bye now."), "wait_for_completion": true},
+			declared: map[string]map[string]any{"search_places_text": {"type": "end_call", "goodbye_message": goodbye("Bye now.")}},
+			wantNot:  "config_overrides.goodbye_message"},
+		{name: "a different goodbye on the agent",
+			onAgent:  map[string]any{"type": "end_call", "goodbye_message": goodbye("Thanks for calling. Goodbye!")},
+			declared: map[string]map[string]any{"search_places_text": {"type": "end_call", "goodbye_message": goodbye("Bye now.")}},
+			want:     "config_overrides.goodbye_message, from \"Thanks for calling. Goodbye!\" to this package's value"},
 		{name: "the agent holds a field the package cannot write",
 			onAgent: map[string]any{"type": "send_sms", "from_number": sender, "body": "Thanks!"}, declared: proposed,
 			want: "config_overrides.body, which the agent has now and this package cannot declare"},

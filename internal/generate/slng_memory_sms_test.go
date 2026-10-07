@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -94,6 +95,7 @@ func TestSlngWritesACuratedCapabilitySettingAsAConfigOverride(t *testing.T) {
 // On slng a curated capability is an attachment like any other and carries the
 // same execution_policy.pre_action_message, so refusing `announce:` on a
 // `builtin:` file was a gap in this compiler stated as a limit of the platform.
+// end_call is the exception: its announce is the goodbye SLNG speaks itself.
 // A code target still refuses it, because it builds the prebuilt from its own
 // SDK and has no seam in front of it; that refusal is beside this one in
 // internal/ir/validate.go.
@@ -115,33 +117,44 @@ func TestSlngAnnouncesEveryKindOfToolIncludingABuiltin(t *testing.T) {
 	if report, _ := ir.Validate(agent, []ir.Target{tgt}, targetcap.Default()); len(report.PerTarget[0].Errors) > 0 {
 		t.Fatalf("announce on a builtin was refused on slng: %v", report.PerTarget[0].Errors)
 	}
-	for name, line := range SlngAuthoredAnnouncements(agent) {
-		if line == "" {
-			t.Errorf("tool %q carries no announcement for the deploy preview to compare", name)
-		}
-	}
-	for _, name := range []string{"current_datetime", "end_call", "send_sms"} {
+	for _, name := range []string{"current_datetime", "send_sms"} {
 		if SlngAuthoredAnnouncements(agent)[name] != "One moment." {
 			t.Errorf("tool %q lost its announcement: %q", name, SlngAuthoredAnnouncements(agent)[name])
 		}
 	}
+	// end_call's announce is its goodbye, so the preview compares it as config.
+	if _, ok := SlngAuthoredAnnouncements(agent)["end_call"]; ok {
+		t.Error("end_call's announce reached the preview as a pre-action message")
+	}
+	if got := SlngAuthoredConfig(agent)["end_call"]["goodbye_message"]; got == nil {
+		t.Error("end_call's announce is not in the preview's config")
+	}
 
-	// A tool that ends the conversation waits for its own sentence, and nothing
-	// else does. end_call hangs up the moment it runs, so a goodbye spoken
-	// alongside it is cut off mid-word; every other announcement covers a wait,
-	// and waiting for one would add the silence it exists to fill.
+	// SLNG's end_call speaks its own goodbye after any pre-action, so an
+	// announce written as one made the caller hear two (MAN-204). It is the
+	// goodbye instead, and no other tool waits for its sentence: every other
+	// announcement covers a wait, and waiting would add the silence it fills.
 	_, files := compileSlng(t, "slng_memory_sms")
 	body := slngBodyOf(t, files)
 	for _, raw := range body["tool_refs"].([]any) {
 		ref := raw.(map[string]any)
 		policy, _ := ref["execution_policy"].(map[string]any)
+		if ref["tool"] == "end_call" {
+			if policy != nil {
+				t.Errorf("end_call carries a pre-action message, so the caller hears two goodbyes: %v", policy)
+			}
+			config, _ := ref["config_overrides"].(map[string]any)
+			want := `{"segments":[{"type":"literal","value":"Thanks for calling, goodbye."}]}`
+			if got, _ := json.Marshal(config["goodbye_message"]); string(got) != want || config["type"] != "end_call" {
+				t.Errorf("end_call config_overrides = %v, want type end_call and goodbye_message %s", config, want)
+			}
+			continue
+		}
 		if policy == nil {
 			continue
 		}
-		pre := policy["pre_action_message"].(map[string]any)
-		want := ref["tool"] == "end_call"
-		if pre["wait"] != want {
-			t.Errorf("tool %v pre_action_message.wait = %v, want %v", ref["tool"], pre["wait"], want)
+		if pre := policy["pre_action_message"].(map[string]any); pre["wait"] != false {
+			t.Errorf("tool %v pre_action_message.wait = %v, want false", ref["tool"], pre["wait"])
 		}
 	}
 }

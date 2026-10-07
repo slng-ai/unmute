@@ -543,15 +543,20 @@ func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []
 		// One line, always: the attachment carries exactly one pre-action
 		// message, which is why ir.Validate refuses alternatives on this target
 		// rather than silently speaking the first of them.
-		if len(tool.Announce) > 0 {
+		//
+		// Not on end_call. SLNG's end_call speaks its own goodbye after the
+		// pre-action ("Thanks for calling. Goodbye!", strict_tool_runtime.py),
+		// so an announce there made the caller hear two. slngPrebuiltConfig
+		// writes it as that goodbye instead.
+		if len(tool.Announce) > 0 && !slngEndCall(tool) {
 			ref.Policy = &slngPolicy{PreActionMessage: &slngPreAction{
 				Enabled: true,
 				Text:    slngSegments{Segments: []slngSegment{{Type: "literal", Value: tool.Announce[0]}}},
 				// A tool that ends the conversation is the one case where the
-				// agent must finish speaking first: end_call hangs up the moment
-				// it runs, so a goodbye spoken alongside it is cut off mid-word.
-				// Every other announce covers a wait, and waiting for it would
-				// add the silence it exists to fill.
+				// agent must finish speaking first: a hangup cuts off a goodbye
+				// spoken alongside it mid-word. Every other announce covers a
+				// wait, and waiting for it would add the silence it exists to
+				// fill.
 				Wait: tool.Effect == ir.ToolEndsConversation,
 			}}
 		}
@@ -563,9 +568,11 @@ func slngTools(agent *ir.Agent, tgt ir.Target, entry ir.AgentDef) ([]slngRef, []
 		// argument for at all. Either way the arguments stay empty, because a
 		// curated capability publishes no argument schema to put one in.
 		if tool.Execution == ir.ToolBuiltin {
-			if prebuilt, known := targetcap.LookupPrebuilt(tool.Builtin); known && len(prebuilt.Config) > 0 {
+			if prebuilt, known := targetcap.LookupPrebuilt(tool.Builtin); known {
 				ref.Config = slngPrebuiltConfig(prebuilt, tool)
-				ref.Arguments = slngArguments{}
+				if len(prebuilt.Config) > 0 {
+					ref.Arguments = slngArguments{}
+				}
 			}
 		}
 		refs = append(refs, ref)
@@ -592,6 +599,15 @@ func slngPrebuiltConfig(prebuilt targetcap.Prebuilt, tool ir.Tool) map[string]an
 			config[key] = value
 		}
 	}
+	// end_call's goodbye comes from `announce:`, not `inject:`: it is the one
+	// sentence spoken before the tool ends the call, which is what announce
+	// already means everywhere else. Plain maps rather than slngSegments, so
+	// the deploy preview compares it with the live value as JSON.
+	if slngEndCall(tool) && len(tool.Announce) > 0 {
+		config["goodbye_message"] = map[string]any{"segments": []any{
+			map[string]any{"type": "literal", "value": tool.Announce[0]},
+		}}
+	}
 	if len(config) == 1 {
 		// Nothing was pinned, so the package is making no claim about this
 		// capability's settings and an override saying only its own type would
@@ -599,6 +615,12 @@ func slngPrebuiltConfig(prebuilt targetcap.Prebuilt, tool ir.Tool) map[string]an
 		return nil
 	}
 	return config
+}
+
+// slngEndCall reports a `builtin: end_call`, whose `announce:` is SLNG's
+// goodbye and not a pre-action message.
+func slngEndCall(tool ir.Tool) bool {
+	return tool.Execution == ir.ToolBuiltin && tool.Builtin == "end_call"
 }
 
 // mcpServerName is the platform's name for the server a tool reads.

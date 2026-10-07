@@ -624,6 +624,10 @@ registry default is used.
 Add `end_call` to every agent that answers a phone. `unmute init` scaffolds it
 for exactly that reason.
 
+On `slng`, `end_call` says its own goodbye before it hangs up, "Thanks for
+calling. Goodbye!" by default. Set your own with `announce:` (see "When to write
+`announce:`" below), and do not tell the model to say goodbye too.
+
 ## Hidden values the model cannot see
 
 ```yaml
@@ -705,7 +709,10 @@ line, rather than quietly narrowed to the first entry.
 
 **On `slng`, a `builtin:` takes one too.** A curated capability is an
 attachment like any other, so `tools/current_datetime.yaml` can speak before it
-reads the clock and `tools/end_call.yaml` can say goodbye before hanging up. A
+reads the clock. On `tools/end_call.yaml` the line is the goodbye: SLNG's
+`end_call` always says one before it hangs up, "Thanks for calling. Goodbye!"
+by default, and `announce:` replaces it. Do not also tell the model to say
+goodbye before it calls `end_call`, or the caller hears two. A
 code target refuses it by name: it builds the prebuilt from its own SDK and has
 no seam in front of it.
 
