@@ -624,6 +624,10 @@ registry default is used.
 Add `end_call` to every agent that answers a phone. `unmute init` scaffolds it
 for exactly that reason.
 
+On `slng`, `end_call` says its own goodbye before it hangs up, "Thanks for
+calling. Goodbye!" by default. Set your own with `announce:` (see "When to write
+`announce:`" below), and do not tell the model to say goodbye too.
+
 ## Hidden values the model cannot see
 
 ```yaml
