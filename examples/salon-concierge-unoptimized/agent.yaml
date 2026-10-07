@@ -1,6 +1,6 @@
 version: 1
 
-name: salon-concierge-single-prompt
+name: salon-concierge-unoptimized
 
 entry_agent: concierge
 
@@ -10,6 +10,7 @@ agents:
     think: reasoning
     speak: voice
     tools:
+      - get_current_date
       - look_up_salon_info
       - look_up_refund_policy
       - find_or_create_customer
@@ -27,24 +28,6 @@ escalations:
       destination: manager_line
       ring_timeout: 30s
       on_unavailable: hangup
-
-# The same two reads as salon-concierge, so neither package spends a model
-# request on what day it is. No `variables:` entry confirms the caller's number:
-# that needs a task, and this package has none. The prompt reads it back instead
-# and the model passes the agreed number to each tool itself.
-prefetch:
-  - name: today
-    clock: now
-    timezone: Europe/Madrid
-    assign:
-      - booking_date: result.date
-      - booking_weekday: result.day_of_week
-      - salon_local_time: result.time
-
-  - name: caller
-    source: from_number
-    assign:
-      - customer_phone: result.value
 
 secrets:
   - OPENAI_API_KEY
@@ -106,6 +89,7 @@ models:
       pace: snappy
 
 tools:
+  - get_current_date
   - find_or_create_customer
   - find_slots
   - save_booking

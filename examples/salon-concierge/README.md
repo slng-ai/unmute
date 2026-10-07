@@ -469,5 +469,6 @@ cat examples/salon-concierge/build/pipecat/README.md
 
 ## Where to go next
 
-- For the same salon with the structural features taken back out, see [`salon-concierge-single-prompt`](../salon-concierge-single-prompt/).
+- For the same salon in one prompt, with the same tools and model, see [`salon-concierge-single-prompt`](../salon-concierge-single-prompt/).
+- For the same salon with none of the optimizations, see [`salon-concierge-unoptimized`](../salon-concierge-unoptimized/).
 - For the other shipped packages, see the [examples index](../README.md).

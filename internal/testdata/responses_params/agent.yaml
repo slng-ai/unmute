@@ -1,0 +1,58 @@
+# The OpenAI Responses API binding, authored once on the base think binding:
+# `api` and `use_websocket` reach LiveKit and are dropped, with a warning, on
+# Pipecat. internal/generate/responses_params_test.go reads this package.
+version: 1
+
+name: responses-params
+entry_agent: desk
+
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-luna
+      params:
+        api: responses
+        reasoning_effort: "none"
+        use_websocket: true
+  speak:
+    voice:
+      provider: slng
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
+      params:
+        world_part: eu-north
+  listen:
+    transcriber:
+      provider: slng
+      model: "deepgram/nova:3"
+      params:
+        world_part: eu-north
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, how can I help?"
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

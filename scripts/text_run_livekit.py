@@ -180,10 +180,23 @@ async def run(args: argparse.Namespace) -> None:
     import agent  # noqa: F401, PLC0415 - after sys.path and cwd are set
     import agents as generated  # noqa: PLC0415
     import call  # noqa: PLC0415
-    import call_state  # noqa: PLC0415
     import session as state  # noqa: PLC0415
     from livekit.agents import AgentSession  # noqa: PLC0415
     from livekit.agents.beta.tools import end_call as end_call_tool  # noqa: PLC0415
+    from livekit.agents.utils import http_context  # noqa: PLC0415
+
+    try:
+        import call_state  # noqa: PLC0415
+
+        userdata = call_state.CallState()
+    except ModuleNotFoundError:
+        # A package with no state.py emits no call_state and keeps nothing.
+        from pydantic import BaseModel  # noqa: PLC0415
+
+        class NoState(BaseModel):
+            pass
+
+        userdata = NoState()
 
     # The tool imported the name itself, so this is where it is replaced.
     end_call_tool.get_job_context = TextJob
@@ -216,7 +229,20 @@ async def run(args: argparse.Namespace) -> None:
         )
     else:
         llm = compiled_llm(build / "call.py", vars(call))
-    async with AgentSession(userdata=call_state.CallState(), llm=llm) as session:
+    # Every agent and step shares this one LLM, so its per-request metrics are
+    # the whole call. Total is what Langfuse shows: cached input counts in full.
+    usage = {"requests": 0, "prompt": 0, "cached": 0, "completion": 0}
+
+    def count(m) -> None:
+        usage["requests"] += 1
+        usage["prompt"] += m.prompt_tokens
+        usage["cached"] += m.prompt_cached_tokens
+        usage["completion"] += m.completion_tokens
+
+    llm.on("metrics_collected", count)
+    # The worker opens this HTTP context on a deployed call. The Responses
+    # websocket transport (`use_websocket: true`) refuses to run without it.
+    async with http_context.open(), AgentSession(userdata=userdata, llm=llm) as session:
         # A package that declares no `prefetch:` emits no _prefetch at all.
         prefetch = getattr(state, "_prefetch", None)
         if prefetch is not None:
@@ -270,6 +296,8 @@ async def run(args: argparse.Namespace) -> None:
                 break
         print("\n=== final state")
         print(state_of(session.userdata))
+        total = usage["prompt"] + usage["completion"]
+        print("\n=== usage", "  ".join(f"{k}={v}" for k, v in usage.items()), f"total={total}")
 
 
 def compiled_llm(module: Path, namespace: dict):

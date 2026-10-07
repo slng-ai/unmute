@@ -192,8 +192,8 @@ would have to repeat `provider`, `model` and `reasoning_effort` to keep them,
 and two copies of one binding is a binding somebody edits on one side only.
 Pipecat drops both and builds `OpenAILLMService` either way, and `unmute
 validate` prints a warning per param naming the target, so you are told what
-did not apply. `salon-concierge-single-prompt` shows this binding;
-`salon-concierge` uses native Gemini through Google's EU Vertex endpoint.
+did not apply. No shipped example uses this binding: both salon packages use
+native Gemini through Google's EU Vertex endpoint.
 
 `use_websocket: true` keeps a WebSocket connection for Responses requests.
 HTTP clients can also reuse connections, so compare latency on the package's

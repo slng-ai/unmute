@@ -279,9 +279,14 @@ class {{.Class}}({{if .SlngScope}}_SlngScoped, {{end}}{{if $.IgnorePhrases}}Igno
 {{end}}    async def on_enter(self) -> None:
         """Open this agent's turn as it takes over the call."""
 {{- if .PromptExpr}}
+{{- if .RefreshPrompt}}
         # Rendered on the way in, and again by _refresh_prompt whenever a step
         # writes declared state: a call variable never changes, a declared value
         # does, and both reach this prompt through the same placeholders.
+{{- else}}
+        # Rendered once, on the way in: no step this agent runs writes state,
+        # so nothing it names can change under it.
+{{- end}}
         await self.update_instructions({{.PromptExpr}})
 {{- end}}
 {{- if and .IsEntry (not $.SingleAgentMinimal)}}

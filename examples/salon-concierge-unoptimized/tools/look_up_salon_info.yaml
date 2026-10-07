@@ -1,0 +1,13 @@
+description: >-
+  Look up anything about the salon itself: services and prices, how long things
+  take, opening hours, the stylists and what each one does, booking, deposits,
+  cancellation and lateness terms, payment methods, parking, and accessibility.
+  Use this whenever the caller asks a question about how the salon works, not
+  only about price. Quote the document rather than estimating.
+
+  Prefer this over asking the caller for anything. A question about the salon is
+  not a booking request: look it up and answer it, and only start verification
+  if the caller actually wants to make, move, or cancel an appointment.
+
+knowledge:
+  base: services
