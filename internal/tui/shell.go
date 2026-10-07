@@ -16,7 +16,8 @@ import (
 // runs as ordinary blocking Go code in a goroutine
 // (fieldRunner); it hands the model one field at a time over a channel and waits
 // for the answer. The model owns the alt-screen, the SLNG chrome, and the field
-// components. huh renders only the accessible/headless path (run, in tui.go).
+// components. The accessible/headless path renders itself with a hand-rolled
+// numbered-prompt scanner loop (run, in tui.go) and pulls in no form library.
 
 // ---- flow <-> model protocol ----
 
@@ -73,7 +74,8 @@ type viewCtx struct {
 }
 
 // fieldReq asks the model to render one field and reply with the answer. It
-// carries plain data, never a huh type, so the interactive path imports no huh.
+// carries plain data, no form-library types, so the interactive path pulls in no
+// form dependency (TestInteractivePathImportsNoHuh guards that).
 type fieldReq struct {
 	kind     fieldKind
 	title    string
@@ -246,6 +248,10 @@ func (m console) updateField(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.req.backable {
 				return m.answer(fieldReply{value: actionBack, back: true})
 			}
+		case "q":
+			// Menus take no typed text, so q is free to quit here. Input and
+			// text fields consume q as a character; they advertise ctrl+c instead.
+			return m, tea.Quit
 		}
 		return m, nil
 	case kindInput:
@@ -369,6 +375,59 @@ func (m console) answer(r fieldReply) (tea.Model, tea.Cmd) {
 	m.input.Blur()
 	m.area.Blur()
 	return m, waitRequest(m.requests)
+}
+
+// footerHint is one affordance the footer bar advertises: the glyph the reader
+// sees and the key strings that actually trigger it. renderFooter builds the bar
+// from these, and a screen only ever lists a key it handles in that state, so the
+// footer cannot promise a dead key (TestFooterKeysAreLive holds this).
+type footerHint struct {
+	glyph string
+	keys  []string
+}
+
+// footerHints returns the affordances live on the current screen, in display
+// order. Availability mirrors the key handling: no back unless backable, no
+// palette on the hero, q quits only where menus (not text fields) accept it.
+func (m console) footerHints() []footerHint {
+	switch {
+	case m.palette != nil:
+		return []footerHint{
+			{"type to filter", nil},
+			{"↑/↓ move", []string{"up", "down"}},
+			{"↵ jump", []string{"enter"}},
+			{"esc close", []string{"esc"}},
+		}
+	case m.notice != nil:
+		return []footerHint{
+			{"↑/↓ scroll", []string{"up", "down"}},
+			{"enter/esc back", []string{"enter", "esc"}},
+		}
+	case m.req != nil && m.req.kind == kindInput:
+		hints := []footerHint{{"↵ confirm", []string{"enter"}}}
+		if m.req.backable {
+			hints = append(hints, footerHint{"esc back", []string{"esc"}})
+		}
+		return append(hints, footerHint{"ctrl+c quit", []string{"ctrl+c"}})
+	case m.req != nil && m.req.kind == kindText:
+		hints := []footerHint{{"ctrl+d save", []string{"ctrl+d"}}}
+		if m.req.backable {
+			hints = append(hints, footerHint{"esc back", []string{"esc"}})
+		}
+		return append(hints, footerHint{"ctrl+c quit", []string{"ctrl+c"}})
+	default: // a select menu, hero or otherwise
+		hints := []footerHint{
+			{"↑/↓ move", []string{"up", "down"}},
+			{"↵ select", []string{"enter"}},
+		}
+		if m.req != nil && !m.req.ctx.hero {
+			hints = append(hints, footerHint{"ctrl+p palette", []string{"ctrl+p"}})
+		}
+		if m.req != nil && m.req.backable {
+			hints = append(hints, footerHint{"esc back", []string{"esc"}})
+		}
+		return append(hints, footerHint{"q quit", []string{"q"}})
+	}
 }
 
 // editorInner is the usable inner width of the editor panel at the current size.
