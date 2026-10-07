@@ -47,7 +47,8 @@ var commitHash = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
 // an entry into bold text, because release bodies start at different levels
 // from each other and TestPagesHaveCleanStructure forbids both a level one
 // heading and a jump between levels. One heading on this page means a body
-// reached it unconverted.
+// reached it unconverted. Fenced code is exempt: the renderer never rewrites
+// inside a fence, so `# before, agent.yaml` in a YAML example stays a comment.
 var headingLine = regexp.MustCompile(`(?m)^[ \t]*#{1,6}[ \t]`)
 
 type entry struct {
@@ -208,7 +209,7 @@ func TestChangelogObeysTheSiteWritingRules(t *testing.T) {
 	if hit := commitHash.FindString(page); hit != "" {
 		t.Errorf("docs-site/%s carries the commit hash %s; the renderer cuts the generated commit list, so this means that cut failed", changelogPage, hit)
 	}
-	if headingLine.MatchString(page) {
+	if headingLine.MatchString(strings.Join(markupLines(page), "\n")) {
 		t.Errorf("docs-site/%s carries a markdown heading; the renderer turns headings inside an entry into bold text, because release bodies start at different levels and the page's heading hierarchy is checked", changelogPage)
 	}
 }

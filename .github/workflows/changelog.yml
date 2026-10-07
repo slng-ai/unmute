@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: docs-changelog
@@ -48,7 +49,11 @@ jobs:
       - name: Check the rendered docs before publishing
         run: go test ./internal/docsite
 
-      - name: Commit and push
+      # main only takes pull requests, so the job opens one and a person
+      # merges it. The Mintlify GitHub App deploys docs-site/ from that merge.
+      - name: Open the changelog pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -57,9 +62,15 @@ jobs:
             echo "The changelog is up to date"
             exit 0
           fi
+          # One fixed branch: a release that lands while the last pull request
+          # is still open updates that pull request instead of opening another.
+          branch=docs/changelog-sync
+          git switch -c "$branch"
           # GoReleaser excludes docs: commits from the next release's notes.
           git commit -m "docs: sync the release changelog"
-          # Keep unrelated main commits that arrived while rendering.
-          git pull --rebase origin main
-          # The Mintlify GitHub App deploys docs-site/ from this push.
-          git push origin HEAD:main
+          git push --force origin "$branch"
+          if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[]')" ]; then
+            gh pr create --base main --head "$branch" \
+              --title "docs: sync the release changelog" \
+              --body "Written by the Changelog workflow from the published releases. Merge it to publish the changelog."
+          fi
