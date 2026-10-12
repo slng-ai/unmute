@@ -98,6 +98,10 @@ uv run bot.py -t webrtc                   # web: open the URL it prints
 
 ```
 
+`uv` copies packages into `.venv` and does not hard-link them out of its cache:
+`pyproject.toml` sets `link-mode = "copy"`. On Linux, NLTK refuses a hard-linked
+file, and the knowledge index reads its stopword list through NLTK at startup.
+
 This package has no phone route, but the bot still answers the runner's Twilio
 route, so a simulated caller can reach it. `uv run bot.py -t twilio -x <public
 host>` serves a TwiML webhook at `/` and a Media Streams websocket at `/ws`.
@@ -2340,6 +2344,12 @@ dependencies = [
 
 [tool.uv]
 package = false
+# Copy packages into .venv, never hard-link them out of uv's cache. On Linux a
+# hard-linked file has st_nlink=2, NLTK refuses to open it, and the knowledge
+# index reads its stopword list through NLTK, so the agent dies at startup. The
+# Dockerfile passes --link-mode=copy for the same reason. This line covers every
+# local `uv run` and `uv sync` in this directory.
+link-mode = "copy"
 
 [dependency-groups]
 dev = ["ruff==0.15.7", "ty"]

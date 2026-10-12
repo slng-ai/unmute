@@ -270,6 +270,21 @@ not apply to `mode: keyword`, which embeds nothing, though baking still saves th
 splitting work. A lookup embeds the caller's question either way, so the run time
 still needs the credential in `secrets:`.
 
+### A startup error that names neither uv nor knowledge
+
+```
+PermissionError: Security Violation [pathsec.open]: refusing multiply-linked file
+```
+
+This means the `.venv` was installed with hard links out of uv's cache, the
+default on Linux. NLTK refuses such a file, and the knowledge index reads its
+stopword list through NLTK. The generated `pyproject.toml` sets
+`link-mode = "copy"` under `[tool.uv]` and the Dockerfile passes
+`--link-mode=copy`, so do not remove either. A `.venv` built before that setting
+existed still holds the links, and so does one built with `UV_LINK_MODE=hardlink`
+exported. Recompiling deletes `build/<target>/`, `.venv` with it, so recompile or
+delete `.venv` and run again.
+
 ### When to set the retrieval fields
 
 **Leave them alone unless the user's documents give you a reason.** The defaults

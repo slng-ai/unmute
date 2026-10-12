@@ -336,6 +336,11 @@ gated on identifying yourself first.
 `look_up_salon_info` for services, `look_up_refund_policy` for refunds. That is
 the whole access model. Both document sets are fictional and both are committed.
 
+The bases are built at startup, and the stopword list is read through NLTK. NLTK
+refuses a hard-linked file, which is how uv installs packages on Linux by
+default. The generated `pyproject.toml` sets `link-mode = "copy"`, so
+`unmute dev` and a local `uv run` work on Linux.
+
 ## Routes, tracing and the speech gateway
 
 **Two routes, one per telephony plane.** The LiveKit target carries inbound calls

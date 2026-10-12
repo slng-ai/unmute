@@ -631,6 +631,37 @@ func TestKnowledgeInstallsWithoutHardlinks(t *testing.T) {
 	}
 }
 
+// TestLocalRunsInstallWithoutHardlinks holds the same failure off the image: a
+// `uv run` on the author's own Linux machine. `unmute dev` on Pipecat, the
+// README's local steps and scripts/text_run_pipecat.py all run uv inside the
+// generated project, and uv reads [tool.uv] from its pyproject.toml for each of
+// them. Setting UV_LINK_MODE in the dev runner would have covered only the first.
+// A stale hard-linked .venv cannot outlive the fix: compile deletes
+// build/<target>/, .venv with it.
+func TestLocalRunsInstallWithoutHardlinks(t *testing.T) {
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		t.Run(string(provider), func(t *testing.T) {
+			agent := knowledgeAgent(t)
+			artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
+			if err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			pyproject := artifactFile(t, artifact, "pyproject.toml")
+			_, uvTable, _ := strings.Cut(pyproject, "[tool.uv]")
+			uvTable, _, _ = strings.Cut(uvTable, "\n[")
+			if !strings.Contains(uvTable, `link-mode = "copy"`) {
+				t.Errorf("%s: [tool.uv] has no link-mode = \"copy\", so a local uv run hard-links and NLTK refuses the stopword list at startup", provider)
+			}
+			if n := strings.Count(pyproject, "[tool.uv]"); n != 1 {
+				t.Errorf("%s: %d [tool.uv] tables, want exactly 1", provider, n)
+			}
+			if !strings.Contains(uvTable, "st_nlink") {
+				t.Errorf("%s: pyproject.toml must record why the link mode is set, or it reads as a preference", provider)
+			}
+		})
+	}
+}
+
 // TestEveryEmbeddingServiceEmitsAValidConstruction: naming a different service
 // changes the import, the class, the keyword and the credential check, and
 // nothing else.

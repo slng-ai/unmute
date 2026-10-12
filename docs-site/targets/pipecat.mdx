@@ -126,7 +126,10 @@ cp .env.example .env                      # then fill in your keys
 uv run bot.py -t webrtc                   # web: open the URL it prints
 ```
 
-`uv` installs the pinned dependencies on the first run.
+`uv` installs the pinned dependencies on the first run. It copies them into
+`.venv` instead of hard-linking them out of its cache, because the generated
+`pyproject.toml` sets `link-mode = "copy"`. On Linux, NLTK refuses a hard-linked
+file, and a knowledge base reads its stopword list through NLTK at startup.
 
 ## Dependencies are pinned
 
