@@ -340,24 +340,66 @@
   .tile .lbl{font-size:10px}
   .tile-value{font-family:var(--mono);font-size:26px}
   .tile-note{font-family:var(--mono);font-size:11px;color:var(--dim)}
-  .metrics-body{display:flex;flex-wrap:wrap;align-items:flex-start}
-  .metrics-main{flex:999 1 640px;min-width:0;padding-bottom:24px}
+  .metrics-main{min-width:0;padding-bottom:24px}
   .metrics-main > .lbl{padding:18px 16px 10px}
-  .metrics-main > .lbl:first-child{padding-top:14px}
   .metrics-main > .empty,.metrics-main > .hint{padding:0 16px}
   .moves{overflow-x:auto;padding:0 16px}
   .moves table{border-collapse:collapse;min-width:640px;width:100%;border:1px solid var(--rule-soft);background:var(--aside)}
   .moves th,.moves td{border:1px solid var(--rule-faint);height:44px;padding:4px 8px;text-align:center;font-family:var(--mono);font-size:14px;color:var(--muted);font-weight:400}
   .moves thead th{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--soft);background:var(--ground)}
   .moves tbody th{text-align:left;padding:0 12px}
-  .moves .left{text-align:left;padding:6px 10px}
-  .moves .flags{text-align:left;padding:6px 10px;font-family:var(--sans);font-size:13px}
   .moves .small{font-size:12px}
-  .rules{flex:1 1 320px;max-width:100%;margin:14px 16px;border:1px solid var(--rule-soft);background:var(--aside)}
-  .rules > .lbl{padding:10px 12px;border-bottom:1px solid var(--rule-soft)}
-  .rule{display:grid;grid-template-columns:minmax(0,1fr) 70px 70px;gap:8px;padding:8px 12px;border-bottom:1px solid var(--rule-faint);align-items:baseline;font-size:13px;color:var(--soft)}
-  .rule .mono{font-size:11px;text-align:right}
-  .rules-note{font-family:var(--mono);font-size:10px;color:var(--faint);padding:8px 12px}
+  /* caller turns: a closed turn is one row, an open one lists its stages */
+  .turns-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:8px 16px;padding:18px 16px 10px}
+  .turns-head .hint{margin:4px 0 0}
+  .turns-legend{display:flex;gap:14px;align-items:center;font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .turns-legend span{display:flex;align-items:center;gap:6px}
+  .turns-legend i{height:12px;border-left:2px solid var(--bad-rule)}
+  .turns{margin:0 16px;border:1px solid var(--rule-soft);overflow-x:auto}
+  .mrow{display:grid;grid-template-columns:minmax(260px,34fr) 90px minmax(160px,28fr) minmax(220px,38fr);gap:0 14px;align-items:center;min-width:860px;padding:9px 14px;border-bottom:1px solid var(--rule-faint)}
+  .mturn > summary{list-style:none;cursor:pointer;background:var(--aside);border-bottom-color:var(--rule-soft)}
+  .mturn > summary::-webkit-details-marker{display:none}
+  .mturn > summary:hover{background:var(--hover)}
+  .mturn > summary:focus-visible{outline:1px solid var(--yellow);outline-offset:-1px}
+  .mturn[open] > summary,.mturn[open] > .mstage{background:var(--panel)}
+  .mturn[open] > summary{box-shadow:inset 2px 0 0 var(--yellow)}
+  .mturn:last-child > .mrow:last-child{border-bottom:0}
+  .mwho{display:flex;gap:10px;align-items:baseline;min-width:0;font-size:13px}
+  .mwho::before{content:"▸";font-family:var(--mono);color:var(--faint);width:10px}
+  .mturn[open] .mwho::before{content:"▾";color:var(--yellow)}
+  .mwho > .mono{font-size:12px;color:var(--dim);flex:none}
+  .mturn[open] .mwho > .mono{color:var(--yellow)}
+  .caller-said{color:var(--caller);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .agent-said{color:var(--bot);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mval{text-align:right;font-size:14px}
+  summary .mval{font-size:16px}
+  .mstage{font-size:13px}
+  .mstage > .mono:first-child{padding-left:20px;font-size:13px;color:var(--soft)}
+  .mtotal{border-bottom-color:var(--rule)}
+  .mtotal > .mono:first-child{color:var(--text)}
+  .tbar{position:relative;height:10px;background:var(--hover)}
+  .tbar > span{position:absolute;left:0;top:0;bottom:0}
+  .tbar > i{position:absolute;top:-3px;bottom:-3px;border-left:2px solid var(--bad-rule)}
+  .chips{display:flex;flex-wrap:wrap;gap:2px 14px;font-family:var(--mono);font-size:12px;color:var(--dim)}
+  .chips .lv-ok{color:var(--dim)}
+  /* latency by model: one section per kind, each with its own columns */
+  .mtable{overflow-x:auto;margin:0 16px;border:1px solid var(--rule-soft);background:var(--aside)}
+  .mtable table{border-collapse:collapse;width:100%;min-width:1100px;font-size:14px}
+  .mtable td,.mtable th{padding:9px 12px;border-bottom:1px solid var(--rule-faint);text-align:left;font-weight:400;white-space:nowrap;color:var(--soft)}
+  .mtable .n{text-align:right;font-family:var(--mono)}
+  .mtable .sec th{padding-top:18px;border-bottom:0}
+  .mtable .sub td{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);border-bottom-color:var(--rule-soft)}
+  .mtable .sec-note{font-family:var(--mono);font-size:11px;color:var(--faint);margin-left:12px}
+  .kind-stt{color:var(--caller)}
+  .kind-llm{color:var(--soft)}
+  .kind-tts{color:var(--bot)}
+  .spread{position:relative;height:16px;width:150px;background:var(--hover)}
+  .spread > span{position:absolute;top:3px;width:2px;height:10px;background:var(--caller)}
+  .spread > span.lv-ok{background:var(--muted)}
+  .spread > span.lv-slow{background:var(--yellow)}
+  .spread > span.lv-bad{background:var(--bad)}
+  .spread > i{position:absolute;top:0;bottom:0;border-left:1px dashed var(--yellow-dim)}
+  .spread > i.limit{border-left-color:var(--bad-rule)}
 
   /* ── logs view: studio .toolbar, .segs, .panel ──────────── */
   .toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex:none;padding:10px 20px;border-bottom:1px solid var(--rule-soft)}
@@ -426,6 +468,8 @@
     .logmain{padding:16px}
     .metrics-head{padding:16px}
     .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .mrow{grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;min-width:0}
+    .mrow > .tbar,.mrow > .chips,.mrow > .dim{grid-column:1/-1}
   }
 
   @media (prefers-reduced-motion:reduce){
@@ -1079,10 +1123,10 @@ function over(value, key){
   const limit=LIMITS[key], lv=level(value,key);
   return limit.what+' over '+(lv==='bad'?limit.bad:limit.slow)+(limit.count?'':'ms');
 }
-// The 90th percentile, inclusive, the number a studio tile shows.
-function p90(values){
+// A percentile, inclusive and interpolated: .9 is the p90 a studio tile shows.
+function pct(values, q){
   if (!values.length) return null;
-  const sorted=[...values].sort((a,b)=>a-b), at=(sorted.length-1)*.9, low=Math.floor(at);
+  const sorted=[...values].sort((a,b)=>a-b), at=(sorted.length-1)*q, low=Math.floor(at);
   return low+1<sorted.length ? sorted[low]+(sorted[low+1]-sorted[low])*(at-low) : sorted[low];
 }
 // Which first byte a measurement is, by its request, or by its source when it
@@ -1108,88 +1152,189 @@ function table(label, heads, rows){
   element.firstChild.setAttribute('aria-label',label);
   return element;
 }
+// A reply is one thing the agent said; a caller turn is everything it did
+// between the caller going quiet and the caller speaking again. A turn can hold
+// several replies (a filler, a step announce, the answer), and its reply
+// latency is reported once, on whichever reply played first. So the view's
+// rows are turns, and every turn with a measured latency shows it.
+function callTurns(all){
+  const turns=[], byInput=new Map();
+  let current=null;
+  for (const r of all){
+    const x=r.exchange;
+    if (!x) continue;
+    if (x.role==='input'){ current={key:r.id,input:r,responses:[]}; turns.push(current); byInput.set(r.id,current); continue; }
+    // ponytail: a reply with no proven input joins the latest caller input
+    // before it, in arrival order. That is wrong only when an earlier turn opens
+    // a reply after the caller spoke again; carry input_id from the producers
+    // if that ever shows.
+    let turn=(x.input_id && byInput.get(x.input_id)) || current;
+    if (!turn){
+      turn=turns.find(t=>!t.input);
+      if (!turn){ turn={key:'greeting',input:null,responses:[]}; turns.unshift(turn); }
+    }
+    turn.responses.push(r);
+  }
+  // A caller input nothing answered is noise, unless it is the turn in progress.
+  return turns.filter((t,i)=>t.responses.length || i===turns.length-1);
+}
+// Turns the reader opened or closed. Until they touch one, the latest is open.
+const openTurns=new Set();
+let turnsTouched=false;
+// Bars run from zero to this, in seconds. A longer value fills the bar.
+const BAR_SCALE=2;
+function bar(value, color, limitKey){
+  const element=h('div','tbar');
+  if (value!=null){
+    const fill=h('span');
+    fill.style.width=Math.min(value/BAR_SCALE,1)*100+'%';
+    fill.style.background=color;
+    element.append(fill);
+  }
+  if (limitKey){
+    const tick=h('i');
+    tick.style.left=Math.min(LIMITS[limitKey].bad/1000/BAR_SCALE,1)*100+'%';
+    element.append(tick);
+  }
+  return element;
+}
+// Each request as a tick between zero and 1.2s, with the target and limit lines.
+function spread(values, limitKey){
+  const element=h('div','spread'), at=v=>Math.min(v/1.2,1)*100+'%';
+  if (limitKey) for (const [ms,cls] of [[LIMITS[limitKey].slow,'target'],[LIMITS[limitKey].bad,'limit']]){
+    const line=h('i',cls); line.style.left=at(ms/1000); element.append(line);
+  }
+  for (const v of values){ const tick=h('span',limitKey?'lv-'+level(v,limitKey):undefined); tick.style.left=at(v); element.append(tick); }
+  return element;
+}
+const STAGE_COLOR={stt:'var(--caller)',llm:'var(--soft)',tool:'var(--muted)',handoff:'var(--muted)',tts:'var(--bot)',total:'var(--ok)'};
+function levelColor(lv, kind){ return lv==='bad' ? 'var(--bad)' : lv==='slow' ? 'var(--yellow)' : STAGE_COLOR[kind]; }
+
 function renderMetrics(){
   const all=Array.from(records.values()).sort((a,b)=>a.order-b.order);
   const measured=all.filter(r=>r.measurement?.state==='measured').map(r=>r.measurement);
   const operations=all.filter(r=>r.operation);
   const byOperation=(id,metric)=>measured.find(m=>m.operation_id===id && m.metric===metric)?.value;
+  const values=metric=>measured.filter(m=>m.metric===metric).map(m=>m.value);
   // LiveKit reports a first byte twice: on its request, and again as a node
   // timing for the reply. The request's own value wins; a first byte that
   // names no request counts only where no request of that kind reported one.
-  const firsts=type=>{
+  const firstsOf=type=>{
     const own=measured.filter(m=>m.operation_id && firstKind(m)===type);
     const covered=new Set(own.map(m=>measurementGroup(m)));
-    return own.concat(measured.filter(m=>!m.operation_id && firstKind(m)===type && !covered.has(measurementGroup(m)))).map(m=>m.value);
+    return own.concat(measured.filter(m=>!m.operation_id && firstKind(m)===type && !covered.has(measurementGroup(m))));
   };
+  const firsts=type=>firstsOf(type).map(m=>m.value);
   const call=records.get('call:call')?.call;
   const errors=operations.filter(r=>FAILED.includes(r.operation.state)).length+(call?.state==='error'?1:0);
-  const replies=all.filter(r=>r.exchange?.role==='response' &&
-    (operations.some(o=>operationGroup(o.operation)==='exchange:'+r.id) || measured.some(m=>measurementGroup(m)==='exchange:'+r.id)));
+  const textOf=(exchangeID,speaker)=>all.filter(r=>r.text?.exchange_id===exchangeID && r.text.speaker===speaker)
+    .map(r=>r.text.separator_before+r.text.text).join('').trim();
+  const turns=callTurns(all), callerTurns=turns.filter(t=>t.input).length;
+  const turnOf=new Map();
+  for (const t of turns) for (const r of t.responses) turnOf.set('exchange:'+r.id,t.key);
   const tile=(label,value,key,note)=>h('div','tile',h('span','lbl',label),
     h('span','tile-value'+(value==null?' dim':key?' lv-'+level(value,key):''),value==null?'—':secs(value)),h('span','tile-note',note));
   const target=key=>'target ≤ '+LIMITS[key].slow+'ms';
   const main=h('section','metrics-main');
 
-  main.append(h('div','lbl','Replies, in order'));
-  if (!replies.length) main.append(h('p','empty','No timed replies yet. Connect and talk to your agent; each reply shows here as its timings arrive.'));
-  else main.append(table('Replies, in order',['Reply','Reply latency','LLM','TTS','Tools','Flags'],replies.map((r,i)=>{
-    const group='exchange:'+r.id, flags=[];
-    const ops=operations.filter(o=>operationGroup(o.operation)===group);
-    const latency=measured.find(m=>m.metric==='reply_latency' && measurementGroup(m)===group)?.value;
-    if (level(latency,'reply_latency')!=='ok') flags.push([over(latency,'reply_latency'),level(latency,'reply_latency')]);
-    // One line per request: its first byte, or for an LLM that did not stream,
-    // its duration, coloured by the limit it is judged by.
-    const cell=type=>{
-      const lines=ops.filter(o=>o.operation.type===type).map(o=>{
-        const op=o.operation, first=byOperation(o.id,'first_response'), duration=byOperation(o.id,'request_duration');
-        if (FAILED.includes(op.state)){ flags.push([operationLabel(o)+' '+op.state.replaceAll('_',' '),'bad']); return h('div','lv-bad',op.state.replaceAll('_',' ')); }
-        if (first!=null){
-          const key=type==='llm'?'llm_first_token':'tts_first_byte', lv=level(first,key);
-          if (lv!=='ok') flags.push([over(first,key),lv]);
-          return h('div','lv-'+lv,secs(first));
-        }
-        if (op.state==='cancelled') return h('div','dim','cancelled'+(duration!=null?' · '+secs(duration):''));
-        if (type==='llm' && duration!=null){
-          const lv=level(duration,'llm_request');
-          if (lv!=='ok') flags.push([over(duration,'llm_request'),lv]);
-          return h('div','lv-'+lv,h('span','dim','— · '),secs(duration));
-        }
-        // A request with no number of its own adds no line: on Pipecat the TTS
-        // first byte belongs to the reply, and is listed below.
-        return op.state==='running' ? h('div','lv-slow pulse','running') : null;
-      }).filter(Boolean);
-      // A first byte that names no request belongs to the reply, unless a
-      // request of that kind already reported its own: then it is the same
-      // moment measured twice, and counting it would double the line.
-      const own=ops.some(o=>o.operation.type===type && byOperation(o.id,'first_response')!=null);
-      for (const m of own ? [] : measured.filter(m=>!m.operation_id && measurementGroup(m)===group && firstKind(m)===type)){
-        const key=type==='llm'?'llm_first_token':'tts_first_byte', lv=level(m.value,key);
-        if (lv!=='ok') flags.push([over(m.value,key),lv]);
-        lines.push(h('div','lv-'+lv,secs(m.value)));
+  // ── caller turns ──
+  main.append(h('div','turns-head',
+    h('div',undefined,h('div','lbl','Caller turns'),
+      h('p','hint','How long the caller waited in silence, and which stage took the time. Open a turn to see each stage.')),
+    h('div','turns-legend',h('span',undefined,'bars 0 – '+BAR_SCALE+'s'),h('span',undefined,h('i'),"that stage's limit"))));
+  if (!turns.length) main.append(h('p','empty','No caller turns yet. Connect and talk to your agent; each turn shows here as its timings arrive.'));
+  else {
+    const latest=turns[turns.length-1].key;
+    const list=h('div','turns');
+    for (const [i,turn] of turns.entries()){
+      const groups=new Set(turn.responses.map(r=>'exchange:'+r.id));
+      const ops=operations.filter(o=>groups.has(operationGroup(o.operation)));
+      const ms=measured.filter(m=>groups.has(measurementGroup(m)));
+      const one=metric=>ms.find(m=>m.metric===metric)?.value;
+      // The caller heard the reply that played first, which has the smallest
+      // latency. A reply cut before it played can carry a larger one.
+      const latencies=ms.filter(m=>m.metric==='reply_latency').sort((a,b)=>a.value-b.value);
+      const waited=turn.input ? latencies[0]?.value : measured.find(m=>m.metric==='first_speech')?.value;
+      const heardID=latencies[0]?.exchange_id || turn.responses.find(r=>textOf(r.id,'assistant'))?.id;
+      const heard=heardID ? textOf(heardID,'assistant') : '';
+      const said=turn.input ? textOf(turn.input.id,'user') : heard;
+
+      // One row per stage, in a fixed order: what the caller waited through.
+      const stages=[];
+      const turnDecision=one('turn_detection'), transcript=one('transcription_delay');
+      if (turnDecision!=null || transcript!=null)
+        stages.push({kind:'stt',name:'STT + turn',value:turnDecision??transcript,
+          note:turnDecision!=null && transcript!=null ? 'final transcript at '+secs(transcript) : turnDecision!=null ? 'turn decision' : 'final transcript'});
+      for (const type of ['llm','tool','handoff','tts']) for (const o of ops.filter(o=>o.operation.type===type)){
+        const op=o.operation, first=byOperation(o.id,'first_response'), duration=byOperation(o.id,type==='tool'?'tool_duration':'request_duration');
+        const failed=FAILED.includes(op.state), model=op.model||measured.find(m=>m.operation_id===o.id && m.model)?.model;
+        const stage={kind:type,name:type==='handoff'?'Handoff':type==='tool'?'Tool':type.toUpperCase()};
+        if (failed){ stage.text=op.state.replaceAll('_',' '); stage.lv='bad'; }
+        if (type==='llm'){
+          stage.limit=first!=null||duration==null ? 'llm_first_token' : 'llm_request';
+          stage.value=first??duration;
+          stage.note=(first!=null?'first token':duration!=null?'did not stream · whole request':'')+(model?' · '+model:'');
+        } else if (type==='tts'){
+          stage.limit='tts_first_byte'; stage.value=first; stage.note='first audio'+(model?' · '+model:'');
+        } else if (type==='tool'){
+          stage.value=duration; stage.note=op.name;
+        } else stage.note='to '+op.name;
+        if (!failed && stage.value==null) stage.text=op.state==='running' ? 'running' : op.state==='cancelled' ? 'cancelled' : '';
+        // A request with no number and nothing to say adds no row: on Pipecat
+        // the TTS first byte belongs to the reply, and is added below.
+        if (stage.value==null && !stage.text && type!=='handoff') continue;
+        stages.push(stage);
       }
-      return lines.length ? lines : [none()];
-    };
-    const llm=cell('llm'), tts=cell('tts');
-    const models=ops.filter(o=>o.operation.type==='llm').length;
-    if (level(models,'requests_per_reply')!=='ok') flags.push([models+' LLM requests in one reply',level(models,'requests_per_reply')]);
-    const tools=ops.filter(o=>o.operation.type==='tool').map(o=>{
-      const duration=byOperation(o.id,'tool_duration'), state=o.operation.state;
-      if (FAILED.includes(state)) flags.push([operationLabel(o)+' '+state.replaceAll('_',' '),'bad']);
-      return h('div',FAILED.includes(state)?'lv-bad':undefined,o.operation.name+' '+(duration!=null?secs(duration):state.replaceAll('_',' ')));
-    });
-    const seen=new Set(), shown=flags.filter(([what])=>!seen.has(what) && seen.add(what));
-    return h('tr',undefined,
-      h('th','mono','R'+(i+1)+(r.exchange.state==='interrupted'?' ⤺':'')),
-      h('td',latency!=null?'lv-'+level(latency,'reply_latency'):undefined,latency!=null?secs(latency):none()),
-      h('td',undefined,...llm),h('td',undefined,...tts),
-      h('td','small',...(tools.length?tools:[none()])),
-      h('td','flags',...(shown.length?shown.map(([what,lv])=>h('div','lv-'+lv,what)):[none()])));
-  })));
-  if (replies.length && measured.some(m=>m.metric==='reply_latency' && measurementGroup(m)==='unassigned'))
-    main.append(h('p','hint','Some reply latencies name no reply, as on Pipecat. They count in the tiles and are split part by part below, not matched to a row here.'));
+      // On Pipecat the TTS first byte belongs to the reply, not to a request.
+      if (!ops.some(o=>o.operation.type==='tts' && byOperation(o.id,'first_response')!=null))
+        for (const m of measured.filter(m=>!m.operation_id && groups.has(measurementGroup(m)) && firstKind(m)==='tts'))
+          stages.push({kind:'tts',name:'TTS',value:m.value,limit:'tts_first_byte',note:'first audio'+(m.model?' · '+m.model:'')});
+      for (const s of stages) if (!s.lv && s.limit && s.value!=null) s.lv=level(s.value,s.limit);
+      const waitedKey=turn.input ? 'reply_latency' : null, waitedLv=waitedKey ? level(waited,waitedKey) : 'ok';
+
+      // Closed, a turn is one line: the first of each stage, and a count when
+      // there were more of them.
+      const chips=[];
+      for (const kind of ['stt','llm','tts']){
+        const of=stages.filter(s=>s.kind===kind), first=of.find(s=>s.value!=null);
+        if (first) chips.push(h('span','lv-'+(first.lv||'ok'),kind.toUpperCase()+' '+secs(first.value)+(of.length>1?' ×'+of.length:'')));
+      }
+      const tools=stages.filter(s=>s.kind==='tool');
+      if (tools.length) chips.push(h('span',tools.some(s=>s.lv==='bad')?'lv-bad':undefined,tools.length+' tool'+(tools.length>1?'s':'')));
+      for (const s of stages.filter(s=>s.kind==='handoff')) chips.push(h('span',s.lv==='bad'?'lv-bad':undefined,'→ handoff '+s.note+(s.text?' · '+s.text:'')));
+
+      const details=h('details','mturn');
+      details.open=turnsTouched ? openTurns.has(turn.key) : turn.key===latest;
+      const label=turn.input ? 'T'+turns.slice(0,i+1).filter(t=>t.input).length : 'GREETING';
+      const summary=h('summary','mrow',
+        h('span','mwho',h('span','mono',label),said?h('span',turn.input?'caller-said':'agent-said',turn.input?'“'+said+'”':said):null),
+        h('span','mono mval lv-'+waitedLv,waited!=null?secs(waited):'—'),
+        bar(waited,levelColor(waitedLv,'total'),waitedKey),
+        h('span','chips',...chips));
+      // The first touch keeps the latest turn as it was; from then on every
+      // turn stays as the reader left it, across the redraw each record causes.
+      summary.addEventListener('click',()=>{ if (!turnsTouched){ turnsTouched=true; openTurns.add(latest); } });
+      details.addEventListener('toggle',()=>{ if (turnsTouched) details.open ? openTurns.add(turn.key) : openTurns.delete(turn.key); });
+      details.append(summary);
+      for (const s of stages) details.append(h('div','mrow mstage',
+        h('span','mono',s.name),
+        h('span','mono mval lv-'+(s.lv||'ok'),s.value!=null?secs(s.value):(s.text||'—')),
+        bar(s.value,levelColor(s.lv,s.kind),s.limit),
+        h('span','dim',[s.value!=null&&s.text?s.text:'',s.note].filter(Boolean).join(' · '))));
+      details.append(h('div','mrow mstage mtotal',
+        h('span','mono',turn.input?'Caller waited':'First audio'),
+        h('span','mono mval lv-'+waitedLv,waited!=null?secs(waited):'—'),
+        bar(waited,levelColor(waitedLv,'total'),waitedKey),
+        h('span','dim',(turn.input?'caller quiet → ':'connect → ')+(heard?'“'+heard+'”':'first audio'))));
+      list.append(details);
+    }
+    main.append(list);
+  }
+  if (turns.length && measured.some(m=>m.metric==='reply_latency' && measurementGroup(m)==='unassigned'))
+    main.append(h('p','hint','Some reply latencies name no reply, as on Pipecat. They count in the tiles and are split part by part below, not matched to a turn here.'));
 
   // Reply time, part by part. A breakdown names no reply, so its rows are in
-  // the order they arrived and are not matched to the replies above.
+  // the order they arrived and are not matched to the turns above.
   const breakdowns=all.filter(r=>r.breakdown).map(r=>r.breakdown);
   if (breakdowns.length){
     const parts=[], owners=new Set();
@@ -1206,50 +1351,111 @@ function renderMetrics(){
       h('p','hint','owners · '+Array.from(owners).join(' · ')+'. A breakdown carries no reply id, so these rows are in arrival order.'));
   }
 
-  // Latency by model: each model on its own row, so a swap mid-call is two rows.
-  const kinds={stt:'STT',llm:'LLM',tts:'TTS'}, groups=new Map();
-  for (const o of operations.filter(o=>kinds[o.operation.type])){
-    const op=o.operation, key=JSON.stringify([op.type,op.model||'',op.provider||'']);
-    if (!groups.has(key)) groups.set(key,{op,requests:[]});
-    groups.get(key).requests.push(o);
+  // ── latency by model: each kind judged by its own first result ──
+  const rows=[], ms=v=>v==null?none():secs(v);
+  const stats=vals=>[pct(vals,.5),pct(vals,.9),vals.length?Math.max(...vals):null].map(v=>h('td','n',ms(v)));
+  const section=(kind,label,note,heads)=>{
+    rows.push(h('tr','sec',h('th',undefined,h('span','lbl kind-'+kind,label),h('span','sec-note',note))),
+      h('tr','sub',...heads.map((head,i)=>h('td',i>=2&&i<10?'n':undefined,head))));
+    rows[rows.length-2].firstChild.colSpan=11;
+  };
+  const judged=(vals,key)=>{
+    const over=vals.filter(v=>level(v,key)==='bad').length;
+    return h('td','n'+(over?' lv-bad':''),vals.length?over+' of '+vals.length:'—');
+  };
+  // STT: LiveKit times each turn's final transcript and turn decision against
+  // the reply; Pipecat times the service's first result on its request.
+  const sttOp=operations.find(o=>o.operation.type==='stt')?.operation;
+  const sttRecord=all.find(r=>r.measurement?.model && r.measurement.source.includes('STT'))?.measurement;
+  const transcripts=values('transcription_delay'), sttFirsts=firsts('stt');
+  const sttValues=transcripts.length?transcripts:sttFirsts, decisions=values('turn_detection');
+  const sttModel=sttOp?.model||sttRecord?.model, sttProvider=sttOp?.provider||sttRecord?.provider;
+  if (sttModel || sttValues.length || decisions.length){
+    const sttFailed=operations.filter(o=>o.operation.type==='stt' && FAILED.includes(o.operation.state)).length;
+    section('stt','STT','per caller turn',['Model','Provider',transcripts.length?'Turns':'Requests',(transcripts.length?'Transcript':'First result')+' p50','p90','max','Turn decision p90','','','Errors','Spread · 0 – 1.2s']);
+    rows.push(h('tr',undefined,h('td','mono',sttModel||'—'),h('td','dim',sttProvider||'—'),h('td','n',String(sttValues.length)),
+      ...stats(sttValues),h('td','n',ms(pct(decisions,.9))),h('td'),h('td'),
+      h('td','n'+(sttFailed?' lv-bad':''),String(sttFailed)),h('td',undefined,spread(sttValues))));
   }
-  if (groups.size){
-    main.append(h('div','lbl','Latency by model'),table('Latency by model',
-      ['Kind','Model','Provider','Requests','First byte p90','Total p90','Errors','Share over the limit'],
-      Array.from(groups.values()).map(({op,requests})=>{
-        const firsts=requests.map(o=>byOperation(o.id,'first_response')).filter(v=>v!=null);
-        const totals=requests.map(o=>byOperation(o.id,'request_duration')).filter(v=>v!=null);
-        const failed=requests.filter(o=>FAILED.includes(o.operation.state)).length;
-        // A request is judged by its first byte, or for an LLM that did not stream, its duration.
-        const judged=requests.map(o=>{
-          const first=byOperation(o.id,'first_response');
-          if (first!=null && op.type!=='stt') return level(first,op.type==='llm'?'llm_first_token':'tts_first_byte');
-          const duration=byOperation(o.id,'request_duration');
-          return op.type==='llm' && duration!=null ? level(duration,'llm_request') : null;
-        }).filter(Boolean);
-        const share=judged.length ? Math.round(judged.filter(lv=>lv==='bad').length/judged.length*100) : null;
-        return h('tr',undefined,h('th','mono',kinds[op.type]),
-          h('td','left',op.model||'—'),h('td','dim',op.provider||'—'),h('td',undefined,String(requests.length)),
-          h('td',undefined,firsts.length?secs(p90(firsts)):none()),h('td',undefined,totals.length?secs(p90(totals)):none()),
-          h('td',failed?'lv-bad':undefined,String(failed)),
-          h('td',share?'lv-bad':undefined,share==null?none():share+'%'));
-      })));
+  // LLM: one row per model, so a swap mid-call is two rows.
+  const llms=new Map();
+  for (const o of operations.filter(o=>o.operation.type==='llm')){
+    const key=JSON.stringify([o.operation.model||'',o.operation.provider||'']);
+    if (!llms.has(key)) llms.set(key,[]);
+    llms.get(key).push(o);
+  }
+  if (llms.size){
+    section('llm','LLM','per request · a turn can make several',['Model','Provider','Requests','TTFT p50','p90','max','Whole request p90','Per turn avg · max','Over '+LIMITS.llm_first_token.bad+'ms','Errors','Spread · 0 – 1.2s']);
+    for (const requests of llms.values()){
+      const op=requests[0].operation;
+      const tt=requests.map(o=>byOperation(o.id,'first_response')).filter(v=>v!=null);
+      const totals=requests.map(o=>byOperation(o.id,'request_duration')).filter(v=>v!=null);
+      const perTurn=new Map();
+      for (const o of requests){ const t=turnOf.get(operationGroup(o.operation)); if (t) perTurn.set(t,(perTurn.get(t)||0)+1); }
+      const counts=Array.from(perTurn.values()), most=counts.length?Math.max(...counts):null;
+      const failed=requests.filter(o=>FAILED.includes(o.operation.state)).length;
+      rows.push(h('tr',undefined,h('td','mono',op.model||'—'),h('td','dim',op.provider||'—'),h('td','n',String(requests.length)),
+        ...stats(tt).map((cell,i)=>{const v=[pct(tt,.5),pct(tt,.9),tt.length?Math.max(...tt):null][i]; if (v!=null) cell.classList.add('lv-'+level(v,'llm_first_token')); return cell;}),
+        h('td','n',ms(pct(totals,.9))),
+        h('td','n'+(most!=null?' lv-'+level(most,'requests_per_reply'):''),counts.length?(Math.round(counts.reduce((a,b)=>a+b,0)/counts.length*10)/10)+' · '+most:'—'),
+        judged(tt,'llm_first_token'),h('td','n'+(failed?' lv-bad':''),String(failed)),h('td',undefined,spread(tt,'llm_first_token'))));
+    }
+  }
+  // TTS: the model is on the request on Pipecat and on its measurements on LiveKit.
+  const ttsGroups=new Map();
+  for (const m of firstsOf('tts')){
+    const op=m.operation_id ? records.get('operation:'+m.operation_id)?.operation : null;
+    const key=JSON.stringify([op?.model||m.model||'',op?.provider||m.provider||'']);
+    if (!ttsGroups.has(key)) ttsGroups.set(key,{model:op?.model||m.model,provider:op?.provider||m.provider,firsts:[],ops:[]});
+    const g=ttsGroups.get(key); g.firsts.push(m.value);
+    if (m.operation_id) g.ops.push(m.operation_id);
+  }
+  if (ttsGroups.size){
+    section('tts','TTS','per synthesis request',['Model','Provider','Requests','TTFB p50','p90','max','Whole synthesis p90','Never played','Over '+LIMITS.tts_first_byte.bad+'ms','Errors','Spread · 0 – 1.2s']);
+    for (const g of ttsGroups.values()){
+      const totals=g.ops.map(id=>byOperation(id,'request_duration')).filter(v=>v!=null);
+      const ops=g.ops.map(id=>records.get('operation:'+id)?.operation).filter(Boolean);
+      // A synthesis whose reply never started playing was work the caller did not hear.
+      const unplayed=ops.filter(op=>{const x=records.get('exchange:'+op.exchange_id)?.exchange; return op.state==='cancelled' || (x && x.state!=='open' && x.playback==='not_started');}).length;
+      const failed=ops.filter(op=>FAILED.includes(op.state)).length;
+      rows.push(h('tr',undefined,h('td','mono',g.model||'—'),h('td','dim',g.provider||'—'),h('td','n',String(g.firsts.length)),
+        ...stats(g.firsts),h('td','n',ms(pct(totals,.9))),h('td','n',String(unplayed)),
+        judged(g.firsts,'tts_first_byte'),h('td','n'+(failed?' lv-bad':''),String(failed)),h('td',undefined,spread(g.firsts,'tts_first_byte'))));
+    }
+  }
+  // Tools and handoffs run in the agent, so they are listed by name.
+  const named=new Map();
+  for (const o of operations.filter(o=>['tool','handoff'].includes(o.operation.type))){
+    const key=o.operation.type+':'+o.operation.name;
+    if (!named.has(key)) named.set(key,[]);
+    named.get(key).push(o);
+  }
+  if (named.size){
+    section('tool','Tools and handoffs','run in the agent process',['Name','Kind','Calls','Duration p50','p90','max','','','','Failed','']);
+    for (const calls of named.values()){
+      const op=calls[0].operation, durations=calls.map(o=>byOperation(o.id,'tool_duration')).filter(v=>v!=null);
+      const failed=calls.filter(o=>FAILED.includes(o.operation.state)).length;
+      rows.push(h('tr',undefined,h('td','mono',op.name),h('td','dim',op.type),h('td','n',String(calls.length)),
+        ...stats(durations),h('td'),h('td'),h('td'),h('td','n'+(failed?' lv-bad':''),String(failed)),h('td')));
+    }
+  }
+  if (rows.length){
+    const element=h('div','mtable',h('table',undefined,h('tbody',undefined,...rows)));
+    element.firstChild.setAttribute('aria-label','Latency by model');
+    main.append(h('div','lbl','Latency by model · each kind judged by its own first result'),element);
   }
 
-  const rules=h('aside','rules',h('div','lbl','What counts as slow'),
-    ...Object.values(LIMITS).map(limit=>h('div','rule',h('span',undefined,limit.what),
-      h('span','mono lv-slow','> '+limit.slow+(limit.count?'':'ms')),h('span','mono lv-bad','> '+limit.bad+(limit.count?'':'ms')))),
-    h('div','rules-note','slow · over the limit · defaults for every agent · tiles are p90'));
   const top=el.metrics.scrollTop;
   el.metrics.replaceChildren(
-    h('div','metrics-head',h('div','lbl','this call · '+AGENT+' · from the live data feed'),h('h1',undefined,'Timings')),
+    h('div','metrics-head',h('div','lbl','this call · '+AGENT+' · '+callerTurns+' caller turn'+(callerTurns===1?'':'s')),h('h1',undefined,'Timings')),
     h('div','tiles',
-      tile('Reply latency p90',p90(measured.filter(m=>m.metric==='reply_latency').map(m=>m.value)),'reply_latency',target('reply_latency')),
-      tile('LLM first token p90',p90(firsts('llm')),'llm_first_token',target('llm_first_token')),
-      tile('TTS first audio p90',p90(firsts('tts')),'tts_first_byte',target('tts_first_byte')),
+      tile('Caller waited p90',pct(values('reply_latency'),.9),'reply_latency',values('reply_latency').length+' timed · '+target('reply_latency')),
+      tile('STT + turn p90',pct(values('turn_detection'),.9),null,transcripts.length?'final transcript '+secs(pct(transcripts,.9)):'turn decision'),
+      tile('LLM first token p90',pct(firsts('llm'),.9),'llm_first_token',firsts('llm').length+' requests · '+target('llm_first_token')),
+      tile('TTS first audio p90',pct(firsts('tts'),.9),'tts_first_byte',firsts('tts').length+' requests · '+target('tts_first_byte')),
       h('div','tile',h('span','lbl','Errors'),h('span','tile-value'+(errors?' lv-bad':''),String(errors)),
-        h('span','tile-note',replies.length+' repl'+(replies.length===1?'y':'ies')+' · '+(selectedCallID?'1 call':'no call yet')))),
-    h('div','metrics-body',main,rules));
+        h('span','tile-note',selectedCallID?'1 call':'no call yet'))),
+    main);
   el.metrics.scrollTop=top;
 }
 // ── the call's state ────────────────────────────────────

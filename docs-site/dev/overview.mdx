@@ -208,11 +208,19 @@ and the model call that follows it is timed on its own.
 the time goes in a voice turn, and how to tell which part is slow.
 
 The **Metrics** view sums up the current call from the same records. Its tiles
-show reply latency, LLM first token and TTS first audio at p90, and the error
-count. A table lists each reply with its latency, its model and tool timings,
-and what was slow. Below it are the reply-time breakdowns and latency per model.
-**What counts as slow** lists the limits each number is judged by. They are the
-SLNG studio's defaults.
+show how long the caller waited, STT and turn decision, LLM first token and TTS
+first audio at p90, and the error count. Below them is one row per caller turn:
+what the caller said, how long they waited in silence, and the first number of
+each stage. A turn can hold several replies, such as a filler and then the
+answer, so its wait sits on the turn and not on each reply. Open a turn to see
+every stage on its own row: STT and turn decision, each LLM request, each tool,
+each TTS request, and the wait. Each bar runs from zero to two seconds and marks
+that stage's limit. These limits are the SLNG studio's defaults.
+
+Below the turns, **Latency by model** has one section per kind. STT shows the
+final transcript and the turn decision. LLM shows time to first token, the whole
+request and requests per turn. TTS shows time to first byte, the whole synthesis
+and requests that never played. Tools and handoffs are listed by name.
 
 The logs view is in front while the target is starting, and the conversation
 view takes over once the agent is ready. If anything in the startup output looked
