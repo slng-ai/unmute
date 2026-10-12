@@ -183,12 +183,19 @@ duration as soon as they arrive. TTS first-audio time and tool duration also
 stay visible. There is no need to expand a reply to compare model requests.
 
 **Debug details** holds turn detection, transcription delay, text aggregation,
-node timings, playback delay, and speech duration. The collapsed **Call
-diagnostics** footer holds call first-speech timing and activity or measurements
-with no proven exchange. These do not interrupt the conversation.
+node timings, playback delay, and speech duration. The **Call diagnostics**
+inspector beside the conversation starts collapsed. It holds call first-speech
+timing and activity or measurements with no proven exchange. These do not
+interrupt the conversation.
 It also holds model, provider, request IDs, and source names. Use these when the
 main timings do not explain the wait. Definitions live here, rather than
 repeating under every value in the conversation.
+
+The **Metrics** view adds up the same values for the whole call. Its tiles show
+reply latency, LLM first token and TTS first audio at p90. Each number is
+colored against a limit: over the first limit it is slow, over the second it is
+over the limit. Reply latency is slow above 1000ms and over the limit above
+1500ms. The view lists every limit beside its tables.
 
 ## What each number means
 
@@ -227,14 +234,15 @@ Partial source coverage or a lost slice of history labels the count as `observed
 ## Where a reply's time went, on Pipecat
 
 Pipecat splits each measured reply into the parts that make it up, and the dev
-page shows them in time order under the reply latency, in the call diagnostics:
+page shows them in time order in the **Reply time** section of the call
+diagnostics:
 
 ```text
 Reply time 1.02s · from the caller falling silent
-  200ms  endpointing wait     config: VAD stop_secs
-  120ms  transcription        DeepgramSTTService#0
-   40ms  pipeline             pipeline
-  660ms  LLM inference        OpenAILLMService#0
+200ms   endpointing wait · config: VAD stop_secs
+120ms   transcription · DeepgramSTTService#0
+40ms    pipeline · pipeline
+660ms   LLM inference · OpenAILLMService#0
 ```
 
 The parts account for the whole wait, so they add up to the total. That is what
@@ -253,8 +261,9 @@ The first line says what the interval was measured from: the caller falling
 silent, or the client connecting. A greeting is anchored on the second, so it is
 never compared with a reply to someone who spoke.
 
-This breakdown carries no reply identity, so it sits with the unassigned values
-rather than being attached to a reply by timing. LiveKit reports its own per
+This breakdown carries no reply identity, so it has its own section rather than
+being attached to a reply by timing. The **Metrics** view lists every breakdown
+in arrival order, one column per part. LiveKit reports its own per
 request timings instead and has no equivalent split.
 
 ## Reading a slow turn

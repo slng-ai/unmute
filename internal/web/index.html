@@ -5,355 +5,448 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>unmute dev</title>
 <style>
+  /* The SLNG studio's tokens (slng-ai/unmute-beat, studio/web/src/styles/tokens.css),
+     one to one, plus the few literals the studio writes inline. Dark ground, one
+     yellow, square corners, 1 px rules. Each signal colour means one thing. Saans
+     is licensed and the page ships inside the binary, so sans falls back to the
+     system face; Geist Mono is used when it is installed. */
   :root{
-    --bg:oklch(0.178 0.008 96);
-    --surface:oklch(0.224 0.009 96);
-    --surface-2:oklch(0.252 0.010 96);
-    --border:oklch(0.320 0.010 96);
-    --text:oklch(0.930 0.010 96);
-    --muted:oklch(0.660 0.012 96);
-    --faint:oklch(0.500 0.011 96);
-    --accent:oklch(0.895 0.165 96);
-    --accent-ink:oklch(0.180 0.010 96);
-    --danger:oklch(0.640 0.165 28);
-    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
-    --ease:cubic-bezier(0.16,1,0.3,1);
+    --sunk:#0f0d0a;
+    --ground:#15120d;
+    --aside:#17150f;
+    --panel:#1a1814;
+    --hover:#1e1c18;
+    --raised:#252320;
+    --rule-faint:#211f1b;     /* rows inside a table or card */
+    --rule-soft:#26241f;
+    --rule:#333230;
+    --rule-strong:#3a3833;
+    --faint:#6e6c66;
+    --dim:#8a8882;
+    --muted:#a0a09b;
+    --soft:#d9d7d1;
+    --text:#f5f4f1;
+    --yellow:#fbe566;         /* brand yellow: the current view, something running, slow */
+    --yellow-hover:#fff1a3;
+    --yellow-dim:#7a6f35;
+    --yellow-ground:#221f14;
+    --caller:#5aa9f0;         /* the caller's words and voice */
+    --bot:#f0a36e;            /* what the agent said or is saying */
+    --ok:#9bd39b;
+    --ok-rule:#5e8f5e;
+    --bad:#f07b6e;            /* failed, over the limit */
+    --bad-rule:#8f4a42;
+    --bad-ground:#2a1714;
+    --bad-line:#5a2a24;
+    --sans:system-ui,-apple-system,sans-serif;
+    --mono:'Geist Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --bar:56px;               /* top bar height */
+    --control:40px;           /* button height */
+    --who:132px;              /* transcript speaker column */
     color-scheme:dark;
   }
   *{box-sizing:border-box}
   html,body{height:100%}
   body{
-    margin:0;background:var(--bg);color:var(--text);
-    font-family:var(--mono);font-size:15px;line-height:1.5;
+    margin:0;background:var(--ground);color:var(--text);
+    font-family:var(--sans);font-size:15px;line-height:1.5;
     -webkit-font-smoothing:antialiased;
-    display:flex;flex-direction:column;min-height:100%;
   }
-  main{
-    flex:1;width:100%;max-width:880px;margin:0 auto;
-    padding:24px 24px 32px;display:flex;flex-direction:column;gap:20px;
-    min-height:0; /* let transcript scroll inside flexbox */
+  button,input,select{font:inherit;color:inherit}
+  :focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
+  kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--rule-strong);padding:1px 5px;color:var(--soft)}
+  .mono{font-family:var(--mono)}
+  .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .dim{color:var(--dim)}
+  .hint{font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.5}
+  .empty{font-family:var(--mono);font-size:12px;color:var(--dim);line-height:1.6;margin:0}
+  .tag{
+    font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+    padding:2px 6px;border:1px solid var(--rule-strong);color:var(--muted);white-space:nowrap;
+  }
+  .tag[hidden]{display:none}
+  .tag-bad{border-color:var(--bad-rule);color:var(--bad)}
+  /* A number's level against its limit: the studio's LEVEL_COLOR. */
+  .lv-ok{color:var(--muted)}
+  .lv-slow{color:var(--yellow)}
+  .lv-bad{color:var(--bad)}
+  .pulse{animation:pulse 1.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @keyframes blink{to{visibility:hidden}}
+
+  /* ── buttons: studio .btn, .btn-y, .btn-q ─────────────────── */
+  .btn,#connect,.metrics-guide{
+    font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+    height:var(--control);padding:0 14px;border:1px solid var(--rule-strong);border-radius:0;
+    background:transparent;color:var(--muted);cursor:pointer;
+    display:inline-flex;align-items:center;gap:8px;text-decoration:none;white-space:nowrap;
+  }
+  .btn:hover,.metrics-guide:hover{background:var(--raised);color:var(--text)}
+  /* connect is the yellow action; cancel and end call are the quiet one */
+  #connect{background:var(--yellow);border-color:var(--yellow);color:var(--ground)}
+  #connect:hover{background:var(--yellow-hover);border-color:var(--yellow-hover)}
+  #connect:focus-visible{outline-color:var(--text)}
+  body[data-state="connecting"] #connect:focus-visible,body[data-state="connected"] #connect:focus-visible{outline-color:var(--yellow)}
+  body[data-state="connecting"] #connect,body[data-state="connected"] #connect{
+    background:transparent;border-color:var(--rule-strong);color:var(--muted);
+  }
+  body[data-state="connecting"] #connect:hover,body[data-state="connected"] #connect:hover{background:var(--raised);color:var(--text)}
+  /* Nothing to connect to yet: the page is served before the runtime exists. */
+  #connect[disabled],#connect[disabled]:hover{
+    background:transparent;border:1px dashed var(--rule-strong);color:var(--faint);cursor:not-allowed;
   }
 
-  /* ── views ───────────────────────────────────────────────
-     Header and controls sit outside: a control that disappears when you switch
-     view is the same defect as a control labelled with its action. Switching is
-     state, never navigation — tearing the page down would end the call. */
-  .views{flex:1;min-height:0;display:flex;flex-direction:column}
-  .view{flex:1;min-height:0;display:none;flex-direction:column;gap:20px}
-  .view[data-active="true"]{display:flex}
+  /* ── page frame ─────────────────────────────────────────── */
+  .app{height:100%;display:flex;flex-direction:column;min-height:0}
 
-  /* ── view switch ──────────────────────────────────────────
-     A segmented control, not a rail: two destinations do not earn a permanent
-     vertical gutter, and the page is one centred column. */
-  .viewtabs{display:flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+  /* ── top bar: studio Shell ──────────────────────────────────
+     The mark, the three views, then the run's own cells. At phone width it stays
+     one row: everything after the views scrolls sideways, so nothing is dropped. */
+  .bar{display:flex;align-items:stretch;min-height:var(--bar);border-bottom:1px solid var(--rule-soft);flex:none}
+  .brand{display:flex;align-items:center;gap:10px;padding:0 20px;color:var(--text);flex:none}
+  .brand-mark{width:18px;height:18px;background:var(--yellow);flex:none}
+  .brand-name{font-weight:800;font-size:18px;letter-spacing:-.01em}
+  .brand-sub{font-family:var(--mono);font-size:13px;color:var(--dim)}
+  /* Views are state, never navigation: tearing the page down would end the call. */
+  .nav{display:flex;flex:none}
   .vtab{
-    font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
-    display:flex;align-items:center;gap:6px;
-    padding:5px 10px;border:0;border-radius:6px;cursor:pointer;
-    background:transparent;color:var(--muted);
-    transition:background .18s var(--ease),color .18s var(--ease);
+    font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);background:transparent;border:0;border-left:1px solid var(--rule-soft);border-radius:0;
+    height:var(--bar);display:flex;align-items:center;gap:8px;padding:0 16px;cursor:pointer;
   }
   .vtab:hover{color:var(--text)}
-  .vtab[aria-selected="true"]{background:var(--surface-2);color:var(--text)}
-  .vtab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  /* the flagged count rides the tab, so it is visible from either view */
-  .badge{
-    font-size:10px;letter-spacing:0;padding:1px 5px;border-radius:99px;
-    background:var(--danger);color:var(--accent-ink);font-weight:700;
-  }
-  .badge[hidden]{display:none}
+  .vtab[aria-selected="true"]{background:var(--yellow);color:var(--ground)}
+  .vtab:focus-visible{outline-offset:-2px}
+  .vtab[aria-selected="true"]:focus-visible{outline-color:var(--text)}
+  /* the problem count rides the Logs cell, so it is visible from every view */
+  .vtab .tag{background:var(--ground)}
+  .bar-scroll{display:contents}
+  .bar-fill{flex:1 1 200px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:8px 20px;border-left:1px solid var(--rule-soft);min-width:0}
+  .bar-agent{font-family:var(--mono);font-size:13px;font-weight:400}
+  [id="feed-status"]{font-family:var(--mono);font-size:12px;color:var(--dim);overflow-wrap:anywhere}
+  .bar-cell{display:flex;align-items:center;gap:8px;padding:8px 16px;border-left:1px solid var(--rule-soft)}
+  /* one tag for where the session is: ready, connecting, live, error */
+  .runtag{border-color:var(--ok-rule);color:var(--ok)}
+  body[data-state="connecting"] .runtag{border-color:var(--yellow);color:var(--yellow);animation:pulse 1.4s ease-in-out infinite}
+  body[data-state="connected"] .runtag{border-color:var(--yellow);color:var(--yellow)}
+  body[data-state="error"] .runtag{border-color:var(--bad-rule);color:var(--bad)}
 
-  /* ── log view ────────────────────────────────────────────── */
-  .logtools{display:flex;gap:10px;align-items:center;flex:none}
-  #logfilter{
-    flex:1;min-width:0;font-family:var(--mono);font-size:13px;
-    padding:9px 12px;border-radius:9px;
-    border:1px solid var(--border);background:var(--surface);color:var(--text);
+  /* ── controls: studio .callbar ─────────────────────────────
+     Above every view: a control that disappears when you switch view is the same
+     defect as a control labelled with its action. */
+  .controls{
+    display:flex;align-items:center;gap:16px;flex-wrap:wrap;flex:none;
+    padding:12px 20px;border-bottom:1px solid var(--rule-soft);background:var(--aside);
   }
-  #logfilter::placeholder{color:var(--faint)}
-  #logfilter:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .kinds{display:flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
-  .kind{
-    font-family:var(--mono);font-size:11px;letter-spacing:.06em;
-    padding:5px 9px;border:0;border-radius:6px;cursor:pointer;
-    background:transparent;color:var(--muted);
-  }
-  .kind[aria-pressed="true"]{background:var(--surface-2);color:var(--text)}
-  .kind:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .callbar-level{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .controls-gap{flex:1 1 auto}
 
-  .logpane{
-    flex:1;min-height:0;display:flex;
-    border:1px solid var(--border);border-radius:12px;background:var(--surface);overflow:hidden;
-  }
-  .loglist{
-    flex:1;overflow:auto;overscroll-behavior:contain;padding:12px 14px;
-    font-size:12.5px;line-height:1.5;
-    scrollbar-width:thin;scrollbar-color:var(--border) transparent;
-  }
-  .loglist::-webkit-scrollbar{width:8px;height:8px}
-  .loglist::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
-  .logrow{
-    display:block;white-space:pre-wrap;overflow-wrap:anywhere;
-    color:var(--muted);padding:1px 0;
-  }
-  .logrow.flagged{color:var(--danger)}
-  .logrow.metric{color:var(--accent)}
-  .logempty{color:var(--faint);font-size:12.5px;letter-spacing:.04em;padding:8px 0}
-
-  /* ── top bar ─────────────────────────────────────────── */
-  .bar{display:flex;align-items:center;justify-content:space-between;gap:16px}
-  .status{display:flex;align-items:center;gap:10px;min-width:0}
-  .dot{
-    width:9px;height:9px;border-radius:50%;flex:none;
-    background:var(--muted);transition:background .22s var(--ease);
-  }
-  .statusline{
-    font-size:12.5px;letter-spacing:.04em;color:var(--muted);
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  }
-  .statusline .sep{color:var(--border);margin:0 .3em}
-  .statusline b{color:var(--text);font-weight:600}
-  .logo{height:26px;width:auto;display:block;flex:none}
-
-  /* ── stage: dominant when idle, tucks under header when connected ─ */
-  .stage{
-    flex:1;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:28px;text-align:center;
-    transition:gap .25s var(--ease);
-  }
-  .state{
-    font-size:40px;font-weight:600;letter-spacing:-.01em;
-    color:var(--muted);transition:color .22s var(--ease),font-size .25s var(--ease);
-  }
-  .state .cursor{color:var(--border);font-weight:400}
-  .hint{font-size:13px;color:var(--muted);min-height:1.2em;transition:opacity .22s var(--ease)}
-
-  /* meter: live conversation level (mic + agent) */
-  .meter{display:flex;align-items:flex-end;gap:4px;height:64px;transition:height .25s var(--ease)}
-  .meter i{
-    display:block;width:5px;height:100%;border-radius:2px;
-    background:var(--border);
-    transform:scaleY(.08);transform-origin:bottom;
-    transition:transform .09s linear,background .22s var(--ease);
-  }
-
-  /* ── transcript ──────────────────────────────────────── */
-  .transcript{
-    flex:1;min-height:0;display:none;flex-direction:column;
-    border:1px solid var(--border);border-radius:12px;background:var(--surface);
-    overflow:hidden;
-  }
-  body[data-state="connected"] .transcript,
-  body[data-has-history="true"] .transcript{display:flex}
-
-  .conversation-scroll{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
-  #diagnostics{flex:none;max-height:35%;overflow-y:auto;border-top:1px solid var(--border);padding:5px 18px}
-  #diagnostics[hidden],.exchange[hidden],.exchange-content:empty{display:none}
-  #diagnostic-list{display:flex;flex-direction:column;gap:8px}
-  .tlist{
-    flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;overflow-anchor:none;
-    padding:18px 18px 12px;display:flex;flex-direction:column;gap:10px;
-    scrollbar-width:thin;scrollbar-color:var(--border) transparent;
-  }
-  .tlist::-webkit-scrollbar{width:8px}
-  .tlist::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
-
-  .turn{display:flex;flex-direction:column;gap:4px;max-width:100%}
-  .who{
-    font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
-    color:var(--faint);font-weight:600;
-  }
-  .said{
-    font-size:14.5px;line-height:1.55;color:var(--text);
-    word-wrap:break-word;overflow-wrap:anywhere;
-  }
-  .turn.you .said{color:var(--text)}
-  .turn.bot .said{color:var(--accent)}
-  .exchange{flex:none;min-width:0;display:flex;flex-direction:column;gap:6px}
-  .exchange-content{display:flex;flex-direction:column;gap:10px}
-  .exchange-status{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
-  .said{white-space:pre-wrap}
-  .segment[data-state="provisional"]{color:var(--muted)}
-  .segment[data-state="provisional"]::after{content:" …";color:var(--faint)}
-  .segment[data-state="incomplete"]{text-decoration:underline dotted var(--muted);text-underline-offset:4px}
-
-  .tempty{
-    margin:auto;padding:24px;text-align:center;color:var(--faint);
-    font-size:12.5px;letter-spacing:.04em;
-  }
-
-  .activity,.measurements{font-size:11.5px;color:var(--muted);overflow-wrap:anywhere}
-  .activity:empty{display:none}
-  .activity{display:flex;flex-direction:column;gap:6px}
-  .operation{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px}
-  .operation-metrics{display:flex;flex-wrap:wrap;gap:4px 14px}
-  .operation-metrics .measurement{padding:0}
-  .metrics-summary{font-size:11.5px;color:var(--text)}
-  .feed-bar{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 16px}
-  .metrics-guide{font-size:11px;color:var(--muted)}
-  .metrics-guide:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .activity [data-state="running"]{color:var(--text)}
-  .measurements summary{cursor:pointer;padding:4px 0;color:var(--muted)}
-  .measurements summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .measurement{padding:5px 0;display:flex;flex-direction:column;gap:2px}
-  .measurement-label{color:var(--text)}
-  /* One reply's time, split into the parts that make it up. The durations are
-     in a column of their own so the long one is findable by eye. */
-  .breakdown{padding:5px 0;display:flex;flex-direction:column;gap:2px}
-  .breakdown-part{display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
-  .breakdown-duration{color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
-  .breakdown-owner{grid-column:2}
-  .source-note{white-space:pre-line}
-  .measurement-note,.source-note{font-size:10.5px;color:var(--muted)}
-  [id="feed-status"]{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
-
-  /* compact mode when conversation is active: shrink the stage out of the way */
-  body[data-state="connected"] .state{font-size:22px}
-  body[data-state="connected"] .stage{gap:14px}
-  body[data-state="connected"] .meter{height:36px}
-  body[data-state="connected"] .hint{opacity:0;min-height:0;height:0;margin:0}
-  body[data-state="connected"] .stage,body[data-has-history="true"] .stage{
-    flex:none;flex-direction:row;justify-content:space-between;gap:12px;
-  }
-  body[data-state="connected"] .state,body[data-has-history="true"] .state{font-size:16px}
-  body[data-state="connected"] .meter,body[data-has-history="true"] .meter{height:18px}
-  body[data-has-history="true"] .hint{display:none}
-  .transcript{position:relative}
-  .tlist{padding-bottom:50px}
-  #latest{position:absolute;right:10px;bottom:10px;padding:5px 10px;font-size:11px;z-index:1}
-  #latest[hidden]{display:none}
-  #latest:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-
-  /* ── controls ────────────────────────────────────────── */
-  .controls{display:flex;flex-direction:column;gap:12px;flex:none}
-  .btnrow{display:flex;gap:12px}
-  .btn,#connect,#mute{
-    font-family:var(--mono);font-size:15px;font-weight:600;
-    letter-spacing:.01em;cursor:pointer;
-    padding:13px 18px;border-radius:9px;border:1px solid var(--border);
-    background:var(--surface);color:var(--text);
-    transition:background .22s var(--ease),color .22s var(--ease),
-               border-color .22s var(--ease),opacity .22s var(--ease);
-  }
-  #connect:focus-visible,#mute:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  #mute[disabled]{opacity:.4;cursor:not-allowed}
-  #connect{flex:1;background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-  #connect:hover:not([disabled]){background:oklch(0.92 0.165 96)}
-  /* Nothing to connect to yet: the page is served before the runtime exists. */
-  #connect[disabled]{opacity:.4;cursor:not-allowed}
-
-  /* ── microphone: a state readout, not a verb ──────────────
-     Uppercase and letter-spaced like .who so it reads as a status line rather
-     than a second action button sitting next to the real one. */
+  /* microphone: a state readout, not a verb. The label beside it names the state;
+     the button's fill carries it (caller blue when live, dashed when there is none). */
   #mute{
-    flex:none;position:relative;overflow:hidden;
-    display:flex;align-items:center;gap:8px;
-    font-size:12.5px;letter-spacing:.1em;
+    position:relative;overflow:hidden;
+    width:56px;height:56px;flex:0 0 56px;border-radius:0;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    border:2px solid var(--caller);background:transparent;color:var(--caller);
   }
-  .mic-glyph{font-size:10px;line-height:1}
-  #mute[data-mic="live"]{
-    background:var(--accent);color:var(--accent-ink);border-color:var(--accent);
-  }
-  #mute[data-mic="muted"]{
-    background:transparent;color:var(--muted);border-color:var(--border);font-weight:500;
-  }
-  #mute[data-mic="unavailable"]{
-    background:transparent;color:var(--faint);border-color:var(--border);font-weight:500;
-  }
-  #mute[data-mic="unavailable"] .mic-glyph{visibility:hidden}  /* keeps the width, drops the mark */
-
+  #mute[data-mic="live"]{background:var(--caller);color:var(--ground)}
+  #mute[data-mic="muted"]{border-color:var(--rule-strong);color:var(--dim)}
+  #mute[data-mic="unavailable"]{border:1px dashed var(--rule-strong);color:var(--faint);cursor:not-allowed}
+  .mic-text{color:var(--faint)}
+  #mute[data-mic="live"] + .callbar-level .mic-text{color:var(--caller)}
+  #mute[data-mic="muted"] + .callbar-level .mic-text{color:var(--muted)}
   /* input level, inside the control it describes */
-  .mic-level{position:absolute;left:0;right:0;bottom:0;height:2px;pointer-events:none}
+  .mic-level{position:absolute;left:0;right:0;bottom:0;height:3px;pointer-events:none}
   .mic-level i{
-    display:block;height:100%;width:100%;background:var(--accent-ink);opacity:.5;
+    display:block;height:100%;width:100%;background:var(--ground);opacity:.6;
     transform:scaleX(0);transform-origin:left;transition:transform .07s linear;
   }
   /* The level is driven by an inline transform, which outranks any rule here, so
      renderMic() zeroes it on leaving `live` rather than a selector doing it. */
 
-  /* mic selector — shown only when ≥2 inputs exist (pipecat transport only) */
-  .microw{
-    display:flex;align-items:center;gap:10px;
-    border:1px solid var(--border);background:var(--surface);
-    border-radius:9px;padding:0 14px;
+  /* meter: live conversation level (mic + agent) */
+  .meter{display:flex;align-items:flex-end;gap:3px;height:18px}
+  .meter i{
+    display:block;width:5px;height:100%;background:var(--rule-strong);
+    transform:scaleY(.08);transform-origin:bottom;transition:transform .09s linear;
   }
-  .microw[hidden]{display:none}
-  .mic-lab{font-size:12px;color:var(--muted);letter-spacing:.04em;white-space:nowrap}
-  #micsel{
-    appearance:none;-webkit-appearance:none;flex:1;min-width:0;
-    background:transparent;border:0;color:var(--text);
-    font-family:var(--mono);font-size:13px;padding:12px 0;cursor:pointer;outline:none;
-    text-overflow:ellipsis;
-  }
-  #micsel:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:2px}
-  .caret{color:var(--muted);font-size:11px;pointer-events:none}
-
-  /* ── state styling, keyed off body[data-state] ───────── */
-  body[data-state="connecting"] .dot{background:var(--accent);animation:pulse 1.1s var(--ease) infinite}
-  body[data-state="connecting"] .state{color:var(--text)}
-
-  body[data-state="connected"] .dot{background:var(--accent)}
-  body[data-state="connected"] .state{color:var(--accent)}
-  body[data-state="connected"] .meter i{background:var(--accent)}
-  body[data-state="connected"] #connect{background:transparent;color:var(--text);border-color:var(--border)}
-  body[data-state="connected"] #connect:hover{border-color:var(--muted);background:var(--surface)}
-
-  body[data-state="error"] .dot{background:var(--danger)}
-  body[data-state="error"] .state{color:var(--danger)}
-
-  /* muted: mic is off — dim the meter. The control dims itself via data-mic. */
+  body[data-state="connected"] .meter i{background:var(--caller)}
   body.muted[data-state="connected"] .meter i{opacity:.5}
 
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  /* mic selector, shown only when two or more inputs exist */
+  .microw{display:flex;align-items:center;gap:10px;min-width:0}
+  .microw[hidden]{display:none}
+  #micsel{
+    max-width:280px;min-width:0;background:var(--sunk);border:1px solid var(--rule-strong);border-radius:0;
+    color:var(--text);padding:9px 10px;font-size:14px;cursor:pointer;text-overflow:ellipsis;
+  }
+  #micsel:focus{outline:none;border-color:var(--yellow)}
 
-  @media (max-width:520px){
-    main{padding:16px;gap:12px}
-    .bar{flex-wrap:wrap;gap:10px}
-    .status{flex:1}
-    .viewtabs{order:1;width:100%}
-    .vtab{flex:1;justify-content:center}
-    .logtools{flex-wrap:wrap}
-    #logfilter{flex-basis:100%}
-    .view{gap:12px}
-    .tlist{padding:12px 12px 50px}
-    .btnrow{gap:8px}
-    #connect,#mute{padding:12px}
-    .state{font-size:30px}
+  /* ── views ─────────────────────────────────────────────── */
+  .views{flex:1;min-height:0;display:flex;flex-direction:column}
+  .view{flex:1;min-height:0;display:none;flex-direction:column}
+  .view[data-active="true"]{display:flex}
+
+  /* ── conversation: stage ──────────────────────────────────
+     The big "ready" while there is nothing to read; one line once there is. */
+  .stage{flex:1;display:flex;flex-direction:column;justify-content:flex-start;gap:12px;padding:48px 24px}
+  .state{font-size:32px;font-weight:800;line-height:1.2;color:var(--text)}
+  .state .cursor{color:var(--yellow);font-weight:400;animation:blink 1s steps(2,start) infinite}
+  [id="hint"]{margin:0}
+  body[data-state="connecting"] .state{color:var(--yellow)}
+  body[data-state="error"] .state{color:var(--bad)}
+  body[data-state="connected"] .stage,body[data-has-history="true"] .stage{
+    flex:none;flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px;padding:12px 20px 10px;
+    border-bottom:1px solid var(--rule-soft);
+  }
+  body[data-state="connected"] .state,body[data-has-history="true"] .state{
+    font-family:var(--mono);font-size:12px;font-weight:400;letter-spacing:.04em;
+  }
+  body[data-state="connected"] .state{color:var(--yellow)}
+  body[data-state="connected"] [id="hint"],body[data-has-history="true"] [id="hint"]{display:none}
+
+  /* ── conversation: transcript and inspector ─────────────── */
+  .transcript{flex:1;min-height:0;display:none;position:relative}
+  body[data-state="connected"] .transcript,
+  body[data-has-history="true"] .transcript{display:flex}
+  .conversation-scroll{position:relative;flex:999 1 600px;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+  .tlist{
+    flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;overflow-anchor:none;
+    padding:14px 20px 56px;display:flex;flex-direction:column;gap:16px;
+    scrollbar-width:thin;scrollbar-color:var(--rule-strong) transparent;
+  }
+  #latest{position:absolute;right:20px;bottom:12px;height:32px;z-index:1;background:var(--ground)}
+  #latest[hidden]{display:none}
+
+  .exchange{flex:none;min-width:0;display:flex;flex-direction:column;gap:8px;position:relative}
+  /* a rule between exchanges, drawn outside the box so it adds no height */
+  .tlist > .exchange:not(:first-child)::before{content:"";position:absolute;left:0;right:0;top:-9px;border-top:1px solid var(--rule-soft)}
+  .exchange[hidden],.exchange-content:empty{display:none}
+  .exchange-content{display:flex;flex-direction:column;gap:8px}
+  .turn{display:grid;grid-template-columns:var(--who) minmax(0,1fr);gap:10px;align-items:baseline}
+  .who{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;overflow-wrap:anywhere}
+  .turn.you .who{color:var(--caller)}
+  .turn.bot .who{color:var(--bot)}
+  .said{font-size:15px;line-height:1.45;color:var(--soft);white-space:pre-wrap;overflow-wrap:anywhere}
+  .segment[data-state="provisional"]{color:var(--dim)}
+  .segment[data-state="provisional"]::after{content:" …";color:var(--faint)}
+  .segment[data-state="incomplete"]{text-decoration:underline dotted var(--dim);text-underline-offset:4px}
+  /* the exchange's status: studio .said-mark, under the text it describes */
+  .exchange-status{font-family:var(--mono);font-size:10px;color:var(--dim);margin-left:calc(var(--who) + 10px);overflow-wrap:anywhere}
+  .exchange[data-state="open"] .exchange-status{color:var(--yellow)}
+
+  /* one reply's measurements: studio .request card */
+  .request{border:1px solid var(--rule-soft);background:var(--panel);margin-left:calc(var(--who) + 10px);min-width:0}
+  .request[hidden]{display:none}
+  .metrics-summary{display:flex;flex-wrap:wrap;gap:0 8px;padding:6px 10px;font-family:var(--mono);font-size:11px;color:var(--muted);border-bottom:1px solid var(--rule-faint)}
+  .metrics-summary:last-child{border-bottom:0}
+  .activity{display:flex;flex-direction:column}
+  .activity:empty{display:none}
+  .operation{padding:5px 10px;font-family:var(--mono);font-size:12px;color:var(--dim);overflow-wrap:anywhere;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 14px}
+  .operation[data-state="running"]{color:var(--yellow);animation:pulse 1.4s ease-in-out infinite}
+  .operation[data-state="failed"],.operation[data-state="timed_out"]{color:var(--bad)}
+  .operation-metrics{display:flex;flex-wrap:wrap;gap:2px 14px}
+  .operation-metrics .measurement{padding:0}
+  .measurements{padding:5px 10px;font-family:var(--mono);font-size:12px;color:var(--dim);overflow-wrap:anywhere}
+  .measurements[hidden]{display:none}
+  .measurements > summary{cursor:pointer;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .measurement{padding:4px 0;display:flex;flex-direction:column;gap:2px}
+  .measurement-label{color:var(--soft)}
+  .operation .measurement-label{color:inherit}
+  .measurement-note,.source-note{font-size:11px;color:var(--dim)}
+  .source-note{white-space:pre-line;margin:6px 0 0}
+
+  /* ── inspector: studio .inspector and Section ────────────── */
+  .inspector{
+    flex:1 1 380px;max-width:100%;min-width:0;min-height:0;overflow-y:auto;
+    background:var(--aside);border-left:1px solid var(--rule-soft);
+  }
+  .inspector[hidden]{display:none}
+  .inspector:not([open]){flex:0 0 auto}
+  .inspector > summary{
+    display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--rule-soft);
+    cursor:pointer;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+  }
+  .inspector > summary:hover{background:var(--hover)}
+  .inspector > summary::-webkit-details-marker{display:none}
+  .inspector > summary::before{content:"▸";width:10px;color:var(--dim)}
+  .inspector[open] > summary::before{content:"▾"}
+  .inspector > summary:focus-visible{outline-offset:-2px}
+  [id="diagnostic-list"]{display:flex;flex-direction:column}
+  [id="diagnostic-list"] .exchange{gap:0;border-bottom:1px solid var(--rule-soft);padding-bottom:12px}
+  [id="diagnostic-list"] .exchange-status{display:none}
+  [id="diagnostic-list"] .request{margin:0;border:0;background:transparent;display:flex;flex-direction:column;gap:10px}
+  [id="diagnostic-list"] .metrics-summary{
+    height:44px;align-items:center;padding:0 16px;border:0;
+    font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--soft);
+  }
+  [id="diagnostic-list"] .activity,[id="diagnostic-list"] .measurements{margin:0 16px}
+  [id="diagnostic-list"] .activity{border:1px solid var(--rule-soft)}
+  [id="diagnostic-list"] .activity:has(> .breakdown){border:0;gap:10px}
+  [id="diagnostic-list"] .operation{border-bottom:1px solid var(--rule-faint)}
+  [id="diagnostic-list"] .measurements{padding:0}
+  /* One reply's time, split into the parts that make it up: a studio .kv. The
+     durations are in a column of their own so the long one is findable by eye. */
+  .breakdown{border:1px solid var(--rule-soft);font-family:var(--mono);font-size:12px}
+  .breakdown > div{display:grid;grid-template-columns:72px minmax(0,1fr);gap:10px;padding:7px 10px;border-bottom:1px solid var(--rule-faint)}
+  .breakdown > div:last-child{border-bottom:0}
+  .breakdown > .measurement-label{display:block;color:var(--text)}
+  .breakdown-duration{color:var(--text);font-variant-numeric:tabular-nums}
+  .breakdown-owner{color:var(--dim)}
+
+  /* ── metrics view: studio Metrics page ──────────────────── */
+  .metrics{flex:1;min-height:0;overflow-y:auto}
+  .metrics-head{padding:20px 24px 16px;border-bottom:1px solid var(--rule-soft)}
+  .metrics-head h1{margin:8px 0 0;font-size:32px;font-weight:800;line-height:1.2}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));border-bottom:1px solid var(--rule-soft)}
+  .tile{padding:14px 18px;border-right:1px solid var(--rule-soft);display:flex;flex-direction:column;gap:6px;min-width:0}
+  .tile .lbl{font-size:10px}
+  .tile-value{font-family:var(--mono);font-size:26px}
+  .tile-note{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .metrics-body{display:flex;flex-wrap:wrap;align-items:flex-start}
+  .metrics-main{flex:999 1 640px;min-width:0;padding-bottom:24px}
+  .metrics-main > .lbl{padding:18px 16px 10px}
+  .metrics-main > .lbl:first-child{padding-top:14px}
+  .metrics-main > .empty,.metrics-main > .hint{padding:0 16px}
+  .moves{overflow-x:auto;padding:0 16px}
+  .moves table{border-collapse:collapse;min-width:640px;width:100%;border:1px solid var(--rule-soft);background:var(--aside)}
+  .moves th,.moves td{border:1px solid var(--rule-faint);height:44px;padding:4px 8px;text-align:center;font-family:var(--mono);font-size:14px;color:var(--muted);font-weight:400}
+  .moves thead th{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--soft);background:var(--ground)}
+  .moves tbody th{text-align:left;padding:0 12px}
+  .moves .left{text-align:left;padding:6px 10px}
+  .moves .flags{text-align:left;padding:6px 10px;font-family:var(--sans);font-size:13px}
+  .moves .small{font-size:12px}
+  .rules{flex:1 1 320px;max-width:100%;margin:14px 16px;border:1px solid var(--rule-soft);background:var(--aside)}
+  .rules > .lbl{padding:10px 12px;border-bottom:1px solid var(--rule-soft)}
+  .rule{display:grid;grid-template-columns:minmax(0,1fr) 70px 70px;gap:8px;padding:8px 12px;border-bottom:1px solid var(--rule-faint);align-items:baseline;font-size:13px;color:var(--soft)}
+  .rule .mono{font-size:11px;text-align:right}
+  .rules-note{font-family:var(--mono);font-size:10px;color:var(--faint);padding:8px 12px}
+
+  /* ── logs view: studio .toolbar, .segs, .panel ──────────── */
+  .toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex:none;padding:10px 20px;border-bottom:1px solid var(--rule-soft)}
+  #logfilter{
+    flex:1 1 260px;min-width:0;background:var(--sunk);border:1px solid var(--rule-strong);border-radius:0;
+    color:var(--text);padding:9px 10px;font-size:14px;font-family:var(--mono);
+  }
+  #logfilter::placeholder{color:var(--faint)}
+  #logfilter:focus{outline:none;border-color:var(--yellow)}
+  .segs{display:flex}
+  .kind{
+    font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    height:32px;padding:0 12px;background:transparent;border:1px solid var(--rule-strong);border-radius:0;
+    color:var(--muted);cursor:pointer;
+  }
+  .kind + .kind{border-left:0}
+  .kind[aria-pressed="true"]{background:var(--text);color:var(--ground);border-color:var(--text)}
+  .kind[aria-pressed="true"]:focus-visible{outline-color:var(--text)}
+  .logmain{flex:1;min-height:0;display:flex;flex-direction:column;gap:12px;padding:20px}
+  .problem{font-family:var(--mono);font-size:12px;color:var(--bad);border-left:2px solid var(--bad);padding:4px 10px;background:var(--bad-ground);overflow-wrap:anywhere;flex:none}
+  .problem[hidden]{display:none}
+  .logpane{flex:1;min-height:0;display:flex;border:1px solid var(--rule-soft);background:var(--aside)}
+  .loglist{
+    flex:1;overflow:auto;overscroll-behavior:contain;padding:10px 14px;background:var(--sunk);
+    font-family:var(--mono);font-size:12px;line-height:1.6;color:var(--muted);
+    scrollbar-width:thin;scrollbar-color:var(--rule-strong) transparent;
+  }
+  .logrow{display:block;white-space:pre-wrap;overflow-wrap:anywhere}
+  .logrow.flagged{color:var(--bad)}
+  .logrow.metric{color:var(--yellow)}
+  .logempty{color:var(--dim)}
+
+  /* ── phone width ─────────────────────────────────────────── */
+  @media (max-width:720px){
+    :root{--bar:48px}
+    .brand{padding:0 15px}
+    .brand-name,.brand-sub{display:none}
+    .brand-mark{width:16px;height:16px}
+    .vtab{padding:0 10px;font-size:11px;letter-spacing:.06em}
+    .bar-scroll{display:flex;flex:1 1 0;min-width:0;overflow-x:auto;scrollbar-width:none;border-left:1px solid var(--rule-soft)}
+    .bar-scroll > *{flex:0 0 auto}
+    .bar-fill{flex-wrap:nowrap;padding:0 10px;border-left:0}
+    .bar-fill > *{flex:0 0 auto;white-space:nowrap}
+    .bar-cell{padding:4px 10px}
+    .controls{gap:10px 12px;padding:10px 16px}
+    #mute{width:48px;height:48px;flex-basis:48px}
+    /* one row for the call: mic, level, connect; the input picker under it */
+    .callbar-level{flex:1 1 0}
+    .controls-gap{display:none}
+    .microw{order:1;flex:1 1 100%}
+    #micsel{flex:1;max-width:none}
+    .meter{gap:2px}
+    .meter i{width:4px}
+    .transcript{flex-direction:column}
+    .conversation-scroll{flex:1 1 auto}
+    .inspector{flex:none;max-height:45%;border-left:0;border-top:1px solid var(--rule-soft)}
+    .inspector:not([open]){flex:none}
+    .tlist{padding:12px 16px 56px}
+    .turn{grid-template-columns:1fr;gap:2px}
+    .exchange-status,.request{margin-left:0}
+    .stage{padding:32px 16px}
+    body[data-state="connected"] .stage,body[data-has-history="true"] .stage{padding:10px 16px 8px}
+    .toolbar{padding:10px 16px}
+    .logmain{padding:16px}
+    .metrics-head{padding:16px}
+    .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
   }
 
   @media (prefers-reduced-motion:reduce){
-    .dot{animation:none!important}
-    .meter i{transition:background .22s var(--ease)}
-    .state,.meter,.hint,.transcript{transition:none!important}
+    .pulse,.state .cursor,.runtag,.operation[data-state="running"]{animation:none!important}
+    .meter i,.mic-level i{transition:none}
   }
 </style>
 </head>
 <body data-state="idle">
-  <main>
+  <div class="app">
     <header class="bar">
-      <div class="status">
-        <span class="dot" aria-hidden="true"></span>
-        <span class="statusline">unmute dev<span class="sep">//</span><b id="agent">agent</b></span>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">UNMUTE</span>
+        <span class="brand-sub">// dev</span>
       </div>
-      <div class="viewtabs" role="tablist" aria-label="View">
-        <button class="vtab" type="button" role="tab" data-view="conversation" aria-selected="true">conversation</button>
+      <nav class="nav" role="tablist" aria-label="View">
+        <button class="vtab" type="button" role="tab" data-view="conversation" aria-selected="true">Conversation</button>
+        <button class="vtab" type="button" role="tab" data-view="metrics" aria-selected="false">Metrics</button>
         <button class="vtab" type="button" role="tab" data-view="logs" aria-selected="false">
-          logs<span class="badge" id="flagcount" hidden>0</span>
+          Logs<span class="tag tag-bad" id="flagcount" hidden>0</span>
         </button>
+      </nav>
+      <div class="bar-scroll">
+        <div class="bar-fill">
+          <b class="bar-agent" id="agent">agent</b>
+          <span class="tag runtag" id="runtag">ready</span>
+          <span id="feed-status" role="status" aria-live="polite">Live data connecting</span>
+        </div>
+        <div class="bar-cell">
+          <a class="metrics-guide" href="https://unmute.ai/optimization/latency" target="_blank" rel="noopener">How to read latency ↗</a>
+        </div>
       </div>
-      <img class="logo" src="logo.svg" alt="Unmute">
     </header>
 
-    <div class="feed-bar">
-    <div id="feed-status" role="status" aria-live="polite">Live data connecting</div>
-    <a class="metrics-guide" href="https://unmute.ai/optimization/latency" target="_blank" rel="noopener">How to read latency ↗</a>
-    </div>
+    <section class="controls" aria-label="Call controls">
+      <button id="mute" type="button" data-mic="unavailable" disabled
+              aria-label="MIC —" title="M to toggle, hold SPACE to talk">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="3" width="6" height="11"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
+        <span class="mic-level" aria-hidden="true"><i id="miclevel"></i></span>
+      </button>
+      <div class="callbar-level">
+        <span class="lbl mic-text" aria-live="polite">MIC —</span>
+        <div class="meter" id="meter" aria-hidden="true"></div>
+        <span class="hint"><kbd>M</kbd> to toggle, hold <kbd>Space</kbd> to talk</span>
+      </div>
+      <label class="microw" id="microw" hidden>
+        <span class="lbl">input //</span>
+        <select id="micsel" aria-label="Microphone"></select>
+      </label>
+      <span class="controls-gap"></span>
+      <button id="connect" type="button">connect</button>
+    </section>
+
     <div class="views" id="views">
       <div class="view" id="view-conversation" data-view="conversation" data-active="true">
         <section class="stage">
+          <div class="lbl">Conversation</div>
           <div class="state" id="state" aria-live="polite" role="status">ready</div>
-          <div class="meter" id="meter" aria-hidden="true"></div>
-          <p class="hint" id="hint">press connect and talk to your agent</p>
+          <p class="empty" id="hint">press connect and talk to your agent</p>
         </section>
 
         <section class="transcript" aria-label="Conversation transcript">
@@ -361,46 +454,36 @@
             <div class="tlist" id="tlist"></div>
             <button id="latest" class="btn" type="button" hidden>Latest</button>
           </div>
-          <details id="diagnostics" class="measurements" hidden>
+          <details id="diagnostics" class="inspector" hidden>
             <summary>Call diagnostics</summary>
             <div id="diagnostic-list"></div>
           </details>
         </section>
       </div>
 
+      <div class="view" id="view-metrics" data-view="metrics">
+        <div class="metrics" id="metrics"></div>
+      </div>
+
       <div class="view" id="view-logs" data-view="logs">
-        <div class="logtools">
+        <div class="toolbar">
           <input id="logfilter" type="search" placeholder="filter output" aria-label="Filter output" autocomplete="off">
-          <div class="kinds" role="group" aria-label="Kind">
-            <button class="kind" type="button" data-kind="all" aria-pressed="true">all</button>
-            <button class="kind" type="button" data-kind="output" aria-pressed="false">output</button>
-            <button class="kind" type="button" data-kind="metric" aria-pressed="false">metrics</button>
-            <button class="kind" type="button" data-kind="flagged" aria-pressed="false">problems</button>
+          <div class="segs" role="group" aria-label="Kind">
+            <button class="kind" type="button" data-kind="all" aria-pressed="true">All</button>
+            <button class="kind" type="button" data-kind="output" aria-pressed="false">Output</button>
+            <button class="kind" type="button" data-kind="metric" aria-pressed="false">Metrics</button>
+            <button class="kind" type="button" data-kind="flagged" aria-pressed="false">Problems</button>
           </div>
         </div>
-        <section class="logpane" aria-label="Run output">
-          <div class="loglist" id="loglist"></div>
-        </section>
+        <div class="logmain">
+          <div class="problem" id="logproblem" hidden>the agent did not start; see the output</div>
+          <section class="logpane" aria-label="Run output">
+            <div class="loglist" id="loglist"></div>
+          </section>
+        </div>
       </div>
     </div>
-
-    <footer class="controls">
-      <label class="microw" id="microw" hidden>
-        <span class="mic-lab">input //</span>
-        <select id="micsel" aria-label="Microphone"></select>
-        <span class="caret" aria-hidden="true">▾</span>
-      </label>
-      <div class="btnrow">
-        <button id="connect" type="button">connect</button>
-        <button id="mute" type="button" data-mic="unavailable" disabled
-                aria-live="polite" title="M to toggle, hold SPACE to talk">
-          <span class="mic-glyph" aria-hidden="true">○</span>
-          <span class="mic-text">MIC —</span>
-          <span class="mic-level" aria-hidden="true"><i id="miclevel"></i></span>
-        </button>
-      </div>
-    </footer>
-  </main>
+  </div>
   <audio id="remote" autoplay></audio>
 
 <script>
@@ -429,8 +512,7 @@ const el = {
   agent: document.getElementById("agent"),
   microw: document.getElementById("microw"),
   micsel: document.getElementById("micsel"),
-  micText: document.querySelector("#mute .mic-text"),
-  micGlyph: document.querySelector("#mute .mic-glyph"),
+  micText: document.querySelector(".controls .mic-text"),
   micLevel: document.getElementById("miclevel"),
   tlist: document.getElementById("tlist"),
   transcript: document.querySelector('.transcript'),
@@ -439,6 +521,9 @@ const el = {
   loglist: document.getElementById("loglist"),
   logfilter: document.getElementById("logfilter"),
   flagcount: document.getElementById("flagcount"),
+  runtag: document.getElementById("runtag"),
+  logproblem: document.getElementById("logproblem"),
+  metrics: document.getElementById("metrics"),
   feed: document.getElementById('feed-status'),
   latest: document.getElementById('latest'),
 };
@@ -460,7 +545,7 @@ let micState = "unavailable";                         // "unavailable" | "live" 
 let holding = false, heldWasMuted = false;            // hold-to-talk
 // ── views ───────────────────────────────────────────────
 // State, not navigation: tearing the page down would end the call, so there is
-// no router and no second document. The session controls live outside both views.
+// no router and no second document. The session controls live outside every view.
 let currentView = "conversation";
 let viewPinned = false;              // the author chose; stop moving it for them
 let savedReading = null;
@@ -475,6 +560,7 @@ function showView(name, byUser){
   for (const tab of tabs)
     tab.setAttribute("aria-selected", String(tab.dataset.view === name));
   if (name === "logs") renderLog();
+  else if (name === "metrics") renderMetrics();
   else restoreReading(savedReading);
 }
 for (const tab of tabs)
@@ -490,6 +576,7 @@ let ready = false;
 
 function setRunState(state){
   el.connect.disabled = !transport && !connecting && !ready && state !== "ready";
+  el.logproblem.hidden = state !== "failed" || !!transport;
   if (state === "ready"){
     ready = true;
     el.connect.disabled = false;
@@ -635,8 +722,10 @@ function startEventStream(){
   });
 }
 
+const RUN_TAG = {idle:"ready", connecting:"connecting", connected:"live", error:"error"};
 function setState(s, label, hint){
   el.body.dataset.state = s;
+  el.runtag.textContent = RUN_TAG[s];
   el.state.innerHTML = label + (s === "idle" ? ' <span class="cursor">▍</span>' : "");
   if (hint !== undefined) el.hint.textContent = hint;
 }
@@ -680,6 +769,7 @@ function clearTranscript(){
   el.body.dataset.hasHistory = 'false';
   el.latest.hidden=true;
   savedReading={following:true};
+  if (currentView==='metrics') renderMetrics();
 }
 function nearBottom(){return el.tlist.scrollHeight-el.tlist.scrollTop-el.tlist.clientHeight < 64;}
 function readingPosition(){
@@ -704,6 +794,9 @@ el.transcript.addEventListener('click',event=>{
   const reading=readingPosition();
   requestAnimationFrame(()=>restoreReading(reading));
 });
+// Display-only groups in the inspector. Exchange groups are 'exchange:'+id, so
+// a native ID can never collide with these.
+const DIAGNOSTIC_GROUPS = ['reply-time','call-details','unassigned'];
 function exchangeNode(id, order){
   if (!exchangeNodes.has(id)){
     const element = node('section','exchange');
@@ -716,11 +809,16 @@ function exchangeNode(id, order){
     const debugSummary = node('summary',undefined,'Debug details');
     const values = node('div');
     const note = node('p','source-note');
+    // The reply's measurements read as one card under its text: the summary line,
+    // a row per operation, and the debug details folded inside.
+    const card = node('div','request');
     details.append(debugSummary,values,note);
     details.hidden=true;
-    element.append(status,content,summary,activity,details);
-    exchangeNodes.set(id,{element,status,content,activity,details,summary,values,note});
-    ordered(id==='call-details'||id==='unassigned'?el.diagnosticList:el.tlist,element,order);
+    card.append(summary,activity,details);
+    card.hidden=true;
+    element.append(content,status,card);
+    exchangeNodes.set(id,{element,status,content,card,activity,details,summary,values,note});
+    ordered(DIAGNOSTIC_GROUPS.includes(id)?el.diagnosticList:el.tlist,element,order);
   }
   return exchangeNodes.get(id);
 }
@@ -826,11 +924,11 @@ function renderData(){
   }
   // Where a reply's time went. The framework measures audio in to audio out and
   // names every part of the wait, including the parts no service measures, but
-  // it carries no request id: this belongs with the reply latency it arrived
-  // with, in the same unassigned group, and never attached to a reply by timing.
+  // it carries no request id: it gets its own inspector section, in arrival
+  // order, and is never attached to a reply by timing.
   for (const record of all.filter(r=>r.breakdown)){
     const key='breakdown:'+record.id, data=record.breakdown;
-    const view=exchangeNode('unassigned',record.order);
+    const view=exchangeNode('reply-time',-1);
     let row=recordNodes.get(key);
     if (!row){
       row=node('div','breakdown');
@@ -840,12 +938,12 @@ function renderData(){
     row.replaceChildren(node('div','measurement-label','Reply time '+secs(data.total_secs)+' · '+
       (data.measured_from==='client_connected'?'from the client connecting':'from the caller falling silent')));
     for (const part of data.parts){
-      const line=node('div','breakdown-part');
-      line.append(node('span','breakdown-duration',secs(part.duration_secs)),node('span',undefined,part.label),
-        node('span','measurement-note breakdown-owner',part.owner));
+      const line=node('div','breakdown-part'), what=node('span',undefined,part.label+' ');
+      what.append(node('span','breakdown-owner','· '+part.owner));
+      line.append(node('span','breakdown-duration',secs(part.duration_secs)),what);
       row.append(line);
     }
-    ordered(view.values,row,record.order);
+    ordered(view.activity,row,record.order);
   }
   const callRecord=all.find(r=>r.call), call=callRecord?.call;
   // Why the call ended, when it ended badly. Without it the page says "error"
@@ -867,18 +965,25 @@ function renderData(){
     const operations=all.filter(r=>r.operation && operationGroup(r.operation)===id);
     const measurements=all.filter(r=>r.measurement?.state==='measured' && measurementGroup(r.measurement)===id);
     // Rows that are neither: the reply-time breakdowns, and the call's own error.
-    const breakdowns=id==='unassigned' ? all.filter(r=>r.breakdown).length : id==='call-details' && recordNodes.has('call:reason') ? 1 : 0;
+    const breakdowns=id==='reply-time' ? all.filter(r=>r.breakdown).length : 0;
+    const callError=id==='call-details' && recordNodes.has('call:reason') ? 1 : 0;
     const response=exchange?.role==='response';
-    view.details.hidden=!(operations.length||measurements.length||breakdowns);
+    view.details.hidden=!(operations.length||measurements.length||callError);
     if (response){
       const models=operations.filter(r=>r.operation.type==='llm');
       const complete=locallyEnded||exchange.state!=='open';
-      const latency=measurements.find(r=>r.measurement.metric==='reply_latency');
+      const latency=measurements.find(r=>r.measurement.metric==='reply_latency')?.measurement.value;
       const count=models.length ? models.length+' model call'+(models.length===1?'':'s')+(historyGap||call?.model_calls!=='known'?' observed':complete?'':' so far') : '';
-      setText(view.summary,[latency?'Reply latency '+secs(latency.measurement.value):'',count].filter(Boolean).join(' · ') || 'Response measurements');
-    } else setText(view.summary,id==='call-details'?'Call measurements':id==='unassigned'?'Unassigned activity and measurements':'Input measurements');
-    view.summary.hidden=!(operations.length||measurements.length||breakdowns);
-    view.element.hidden=!(view.content.querySelector('.segment:not([hidden])') || operations.length || measurements.length || breakdowns || (response && exchange.state==='open'));
+      // The latency is coloured by its level, as on the studio's Metrics page.
+      const parts=[latency!=null?'Reply latency '+secs(latency):'',count].filter(Boolean);
+      const text=parts.join(' · ') || 'Response measurements';
+      if (view.summary.textContent!==text){
+        view.summary.replaceChildren(...parts.map((part,i)=>node('span',i===0&&latency!=null?'lv-'+level(latency,'reply_latency'):undefined,(i?' · ':'')+part)));
+        if (!parts.length) view.summary.textContent=text;
+      }
+    } else setText(view.summary,id==='reply-time'?'Reply time':id==='call-details'?'Call measurements':id==='unassigned'?'Unassigned activity and measurements':'Input measurements');
+    view.card.hidden=view.summary.hidden=!(operations.length||measurements.length||breakdowns||callError);
+    view.element.hidden=!(view.content.querySelector('.segment:not([hidden])') || operations.length || measurements.length || breakdowns || callError || (response && exchange.state==='open'));
     setText(view.note,operations.map(r=>[operationLabel(r),r.operation.name,r.operation.model,r.operation.provider,r.operation.source_request_id].filter(value=>value && value!=='unknown').join(' · '))
       .concat(measurements.filter(r=>r.measurement.operation_id).map(r=>{
         const m=r.measurement,op=records.get('operation:'+m.operation_id);
@@ -891,8 +996,189 @@ function renderData(){
       view.element.remove();exchangeNodes.delete(id);
     }
   el.diagnostics.hidden=!el.diagnosticList.childNodes.length;
+  if (currentView==='metrics') renderMetrics();
   if ((!focused.isConnected || !focused.checkVisibility()) && (movedFocus || focusedDiagnostics))
     (movedFocus || el.connect).focus({preventScroll:true});
+}
+// ── metrics view ────────────────────────────────────────
+// The studio's Metrics page, built only from this call's records: nothing here
+// is measured twice or kept anywhere else.
+//
+// What counts as slow, in milliseconds except LLM requests per reply, which is
+// a count. These are the studio's defaults, Limits in slng-ai/unmute-beat
+// studio/src/studio/metrics/models.py: change them there and here together.
+const LIMITS = {
+  reply_latency:      {slow:1000, bad:1500, what:'Reply latency'},
+  llm_first_token:    {slow:600,  bad:700,  what:'LLM first token'},
+  llm_request:        {slow:1000, bad:1500, what:'LLM request that did not stream'},
+  tts_first_byte:     {slow:300,  bad:400,  what:'TTS first audio'},
+  requests_per_reply: {slow:1,    bad:2,    what:'LLM requests in one reply', count:true},
+};
+const FAILED = ['failed','timed_out'];
+// Above `slow` a number is slow; above `bad` it is over its limit.
+function level(value, key){
+  if (value == null) return 'ok';
+  const limit=LIMITS[key], v=limit.count ? value : value*1000;
+  return v>limit.bad ? 'bad' : v>limit.slow ? 'slow' : 'ok';
+}
+function over(value, key){
+  const limit=LIMITS[key], lv=level(value,key);
+  return limit.what+' over '+(lv==='bad'?limit.bad:limit.slow)+(limit.count?'':'ms');
+}
+// The 90th percentile, inclusive, the number a studio tile shows.
+function p90(values){
+  if (!values.length) return null;
+  const sorted=[...values].sort((a,b)=>a-b), at=(sorted.length-1)*.9, low=Math.floor(at);
+  return low+1<sorted.length ? sorted[low]+(sorted[low+1]-sorted[low])*(at-low) : sorted[low];
+}
+// Which first byte a measurement is, by its request, or by its source when it
+// has none: the same reading metricLabel() gives it in the conversation.
+function firstKind(m){
+  if (m.metric!=='first_response') return '';
+  const op=records.get('operation:'+m.operation_id)?.operation;
+  if (op) return op.type;
+  return m.source.includes('ttft') ? 'llm' : m.source.includes('ttfb') ? 'tts' : '';
+}
+function h(tag, className, ...children){
+  const element=node(tag,className);
+  element.append(...children.filter(child=>child!=null && child!==''));
+  return element;
+}
+function none(){ return h('span','dim','—'); }
+function table(label, heads, rows){
+  const element=h('div','moves',h('table',undefined,
+    h('thead',undefined,h('tr',undefined,...heads.map(head=>h('th','lbl',head)))),
+    h('tbody',undefined,...rows)));
+  element.firstChild.setAttribute('aria-label',label);
+  return element;
+}
+function renderMetrics(){
+  const all=Array.from(records.values()).sort((a,b)=>a.order-b.order);
+  const measured=all.filter(r=>r.measurement?.state==='measured').map(r=>r.measurement);
+  const operations=all.filter(r=>r.operation);
+  const byOperation=(id,metric)=>measured.find(m=>m.operation_id===id && m.metric===metric)?.value;
+  const call=records.get('call:call')?.call;
+  const errors=operations.filter(r=>FAILED.includes(r.operation.state)).length+(call?.state==='error'?1:0);
+  const replies=all.filter(r=>r.exchange?.role==='response' &&
+    (operations.some(o=>operationGroup(o.operation)==='exchange:'+r.id) || measured.some(m=>measurementGroup(m)==='exchange:'+r.id)));
+  const tile=(label,value,key,note)=>h('div','tile',h('span','lbl',label),
+    h('span','tile-value'+(value==null?' dim':key?' lv-'+level(value,key):''),value==null?'—':secs(value)),h('span','tile-note',note));
+  const target=key=>'target ≤ '+LIMITS[key].slow+'ms';
+  const main=h('section','metrics-main');
+
+  main.append(h('div','lbl','Replies, in order'));
+  if (!replies.length) main.append(h('p','empty','No timed replies yet. Connect and talk to your agent; each reply shows here as its timings arrive.'));
+  else main.append(table('Replies, in order',['Reply','Reply latency','LLM','TTS','Tools','Flags'],replies.map((r,i)=>{
+    const group='exchange:'+r.id, flags=[];
+    const ops=operations.filter(o=>operationGroup(o.operation)===group);
+    const latency=measured.find(m=>m.metric==='reply_latency' && measurementGroup(m)===group)?.value;
+    if (level(latency,'reply_latency')!=='ok') flags.push([over(latency,'reply_latency'),level(latency,'reply_latency')]);
+    // One line per request: its first byte, or for an LLM that did not stream,
+    // its duration, coloured by the limit it is judged by.
+    const cell=type=>{
+      const lines=ops.filter(o=>o.operation.type===type).map(o=>{
+        const op=o.operation, first=byOperation(o.id,'first_response'), duration=byOperation(o.id,'request_duration');
+        if (FAILED.includes(op.state)){ flags.push([operationLabel(o)+' '+op.state.replaceAll('_',' '),'bad']); return h('div','lv-bad',op.state.replaceAll('_',' ')); }
+        if (first!=null){
+          const key=type==='llm'?'llm_first_token':'tts_first_byte', lv=level(first,key);
+          if (lv!=='ok') flags.push([over(first,key),lv]);
+          return h('div','lv-'+lv,secs(first));
+        }
+        if (type==='llm' && duration!=null){
+          const lv=level(duration,'llm_request');
+          if (lv!=='ok') flags.push([over(duration,'llm_request'),lv]);
+          return h('div','lv-'+lv,h('span','dim','— · '),secs(duration));
+        }
+        return op.state==='running' ? h('div','lv-slow pulse','running') : h('div','dim','—');
+      });
+      // Framework-level first bytes that name no request still belong to the reply.
+      for (const m of measured.filter(m=>!m.operation_id && measurementGroup(m)===group && firstKind(m)===type)){
+        const key=type==='llm'?'llm_first_token':'tts_first_byte', lv=level(m.value,key);
+        if (lv!=='ok') flags.push([over(m.value,key),lv]);
+        lines.push(h('div','lv-'+lv,secs(m.value)));
+      }
+      return lines.length ? lines : [none()];
+    };
+    const llm=cell('llm'), tts=cell('tts');
+    const models=ops.filter(o=>o.operation.type==='llm').length;
+    if (level(models,'requests_per_reply')!=='ok') flags.push([models+' LLM requests in one reply',level(models,'requests_per_reply')]);
+    const tools=ops.filter(o=>o.operation.type==='tool').map(o=>{
+      const duration=byOperation(o.id,'tool_duration'), state=o.operation.state;
+      if (FAILED.includes(state)) flags.push([operationLabel(o)+' '+state.replaceAll('_',' '),'bad']);
+      return h('div',FAILED.includes(state)?'lv-bad':undefined,o.operation.name+' '+(duration!=null?secs(duration):state.replaceAll('_',' ')));
+    });
+    const seen=new Set(), shown=flags.filter(([what])=>!seen.has(what) && seen.add(what));
+    return h('tr',undefined,
+      h('th','mono','R'+(i+1)+(r.exchange.state==='interrupted'?' ⤺':'')),
+      h('td',latency!=null?'lv-'+level(latency,'reply_latency'):undefined,latency!=null?secs(latency):none()),
+      h('td',undefined,...llm),h('td',undefined,...tts),
+      h('td','small',...(tools.length?tools:[none()])),
+      h('td','flags',...(shown.length?shown.map(([what,lv])=>h('div','lv-'+lv,what)):[none()])));
+  })));
+
+  // Reply time, part by part. A breakdown names no reply, so its rows are in
+  // the order they arrived and are not matched to the replies above.
+  const breakdowns=all.filter(r=>r.breakdown).map(r=>r.breakdown);
+  if (breakdowns.length){
+    const parts=[], owners=new Set();
+    for (const b of breakdowns) for (const part of b.parts){
+      if (!parts.some(p=>p.key===part.key)) parts.push(part);
+      owners.add(part.label+': '+part.owner);
+    }
+    main.append(h('div','lbl','Reply time, part by part · the parts add up to the total'),
+      table('Reply time, part by part',['In order','Total',...parts.map(p=>p.label),'Measured from'],breakdowns.map((b,i)=>h('tr',undefined,
+        h('th','mono',String(i+1)),
+        h('td','lv-'+level(b.total_secs,'reply_latency'),secs(b.total_secs)),
+        ...parts.map(p=>{const part=b.parts.find(x=>x.key===p.key);return h('td',undefined,part?secs(part.duration_secs):none());}),
+        h('td','dim small',b.measured_from==='client_connected'?'client connecting':'caller falling silent')))),
+      h('p','hint','owners · '+Array.from(owners).join(' · ')+'. A breakdown carries no reply id, so these rows are in arrival order.'));
+  }
+
+  // Latency by model: each model on its own row, so a swap mid-call is two rows.
+  const kinds={stt:'STT',llm:'LLM',tts:'TTS'}, groups=new Map();
+  for (const o of operations.filter(o=>kinds[o.operation.type])){
+    const op=o.operation, key=JSON.stringify([op.type,op.model||'',op.provider||'']);
+    if (!groups.has(key)) groups.set(key,{op,requests:[]});
+    groups.get(key).requests.push(o);
+  }
+  if (groups.size){
+    main.append(h('div','lbl','Latency by model'),table('Latency by model',
+      ['Kind','Model','Provider','Requests','First byte p90','Total p90','Errors','Share over the limit'],
+      Array.from(groups.values()).map(({op,requests})=>{
+        const firsts=requests.map(o=>byOperation(o.id,'first_response')).filter(v=>v!=null);
+        const totals=requests.map(o=>byOperation(o.id,'request_duration')).filter(v=>v!=null);
+        const failed=requests.filter(o=>FAILED.includes(o.operation.state)).length;
+        // A request is judged by its first byte, or for an LLM that did not stream, its duration.
+        const judged=requests.map(o=>{
+          const first=byOperation(o.id,'first_response');
+          if (first!=null && op.type!=='stt') return level(first,op.type==='llm'?'llm_first_token':'tts_first_byte');
+          const duration=byOperation(o.id,'request_duration');
+          return op.type==='llm' && duration!=null ? level(duration,'llm_request') : null;
+        }).filter(Boolean);
+        const share=judged.length ? Math.round(judged.filter(lv=>lv==='bad').length/judged.length*100) : null;
+        return h('tr',undefined,h('th','mono',kinds[op.type]),
+          h('td','left',op.model||'—'),h('td','dim',op.provider||'—'),h('td',undefined,String(requests.length)),
+          h('td',undefined,firsts.length?secs(p90(firsts)):none()),h('td',undefined,totals.length?secs(p90(totals)):none()),
+          h('td',failed?'lv-bad':undefined,String(failed)),
+          h('td',share?'lv-bad':undefined,share==null?none():share+'%'));
+      })));
+  }
+
+  const rules=h('aside','rules',h('div','lbl','What counts as slow'),
+    ...Object.values(LIMITS).map(limit=>h('div','rule',h('span',undefined,limit.what),
+      h('span','mono lv-slow','> '+limit.slow+(limit.count?'':'ms')),h('span','mono lv-bad','> '+limit.bad+(limit.count?'':'ms')))),
+    h('div','rules-note','slow · over the limit · defaults for every agent · tiles are p90'));
+  const top=el.metrics.scrollTop;
+  el.metrics.replaceChildren(
+    h('div','metrics-head',h('div','lbl','this call · '+AGENT+' · from the live data feed'),h('h1',undefined,'Timings')),
+    h('div','tiles',
+      tile('Reply latency p90',p90(measured.filter(m=>m.metric==='reply_latency').map(m=>m.value)),'reply_latency',target('reply_latency')),
+      tile('LLM first token p90',p90(measured.filter(m=>firstKind(m)==='llm').map(m=>m.value)),'llm_first_token',target('llm_first_token')),
+      tile('TTS first audio p90',p90(measured.filter(m=>firstKind(m)==='tts').map(m=>m.value)),'tts_first_byte',target('tts_first_byte')),
+      h('div','tile',h('span','lbl','Errors'),h('span','tile-value'+(errors?' lv-bad':''),String(errors)),
+        h('span','tile-note',replies.length+' repl'+(replies.length===1?'y':'ies')+' · '+(selectedCallID?'1 call':'no call yet')))),
+    h('div','metrics-body',main,rules));
+  el.metrics.scrollTop=top;
 }
 function renderText(record){
   const data = record.text;
@@ -1063,7 +1349,7 @@ function renderMic(){
   el.mute.dataset.mic = micState;
   el.mute.disabled = micState === "unavailable";
   el.micText.textContent = MIC_LABEL[micState];
-  el.micGlyph.textContent = micState === "live" ? "●" : "○";
+  el.mute.setAttribute("aria-label", MIC_LABEL[micState]);
   el.body.classList.toggle("muted", micState === "muted");
   if (micState !== "live") el.micLevel.style.transform = "scaleX(0)";
 }
