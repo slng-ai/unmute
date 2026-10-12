@@ -1059,6 +1059,14 @@ function renderMetrics(){
   const measured=all.filter(r=>r.measurement?.state==='measured').map(r=>r.measurement);
   const operations=all.filter(r=>r.operation);
   const byOperation=(id,metric)=>measured.find(m=>m.operation_id===id && m.metric===metric)?.value;
+  // LiveKit reports a first byte twice: on its request, and again as a node
+  // timing for the reply. The request's own value wins; a first byte that
+  // names no request counts only where no request of that kind reported one.
+  const firsts=type=>{
+    const own=measured.filter(m=>m.operation_id && firstKind(m)===type);
+    const covered=new Set(own.map(m=>measurementGroup(m)));
+    return own.concat(measured.filter(m=>!m.operation_id && firstKind(m)===type && !covered.has(measurementGroup(m)))).map(m=>m.value);
+  };
   const call=records.get('call:call')?.call;
   const errors=operations.filter(r=>FAILED.includes(r.operation.state)).length+(call?.state==='error'?1:0);
   const replies=all.filter(r=>r.exchange?.role==='response' &&
@@ -1096,8 +1104,11 @@ function renderMetrics(){
         // first byte belongs to the reply, and is listed below.
         return op.state==='running' ? h('div','lv-slow pulse','running') : null;
       }).filter(Boolean);
-      // Framework-level first bytes that name no request still belong to the reply.
-      for (const m of measured.filter(m=>!m.operation_id && measurementGroup(m)===group && firstKind(m)===type)){
+      // A first byte that names no request belongs to the reply, unless a
+      // request of that kind already reported its own: then it is the same
+      // moment measured twice, and counting it would double the line.
+      const own=ops.some(o=>o.operation.type===type && byOperation(o.id,'first_response')!=null);
+      for (const m of own ? [] : measured.filter(m=>!m.operation_id && measurementGroup(m)===group && firstKind(m)===type)){
         const key=type==='llm'?'llm_first_token':'tts_first_byte', lv=level(m.value,key);
         if (lv!=='ok') flags.push([over(m.value,key),lv]);
         lines.push(h('div','lv-'+lv,secs(m.value)));
@@ -1180,8 +1191,8 @@ function renderMetrics(){
     h('div','metrics-head',h('div','lbl','this call · '+AGENT+' · from the live data feed'),h('h1',undefined,'Timings')),
     h('div','tiles',
       tile('Reply latency p90',p90(measured.filter(m=>m.metric==='reply_latency').map(m=>m.value)),'reply_latency',target('reply_latency')),
-      tile('LLM first token p90',p90(measured.filter(m=>firstKind(m)==='llm').map(m=>m.value)),'llm_first_token',target('llm_first_token')),
-      tile('TTS first audio p90',p90(measured.filter(m=>firstKind(m)==='tts').map(m=>m.value)),'tts_first_byte',target('tts_first_byte')),
+      tile('LLM first token p90',p90(firsts('llm')),'llm_first_token',target('llm_first_token')),
+      tile('TTS first audio p90',p90(firsts('tts')),'tts_first_byte',target('tts_first_byte')),
       h('div','tile',h('span','lbl','Errors'),h('span','tile-value'+(errors?' lv-bad':''),String(errors)),
         h('span','tile-note',replies.length+' repl'+(replies.length===1?'y':'ies')+' · '+(selectedCallID?'1 call':'no call yet')))),
     h('div','metrics-body',main,rules));
