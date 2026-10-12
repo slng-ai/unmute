@@ -492,7 +492,15 @@ class _Reporter:
                 self.snapshot("operation", operation_id, type="tool", name="Tool call", state="incomplete")
                 known = self.tool_operations[update.call_id] = (operation_id, None)
             operation_id, started_at = known
-            self.snapshot("operation", operation_id, state={"done": "returned", "error": "failed", "cancelled": "cancelled"}[update.status])
+            state = {"done": "returned", "error": "failed", "cancelled": "cancelled"}[update.status]
+            # Closing the session cancels a running AgentTask, and its control
+            # tool ends in a ToolError before the close event arrives. That is
+            # the hang-up, not the tool.
+            # ponytail: private read pinned to LiveKit 1.8.1; every close path
+            # sets it before it cancels a task. Missing, a hang-up reads failed.
+            if state == "failed" and getattr(self.session, "_is_closing", lambda: False)():
+                state = "cancelled"
+            self.snapshot("operation", operation_id, state=state)
             if update.call_id in self.control_tools:
                 return
             response_id = self.records[("operation", operation_id)]["operation"].get("exchange_id")

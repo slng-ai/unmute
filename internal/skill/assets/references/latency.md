@@ -39,7 +39,8 @@ owned by a service or a setting are yours to act on. On LiveKit the per-request
 timings are the equivalent, and there is no such split.
 
 A tool that produced no result says why: `failed` names the kind of error the
-handler raised, `timed_out` means it ran past its deadline, and a call that ended
+handler raised, `timed_out` means it ran past its deadline, a hang-up
+reads `cancelled` (LiveKit) or `incomplete` (Pipecat) and is not an error, and a call that ended
 because something broke names the service that stopped it. The messages are in
 `build/<target>/dev.log`, not on the page, because an error's text quotes what it
 was working on.
