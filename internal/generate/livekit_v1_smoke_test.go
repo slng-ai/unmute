@@ -1418,6 +1418,49 @@ func TestSmokeLiveKitRegionalInfrastructureInstantiates(t *testing.T) {
 	runLiveKitSmokeScript(t, "salon-concierge", nil, nil, livekitRegionalSmokeScript)
 }
 
+// livekitNoProxySmokeScript imports the emitted agent.py in a fresh process per
+// environment, because the worker's proxy is read when the module loads. It
+// also holds the private JobProcess attribute prewarm writes, so an SDK bump
+// that renames it fails here and not on a proxied deployment.
+const livekitNoProxySmokeScript = `"""Smoke check: the worker skips its proxy only for a LiveKit host in NO_PROXY."""
+import json
+import os
+import subprocess
+import sys
+
+PROXY = "http://proxy.invalid:3128"
+PROBE = """
+from livekit.agents import JobExecutorType, JobProcess
+
+import agent
+
+proc = JobProcess(executor_type=JobExecutorType.PROCESS, user_arguments=None, http_proxy=None)
+agent.prewarm(proc)
+print(agent.server._http_proxy, proc.http_proxy)
+"""
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+os.environ.update(HTTPS_PROXY=PROXY, LIVEKIT_URL="ws://livekit_server:7880")
+
+
+def probe(no_proxy: str) -> str:
+    """Return the worker's and the job process's proxy for one NO_PROXY."""
+    env = {**os.environ, "NO_PROXY": no_proxy}
+    out = subprocess.run([sys.executable, "-c", PROBE], env=env, capture_output=True, text=True, check=True)
+    return out.stdout.strip().splitlines()[-1]
+
+
+assert probe("livekit_server") == f"None {PROXY}", probe("livekit_server")
+assert probe("") == f"{PROXY} {PROXY}", probe("")
+assert probe("other.example") == f"{PROXY} {PROXY}", probe("other.example")
+print("no_proxy smoke ok")
+`
+
+func TestSmokeLiveKitWorkerHonoursNoProxy(t *testing.T) {
+	runLiveKitSmokeScript(t, "customer-intake", nil, nil, livekitNoProxySmokeScript)
+}
+
 func addLiveKitTaskTransfer(agent *ir.Agent) {
 	transfer := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	transfer.Announce = "I will take you back to Remy."

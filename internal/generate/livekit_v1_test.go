@@ -2282,6 +2282,33 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	}
 }
 
+// TestLiveKitWorkerHonoursNoProxy holds both halves of the NO_PROXY fix: the
+// worker drops its proxy when NO_PROXY covers LIVEKIT_URL, and each job process
+// gets it back for the speech plugins. A plain and a telephony worker build
+// AgentServer in different branches, so both are checked.
+func TestLiveKitWorkerHonoursNoProxy(t *testing.T) {
+	sip, resolved := configuredLiveKitSIP(t)
+	telephony, err := GenerateLiveKit(sip, resolved, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, artifact := range map[string]Artifact{"plain": devArtifact(t, ir.ProviderLiveKit), "telephony": telephony} {
+		t.Run(name, func(t *testing.T) {
+			agentPy := artifactFile(t, artifact, "agent.py")
+			if !strings.Contains(agentPy, `if proxy_bypass_environment(urlparse(os.getenv("LIVEKIT_URL", "")).hostname or ""):`) {
+				t.Errorf("agent.py does not check NO_PROXY for LIVEKIT_URL:\n%s", agentPy)
+			}
+			if servers, passed := strings.Count(agentPy, "AgentServer("), strings.Count(agentPy, "http_proxy=WORKER_PROXY"); servers != 1 || passed != 1 {
+				t.Errorf("agent.py builds %d AgentServer and passes WORKER_PROXY %d times, want 1 and 1", servers, passed)
+			}
+			callPy := artifactFile(t, artifact, "call.py")
+			if !strings.Contains(callPy, `proc._http_proxy = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")`) {
+				t.Errorf("prewarm does not give the job process its proxy back:\n%s", callPy)
+			}
+		})
+	}
+}
+
 func TestLiveKitSIPCapacityIsExactAtOneAndN(t *testing.T) { // telephony V22, V30
 	for _, maxSessions := range []int{1, 60} {
 		t.Run(fmt.Sprintf("max_%d", maxSessions), func(t *testing.T) {

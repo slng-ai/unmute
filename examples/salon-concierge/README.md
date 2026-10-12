@@ -47,7 +47,9 @@ unmute dev examples/salon-concierge --target pipecat
 ```
 
 Use `--target livekit` for the same conversation on the other target. Use
-headphones, or the agent hears its own voice and interrupts itself.
+headphones, or the agent hears its own voice and interrupts itself. If your
+worker image sets `HTTPS_PROXY`, also set `NO_PROXY=livekit_server` in it, so
+the LiveKit worker reaches the local server directly.
 
 ## What you need
 
