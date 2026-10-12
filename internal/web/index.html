@@ -1032,12 +1032,14 @@ function p90(values){
   return low+1<sorted.length ? sorted[low]+(sorted[low+1]-sorted[low])*(at-low) : sorted[low];
 }
 // Which first byte a measurement is, by its request, or by its source when it
-// has none: the same reading metricLabel() gives it in the conversation.
+// has none. Sources name the service, not only the clock: Pipecat's STT first
+// byte is pipecat-stt-ttfb, so "ttfb" alone does not mean speech output.
 function firstKind(m){
   if (m.metric!=='first_response') return '';
   const op=records.get('operation:'+m.operation_id)?.operation;
   if (op) return op.type;
-  return m.source.includes('ttft') ? 'llm' : m.source.includes('ttfb') ? 'tts' : '';
+  const source=m.source.toLowerCase();
+  return source.includes('stt') ? 'stt' : source.includes('tts') ? 'tts' : source.includes('llm') || source.includes('ttft') ? 'llm' : '';
 }
 function h(tag, className, ...children){
   const element=node(tag,className);
@@ -1084,13 +1086,16 @@ function renderMetrics(){
           if (lv!=='ok') flags.push([over(first,key),lv]);
           return h('div','lv-'+lv,secs(first));
         }
+        if (op.state==='cancelled') return h('div','dim','cancelled'+(duration!=null?' · '+secs(duration):''));
         if (type==='llm' && duration!=null){
           const lv=level(duration,'llm_request');
           if (lv!=='ok') flags.push([over(duration,'llm_request'),lv]);
           return h('div','lv-'+lv,h('span','dim','— · '),secs(duration));
         }
-        return op.state==='running' ? h('div','lv-slow pulse','running') : h('div','dim','—');
-      });
+        // A request with no number of its own adds no line: on Pipecat the TTS
+        // first byte belongs to the reply, and is listed below.
+        return op.state==='running' ? h('div','lv-slow pulse','running') : null;
+      }).filter(Boolean);
       // Framework-level first bytes that name no request still belong to the reply.
       for (const m of measured.filter(m=>!m.operation_id && measurementGroup(m)===group && firstKind(m)===type)){
         const key=type==='llm'?'llm_first_token':'tts_first_byte', lv=level(m.value,key);
@@ -1115,6 +1120,8 @@ function renderMetrics(){
       h('td','small',...(tools.length?tools:[none()])),
       h('td','flags',...(shown.length?shown.map(([what,lv])=>h('div','lv-'+lv,what)):[none()])));
   })));
+  if (replies.length && measured.some(m=>m.metric==='reply_latency' && measurementGroup(m)==='unassigned'))
+    main.append(h('p','hint','Some reply latencies name no reply, as on Pipecat. They count in the tiles and are split part by part below, not matched to a row here.'));
 
   // Reply time, part by part. A breakdown names no reply, so its rows are in
   // the order they arrived and are not matched to the replies above.
