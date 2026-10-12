@@ -927,6 +927,23 @@ def install_dev_metrics(session: AgentSession, *, call_id: str) -> AgentSession:
     ):
         session.on(event, callback)
         reporter.callbacks.append((event, callback))
+    # The call's state, when it keeps one: each change goes to the page as it happens.
+    try:
+        state = session.userdata
+    except ValueError:
+        state = None
+    if hasattr(state, "_watch"):
+
+        def state_changed(origin: dict[str, str], changes: list[dict[str, Any]]) -> None:
+            """Send one change to the page as a state record.
+
+            Args:
+                origin: What made the change.
+                changes: Each value it touched, as it now stands.
+            """
+            reporter.snapshot("state", reporter.new_id("state"), origin=origin, changes=changes)
+
+        state._watch(state_changed)
     return session
 
 

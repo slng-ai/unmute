@@ -315,12 +315,21 @@ class CallState(State):
     # bounds a template variable by, because this is the same value travelling
     # the same way, and one number cannot be two.
     VALUE_MAX: ClassVar[int] = {{.ValueMax}}
+    # The bound on one value sent to the dev page, in characters of JSON. The
+    # page shows a value, it does not store one: anything longer is cut and
+    # marked, so one large result cannot crowd a call's other records out of
+    # the dev server's replay buffer.
+    DEV_VALUE_MAX: ClassVar[int] = 4096
 
     # Facts about the values, not values: which ones still wait for the caller
     # to confirm them, and which inputs each pre-fetched one was derived from.
     # Private, so no save, prompt or dispatch payload can ever set them.
     _unconfirmed: set[str] = PrivateAttr(default_factory=lambda: set(CallState.CONFIRM))
     _prefetch_provenance: dict[str, tuple[str, ...]] = PrivateAttr(default_factory=dict)
+    # What set each value last, as {"kind", "name"}, and who is told when one
+    # changes. Only the local dev loop listens; a deployed call never sets one.
+    _origins: dict[str, dict[str, str]] = PrivateAttr(default_factory=dict)
+    _listener: Any = PrivateAttr(default=None)
 {{- .Members}}
 
     def initial_value(self, name: str) -> object:
@@ -455,12 +464,19 @@ class CallState(State):
                     continue
                 value = _appended(getattr(self, name), value)
             pending[name] = value
-        self.save_batch(pending, step=step)
+        self.save_batch(pending, step=step, origin=("step", step))
         # Plain data for the framework: one refuses a model in a tool result and
         # drops the whole result, the other cannot serialise one at all.
         return result.model_dump(mode="json")
 
-    def save_batch(self, values: dict, *, step: str | None = None, inputs: list[str] | None = None) -> None:
+    def save_batch(
+        self,
+        values: dict,
+        *,
+        step: str | None = None,
+        inputs: list[str] | None = None,
+        origin: tuple[str, str] = ("call", ""),
+    ) -> None:
         """Validate one batch as a whole, then commit it and invalidate what it changed.
 
         The batch is built into one fresh model, so each value is checked by
@@ -473,6 +489,7 @@ class CallState(State):
             step: The step saving them, which decides whether it confirms them.
             inputs: Fields a pre-fetch read to produce them, kept as provenance
                 so a later change to one invalidates the result.
+            origin: What is saving them, as (kind, name), for the dev page.
 
         Raises:
             StateRefused: If a value does not fit its declared type.
@@ -536,8 +553,15 @@ class CallState(State):
             setattr(self, name, self.initial_value(name))
         for name, value in pending.items():
             setattr(self, name, value)
+        flipped = unconfirmed ^ self._unconfirmed
         self._unconfirmed = unconfirmed
         self._prefetch_provenance = provenance
+        by = {"kind": origin[0], "name": origin[1]}
+        for name in pending.keys() & affected:
+            self._origins[name] = by
+        for name in invalidated:
+            self._origins[name] = {"kind": "reset", "name": origin[1]}
+        self._tell(by, [*(name for name in pending if name in affected), *sorted(invalidated), *sorted(flipped)])
 
     def save_call_start(self, values: dict) -> None:
         """Save the values the dispatch sent, each checked against its type.
@@ -554,7 +578,9 @@ class CallState(State):
             RuntimeError: If a dispatched value does not fit its type.
         """
         try:
-            self.save_batch({name: values[name] for name in self.CALL_START if name in values})
+            self.save_batch(
+                {name: values[name] for name in self.CALL_START if name in values}, origin=("call_start", "")
+            )
         except StateRefused as refused:
             raise RuntimeError(f"call_start: {refused.message}") from None
 
@@ -575,7 +601,7 @@ class CallState(State):
             Whether the fact was saved.
         """
         try:
-            self.save_batch({name: value})
+            self.save_batch({name: value}, origin=("fact", name))
         except StateRefused as refused:
             logger.warning(f"call fact {name}: {refused.message}; treated as missing")
             return False
@@ -621,8 +647,73 @@ class CallState(State):
                     unconfirmed.add(name)
             if before == unconfirmed:
                 break
+        flipped = unconfirmed - self._unconfirmed
         self._unconfirmed = unconfirmed
         logger.info("withdrew confirmation on entering " + step)
+        self._tell({"kind": "withdraw", "name": step}, sorted(flipped))
+
+    def _watch(self, listener: Any) -> None:
+        """Tell a listener about every change from now on, starting with what is set.
+
+        The dev page attaches once the call exists, which can be after the
+        dispatch and the pre-fetches have saved, so it is told those first, as
+        one change, with what set each of them.
+
+        Args:
+            listener: Called with the change's origin and its entries, as
+                _describe() words them.
+        """
+        self._listener = listener
+        names = [
+            name
+            for name in State.model_fields
+            if name in self._origins or (name in self.CONFIRM and getattr(self, name, None) not in (None, ""))
+        ]
+        self._tell({"kind": "start", "name": ""}, names)
+
+    def _describe(self, names: list[str]) -> list[dict[str, Any]]:
+        """Word changed values the way the dev page shows them.
+
+        Args:
+            names: The fields that changed.
+
+        Returns:
+            One entry per field: its value as JSON data, what set it, and
+            whether the caller has confirmed it, for a value that needs that.
+        """
+        entries = []
+        for name in names:
+            value = self.model_dump(mode="json", include={name}).get(name)
+            by = self._origins.get(name, {"kind": "start", "name": ""})
+            entry: dict[str, Any] = {"field": name, "value": value, "by": by}
+            text = to_json(value).decode()
+            if len(text) > self.DEV_VALUE_MAX:
+                entry["value"], entry["truncated"] = text[: self.DEV_VALUE_MAX], True
+            if name in self.CONFIRM:
+                entry["confirmed"] = name not in self._unconfirmed
+            entries.append(entry)
+        return entries
+
+    def _tell(self, origin: dict[str, str], names: list[str]) -> None:
+        """Tell the listener what changed, if one is listening.
+
+        Only the author's own fields: a value the generated code keeps beside
+        them, such as a router session id, is not the author's state.
+
+        Args:
+            origin: What made the change, as {"kind", "name"}.
+            names: The fields it touched, in the order they changed.
+        """
+        if self._listener is None:
+            return
+        own = [name for name in dict.fromkeys(names) if name in State.model_fields]
+        if not own:
+            return
+        # The dev page is a convenience; a fault in reporting never stops a call.
+        try:
+            self._listener(origin, self._describe(own))
+        except Exception as error:  # noqa: BLE001 - any reporting fault is logged and dropped
+            logger.warning(f"dev state report failed: {type(error).__name__}")
 
 
 def _task_status(values: dict) -> dict[str, str]:

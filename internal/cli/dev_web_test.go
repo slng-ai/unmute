@@ -21,6 +21,7 @@ import (
 	"github.com/slng-ai/unmute/internal/devmetrics"
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	"github.com/slng-ai/unmute/internal/target"
 	"github.com/slng-ai/unmute/internal/web"
 )
@@ -32,7 +33,7 @@ func TestDevSessionCallIDs(t *testing.T) {
 			previous := ""
 			for range 2 {
 				rr := httptest.NewRecorder()
-				devSessionHandler(provider, "agent", "ws://127.0.0.1:7880", stream)(rr, httptest.NewRequest(http.MethodGet, "/api/session", nil))
+				devSessionHandler(provider, "agent", "ws://127.0.0.1:7880", stream, nil)(rr, httptest.NewRequest(http.MethodGet, "/api/session", nil))
 				var body map[string]any
 				if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
 					t.Fatal(err)
@@ -217,7 +218,7 @@ func TestDevSessionPipecatCallIDSurvivesTheOfferProxy(t *testing.T) {
 	}))
 	defer upstream.Close()
 	port := strings.TrimPrefix(upstream.URL, "http://127.0.0.1:")
-	page := httptest.NewServer(devWebMux(ir.ProviderPipecat, "agent", port, "", readyDevStream(t)))
+	page := httptest.NewServer(devWebMux(ir.ProviderPipecat, "agent", port, "", readyDevStream(t), nil))
 	defer page.Close()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, page.URL+"/api/offer", strings.NewReader(`{"sdp":"offer","type":"offer","pc_id":null,"request_data":{"unmute_dev_call_id":"`+callID+`"}}`))
 	if err != nil {
@@ -247,7 +248,7 @@ func readyDevStream(t *testing.T) *devStream {
 // webrtc-offer kind pointing at the proxied offer URL (SPEC I.session, V6).
 func TestDevSessionHandlerPipecat(t *testing.T) {
 	rr := httptest.NewRecorder()
-	devSessionHandler(ir.ProviderPipecat, "pipecat", "", readyDevStream(t)).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session", nil))
+	devSessionHandler(ir.ProviderPipecat, "pipecat", "", readyDevStream(t), nil).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
 	}
@@ -268,7 +269,7 @@ func TestDevSessionHandlerLiveKit(t *testing.T) {
 	decode := func() map[string]string {
 		t.Helper()
 		rr := httptest.NewRecorder()
-		devSessionHandler(ir.ProviderLiveKit, "remy-dev", liveKitURL, ready).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session", nil))
+		devSessionHandler(ir.ProviderLiveKit, "remy-dev", liveKitURL, ready, nil).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session", nil))
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d", rr.Code)
 		}
@@ -329,7 +330,7 @@ func TestDevWebMuxServesOnePageBothTargets(t *testing.T) {
 		return rr
 	}
 
-	pipecat := devWebMux(ir.ProviderPipecat, "pipecat", "7860", "", readyDevStream(t))
+	pipecat := devWebMux(ir.ProviderPipecat, "pipecat", "7860", "", readyDevStream(t), nil)
 	if rr := get(pipecat, "/"); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "unmute dev") {
 		t.Errorf("pipecat GET / = %d, body missing brand", rr.Code)
 	}
@@ -337,7 +338,7 @@ func TestDevWebMuxServesOnePageBothTargets(t *testing.T) {
 		t.Errorf("pipecat GET /api/session = %d: %s", rr.Code, rr.Body.String())
 	}
 
-	livekit := devWebMux(ir.ProviderLiveKit, "remy-dev", "7860", "ws://127.0.0.1:7880", readyDevStream(t))
+	livekit := devWebMux(ir.ProviderLiveKit, "remy-dev", "7860", "ws://127.0.0.1:7880", readyDevStream(t), nil)
 	if rr := get(livekit, "/"); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "unmute dev") {
 		t.Errorf("livekit GET / = %d, body missing brand", rr.Code)
 	}
@@ -540,7 +541,7 @@ func TestDevSessionAnswersBeforeTheRuntimeExists(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			stream := newDevStream() // still starting
 			rr := httptest.NewRecorder()
-			devSessionHandler(provider, "agent", "ws://127.0.0.1:7880", stream).
+			devSessionHandler(provider, "agent", "ws://127.0.0.1:7880", stream, nil).
 				ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session", nil))
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status = %d", rr.Code)
@@ -598,5 +599,36 @@ func TestDevDispatchNameMatchesTheEmittedWorker(t *testing.T) {
 	}
 	if dispatched == resolved.Name {
 		t.Fatal("this test needs the dispatch name to differ from the target name")
+	}
+}
+
+// TestDevSessionSendsTheStateFields: the page draws every declared field before
+// any value arrives, so the session answer carries them in state.py's order,
+// with the step that confirms each one that waits for the caller's yes.
+func TestDevSessionSendsTheStateFields(t *testing.T) {
+	agent := &ir.Agent{
+		State: &stateschema.Model{Fields: []stateschema.Field{
+			{Name: "customer_phone", Description: "The caller's number.", Type: &stateschema.Type{Kind: stateschema.KindString, Nullable: true}},
+			{Name: "booking_day", Type: &stateschema.Type{Kind: stateschema.KindString, Format: "date"}},
+		}},
+		Variables: map[string]ir.Variable{"customer_phone": {Confirm: "verify_customer"}},
+	}
+	fields := devStateFields(agent)
+	rr := httptest.NewRecorder()
+	devSessionHandler(ir.ProviderPipecat, "pipecat", "", readyDevStream(t), fields).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session", nil))
+	var body struct {
+		StateFields []devStateField `json:"state_fields"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.StateFields) != 2 || body.StateFields[0].Name != "customer_phone" || body.StateFields[1].Name != "booking_day" {
+		t.Fatalf("state fields = %+v", body.StateFields)
+	}
+	if body.StateFields[0].Confirm != "verify_customer" || body.StateFields[0].Description != "The caller's number." || body.StateFields[0].Type == "" {
+		t.Errorf("customer_phone = %+v", body.StateFields[0])
+	}
+	if devStateFields(&ir.Agent{}) != nil {
+		t.Error("a package with no state.py has no state fields")
 	}
 }

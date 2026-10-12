@@ -34,6 +34,7 @@ const (
 	KindOperation   = "operation"
 	KindMeasurement = "measurement"
 	KindBreakdown   = "breakdown"
+	KindState       = "state"
 	KindTurn        = "turn"
 	KindSession     = "session"
 )
@@ -54,6 +55,7 @@ type Record struct {
 	Operation   *Operation   `json:"operation,omitempty"`
 	Measurement *Measurement `json:"measurement,omitempty"`
 	Breakdown   *Breakdown   `json:"breakdown,omitempty"`
+	State       *State       `json:"state,omitempty"`
 	Kind        string       `json:"kind"`
 	Seq         int          `json:"seq,omitempty"`
 
@@ -226,6 +228,35 @@ type Part struct {
 	DurationSecs float64 `json:"duration_secs"`
 }
 
+// State is one change to the call's state: what made it, and each value it
+// touched as it now stands. It carries values, so it is the one record kind
+// with the caller's own data in it: the local dev page shows it, and nothing
+// else reads it. A change is never revised; the next one is a record of its own.
+type State struct {
+	Origin  StateOrigin   `json:"origin"`
+	Changes []StateChange `json:"changes"`
+}
+
+// StateOrigin names what set a value: the call's start, a step finishing, a
+// dispatched value, a carrier fact, a pre-fetch, a withdrawn confirmation, or
+// (per change only) a value reset because something it was derived from changed.
+type StateOrigin struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
+// StateChange is one value as it stands after the change.
+type StateChange struct {
+	Field string `json:"field"`
+	// Value is the field's JSON, whatever its type. When it ran past the
+	// producer's bound it is a JSON string holding the cut text, and Truncated says so.
+	Value     json.RawMessage `json:"value"`
+	Truncated bool            `json:"truncated,omitempty"`
+	// Confirmed is present only for a value that waits for the caller's yes.
+	Confirmed *bool       `json:"confirmed,omitempty"`
+	By        StateOrigin `json:"by"`
+}
+
 // Measurement is one independently arriving quantity. Absence is never zero.
 type Measurement struct {
 	ExchangeID  string   `json:"exchange_id,omitempty"`
@@ -265,7 +296,7 @@ func (r Record) validate() error {
 		return bad()
 	}
 	count := 0
-	for _, present := range []bool{r.Call != nil, r.Exchange != nil, r.Text != nil, r.Operation != nil, r.Measurement != nil, r.Breakdown != nil} {
+	for _, present := range []bool{r.Call != nil, r.Exchange != nil, r.Text != nil, r.Operation != nil, r.Measurement != nil, r.Breakdown != nil, r.State != nil} {
 		if present {
 			count++
 		}
@@ -342,6 +373,20 @@ func (r Record) validate() error {
 		// arithmetic, so it is checked here rather than trusted.
 		if math.Abs(sum-p.TotalSecs) > 1e-6 {
 			return bad()
+		}
+	case KindState:
+		p := r.State
+		origins := []string{"start", "step", "call_start", "fact", "prefetch", "withdraw"}
+		if p == nil || !one(p.Origin.Kind, origins...) || !validID(p.Origin.Name, true) || len(p.Changes) == 0 {
+			return bad()
+		}
+		for _, change := range p.Changes {
+			if !validID(change.Field, false) || len(change.Value) == 0 || !json.Valid(change.Value) {
+				return bad()
+			}
+			if !one(change.By.Kind, append(origins, "reset")...) || !validID(change.By.Name, true) {
+				return bad()
+			}
 		}
 	default:
 		return bad()

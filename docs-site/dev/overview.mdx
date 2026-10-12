@@ -185,6 +185,17 @@ first-speech measurements. Its **Reply time** section holds Pipecat's reply-time
 breakdowns. It starts collapsed and appears only when there is data to inspect;
 it does not insert diagnostic sections between turns.
 
+**The call's state shows as it changes.** Every save to `State` is a row in the
+conversation, at the point where it happened. The row names what set the value:
+a step finishing, a pre-fetch, a carrier fact or a dispatched value. A changed
+value shows what it was before. The **State** section, above Call diagnostics,
+holds every field in `state.py`'s order with its current value and what set it,
+and marks the newest change in yellow. A value that waits for the caller's yes
+reads `not confirmed` until the step that confirms it hears one. Hover a field's
+name for its type and description. These are the call's real values, so they
+can include a tool's result and the caller's details; they stay in
+`build/<target>/dev.log` and this local page.
+
 The `HANDOFF` row carries no duration on purpose. A task, a task group, or a
 handoff to another agent reaches the framework as a function call, so it could
 be timed like a tool. But a task or a task group does not return until

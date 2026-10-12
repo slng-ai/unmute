@@ -1013,6 +1013,26 @@ class DevReporter:
 
         return tts
 
+    def watch_state(self, state: Any) -> None:
+        """Send each change to the call's state to the dev page, as it happens.
+
+        Args:
+            state: The call's CallState.
+        """
+        if not self.enabled or state is None:
+            return
+
+        def state_changed(origin: dict[str, str], changes: list[dict[str, Any]]) -> None:
+            """Send one change to the page as a state record.
+
+            Args:
+                origin: What made the change.
+                changes: Each value it touched, as it now stands.
+            """
+            self._put("state", self._id("state"), {"origin": origin, "changes": changes})
+
+        state._watch(state_changed)
+
     def finish(self, *, error: bool = False, reason: str | None = None) -> None:
         """Close every open entity, end the call and stop listening.
 

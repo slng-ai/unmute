@@ -416,7 +416,7 @@ func TestSlngRouterPipecatReadsTheVariablesPerRequest(t *testing.T) {
 	for _, want := range []string{
 		`("customer_id", "tier", False)`,
 		`("caller_alias", "alias", False)`,
-		`self.save_batch(pending, step=step)`,
+		`self.save_batch(pending, step=step, origin=("step", step))`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("the fixture does not exercise the shared state save %q", want)

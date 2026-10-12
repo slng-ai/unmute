@@ -54,7 +54,7 @@ func TestDevSessionCarriesTheCovalSimulationIntoDispatch(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/session", nil)
 	request.Header.Set("X-Coval-Simulation-Id", "sim-abc123")
 	recorder := httptest.NewRecorder()
-	devSessionHandler(ir.ProviderLiveKit, "remy-dev", "ws://127.0.0.1:7880", readyDevStream(t))(recorder, request)
+	devSessionHandler(ir.ProviderLiveKit, "remy-dev", "ws://127.0.0.1:7880", readyDevStream(t), nil)(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", recorder.Code, recorder.Body.String())
@@ -81,7 +81,7 @@ func TestDevSessionCarriesTheCovalSimulationIntoDispatch(t *testing.T) {
 // exactly what it was before Coval existed.
 func TestDevSessionOmitsDispatchMetadataWithoutTheHeader(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	devSessionHandler(ir.ProviderLiveKit, "remy-dev", "ws://127.0.0.1:7880", readyDevStream(t))(
+	devSessionHandler(ir.ProviderLiveKit, "remy-dev", "ws://127.0.0.1:7880", readyDevStream(t), nil)(
 		recorder, httptest.NewRequest(http.MethodGet, "/api/session", nil))
 
 	var body map[string]any

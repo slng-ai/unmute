@@ -362,7 +362,11 @@ SDK model call shows its own first-response and full-duration values at a glance
 TTS first audio and tool duration also stay visible; Debug details holds
 secondary timings and source metadata. A call into a task or a flow, such as
 `book`, gets a `HANDOFF` row and no duration, which is what accounts for the
-extra model call in that reply. On Pipecat each measured reply is also split
+extra model call in that reply. Each save to the call's state is a row of its
+own where it happened: today's date and the caller's number at call start, the
+number turning `confirmed` when `verify_customer` hears a yes, and
+`appointment` once a booking succeeds. The State section beside the
+conversation holds every field with its current value. On Pipecat each measured reply is also split
 into the parts that make it up, with what each cost and who owns it, and a tool that produced no
 result says whether it failed or ran past its deadline. Reply latency excludes
 browser delivery; source-limited measurements
