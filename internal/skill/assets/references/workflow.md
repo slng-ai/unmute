@@ -272,7 +272,9 @@ contain other data. This dev path adds no exporter and stays separate from
 configured providers and optional tracing. Existing call-verification guidance
 still applies; a replay check does not describe a real caller's conversation.
 
-Conversation and Logs share one media connection. Feed reconnects retain the
+Conversation, Metrics and Logs share one media connection. Metrics sums up the
+current call from the same records: p90 tiles, one row per reply with what was
+slow, and latency per model, judged against the studio's default limits. Feed reconnects retain the
 conversation and expose unrecoverable gaps; they do not reconnect the mic.
 Scrolling back keeps the reading position, and Latest resumes following.
 The logs view is available while the runtime starts so startup failures remain

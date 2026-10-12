@@ -153,21 +153,27 @@ func TestPageShowsTheRunBeforeThereIsACall(t *testing.T) {
 	}
 }
 
-func TestPageKeepsTheControlsOutsideBothViews(t *testing.T) {
+func TestPageKeepsTheControlsOutsideEveryView(t *testing.T) {
 	source := page(t)
 	// The controls have to sit outside the view container: a control that
 	// disappears when you switch view is the same defect as one labelled with its
 	// action, it makes the reader hold state the interface should show.
-	// The views container closes before the controls open, so the controls are its
-	// sibling rather than a child of either view.
-	if !strings.Contains(source, "      </div>\n    </div>\n\n    <footer class=\"controls\">") {
+	// The controls close right before the views container opens, so they are its
+	// sibling rather than a child of any view.
+	controls := strings.Index(source, `<section class="controls"`)
+	views := strings.Index(source, `<div class="views" id="views">`)
+	if controls < 0 || views < 0 || controls > views ||
+		strings.Count(source[controls:views], "<section") != 1 ||
+		!strings.HasSuffix(source[:views], "    </section>\n\n    ") {
 		t.Error("the session controls are no longer a sibling of the views container")
 	}
-	if !strings.Contains(source, `id="view-conversation"`) || !strings.Contains(source, `id="view-logs"`) {
-		t.Error("expected exactly the two views")
+	for _, view := range []string{`id="view-conversation"`, `id="view-metrics"`, `id="view-logs"`} {
+		if !strings.Contains(source, view) {
+			t.Errorf("view missing: %s", view)
+		}
 	}
-	if strings.Count(source, `class="view"`) != 2 {
-		t.Errorf("found %d views, want 2", strings.Count(source, `class="view"`))
+	if strings.Count(source, `class="view"`) != 3 {
+		t.Errorf("found %d views, want 3", strings.Count(source, `class="view"`))
 	}
 }
 
@@ -237,15 +243,9 @@ func TestPageStaysSelfContained(t *testing.T) {
 	if hits := hexColour.FindAllString(body, -1); len(hits) > 0 {
 		t.Errorf("colour literals outside the token block: %v", hits)
 	}
-	for _, fn := range []string{"rgb(", "rgba(", "hsl("} {
+	for _, fn := range []string{"rgb(", "rgba(", "hsl(", "oklch("} {
 		if strings.Contains(body, fn) {
 			t.Errorf("colour function %q outside the token block", fn)
 		}
-	}
-	// One oklch() survives below the tokens, the accent hover. It predates this
-	// feature; the count is pinned so a second one has to be a decision rather
-	// than a drift.
-	if got := strings.Count(body, "oklch("); got != 1 {
-		t.Errorf("found %d oklch() literals below the token block, want the 1 known hover", got)
 	}
 }

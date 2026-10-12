@@ -178,10 +178,12 @@ Live-data status is separate from audio status. Reconnecting the event feed
 does not restart the microphone. If some history cannot be recovered, the page
 keeps the incomplete-history label until the next call and shows observed model
 calls labelled as observed. Late updates stay with their known exchange;
-unassignable values remain labelled as unassigned. **Call diagnostics**, below
-the conversation, holds those values and call-level first-speech measurements.
-It starts collapsed and appears only when there is data to inspect; it does not
-insert diagnostic sections between turns.
+unassignable values remain labelled as unassigned. **Call diagnostics** is the
+inspector beside the conversation, or under it on a phone. Its **Unassigned
+activity and measurements** section holds those values and call-level
+first-speech measurements. Its **Reply time** section holds Pipecat's reply-time
+breakdowns. It starts collapsed and appears only when there is data to inspect;
+it does not insert diagnostic sections between turns.
 
 The `HANDOFF` row carries no duration on purpose. A task, a task group, or a
 handoff to another agent reaches the framework as a function call, so it could
@@ -194,10 +196,17 @@ and the model call that follows it is timed on its own.
 [Reading the latency numbers](/optimization/latency) covers what each number means, where
 the time goes in a voice turn, and how to tell which part is slow.
 
+The **Metrics** view sums up the current call from the same records. Its tiles
+show reply latency, LLM first token and TTS first audio at p90, and the error
+count. A table lists each reply with its latency, its model and tool timings,
+and what was slow. Below it are the reply-time breakdowns and latency per model.
+**What counts as slow** lists the limits each number is judged by. They are the
+SLNG studio's defaults.
+
 The logs view is in front while the target is starting, and the conversation
 view takes over once the agent is ready. If anything in the startup output looked
 like a failure, the logs view stays in front instead, and the count of those
-lines sits on the tab so it is visible from either view. Pick a view yourself and
+lines sits on the **Logs** cell in the top bar, so it is visible from every view. Pick a view yourself and
 the page stops moving it for you.
 
 Filter the output by typing, or narrow it to output, measurements, or problems.
