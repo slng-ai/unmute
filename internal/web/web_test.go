@@ -177,6 +177,24 @@ func TestPageKeepsTheControlsOutsideEveryView(t *testing.T) {
 	}
 }
 
+// The call's state reaches the page as records the agent prints and fields the
+// session names. The smoke replay drives both through a browser; this holds the
+// wiring in place for the suite that needs no Node.
+func TestPageShowsTheCallState(t *testing.T) {
+	source := page(t)
+	for _, want := range []string{
+		`session.state_fields`,                // every declared field, in state.py's order
+		`record.kind==='state'`,               // each change is its own record
+		`id="state-panel"`,                    // the whole state, in the inspector
+		`row.dataset.kind='state'`,            // and each change, where it happened
+		`if (rec.state) return prefix+'state`, // one log line per change
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("state view missing %q", want)
+		}
+	}
+}
+
 func TestTextSegmentsCarryTheirOwnFinality(t *testing.T) {
 	source := page(t)
 	for _, want := range []string{

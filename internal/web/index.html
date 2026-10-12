@@ -38,6 +38,9 @@
     --bad-rule:#8f4a42;
     --bad-ground:#2a1714;
     --bad-line:#5a2a24;
+    --state-ground:#19170f;   /* a change to the call's state, in the conversation */
+    --state-rule:#2a2618;
+    --state-mark:#1d1a10;     /* a value the latest change set */
     --sans:system-ui,-apple-system,sans-serif;
     --mono:'Geist Mono',ui-monospace,'SF Mono',Menlo,monospace;
     --bar:56px;               /* top bar height */
@@ -256,22 +259,56 @@
   .measurement-note,.source-note{font-size:11px;color:var(--dim)}
   .source-note{white-space:pre-line;margin:6px 0 0}
 
-  /* ── inspector: studio .inspector and Section ────────────── */
+  /* ── inspector: studio .inspector and Section ──────────────
+     The call's state on top, open; the diagnostics under it, closed until asked. */
   .inspector{
     flex:1 1 380px;max-width:100%;min-width:0;min-height:0;overflow-y:auto;
+    display:flex;flex-direction:column;
     background:var(--aside);border-left:1px solid var(--rule-soft);
   }
-  .inspector[hidden]{display:none}
-  .inspector:not([open]){flex:0 0 auto}
-  .inspector > summary{
-    display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--rule-soft);
+  .inspector[hidden],.inspector > details[hidden]{display:none}
+  .inspector:not(:has(> details[open]:not([hidden]))){flex:0 0 auto}
+  .inspector > details{border-bottom:1px solid var(--rule-soft)}
+  .inspector > details > summary{
+    display:flex;align-items:center;gap:10px;padding:10px 14px;
     cursor:pointer;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
   }
-  .inspector > summary:hover{background:var(--hover)}
-  .inspector > summary::-webkit-details-marker{display:none}
-  .inspector > summary::before{content:"▸";width:10px;color:var(--dim)}
-  .inspector[open] > summary::before{content:"▾"}
-  .inspector > summary:focus-visible{outline-offset:-2px}
+  .inspector > details[open] > summary{border-bottom:1px solid var(--rule-soft)}
+  .inspector > details > summary:hover{background:var(--hover)}
+  .inspector > details > summary::-webkit-details-marker{display:none}
+  .inspector > details > summary::before{content:"▸";width:10px;color:var(--dim)}
+  .inspector > details[open] > summary::before{content:"▾"}
+  .inspector > details > summary:focus-visible{outline-offset:-2px}
+  .summary-gap{flex:1 1 auto}
+
+  /* ── the call's state: studio ModelView, in the inspector and in the conversation ── */
+  [id="state-list"]{margin:12px 16px 16px;display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);border:1px solid var(--rule-soft);font-family:var(--mono);font-size:12px}
+  .fact{display:contents}
+  .fact > dt,.fact > dd{margin:0;padding:7px 10px;border-bottom:1px solid var(--rule-faint)}
+  .fact > dt{color:var(--dim);font-size:11px;overflow-wrap:anywhere}
+  .fact > dd{color:var(--text);overflow-wrap:anywhere;display:flex;flex-direction:column;gap:3px;min-width:0}
+  .fact-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
+  .fact-src{font-size:10px;color:var(--faint)}
+  .fact-changed > dt,.fact-changed > dd > .fact-line{color:var(--yellow)}
+  .fact-changed > dt,.fact-changed > dd{background:var(--state-mark)}
+  .value-empty{color:var(--faint)}
+  .value-nested{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);gap:3px 10px;padding-left:10px;border-left:1px solid var(--rule-soft);font-size:11px}
+  .value-nested > .value-key{color:var(--dim)}
+  .value-list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+  .tag-y{border-color:var(--yellow);color:var(--yellow)}
+  .tag-wait{border-color:var(--yellow-dim);color:var(--yellow)}
+  .tag-ok{border-color:var(--ok-rule);color:var(--ok)}
+  .state-row{display:grid;grid-template-columns:var(--who) minmax(0,1fr);gap:10px;align-items:start;position:relative}
+  .state-who{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--yellow);padding-top:7px}
+  .state-box{border:1px solid var(--yellow-dim);background:var(--state-ground);min-width:0}
+  .state-box-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:6px 10px;border-bottom:1px solid var(--state-rule);font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .state-box-h b{font-weight:500;color:var(--soft)}
+  .change{display:grid;grid-template-columns:minmax(0,150px) minmax(0,1fr);gap:10px;padding:5px 10px;font-family:var(--mono);font-size:12px;align-items:baseline}
+  .change + .change{border-top:1px solid var(--rule-faint)}
+  .change-field{color:var(--soft);overflow-wrap:anywhere}
+  .change-val{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;color:var(--text);overflow-wrap:anywhere;min-width:0}
+  .change-old{color:var(--faint);text-decoration:line-through;text-decoration-color:var(--rule-strong)}
+  .change-arrow{color:var(--faint)}
   [id="diagnostic-list"]{display:flex;flex-direction:column}
   [id="diagnostic-list"] .exchange{gap:0;border-bottom:1px solid var(--rule-soft);padding-bottom:12px}
   [id="diagnostic-list"] .exchange-status{display:none}
@@ -377,7 +414,9 @@
     .transcript{flex-direction:column}
     .conversation-scroll{flex:1 1 auto}
     .inspector{flex:none;max-height:45%;border-left:0;border-top:1px solid var(--rule-soft)}
-    .inspector:not([open]){flex:none}
+    .inspector:not(:has(> details[open]:not([hidden]))){flex:none}
+    .state-row,.change{grid-template-columns:1fr;gap:2px}
+    .state-who{padding-top:0}
     .tlist{padding:12px 16px 56px}
     .turn{grid-template-columns:1fr;gap:2px}
     .exchange-status,.request{margin-left:0}
@@ -454,10 +493,16 @@
             <div class="tlist" id="tlist"></div>
             <button id="latest" class="btn" type="button" hidden>Latest</button>
           </div>
-          <details id="diagnostics" class="inspector" hidden>
-            <summary>Call diagnostics</summary>
-            <div id="diagnostic-list"></div>
-          </details>
+          <aside class="inspector" id="inspector" aria-label="Call state and diagnostics" hidden>
+            <details id="state-panel" open hidden>
+              <summary>State<span class="summary-gap"></span><span class="tag tag-y" id="state-changed" hidden></span></summary>
+              <dl id="state-list"></dl>
+            </details>
+            <details id="diagnostics" hidden>
+              <summary>Call diagnostics</summary>
+              <div id="diagnostic-list"></div>
+            </details>
+          </aside>
         </section>
       </div>
 
@@ -517,6 +562,10 @@ const el = {
   tlist: document.getElementById("tlist"),
   transcript: document.querySelector('.transcript'),
   diagnostics: document.getElementById('diagnostics'),
+  inspector: document.getElementById('inspector'),
+  statePanel: document.getElementById('state-panel'),
+  stateList: document.getElementById('state-list'),
+  stateChanged: document.getElementById('state-changed'),
   diagnosticList: document.getElementById('diagnostic-list'),
   loglist: document.getElementById("loglist"),
   logfilter: document.getElementById("logfilter"),
@@ -623,6 +672,7 @@ function metricText(rec){
       return prefix+'reply time '+secs(b.total_secs)+' · '+b.parts.map(p=>p.label+' '+secs(p.duration_secs)).join(' · ');
     }
     if (rec.call) return prefix+[rec.call.state,rec.call.reason].filter(Boolean).join(' · ');
+    if (rec.state) return prefix+'state · '+byText(rec.state.origin)+' · '+rec.state.changes.map(c=>c.field+' '+shortValue(c.value)).join(' · ');
     return ''; // raw transcript snapshots remain in dev.log, not repeated here
   }
   if (rec.kind === "session")
@@ -760,6 +810,9 @@ function clearTranscript(){
   el.diagnosticList.replaceChildren();
   el.diagnostics.open=false;
   el.diagnostics.hidden=true;
+  stateValues.clear();
+  stateLatest=new Set();
+  renderStatePanel();
   records.clear(); recordNodes.clear(); exchangeNodes.clear(); messageNodes.clear();
   selectedCallID = null;
   locallyEnded = false;
@@ -996,6 +1049,7 @@ function renderData(){
       view.element.remove();exchangeNodes.delete(id);
     }
   el.diagnostics.hidden=!el.diagnosticList.childNodes.length;
+  renderInspector();
   if (currentView==='metrics') renderMetrics();
   if ((!focused.isConnected || !focused.checkVisibility()) && (movedFocus || focusedDiagnostics))
     (movedFocus || el.connect).focus({preventScroll:true});
@@ -1187,6 +1241,108 @@ function renderMetrics(){
     h('div','metrics-body',main,rules));
   el.metrics.scrollTop=top;
 }
+// ── the call's state ────────────────────────────────────
+// Each change is a row in the conversation, where it happened, and the whole
+// state stands in the inspector with the latest change marked. The fields come
+// from the session, in state.py's order, so an unset one reads as empty; the
+// values come from the agent's state records, each one what a save changed.
+let stateFields = [];                 // {name, type, description, confirm}
+const stateValues = new Map();        // field -> {value, truncated, confirmed, by}
+let stateLatest = new Set();          // the fields the newest change touched
+function byText(by){
+  const name=by?.name || '';
+  switch (by?.kind){
+    case 'step': return name+' · step finished';
+    case 'call_start': return 'dispatched with the call';
+    case 'fact': return 'carrier fact';
+    case 'prefetch': return 'pre-fetch '+name;
+    case 'withdraw': return 'confirmation withdrawn on entering '+name;
+    case 'reset': return 'reset: a value it was read from changed';
+    default: return 'set at call start';
+  }
+}
+function shortValue(value){
+  if (value===null || value===undefined || value==='') return 'empty';
+  const text=typeof value==='string' ? value : JSON.stringify(value);
+  return text.length>60 ? text.slice(0,59)+'…' : text;
+}
+function valueNode(value, truncated){
+  if (truncated) return h('span',undefined,String(value),h('span','fact-src',' (cut)'));
+  if (value===null || value===undefined || value==='') return h('span','value-empty','empty');
+  if (Array.isArray(value))
+    return value.length ? h('ol','value-list',...value.map(item=>h('li',undefined,valueNode(item)))) : h('span','value-empty','none');
+  if (typeof value==='object'){
+    const keys=Object.keys(value);
+    if (!keys.length) return h('span','value-empty','empty');
+    const grid=h('span','value-nested');
+    for (const key of keys) grid.append(h('span','value-key',key),valueNode(value[key]));
+    return grid;
+  }
+  return h('span',undefined,String(value));
+}
+function confirmTag(confirmed){
+  if (confirmed===undefined || confirmed===null) return null;
+  return h('span','tag '+(confirmed?'tag-ok':'tag-wait'),confirmed?'confirmed':'not confirmed');
+}
+function originHeading(origin){
+  const name=origin.name || '';
+  switch (origin.kind){
+    case 'step': return [h('b',undefined,name),' · step finished'];
+    case 'call_start': return [h('b',undefined,'Dispatch'),' · values sent with the call'];
+    case 'fact': return [h('b',undefined,'Carrier fact'),' · '+name];
+    case 'prefetch': return [h('b',undefined,'Pre-fetch'),' · '+name];
+    case 'withdraw': return [h('b',undefined,name),' · confirmation withdrawn, the step runs again'];
+    default: return [h('b',undefined,'Call start')];
+  }
+}
+function renderState(record){
+  const key='state:'+record.id, data=record.state;
+  if (recordNodes.has(key)) return;
+  const box=h('div','state-box',h('div','state-box-h',...originHeading(data.origin)));
+  for (const change of data.changes){
+    const before=stateValues.get(change.field);
+    const value=h('span','change-val');
+    if (before && JSON.stringify(before.value)!==JSON.stringify(change.value))
+      value.append(h('span','change-old',shortValue(before.value)),h('span','change-arrow','→'));
+    value.append(valueNode(change.value,change.truncated));
+    const tag=confirmTag(change.confirmed);
+    if (tag) value.append(tag);
+    if (change.by && (change.by.kind!==data.origin.kind || change.by.name!==data.origin.name))
+      value.append(h('span','fact-src',byText(change.by)));
+    box.append(h('div','change',h('span','change-field',change.field),value));
+    stateValues.set(change.field,{value:change.value,truncated:!!change.truncated,confirmed:change.confirmed,by:change.by});
+  }
+  const row=h('div','state-row',h('span','state-who','State'),box);
+  row.dataset.kind='state';row.dataset.id=record.id;
+  recordNodes.set(key,row);
+  ordered(el.tlist,row,record.order);
+  stateLatest=new Set(data.changes.map(change=>change.field));
+  renderStatePanel();
+}
+function renderStatePanel(){
+  const names=stateFields.length ? stateFields.map(field=>field.name) : Array.from(stateValues.keys());
+  el.statePanel.hidden=!names.length;
+  el.stateList.replaceChildren(...names.map(name=>{
+    const field=stateFields.find(each=>each.name===name), now=stateValues.get(name);
+    const term=h('dt',undefined,name);
+    if (field) term.title=[field.type,field.description].filter(Boolean).join('\n\n');
+    const line=h('span','fact-line',valueNode(now?.value,now?.truncated));
+    // Confirmation is about a value: an empty one has nothing to agree to yet.
+    const filled=now && now.value!==null && now.value!=='';
+    const tag=filled ? confirmTag(now.confirmed) : null;
+    if (tag) line.append(tag);
+    const detail=h('dd',undefined,line);
+    if (now?.by) detail.append(h('span','fact-src',byText(now.by)));
+    if (field?.confirm && !now?.confirmed) detail.append(h('span','fact-src',field.confirm+' confirms it'));
+    return h('div','fact'+(stateLatest.has(name)?' fact-changed':''),term,detail);
+  }));
+  el.stateChanged.hidden=!stateLatest.size;
+  el.stateChanged.textContent=stateLatest.size+' changed';
+  renderInspector();
+}
+function renderInspector(){
+  el.inspector.hidden=el.diagnostics.hidden && el.statePanel.hidden;
+}
 function renderText(record){
   const data = record.text;
   // ponytail: scan this call's snapshots; index messages if long-call replay makes this hot.
@@ -1243,6 +1399,7 @@ function attachRecord(record){
     exchangeNode(key,record.order);
     for (const id of exchangeNodes.keys()) renderExchange(id);
   }
+  else if (record.kind==='state') renderState(record);
   else if (record.kind==='call'){
     if (record.call.state!=='open') endConversation();
     // The final runtime snapshot can arrive after WebRTC has disconnected.
@@ -1255,8 +1412,9 @@ function attachRecord(record){
   renderData();
   if (focused.isConnected && focused.checkVisibility() && document.activeElement!==focused) focused.focus({preventScroll:true});
   if (selected && selected[0].isConnected && selected[2].isConnected) selection.setBaseAndExtent(...selected);
-  el.body.dataset.hasHistory=String(exchangeNodes.size>0);
-  el.latest.hidden=exchangeNodes.size===0;
+  const history=exchangeNodes.size>0 || !!el.tlist.querySelector('.state-row');
+  el.body.dataset.hasHistory=String(history);
+  el.latest.hidden=!history;
   restoreReading(reading);
 }
 function endConversation(){
@@ -1428,6 +1586,8 @@ async function connect(){
     }
     if (session.dev_events_version !== 2 || !session.call_id) throw new Error('streaming session identity unavailable');
     selectedCallID = session.call_id;
+    stateFields = Array.isArray(session.state_fields) ? session.state_fields : [];
+    renderStatePanel();
     session.generation = generation;
     transport = session.kind;
     if (session.kind === 'livekit') await connectLivekit(session);

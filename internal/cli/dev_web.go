@@ -128,6 +128,7 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 		root:        root,
 		provider:    resolved.Provider,
 		agentName:   devDispatchName(agent, resolved),
+		stateFields: devStateFields(agent),
 		composeFile: composeFile,
 		project:     composeProjectName(root, resolved.Name),
 		env:         childEnv,
@@ -225,6 +226,7 @@ type devWebRun struct {
 	root        string
 	provider    ir.Provider
 	agentName   string
+	stateFields []devStateField
 	composeFile string
 	project     string
 	env         []string
@@ -280,7 +282,7 @@ func startDevWebServer(cmd *cobra.Command, run devWebRun) (*devWebServer, error)
 	if port := envValue(run.env, "LIVEKIT_HOST_PORT"); port != "" {
 		liveKitURL = "ws://127.0.0.1:" + port
 	}
-	srv := &http.Server{Handler: devWebMux(run.provider, run.agentName, run.botPort, liveKitURL, run.stream)}
+	srv := &http.Server{Handler: devWebMux(run.provider, run.agentName, run.botPort, liveKitURL, run.stream, run.stateFields)}
 	web := &devWebServer{srv: srv, errCh: make(chan error, 1)}
 	go func() { web.errCh <- srv.Serve(ln) }()
 
@@ -434,9 +436,9 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 // routing is the transport wiring: pipecat reverse-proxies the WebRTC offer to
 // the local bot; livekit serves the vendored SDK. Both share the same
 // static page, the /api/session bootstrap (SPEC V6) and the event stream.
-func devWebMux(provider ir.Provider, agentName, botPort, liveKitURL string, stream *devStream) http.Handler {
+func devWebMux(provider ir.Provider, agentName, botPort, liveKitURL string, stream *devStream, stateFields []devStateField) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/session", devSessionHandler(provider, agentName, liveKitURL, stream))
+	mux.HandleFunc("/api/session", devSessionHandler(provider, agentName, liveKitURL, stream, stateFields))
 	mux.HandleFunc("/api/events", devEventsHandler(stream))
 	switch provider {
 	case ir.ProviderPipecat:
@@ -461,7 +463,7 @@ func devWebMux(provider ir.Provider, agentName, botPort, liveKitURL string, stre
 // answer that there is nothing to connect to yet. `ready: false` is the page's
 // instruction to keep the call control unavailable rather than offer a call that
 // cannot be placed. A ready answer also identifies the call before media joins.
-func devSessionHandler(provider ir.Provider, agentName, liveKitURL string, stream *devStream) http.HandlerFunc {
+func devSessionHandler(provider ir.Provider, agentName, liveKitURL string, stream *devStream, stateFields []devStateField) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if stream != nil && stream.State() != devStateReady {
@@ -475,7 +477,7 @@ func devSessionHandler(provider ir.Provider, agentName, liveKitURL string, strea
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"kind": "webrtc-offer", "offerUrl": "/api/offer", "ready": true, "call_id": callID, "dev_events_version": 2})
+			_ = json.NewEncoder(w).Encode(map[string]any{"kind": "webrtc-offer", "offerUrl": "/api/offer", "ready": true, "call_id": callID, "dev_events_version": 2, "state_fields": stateFields})
 		case ir.ProviderLiveKit:
 			room, err := randomRoomName("unmute")
 			if err != nil {
@@ -492,7 +494,7 @@ func devSessionHandler(provider ir.Provider, agentName, liveKitURL string, strea
 				http.Error(w, fmt.Sprintf("mint token: %v", err), http.StatusInternalServerError)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"kind": "livekit", "url": liveKitURL, "token": token, "room": room, "ready": true, "call_id": room, "dev_events_version": 2})
+			_ = json.NewEncoder(w).Encode(map[string]any{"kind": "livekit", "url": liveKitURL, "token": token, "room": room, "ready": true, "call_id": room, "dev_events_version": 2, "state_fields": stateFields})
 		default:
 			http.Error(w, "unsupported transport", http.StatusInternalServerError)
 		}

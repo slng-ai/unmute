@@ -251,8 +251,10 @@ set, which only `unmute dev` does. Emitting them conditionally would make
 This display path adds no external exporter or collector. The local
 `build/<target>/dev.log` contains the raw records, including recognized and
 generated transcript text; the visible measurement filter omits repeated text
-fragments. Dev records exclude audio, reasoning, prompts, tool payloads and
-secrets. Trace export remains a separate opt-in feature. Observation preserves
+fragments. Dev records exclude audio, reasoning, prompts, tool arguments and
+secrets. State records carry the values a call saved to `State`, which can
+include a tool's result and the caller's details, so the page can show them as
+they change; they go only to this local log and page. Trace export remains a separate opt-in feature. Observation preserves
 the framework's native results, chunks, cancellation and speech handles.
 
 ## State and deployment boundaries

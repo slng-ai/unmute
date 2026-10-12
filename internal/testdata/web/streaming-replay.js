@@ -20,7 +20,9 @@ const {chromium} = require(process.env.UNMUTE_SWEEP_PLAYWRIGHT || 'playwright');
         call++;
         const session={ready:true,dev_events_version:2,call_id:callID,
           kind:target==='livekit'?'livekit':'webrtc-offer',offerUrl:'/api/offer',
-          url:'ws://unused',token:'unused',room:callID};
+          url:'ws://unused',token:'unused',room:callID,
+          state_fields:[{name:'customer_phone',type:'str | None',description:'The caller number.',confirm:'verify_customer'},
+            {name:'appointment',type:'Appointment | None'},{name:'notes',type:'str'}]};
         if(holdNextBootstrap){
           holdNextBootstrap=false;heldBootstrap=()=>route.fulfill({json:session});bootstrapHeld();return;
         }
@@ -370,6 +372,28 @@ const {chromium} = require(process.env.UNMUTE_SWEEP_PLAYWRIGHT || 'playwright');
         await checkpoint(visible(selector+' .metrics-summary',/^1 model call$/i));
         assert.doesNotMatch(await page.locator(selector+' .metrics-summary').textContent(),/pending/i,'late operation cannot revive ended reply latency');
       }
+      // State: each change is a row where it happened, and the whole state stands
+      // in the inspector, in state.py's order, with the newest change marked.
+      assert.equal(await page.locator('#state-panel').isVisible(),true,'declared state shows before any value arrives');
+      assert.match(await page.locator('#state-list').textContent(),/customer_phone[\s\S]*appointment[\s\S]*notes/);
+      await emit('state','state-start',{origin:{kind:'start',name:''},changes:[
+        {field:'customer_phone',value:'+34600111222',confirmed:false,by:{kind:'prefetch',name:'caller'}}]});
+      await checkpoint(visible(identity('state','state-start'),/call start[\s\S]*customer_phone[\s\S]*\+34600111222[\s\S]*not confirmed[\s\S]*pre-fetch caller/i));
+      await emit('state','state-verified',{origin:{kind:'step',name:'verify_customer'},changes:[
+        {field:'customer_phone',value:'+34600111222',confirmed:true,by:{kind:'step',name:'verify_customer'}}]});
+      await checkpoint(visible(identity('state','state-verified'),/verify_customer[\s\S]*customer_phone[\s\S]*confirmed/i));
+      await emit('state','state-booked',{origin:{kind:'step',name:'booking'},changes:[
+        {field:'appointment',value:{service:'haircut',time:'16:00:00'},by:{kind:'step',name:'booking'}},
+        {field:'notes',value:'window seat',by:{kind:'step',name:'booking'}}]});
+      await emit('state','state-moved',{origin:{kind:'step',name:'booking'},changes:[
+        {field:'appointment',value:{service:'haircut',time:'17:00:00'},by:{kind:'step',name:'booking'}}]});
+      await checkpoint(visible(identity('state','state-moved'),/appointment[\s\S]*16:00:00[\s\S]*→[\s\S]*17:00:00/));
+      assert.equal(await page.locator(identity('state','state-moved')+' .change-old').count(),1,'a changed value shows what it was');
+      assert.equal(await page.locator('#state-list .fact-changed').count(),1,'only the newest change is marked');
+      assert.match(await page.locator('#state-list .fact-changed').textContent(),/appointment[\s\S]*17:00:00/);
+      assert.match(await page.locator('#state-list').textContent(),/customer_phone[\s\S]*confirmed[\s\S]*notes[\s\S]*window seat/);
+      assert.equal(await page.locator('#state-changed').textContent(),'1 changed');
+      assert.equal(await page.locator('#tlist [data-kind="state"]').count(),4,'every change is its own row in the conversation');
       // Updates received in Logs stay current without reconnecting media.
       const mediaBefore=await page.evaluate(()=>({connections:window.mediaConnections,closes:window.mediaCloses}));
       await page.locator('.vtab[data-view="logs"]').click();

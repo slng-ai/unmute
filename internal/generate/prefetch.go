@@ -213,7 +213,7 @@ func writePrefetchSave(b *strings.Builder, agent *ir.Agent, entry ir.Prefetch, v
 	for _, input := range entry.Inputs {
 		inputs = append(inputs, pyQuote(ir.PathRoot(input)))
 	}
-	fmt.Fprintf(b, "%sstate.save_batch({%s}, inputs=[%s])\n", indent, strings.Join(values, ", "), strings.Join(inputs, ", "))
+	fmt.Fprintf(b, "%sstate.save_batch({%s}, inputs=[%s], origin=(\"prefetch\", %s))\n", indent, strings.Join(values, ", "), strings.Join(inputs, ", "), pyQuote(entry.Name))
 	fmt.Fprintf(b, "%slogger.info(\"prefetch %s: resolved %s%s\")\n", indent, entry.Name, prefetchAssignedNames(entry), prefetchConfirmSuffix(agent, entry))
 }
 

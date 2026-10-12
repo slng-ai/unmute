@@ -67,20 +67,27 @@ up to the total, and the owner is one of four kinds:
 The line above the parts says what the interval was measured from: the caller
 falling silent, or the client connecting, which is how a greeting is kept from
 being compared with a reply. This breakdown carries no reply identity, so it
-sits with the unassigned values rather than being matched to a reply by timing.
+has a Reply time section of its own rather than being matched to a reply by
+timing.
 
 **A tool that produced no result says why.** Its row reads `failed` with the
 kind of error the handler raised, or `timed_out` when it ran past its deadline,
 and a call that ends badly names the service that stopped it. The messages
 themselves stay in `build/{{.Target}}/dev.log`: an error's text quotes whatever
-was being worked on, and this feed carries no prompts, tool arguments or
-results.
+was being worked on, and this feed carries no prompts or tool arguments.
 
 The event feed reconnects separately from audio. Retained events can replay;
-a gap stays marked until the next call. Switching Conversation and Logs keeps
-the same microphone connection.
+a gap stays marked until the next call. Switching Conversation, Metrics and
+Logs keeps the same microphone connection.
 
-The generated `utils/dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
+{{if .TypedState}}**The call's state shows as it changes.** Every save to `State` is a row in the
+conversation, where it happened, naming what set it: a step finishing, a
+pre-fetch, a carrier fact or a dispatched value. The inspector beside the
+conversation holds every field in `state.py`'s order with its current value,
+and marks the newest change. A value that waits for the caller's yes says so
+until the step that confirms it hears one.
+
+{{end}}The generated `utils/dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
 as `unmute dev` does. Its identified v2 snapshots use `UNMUTE_METRIC ` framing.
 Raw values use seconds. To inspect measurements:
 
@@ -89,8 +96,10 @@ grep '"kind":"measurement"' build/{{.Target}}/dev.log
 ```
 
 The local `dev.log` also contains transcript snapshots. The normalized dev
-records exclude audio, reasoning, prompts and tool arguments/results. Ordinary
-SDK output can contain other data. This path adds no exporter; configured
+records exclude audio, reasoning, prompts and tool arguments. State records
+carry the values the call saved, which can include a tool's result and the
+caller's details; they go only to this log and the local page. Ordinary SDK
+output can contain other data. This path adds no exporter; configured
 provider calls and optional tracing keep their own existing behavior.
 {{- if gt (len .Agents) 1}}
 

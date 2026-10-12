@@ -56,10 +56,17 @@ Native playback delay is separate from service timing. Call first speech runs
 from reporter installation to the native playback-start timestamp.
 
 The event feed reconnects separately from audio. Retained events can replay;
-a gap stays marked until the next call. Switching Conversation and Logs keeps
-the same microphone connection.
+a gap stays marked until the next call. Switching Conversation, Metrics and
+Logs keeps the same microphone connection.
 
-The generated `utils/dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
+{{if .TypedState}}**The call's state shows as it changes.** Every save to `State` is a row in the
+conversation, where it happened, naming what set it: a step finishing, a
+pre-fetch, a carrier fact or a dispatched value. The inspector beside the
+conversation holds every field in `state.py`'s order with its current value,
+and marks the newest change. A value that waits for the caller's yes says so
+until the step that confirms it hears one.
+
+{{end}}The generated `utils/dev_metrics.py` is inert unless `UNMUTE_DEV_METRICS` is enabled,
 as `unmute dev` does. Its identified v2 snapshots use `UNMUTE_METRIC ` framing.
 Raw values use seconds. To inspect measurements:
 
@@ -68,8 +75,10 @@ grep '"kind":"measurement"' build/{{.Target}}/dev.log
 ```
 
 The local `dev.log` also contains transcript snapshots. The normalized dev
-records exclude audio, reasoning, prompts and tool arguments/results. Ordinary
-SDK output can contain other data. This path adds no exporter; configured
+records exclude audio, reasoning, prompts and tool arguments. State records
+carry the values the call saved, which can include a tool's result and the
+caller's details; they go only to this log and the local page. Ordinary SDK
+output can contain other data. This path adds no exporter; configured
 provider calls and optional tracing keep their own existing behavior.
 {{- if .OpenAIResponses}}
 

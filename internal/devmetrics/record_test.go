@@ -188,8 +188,8 @@ func TestAbsentTimingStaysNil(t *testing.T) {
 // contract rather than an omission.
 func TestStreamingContract(t *testing.T) {
 	for target, want := range map[string][]string{
-		"livekit": {KindCall, KindExchange, KindText, KindOperation, KindMeasurement},
-		"pipecat": {KindCall, KindExchange, KindText, KindOperation, KindMeasurement, KindBreakdown},
+		"livekit": {KindCall, KindExchange, KindText, KindOperation, KindMeasurement, KindState},
+		"pipecat": {KindCall, KindExchange, KindText, KindOperation, KindMeasurement, KindBreakdown, KindState},
 	} {
 		records := readFixture(t, "streaming-"+target+".jsonl")
 		kinds := map[string]bool{}
@@ -234,6 +234,29 @@ func TestStreamingValidation(t *testing.T) {
 	}
 	if _, found, err := Extract([]byte(Sentinel + strings.Repeat(" ", 512<<10) + valid)); !found || err == nil {
 		t.Error("oversized framed record accepted")
+	}
+}
+
+// A state record carries the caller's own values, so its envelope is held as
+// tightly as any other: a known origin, a named field, real JSON, nothing extra.
+func TestStreamingStateValidation(t *testing.T) {
+	valid := `{"version":2,"kind":"state","call_id":"call-a","id":"state-1","revision":1,"order":1,"state":{"origin":{"kind":"step","name":"booking"},"changes":[{"field":"appointment","value":{"time":"16:00:00"},"confirmed":true,"by":{"kind":"step","name":"booking"}}]}}`
+	if _, _, err := Extract([]byte(Sentinel + valid)); err != nil {
+		t.Fatal(err)
+	}
+	for _, replace := range [][2]string{
+		{`"kind":"step","name":"booking"},"changes"`, `"kind":"guess","name":"booking"},"changes"`},
+		{`"by":{"kind":"step"`, `"by":{"kind":"magic"`},
+		{`"field":"appointment"`, `"field":""`},
+		{`"field":"appointment"`, `"field":"two words"`},
+		{`"value":{"time":"16:00:00"},`, ``},
+		{`"changes":[{`, `"changes":[],"x":[{`},
+		{`"confirmed":true`, `"confirmed":true,"prompt":"private"`},
+	} {
+		bad := strings.Replace(valid, replace[0], replace[1], 1)
+		if _, found, err := Extract([]byte(Sentinel + bad)); !found || err == nil {
+			t.Errorf("accepted invalid state record: %s", bad)
+		}
 	}
 }
 

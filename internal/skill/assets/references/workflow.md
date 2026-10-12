@@ -267,8 +267,15 @@ grep '"kind":"measurement"' build/<target>/dev.log
 ```
 
 `dev.log` also contains transcript snapshots. Normalized dev records exclude
-audio, reasoning, prompts and tool arguments/results; ordinary SDK output may
-contain other data. This dev path adds no exporter and stays separate from
+audio, reasoning, prompts and tool arguments; ordinary SDK output may contain
+other data. State records carry the values the call saved, a tool's result
+among them, and stay in the local log and page.
+
+Every save to `State` shows in the conversation as a row where it happened,
+naming what set it (a step finishing, a pre-fetch, a carrier fact, a dispatched
+value). The inspector holds the whole state in `state.py`'s order, marks the
+newest change, and says which values still wait for the caller's yes. Read it
+before guessing why a prompt saw an empty value. This dev path adds no exporter and stays separate from
 configured providers and optional tracing. Existing call-verification guidance
 still applies; a replay check does not describe a real caller's conversation.
 
