@@ -54,10 +54,12 @@ lost event history labels the count as observed. Values with no proven owner rem
 unassigned; they are never attached to the newest reply by timing or name.
 
 Pipecat reports service first-response and processing durations separately.
-Its native audio-latency summaries have no proven response ID and remain
+Reply latency, turn detection and speech duration belong to the reply whose
+audio started the bot speaking: the synthesis the output transport is playing
+at that moment. Speech that no single reply's synthesis started stays
 unassigned. Call first speech uses the native observer session-start boundary.
 
-**Where a reply's time went.** Beside that unassigned reply latency the page
+**Where a reply's time went.** Beside the reply latency the page
 shows the reply broken into the parts that make it up, in time order, each with
 what it cost and who owns it. The parts account for the whole wait, so they add
 up to the total, and the owner is one of four kinds:

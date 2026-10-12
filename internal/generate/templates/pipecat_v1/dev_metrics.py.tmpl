@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
+    TTSStartedFrame,
     TTSStoppedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -40,7 +41,9 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import ProcessingMetricsData, TextAggregationMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
+from pipecat.transports.base_output import BaseOutputTransport
 
 SENTINEL = "UNMUTE_METRIC"
 METRICS_ENV = "UNMUTE_DEV_METRICS"
@@ -48,6 +51,10 @@ _METADATA = "unmute_dev"
 
 # An async event handler registered on a pipecat processor.
 _Handler = Callable[..., Awaitable[None]]
+
+# The synthesis context whose audio started the bot's current speech, set by
+# _PlaybackLatencyObserver while the latency observer handles that start.
+_PLAYING: contextvars.ContextVar[str | None] = contextvars.ContextVar("unmute_dev_playing", default=None)
 
 # Handoffs and delegate controls get a row and no duration: they hand over to
 # a task rather than returning a result.
@@ -162,6 +169,9 @@ class DevReporter:
         self._tools: dict[tuple[int, str], dict[str, Any]] = {}
         self._tool_frames: set[tuple[Any, ...]] = set()
         self._tts_contexts: dict[tuple[int, str], list[str]] = {}
+        # The reply each synthesis context spoke for, kept after the context
+        # stops: the caller can still be hearing it. None when it spoke for two.
+        self._context_responses: dict[str, str | None] = {}
 {{- if .SpeechToSpeech}}
         # The reply the speech to speech model is speaking now. It opens with no context
         # frame in front of it, so the request it records under is kept here
@@ -325,13 +335,13 @@ class DevReporter:
         """Return the observers to attach to the pipeline task.
 
         Returns:
-            The latency and speech observers, created on first use, or none when reporting is off.
+            The latency observer, created on first use, or none when reporting is off.
         """
         if not self.enabled or self._closed:
             return []
         if self._latency_observer is not None:
             return [self._latency_observer]
-        observer = UserBotLatencyObserver()
+        observer = _PlaybackLatencyObserver(self)
         self._latency_observer = observer
 
         @self._listen(observer, "on_first_bot_speech_latency")
@@ -340,15 +350,13 @@ class DevReporter:
 
         @self._listen(observer, "on_latency_measured")
         async def reply_latency(_observer: Any, seconds: float | None) -> None:
-            self._measure(self._id("reply-latency"), "reply_latency", seconds, "pipecat-user-bot-latency",
-                          reason="The native audio callback does not identify its response.")
+            self._measure_reply("reply-latency", "reply_latency", seconds, "pipecat-user-bot-latency")
 
         @self._listen(observer, "on_latency_breakdown")
         async def breakdown_ready(_observer: Any, breakdown: Any) -> None:
             if breakdown.user_turn_secs is not None:
-                self._measure(self._id("turn-detection"), "turn_detection", breakdown.user_turn_secs,
-                              "pipecat-vad-stop-to-turn-release",
-                              reason="The native breakdown does not identify its input.")
+                self._measure_reply("turn-detection", "turn_detection", breakdown.user_turn_secs,
+                                    "pipecat-vad-stop-to-turn-release")
             # TTFB, text aggregation and tools already arrived at their sources.
             # The aggregate carries no request IDs and cannot refine ownership.
             #
@@ -375,7 +383,23 @@ class DevReporter:
                     "parts": parts,
                 })
 
-        return [observer, _SpeechObserver(self)]
+        return [observer]
+
+    def _measure_reply(self, name: str, metric: str, seconds: float | None, source: str) -> None:
+        """Record a latency event under the reply whose audio started the speech.
+
+        Args:
+            name: The measurement's name within its reply.
+            metric: What was timed.
+            seconds: The duration the observer measured.
+            source: Where the number came from.
+        """
+        response = self.reply_of(_PLAYING.get())
+        if response:
+            self._measure(f"{response}:{name}", metric, seconds, source, scope="response", exchange_id=response)
+        else:
+            self._measure(self._id(name), metric, seconds, source,
+                          reason="The bot's speech did not start inside one reply's synthesis.")
 
     def speech_measured(self, seconds: float, response: str | None = None) -> None:
         """Record how long the bot spoke, which no service reports.
@@ -391,30 +415,18 @@ class DevReporter:
         self._measure(self._id("speech-duration"), "speech_duration", seconds,
                       "pipecat-bot-speaking-frames",
                       scope="response" if response else "unassigned", exchange_id=response,
-                      reason=None if response else "The transport reports the bot's speech without a response identity.")
+                      reason=None if response else "The bot's speech did not start inside one reply's synthesis.")
 
-    def speaking_response(self) -> str | None:
-        """Return the reply whose speech is starting, when exactly one is in flight.
+    def reply_of(self, context_id: str | None) -> str | None:
+        """Return the reply a synthesis context spoke for.
 
-        Read when the speech starts, because synthesis for a reply can finish
-        while the caller is still hearing it. Two replies queued behind each
-        other, or a live model that runs no synthesis at all, leave the speech
-        unassigned rather than attached to a reply by how recent it is.
+        Args:
+            context_id: The synthesis context, or None when no context was playing.
 
         Returns:
-            The reply's identifier, or None when there is not exactly one.
+            The reply's identifier, or None when the context spoke for none or for two.
         """
-        if not self.enabled or self._closed:
-            return None
-        records = (
-            self._records.get(("operation", operation))
-            for operations in self._tts_contexts.values()
-            for operation in operations
-        )
-        responses = {
-            record["operation"]["exchange_id"] for record in records if record and record["operation"].get("exchange_id")
-        }
-        return responses.pop() if len(responses) == 1 else None
+        return self._context_responses.get(context_id) if context_id else None
 
     def _measure(
         self,
@@ -709,7 +721,7 @@ class DevReporter:
         self._put("exchange", response, payload)
         self._measure(f"{response}:reply-latency", "reply_latency", None,
                       "pipecat-user-bot-latency", scope="response", exchange_id=response,
-                      reason="Pipecat reports audio latency without a response identity.")
+                      reason="Pipecat times only the reply whose audio plays first after the caller stops speaking.")
         return response
 
     def _tool_event(self, llm: Any, frame: Frame, cause: dict[str, Any]) -> None:
@@ -1006,10 +1018,13 @@ class DevReporter:
             cause = self._scope.get() or {}
             operation = self._id("tts")
             payload = {"type": "tts", "name": tts.name, "state": "running"}
-            if cause.get("response_id"):
-                payload["exchange_id"] = cause["response_id"]
+            response = cause.get("response_id")
+            if response:
+                payload["exchange_id"] = response
             self._put("operation", operation, payload)
             self._tts_contexts.setdefault((id(tts), context_id), []).append(operation)
+            if self._context_responses.setdefault(context_id, response) != response:
+                self._context_responses[context_id] = None
 
         return tts
 
@@ -1096,41 +1111,66 @@ class DevReporter:
         self._tools.clear()
         self._tool_frames.clear()
         self._tts_contexts.clear()
+        self._context_responses.clear()
 
 
-class _SpeechObserver(BaseObserver):
-    """Times the bot's speech from the transport's own speaking frames.
+class _PlaybackLatencyObserver(UserBotLatencyObserver):
+    """Pipecat's latency observer, told which reply's audio started each speech.
 
-    The frames are pushed both ways, so one reply produces two of each: the
-    first start opens the stretch and the first stop closes it, and the copies
-    land on a closed stretch and are ignored.
+    The synthesizer plays one context at a time: its TTSStartedFrame, its
+    audio, then its TTSStoppedFrame. The output transport writes and pushes
+    them in that order from one task, and pushes BotStartedSpeakingFrame just
+    before the first audio it writes. So the context the transport last pushed
+    a start for, with no stop or interruption since, is the one whose audio
+    started the speech. Speech with no such context, such as a live model's,
+    leaves its measurements unassigned.
+
+    The latency events run in tasks created while that start frame is
+    handled, and a task keeps the context variables it was created with. So
+    each event handler reads, from _PLAYING, the context of its own speech.
+    The same start and stop frames time the bot's speech.
     """
 
     def __init__(self, reporter: DevReporter) -> None:
-        """Time speech on behalf of a reporter.
+        """Measure on behalf of a reporter.
 
         Args:
-            reporter: The reporter that receives each measured stretch.
+            reporter: The reporter that receives each measurement.
         """
         super().__init__()
         self._reporter = reporter
+        self._context: str | None = None
         self._started: float | None = None
-        self._response: str | None = None
+        self._speech_context: str | None = None
 
     async def on_push_frame(self, data: Any) -> None:
-        """Open or close the speaking stretch when the bot's speaking frames pass.
+        """Follow the transport's playback, then let the framework measure.
 
         Args:
             data: The observed frame push.
         """
-        if isinstance(data.frame, BotStartedSpeakingFrame):
-            if self._started is None:
-                self._started = time.monotonic()
-                self._response = self._reporter.speaking_response()
-        elif isinstance(data.frame, BotStoppedSpeakingFrame) and self._started is not None:
+        frame = data.frame
+        if data.direction != FrameDirection.DOWNSTREAM or not isinstance(data.source, BaseOutputTransport):
+            await super().on_push_frame(data)
+            return
+        if isinstance(frame, TTSStartedFrame):
+            self._context = frame.context_id
+        elif isinstance(frame, InterruptionFrame) or (
+            isinstance(frame, TTSStoppedFrame) and frame.context_id == self._context
+        ):
+            self._context = None
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._started, self._speech_context = time.monotonic(), self._context
+            token = _PLAYING.set(self._context)
+            try:
+                await super().on_push_frame(data)
+            finally:
+                _PLAYING.reset(token)
+            return
+        elif isinstance(frame, BotStoppedSpeakingFrame) and self._started is not None:
             started, self._started = self._started, None
-            response, self._response = self._response, None
-            self._reporter.speech_measured(time.monotonic() - started, response)
+            self._reporter.speech_measured(time.monotonic() - started, self._reporter.reply_of(self._speech_context))
+        await super().on_push_frame(data)
 
 
 def install_dev_metrics(runner_args: RunnerArguments) -> DevReporter:

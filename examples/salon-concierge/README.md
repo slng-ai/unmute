@@ -375,7 +375,8 @@ number turning `confirmed` when `verify_customer` hears a yes, and
 `appointment` once a booking succeeds. The State section beside the
 conversation holds every field with its current value. On Pipecat each measured reply is also split
 into the parts that make it up, with what each cost and who owns it, and a tool that produced no
-result says whether it failed or ran past its deadline. Reply latency excludes
+result says whether it failed or ran past its deadline. On both targets reply
+latency sits on the reply the caller heard. Reply latency excludes
 browser delivery; source-limited measurements
 remain unassigned, and a lost event range labels the call count as observed.
 Missing values have no placeholder; measured zero stays visible.

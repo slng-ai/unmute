@@ -248,8 +248,10 @@ metadata. Definitions live in the latency guide. Explicit task retries count
 as separate SDK calls; hidden provider retries do not. Never add overlapping
 stage timings to derive reply latency, which ends at runtime audio and excludes
 browser delivery. LiveKit's native node timings belong to the response step,
-not an arbitrary request. Pipecat audio-latency summaries without a proven
-response ID stay unassigned. Call first speech is separate, with its source's
+not an arbitrary request. Pipecat's reply latency, turn detection and speech
+duration belong to the reply whose synthesis the output transport is playing
+when the bot starts speaking; speech no single reply started stays unassigned.
+Call first speech is separate, with its source's
 start boundary explained.
 
 Tools keep their own call identity through late results and repeated names.
