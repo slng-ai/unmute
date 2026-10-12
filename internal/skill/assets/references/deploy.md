@@ -142,6 +142,10 @@ agent. Present them as a starting point and tell the user to measure.
 - **Model providers.** Hosting the orchestrator does not host the models. Speech
   and reasoning calls still go to the providers bound in the package, on the
   user's own accounts.
+- **A proxy.** A LiveKit worker with `HTTPS_PROXY` set also sends its LiveKit
+  connection through the proxy, unless the server's host is in `NO_PROXY`. The
+  generated `agent.py` reads `NO_PROXY` for that one connection. Model and
+  speech calls keep the proxy.
 - **The carrier steps.** Markup to paste, a trunk to configure, a number to
   attach. Per route and per carrier, and the part no compiler can do. The
   generated runbook has them.

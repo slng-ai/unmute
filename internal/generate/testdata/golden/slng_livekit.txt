@@ -1969,6 +1969,11 @@ def prewarm(proc: JobProcess) -> None:
     Args:
         proc: The worker process being warmed.
     """
+    # The SDK gives every job process the worker's proxy, and agent.py drops
+    # that proxy when NO_PROXY covers LIVEKIT_URL. Speech plugins still need it:
+    # livekit.agents.utils.http_session() reads proc.http_proxy, and
+    # livekit-agents 1.8.1 has no public setter for it.
+    proc._http_proxy = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
     # The FLOOR: how long silence has to last before the runtime treats the
     # caller as finished. From pace: balanced.
     #
@@ -2087,6 +2092,8 @@ async def run_call(ctx: JobContext) -> None:
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
+from urllib.request import proxy_bypass_environment
 
 from dotenv import load_dotenv
 from livekit.agents import AgentServer, JobContext
@@ -2095,7 +2102,17 @@ from call import prewarm, run_call
 from settings import LOCAL_INIT_TIMEOUT_SECS
 
 load_dotenv()
-server = AgentServer()
+
+# livekit-agents 1.8.1 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
+# connection to LIVEKIT_URL and ignores NO_PROXY (worker.py:358). A proxy that
+# only tunnels HTTPS answers that request with 405, and the worker never
+# registers. So a LiveKit host listed in NO_PROXY is reached directly. Anything
+# else gets the value the SDK would have picked itself.
+WORKER_PROXY = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
+if proxy_bypass_environment(urlparse(os.getenv("LIVEKIT_URL", "")).hostname or ""):
+    WORKER_PROXY = None
+
+server = AgentServer(http_proxy=WORKER_PROXY)
 server.setup_fnc = prewarm
 if os.getenv("UNMUTE_LOCAL_RUN") == "1":
     # One browser call needs one warm spare, not one index build per CPU.

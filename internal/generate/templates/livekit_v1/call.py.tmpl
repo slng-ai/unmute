@@ -13,6 +13,11 @@ def prewarm(proc: JobProcess) -> None:
     Args:
         proc: The worker process being warmed.
     """
+    # The SDK gives every job process the worker's proxy, and agent.py drops
+    # that proxy when NO_PROXY covers LIVEKIT_URL. Speech plugins still need it:
+    # livekit.agents.utils.http_session() reads proc.http_proxy, and
+    # livekit-agents 1.8.1 has no public setter for it.
+    proc._http_proxy = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
 {{- if not .LocalTurnTaking}}
     # No voice activity detector. The model reports the caller's speech itself,
     # and the framework only listens to it when no detector of ours is present:

@@ -134,6 +134,12 @@ uv run python -m livekit.agents start agent.py    # the worker
 for readable logs while developing, which is what the generated development
 Compose file does.
 
+If the worker's environment sets `HTTPS_PROXY`, the worker would send its
+LiveKit connection through that proxy too. To reach the LiveKit server
+directly, add its host to `NO_PROXY`. Model and speech calls still use the
+proxy. Under `unmute dev` the host is `livekit_server`, so a worker image that
+sets a proxy also needs `NO_PROXY=livekit_server`.
+
 ## Dependencies are pinned
 
 The generated `pyproject.toml` follows your target's framework version, selected

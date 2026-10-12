@@ -227,8 +227,9 @@ import os
 {{end}}from collections.abc import AsyncIterable
 {{if .NeedsPrefetchClock}}from datetime import datetime
 {{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
-{{end}}{{if .NeedsRender}}from urllib.parse import quote
-{{end}}{{if .NeedsPrefetchClock}}from zoneinfo import ZoneInfo
+{{end}}from urllib.parse import {{if .NeedsRender}}quote, {{end}}urlparse
+from urllib.request import proxy_bypass_environment
+{{if .NeedsPrefetchClock}}from zoneinfo import ZoneInfo
 {{end}}
 {{if .NeedsHTTPX}}import httpx
 {{end}}from dotenv import load_dotenv

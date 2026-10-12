@@ -776,6 +776,11 @@ provider keys from `.env.example`, then start the worker:
 python -m livekit.agents start agent.py
 ```
 
+Behind an outbound proxy, the worker would also send its LiveKit connection
+through `HTTPS_PROXY`. To reach your LiveKit server directly, add its host to
+`NO_PROXY`, for example `NO_PROXY=livekit.internal`. Model and speech calls
+still go through the proxy.
+
 See `docs-site/deploy/going-live.mdx` in the Unmute repository for the full
 self-hosted setup: server, Redis, firewall ports, sizing, and scaling.
 {{if or .HasWarmTransfer .HasColdTransfer}}
