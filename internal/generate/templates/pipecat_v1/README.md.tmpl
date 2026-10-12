@@ -11,6 +11,10 @@ cp .env.example .env                      # then fill in your keys
 uv run bot.py -t webrtc                   # web: open the URL it prints
 
 ```
+
+`uv` copies packages into `.venv` and does not hard-link them out of its cache:
+`pyproject.toml` sets `link-mode = "copy"`. On Linux, NLTK refuses a hard-linked
+file, and the knowledge index reads its stopword list through NLTK at startup.
 {{if .LocalTwilio}}
 This package has no phone route, but the bot still answers the runner's Twilio
 route, so a simulated caller can reach it. `uv run bot.py -t twilio -x <public

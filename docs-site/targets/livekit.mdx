@@ -140,6 +140,11 @@ directly, add its host to `NO_PROXY`. Model and speech calls still use the
 proxy. Under `unmute dev` the host is `livekit_server`, so a worker image that
 sets a proxy also needs `NO_PROXY=livekit_server`.
 
+`uv` copies the dependencies into `.venv` instead of hard-linking them out of its
+cache, because the generated `pyproject.toml` sets `link-mode = "copy"`. On Linux,
+NLTK refuses a hard-linked file, and a knowledge base reads its stopword list
+through NLTK at startup.
+
 ## Dependencies are pinned
 
 The generated `pyproject.toml` follows your target's framework version, selected

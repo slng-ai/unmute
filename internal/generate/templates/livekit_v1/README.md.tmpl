@@ -14,6 +14,10 @@ cp .env.example .env          # then fill in the selected provider values
 uv run python -m livekit.agents start agent.py   # run the worker
 ```
 
+`uv` copies packages into `.venv` and does not hard-link them out of its cache:
+`pyproject.toml` sets `link-mode = "copy"`. On Linux, NLTK refuses a hard-linked
+file, and the knowledge index reads its stopword list through NLTK at startup.
+
 `unmute dev` publishes the local LiveKit server on ports `7880` to `7882`. When
 they are busy, most often because another `unmute dev` session holds them, it
 moves to the next free set of three (`7890` to `7892`, and so on). To pin the

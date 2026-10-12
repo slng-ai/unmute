@@ -19,6 +19,12 @@ dependencies = [
 {{end}}
 [tool.uv]
 package = false
+# Copy packages into .venv, never hard-link them out of uv's cache. On Linux a
+# hard-linked file has st_nlink=2, NLTK refuses to open it, and the knowledge
+# index reads its stopword list through NLTK, so the agent dies at startup. The
+# Dockerfile passes --link-mode=copy for the same reason. This line covers every
+# local `uv run` and `uv sync` in this directory.
+link-mode = "copy"
 {{- if .Knowledge.AnyKeyword}}
 
 # llama-index-retrievers-bm25 declares pystemmer<3, and PyStemmer 2.2.0.3 publishes
