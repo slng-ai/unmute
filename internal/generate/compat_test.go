@@ -219,6 +219,12 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // only repeated a row the trace keeps, and both backends counted llm_node as a
 // second model call. Pipecat and Coval packages move only by that deleted line.
 //
+// And on 2026-10-12, for every Pipecat package: utils/dev_metrics.py names the
+// reply a reply latency, turn detection and speech length belong to. It
+// follows the synthesis context the output transport is playing when the bot
+// starts speaking, so the dev page's turn view shows them. It runs only under
+// `unmute dev`.
+//
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {

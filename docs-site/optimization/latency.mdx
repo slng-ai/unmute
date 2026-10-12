@@ -42,6 +42,11 @@ after runtime audio   the browser or phone receives and plays it
 speech to the first agent audio. It excludes delivery to the browser. It appears
 only when a value is reported. A stage value never substitutes for it.
 
+On Pipecat, reply latency, turn detection and speech duration belong to the
+reply whose audio started the bot speaking. The page reads that reply from the
+synthesis the output transport is playing at that moment. Speech that no single
+reply's synthesis started, such as a speech-to-speech model's, stays unassigned.
+
 The page displays generated text before audio when the source supplies it.
 A model's first response can be a tool call or other output before visible
 answer text. Generation finishing also does not mean all displayed words have

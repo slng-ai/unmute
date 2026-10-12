@@ -19,6 +19,8 @@ import (
 //     decoder refuses to accept otherwise;
 //   - the bot's speech is timed from the transport's own speaking frames, which
 //     is the only place a reply's length appears;
+//   - the reply latency, turn detection and speech length name the reply whose
+//     audio a real output transport started playing, not "unassigned";
 //   - a handler that raises ends its row `failed` carrying the error text, and
 //     one that runs past its deadline ends `timed_out`, told apart by what the
 //     framework sets rather than by log wording.
@@ -35,12 +37,34 @@ func TestSmokeWhereTheReplysTimeWent(t *testing.T) {
 
 const pipecatBreakdownScript = `
 from pipecat.frames.frames import (  # noqa: E402
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     FunctionCallFromLLM,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.transports.base_output import BaseOutputTransport  # noqa: E402
+from pipecat.transports.base_transport import TransportParams  # noqa: E402
+
+
+class PlayingOutput(BaseOutputTransport):
+    """A real output transport, so the speaking frames are the framework's own."""
+
+    def __init__(self, probe):
+        super().__init__(TransportParams(audio_out_enabled=True, audio_out_sample_rate=16000))
+        self.probe = probe
+
+    async def start(self, frame):
+        await super().start(frame)
+        await self.set_transport_ready(frame)
+
+    async def write_audio_frame(self, frame):
+        self.probe.audio.append(frame)
+        return True
+
+
+class PlayingTransport(FakeTransport):
+    def __init__(self, probe):
+        super().__init__(probe)
+        self._output = PlayingOutput(probe)
 
 
 async def exercise_breakdown():
@@ -62,7 +86,7 @@ async def exercise_breakdown():
     args = RunnerArguments(body={"unmute_dev_call_id": call_id}, session_id=call_id)
     try:
         with redirect_stdout(capture):
-            task = asyncio.create_task(bot.run_bot(FakeTransport(probe), args))
+            task = asyncio.create_task(bot.run_bot(PlayingTransport(probe), args))
             try:
                 await asyncio.wait_for(probe.started.wait(), timeout=5)
                 await probe.main.rtvi.set_client_ready()
@@ -90,9 +114,6 @@ async def exercise_breakdown():
                 await asyncio.wait_for(request.finished.wait(), timeout=5)
                 await until(lambda: len(probe.syntheses) == 2, "the reply reached TTS")
                 probe.syntheses[1][1].set()
-                await probe.stt.push_frame(BotStartedSpeakingFrame())
-                await asyncio.sleep(0.05)
-                await probe.stt.push_frame(BotStoppedSpeakingFrame())
 
                 await until(lambda: any(r["kind"] == "breakdown" for r in capture.records()),
                             "the framework's breakdown reached the dev feed", timeout=5)
@@ -111,6 +132,22 @@ async def exercise_breakdown():
 
                 await until(spoken, "the bot's speech was never timed", timeout=5)
                 assert spoken()[-1]["measurement"]["state"] == "measured", spoken()[-1]
+
+                # Each one names the reply the transport was playing: the
+                # exchange the reply's synthesis request was made for.
+                reply = [r["operation"] for r in capture.latest("operation")
+                         if r["operation"]["type"] == "tts"][-1]["exchange_id"]
+                assert reply, "the reply's synthesis named no reply"
+
+                def of_reply(metric):
+                    return [r["measurement"] for r in capture.latest("measurement")
+                            if r["measurement"]["metric"] == metric and r["measurement"]["state"] == "measured"
+                            and r["measurement"].get("exchange_id") == reply]
+
+                await until(lambda: of_reply("speech_duration"), "the reply's speech named no reply", timeout=5)
+                for metric in ("reply_latency", "turn_detection", "speech_duration"):
+                    rows = of_reply(metric)
+                    assert len(rows) == 1 and rows[0]["scope"] == "response", (metric, capture.latest("measurement"))
 
                 # A handler that raises, and one that runs past its deadline.
                 llm = probe.llms[0]
