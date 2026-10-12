@@ -87,6 +87,19 @@ const {chromium} = require(process.env.UNMUTE_SWEEP_PLAYWRIGHT || 'playwright');
       assert.equal(await page.evaluate(()=>window.sent.filter(m=>m.label==='rtvi-ai'&&m.type==='send-text'||m.options).length), 2);
       assert.deepEqual(await page.locator('#tlist .turn.you').allTextContents().then(t=>t.map(x=>x.replace(/^you/,''))), ['I want a haircut','second line']);
 
+      // A bot that records typed text sends the line itself: its row replaces
+      // the echo. A line nothing reports keeps its echo.
+      const emit=(kind,id,payload,order)=>page.evaluate(({kind,id,payload,order,call})=>window.feed.dispatchEvent(new MessageEvent('message',
+        {data:JSON.stringify({t:'metric',stream_id:'test',seq:order,record:{version:2,kind,id,call_id:call,revision:1,order,[kind]:payload}})})),
+        {kind,id,payload,order,call:`call-${call}`});
+      await emit('exchange','bot-input',{role:'input',state:'ended',link_status:'unavailable'},500);
+      await emit('text','bot-text',{exchange_id:'bot-input',message_id:'bot-text',speaker:'user',text:'  Second LINE ',state:'final',origin:'recognition',separator_before:''},501);
+      const rows=await page.locator('#tlist .turn.you').evaluateAll(n=>n.map(x=>x.textContent.replace(/^you/,'').trim()));
+      assert.deepEqual(rows.sort(), ['I want a haircut','  Second LINE'.trim()].sort(), 'a matching record replaces its echo; an unmatched echo stays');
+      assert.equal(await page.locator('#tlist .turn.you[data-message^="typed-"]').count(), 1);
+      await emit('text','other',{exchange_id:'bot-input',message_id:'other',speaker:'user',text:'unrelated',state:'final',origin:'recognition',separator_before:''},502);
+      assert.equal(await page.locator('#tlist .turn.you[data-message^="typed-"]').count(), 1, 'a different line does not remove an echo');
+
       // M and Space still belong to the page only outside the text box.
       await page.locator('#chatinput').fill('m m');
       assert.equal(await page.locator('#chatinput').inputValue(), 'm m');

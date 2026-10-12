@@ -285,6 +285,10 @@ func TestTextChatReachesTheBotThroughTheTransportsOwnChannel(t *testing.T) {
 			t.Errorf("text chat missing %q", want)
 		}
 	}
+	// The echo is a placeholder that the bot's own record replaces.
+	if !strings.Contains(source, "function dropEcho(record)") || !strings.Contains(source, "pendingEchoes") {
+		t.Error("a typed line's echo must give way to a matching record")
+	}
 	// A text-only call must not reach for the microphone.
 	if !strings.Contains(source, "if (textOnly) return;") {
 		t.Error("LiveKit text only must skip enabling the microphone")

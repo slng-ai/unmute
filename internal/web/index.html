@@ -896,6 +896,7 @@ function clearTranscript(){
   stateLatest=new Set();
   renderStatePanel();
   records.clear(); recordNodes.clear(); exchangeNodes.clear(); messageNodes.clear();
+  pendingEchoes.clear();
   selectedCallID = null;
   locallyEnded = false;
   connectionLost = false;
@@ -1636,6 +1637,7 @@ function attachRecord(record){
   const key=record.kind+':'+record.id, prior=records.get(key);
   if (prior && record.revision<=prior.revision) return;
   if (prior?.text?.state==='final' && record.text?.state==='provisional') return;
+  dropEcho(record);
   const reading=readingPosition();
   const selection=window.getSelection();
   const selected=selection && !selection.isCollapsed && el.transcript.contains(selection.anchorNode) && el.transcript.contains(selection.focusNode)
@@ -2100,6 +2102,25 @@ el.textonly.addEventListener("click", () => { connect(true); });
 // input listens to by default. Neither runtime reports the line back as a
 // transcript, so the page writes the caller's words itself.
 let typedCount = 0;
+const pendingEchoes = new Map();                     // echo id -> typed text, until a record says it
+const sameWords = text => text.trim().toLowerCase();
+// The echo is a placeholder. When the bot reports the same words as the
+// caller's, that record owns the row and the echo goes. Matching is by the
+// words only, never by time, and an echo nothing matches stays.
+function dropEcho(record){
+  const data = record.text;
+  if (!data || data.speaker !== "user" || pendingEchoes.size === 0 || record.id.startsWith("typed-")) return;
+  for (const [id, text] of pendingEchoes){
+    if (text !== sameWords(data.text)) continue;
+    pendingEchoes.delete(id);
+    records.delete("exchange:"+id); records.delete("text:"+id+"-text");
+    recordNodes.delete("text:"+id+"-text");
+    messageNodes.delete(JSON.stringify(["user",id,""]));
+    exchangeNodes.get("exchange:"+id)?.element.remove();
+    exchangeNodes.delete("exchange:"+id);
+    return;
+  }
+}
 function chatReady(){ el.chatsend.disabled = el.chatinput.value.trim() === ""; }
 el.chatinput.addEventListener("input", chatReady);
 function showTyped(text){
@@ -2110,6 +2131,7 @@ function showTyped(text){
     exchange:{role:"input",state:"ended",link_status:"unavailable",playback:"unknown"}});
   attachRecord({version:2,kind:"text",call_id:selectedCallID,id:id+"-text",revision:1,order:order+0.1,
     text:{exchange_id:id,message_id:id,speaker:"user",text,state:"final",origin:"typed",separator_before:""}});
+  pendingEchoes.set(id, sameWords(text));
 }
 async function sendTyped(text){
   if (transport === "livekit"){
