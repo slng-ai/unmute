@@ -1389,6 +1389,20 @@ function callTurns(all){
   // A caller input nothing answered is noise, unless it is the turn in progress.
   return turns.filter((t,i)=>t.responses.length || i===turns.length-1);
 }
+// A turn's requests in the order they started. Record order is first sight,
+// except that LiveKit records a TTS request only once synthesis has ended, which
+// puts a filler's speech after the model call it was covering. Synthesis starts
+// on its reply's text, so speech sorts at the latest text of that reply that
+// arrived before it. A reply-level first byte (Pipecat) sorts the same way.
+function inStartOrder(all, records){
+  const at=r=>{
+    const data=r.operation||r.measurement;
+    if (r.operation && data.type!=='tts') return r.order;
+    const said=all.filter(t=>t.text?.speaker==='assistant' && t.text.exchange_id===data.exchange_id && t.order<r.order);
+    return said.length ? Math.max(...said.map(t=>t.order)) : r.order;
+  };
+  return records.map(r=>[at(r),r]).sort((a,b)=>a[0]-b[0]).map(([,r])=>r);
+}
 // Turns the reader opened or closed. Until they touch one, the latest is open.
 const openTurns=new Set();
 let turnsTouched=false;
@@ -1472,14 +1486,22 @@ function renderMetrics(){
       const heard=heardID ? textOf(heardID,'assistant') : '';
       const said=turn.input ? textOf(turn.input.id,'user') : heard;
 
-      // One row per stage, in a fixed order: what the caller waited through.
+      // One row per stage, in the order they started: what the caller waited through.
       const stages=[];
       const turnDecision=one('turn_detection'), transcript=one('transcription_delay');
       if (turnDecision!=null || transcript!=null)
         stages.push({kind:'stt',name:'STT + turn',value:turnDecision??transcript,
           note:turnDecision!=null && transcript!=null ? 'final transcript at '+secs(transcript) : turnDecision!=null ? 'turn decision' : 'final transcript'});
-      for (const type of ['llm','tool','handoff','tts']) for (const o of ops.filter(o=>o.operation.type===type)){
-        const op=o.operation, first=byOperation(o.id,'first_response'), duration=byOperation(o.id,type==='tool'?'tool_duration':'request_duration');
+      // On Pipecat the TTS first byte belongs to the reply, not to a request.
+      const replyTTS=ops.some(o=>o.operation.type==='tts' && byOperation(o.id,'first_response')!=null) ? [] :
+        all.filter(r=>r.measurement?.state==='measured' && !r.measurement.operation_id && groups.has(measurementGroup(r.measurement)) && firstKind(r.measurement)==='tts');
+      for (const o of inStartOrder(all,ops.concat(replyTTS))){
+        if (o.measurement){
+          const m=o.measurement;
+          stages.push({kind:'tts',name:'TTS',value:m.value,limit:'tts_first_byte',note:'first audio'+(m.model?' · '+m.model:'')});
+          continue;
+        }
+        const op=o.operation, type=op.type, first=byOperation(o.id,'first_response'), duration=byOperation(o.id,type==='tool'?'tool_duration':'request_duration');
         const failed=FAILED.includes(op.state), model=op.model||measured.find(m=>m.operation_id===o.id && m.model)?.model;
         const stage={kind:type,name:type==='handoff'?'Handoff':type==='tool'?'Tool':type.toUpperCase()};
         if (failed){ stage.text=op.state.replaceAll('_',' '); stage.lv='failed'; }
@@ -1494,14 +1516,10 @@ function renderMetrics(){
         } else stage.note='to '+op.name;
         if (!failed && stage.value==null) stage.text=op.state==='running' ? 'running' : op.state==='cancelled' ? 'cancelled' : '';
         // A request with no number and nothing to say adds no row: on Pipecat
-        // the TTS first byte belongs to the reply, and is added below.
+        // the TTS first byte belongs to the reply, and comes from replyTTS.
         if (stage.value==null && !stage.text && type!=='handoff') continue;
         stages.push(stage);
       }
-      // On Pipecat the TTS first byte belongs to the reply, not to a request.
-      if (!ops.some(o=>o.operation.type==='tts' && byOperation(o.id,'first_response')!=null))
-        for (const m of measured.filter(m=>!m.operation_id && groups.has(measurementGroup(m)) && firstKind(m)==='tts'))
-          stages.push({kind:'tts',name:'TTS',value:m.value,limit:'tts_first_byte',note:'first audio'+(m.model?' · '+m.model:'')});
       for (const s of stages) if (!s.lv && s.limit && s.value!=null) s.lv=level(s.value,s.limit);
       const tools=stages.filter(s=>s.kind==='tool'), llmCount=stages.filter(s=>s.kind==='llm').length;
       const unrated=!!turn.input && unratedReply(ops);

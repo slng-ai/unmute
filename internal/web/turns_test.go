@@ -13,26 +13,41 @@ import (
 	"github.com/slng-ai/unmute/internal/devmetrics"
 )
 
-// TestMetricsGivesEachCallerTurnItsOwnReply runs the page's own callTurns over a
-// typed LiveKit call. LiveKit opens a reply before its input commits, so a reply
-// sorts ahead of the input it answers. Placed in arrival order, every reply
-// landed one turn early and the last turn showed nothing. Node runs the function
-// as shipped; without Node the test skips, the way the browser smoke does.
-func TestMetricsGivesEachCallerTurnItsOwnReply(t *testing.T) {
+// TestMetricsShowsEachCallerTurnInTheOrderItRan runs the page's own functions
+// over a typed LiveKit call. LiveKit opens a reply before its input commits, so
+// a reply sorts ahead of the input it answers; placed in arrival order, every
+// reply landed one turn early. And LiveKit records a TTS request only once
+// synthesis ends, so a filler's speech sorted after the model call it covered.
+// Node runs the functions as shipped; without Node the test skips, the way the
+// browser smoke does.
+func TestMetricsShowsEachCallerTurnInTheOrderItRan(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not available")
 	}
 	source := page(t)
-	start := strings.Index(source, "function callTurns(")
-	if start < 0 {
-		t.Fatal("index.html has no callTurns")
+	var script strings.Builder
+	for _, name := range []string{"callTurns", "operationGroup", "inStartOrder"} {
+		start := strings.Index(source, "function "+name+"(")
+		if start < 0 {
+			t.Fatalf("index.html has no %s", name)
+		}
+		// A function ends on its first line, or at the next brace in column zero.
+		end := strings.Index(source[start:], "\n")
+		if !strings.HasSuffix(source[start:start+end], "}") {
+			end = strings.Index(source[start:], "\n}\n") + 2
+		}
+		script.WriteString(source[start : start+end])
+		script.WriteString("\n")
 	}
-	end := strings.Index(source[start:], "\n}\n")
-	if end < 0 {
-		t.Fatal("callTurns has no closing brace at column zero")
-	}
-	fn := source[start : start+end+2]
+	script.WriteString(`
+const all=JSON.parse(require('node:fs').readFileSync(0,'utf8'));
+for (const t of callTurns(all)){
+  const groups=new Set(t.responses.map(r=>'exchange:'+r.id));
+  const ops=all.filter(r=>r.operation && groups.has(operationGroup(r.operation)));
+  const rows=inStartOrder(all,ops).map(r=>r.operation.type==='tool'||r.operation.type==='handoff'?r.operation.type+':'+r.operation.name:r.operation.type);
+  console.log((t.input?t.input.id:'greeting')+': '+t.responses.map(r=>r.id).join(' ')+' | '+rows.join(' '));
+}`)
 
 	raw, err := os.ReadFile("../devmetrics/testdata/typed-livekit.jsonl")
 	if err != nil {
@@ -62,20 +77,19 @@ func TestMetricsGivesEachCallerTurnItsOwnReply(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	script := fn + `
-const all=JSON.parse(require('node:fs').readFileSync(0,'utf8'));
-for (const t of callTurns(all)) console.log((t.input?t.input.id:'greeting')+': '+t.responses.map(r=>r.id).join(' '));`
-	cmd := exec.CommandContext(t.Context(), node, "-e", script)
+	cmd := exec.CommandContext(t.Context(), node, "-e", script.String())
 	cmd.Stdin = bytes.NewReader(feed)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}
 	want := strings.Join([]string{
-		"greeting: response-2",
-		"input-7: response-5 response-10 response-12",   // book handoff, the announce, the verify ask
-		"input-17: response-15 response-20 response-22", // find_or_create_customer, the filler, find_slots
-		"input-29: response-27",                         // save_booking
+		"greeting: response-2 | tts",
+		// The handoff, the step announce's speech, then the verify ask.
+		"input-7: response-5 response-10 response-12 | llm handoff:book tts llm tts",
+		// The filler is spoken while the next model call runs.
+		"input-19: response-17 response-22 response-24 | llm tool:find_or_create_customer tts llm tool:find_slots llm tts",
+		"input-33: response-31 | llm tool:save_booking llm tts",
 	}, "\n") + "\n"
 	if string(out) != want {
 		t.Errorf("caller turns:\n%s\nwant:\n%s", out, want)
