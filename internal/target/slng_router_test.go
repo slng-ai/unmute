@@ -374,6 +374,12 @@ func TestSlngRolesTakeTheirOwnRegionLists(t *testing.T) {
 			t.Error(err)
 		}
 	}
+	// The refusal of a second region suggests the regions to pick from, so it
+	// reads the same list: a copy of it kept offering the world parts.
+	refusal := Default().Capability(FieldDeploymentMultiRegion, Slng).Note
+	if !strings.HasSuffix(refusal, strings.Join(SlngDeploymentRegions, ", ")) {
+		t.Errorf("multi-region refusal does not offer the deployment regions: %q", refusal)
+	}
 	// Agent regions that are no world part deploy, and reach no model service.
 	for _, region := range []string{"us-east-slng", "eu-central", "ap-south"} {
 		if err := CheckSlngRegion(region); err != nil {
