@@ -415,3 +415,9 @@ func TestAToolThatRanOutOfTimeSaysSo(t *testing.T) {
 		t.Errorf("a failed tool with its error text was refused: %v", err)
 	}
 }
+
+// The typed fixture feeds the dev page's caller-turn test in internal/web, so it
+// has to stay a feed the decoder accepts.
+func TestTypedLiveKitFixtureDecodes(t *testing.T) {
+	readFixture(t, "typed-livekit.jsonl")
+}

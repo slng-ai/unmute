@@ -1367,11 +1367,14 @@ function table(label, heads, rows){
 // rows are turns, and every turn with a measured latency shows it.
 function callTurns(all){
   const turns=[], byInput=new Map();
+  // LiveKit opens a reply before its input commits, so a linked reply sorts
+  // ahead of the input it answers. Know every input before placing a reply.
+  for (const r of all) if (r.exchange?.role==='input'){ const t={key:r.id,input:r,responses:[]}; turns.push(t); byInput.set(r.id,t); }
   let current=null;
   for (const r of all){
     const x=r.exchange;
     if (!x) continue;
-    if (x.role==='input'){ current={key:r.id,input:r,responses:[]}; turns.push(current); byInput.set(r.id,current); continue; }
+    if (x.role==='input'){ current=byInput.get(r.id); continue; }
     // ponytail: a reply with no proven input joins the latest caller input
     // before it, in arrival order. That is wrong only when an earlier turn opens
     // a reply after the caller spoke again; carry input_id from the producers
