@@ -198,9 +198,13 @@ repeating under every value in the conversation.
 
 The **Metrics** view adds up the same values for the whole call. Its tiles show
 reply latency, LLM first token and TTS first audio at p90. Each number is
-colored against a limit: over the first limit it is slow, over the second it is
-over the limit. Reply latency is slow above 1000ms and over the limit above
-1500ms. Each tile names its target, and each bar marks its stage's limit.
+colored against a limit: over the first limit it is slow (yellow), over the
+second it is over the limit (orange, marked ▲). Red means a request failed. A
+caller turn is green up to 900ms, slow above 900ms and over the limit above
+1200ms. A turn where the model ran more than once, as it does around a tool
+call, is not rated, because it cannot fit a one-request budget. Each tile names
+its target, each bar marks its stage's limit, and a legend under the turns
+explains every color.
 
 The view groups replies by caller turn. One caller turn can make several
 replies, such as "Let me have a look." and then the answer. The runtime reports

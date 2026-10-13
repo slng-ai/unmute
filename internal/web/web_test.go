@@ -43,7 +43,9 @@ func TestControlsLabelTheStateNotTheAction(t *testing.T) {
 	for _, want := range []string{
 		`MIC LIVE`,                       // capturing
 		`MIC MUTED`,                      // not capturing
-		`MIC —`,                          // no call, or permission refused
+		`MIC OFF`,                        // no call yet
+		`NO MIC · TEXT ONLY`,             // a text-only call, on purpose
+		`NO MIC · BLOCKED`,               // permission refused
 		`el.mute.dataset.mic = micState`, // one state drives the appearance
 		`el.mute.disabled = micState === "unavailable"`, // inert until a call exists
 		`el.connect.textContent = "end call"`,           // the primary button names the next transition
@@ -292,5 +294,34 @@ func TestTextChatReachesTheBotThroughTheTransportsOwnChannel(t *testing.T) {
 	// A text-only call must not reach for the microphone.
 	if !strings.Contains(source, "if (textOnly) return;") {
 		t.Error("LiveKit text only must skip enabling the microphone")
+	}
+}
+
+// While the agent starts, the conversation view is a start screen named in words
+// that fit both targets, the typed line sits under the conversation rather than
+// in the call bar, and a reply the model made more than once is not rated.
+func TestPageStartsOnAStartScreenAndTypesUnderTheConversation(t *testing.T) {
+	source := page(t)
+	for _, want := range []string{
+		`setRunState(ev.state, ev.step)`, // the CLI names the step
+		`const BOOT_STEP = {1:"Starting the agent", 2:"Waiting for the agent to answer"}`,
+		`function unratedReply(ops)`,
+		`reply_latency:      {slow:900,  bad:1200`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("page missing %q", want)
+		}
+	}
+	boot := source[strings.Index(source, `<section class="boot"`):strings.Index(source, `<section class="stage">`)]
+	for _, framework := range []string{"LiveKit", "Pipecat", "worker", "container"} {
+		if strings.Contains(boot, framework) {
+			t.Errorf("start screen names one target's internals: %q", framework)
+		}
+	}
+	conversation := strings.Index(source, `id="view-conversation"`)
+	metrics := strings.Index(source, `id="view-metrics"`)
+	form := strings.Index(source, `<form id="chatform"`)
+	if form < conversation || form > metrics {
+		t.Error("the typed line must sit inside the conversation view")
 	}
 }

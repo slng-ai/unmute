@@ -283,11 +283,14 @@ still applies; a replay check does not describe a real caller's conversation.
 
 Conversation, Metrics and Logs share one media connection. Metrics sums up the
 current call from the same records: p90 tiles, one row per reply with what was
-slow, and latency per model, judged against the studio's default limits. Feed reconnects retain the
+slow, and latency per model. A caller turn is green up to 900ms, yellow to
+1200ms and orange above it; a turn where the model ran more than once, as around
+a tool call, is not rated. Red means failed. Feed reconnects retain the
 conversation and expose unrecoverable gaps; they do not reconnect the mic.
 Scrolling back keeps the reading position, and Latest resumes following.
-The logs view is available while the runtime starts so startup failures remain
-readable.
+While the runtime starts, the page shows a start screen with the current step
+and the latest output, on both targets. If the start fails, it shows the first
+error line and a link to the full output in Logs.
 
 ## What to state when you finish
 

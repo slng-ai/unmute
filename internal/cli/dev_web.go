@@ -186,6 +186,7 @@ func runDevPipecat(ctx context.Context, cmd *cobra.Command, outDir string, run d
 	}
 	defer web.close()
 
+	run.stream.SetStep(devStepStart)
 	spin := startSpinner(cmd.ErrOrStderr(), "starting the local Pipecat agent")
 	agent, err := startPipecatWebAgent(ctx, outDir, run.botPort, run.env, logSink)
 	if err != nil {
@@ -193,6 +194,7 @@ func runDevPipecat(ctx context.Context, cmd *cobra.Command, outDir string, run d
 		return web.holdForFailure(ctx, cmd, run, fmt.Errorf("dev %s: %w", run.root, err))
 	}
 	defer stopBot(agent.cmd, agent.done)
+	run.stream.SetStep(devStepAnswer)
 	if err := pipecatWebAgentReady(ctx, run.botPort, agent.done); err != nil {
 		spin.Stop()
 		if ctx.Err() != nil {
@@ -373,6 +375,7 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 
 	reapAbandonedStacks(ctx, run.env, logSink, cmd.ErrOrStderr())
 
+	run.stream.SetStep(devStepStart)
 	spin := startSpinner(cmd.ErrOrStderr(), "building and starting the container")
 	up := composeCommand(ctx, "docker", composeArgs(run.composeFile, run.project, "up", "--build", "--detach", "--remove-orphans", "--wait")...)
 	up.Env = run.env
@@ -407,6 +410,7 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 	go func() { logsDone <- logs.Wait() }()
 
 	if run.provider == ir.ProviderLiveKit {
+		run.stream.SetStep(devStepAnswer)
 		spin := startSpinner(cmd.ErrOrStderr(), "waiting for the agent worker to register")
 		select {
 		case <-ready:

@@ -350,3 +350,30 @@ func TestDevStreamWritesConcurrently(t *testing.T) {
 		t.Fatalf("kept %d lines, want 200", got)
 	}
 }
+
+// The page says which start-up step is running. A page that connects late reads
+// the step from the latched state, and a step sent after ready changes nothing.
+func TestDevStreamStepRidesTheStartingState(t *testing.T) {
+	s := newDevStream()
+	_, live, cancel := subscribeDev(t, s, "")
+	defer cancel()
+	s.SetStep(devStepAnswer)
+	if ev := <-live; ev.T != devEventState || ev.State != devStateStarting || ev.Step != devStepAnswer {
+		t.Fatalf("step event = %+v", ev)
+	}
+	backlog, _, cancelLate := subscribeDev(t, s, "")
+	defer cancelLate()
+	if ev := backlog[0]; ev.State != devStateStarting || ev.Step != devStepAnswer {
+		t.Fatalf("late page latched %+v, want step %d", ev, devStepAnswer)
+	}
+	s.SetState(devStateReady)
+	if ev := <-live; ev.State != devStateReady || ev.Step != 0 {
+		t.Fatalf("ready event = %+v, want no step", ev)
+	}
+	s.SetStep(devStepStart)
+	select {
+	case ev := <-live:
+		t.Fatalf("step after ready sent %+v", ev)
+	default:
+	}
+}

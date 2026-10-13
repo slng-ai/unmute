@@ -38,6 +38,15 @@ const (
 	devStateFailed   = "failed"
 )
 
+// Start-up steps, sent with `starting` so the page can say which one is running
+// in words that fit both targets. The page owns the wording; 0 means not yet
+// begun. LiveKit builds and starts its container, then waits for the worker to
+// register; Pipecat starts its local process, then waits for its health check.
+const (
+	devStepStart  = 1
+	devStepAnswer = 2
+)
+
 // devFailureMarkers is one substring test, deliberately. Parsing log levels
 // needs per-SDK format knowledge that breaks on any release that reformats a
 // line, and a flag that quietly stops working is worse than a crude one.
@@ -53,6 +62,7 @@ type devEvent struct {
 	Flagged  bool               `json:"flagged,omitempty"`
 	Record   *devmetrics.Record `json:"record,omitempty"`
 	State    string             `json:"state,omitempty"`
+	Step     int                `json:"step,omitempty"`
 	Reason   string             `json:"reason,omitempty"`
 	size     int
 }
@@ -75,6 +85,7 @@ type devStream struct {
 	nextSeq    int
 	id         string
 	state      string
+	step       int
 	partial    []byte
 	discarding bool
 	subs       map[int]*devSubscription
@@ -156,7 +167,27 @@ func (s *devStream) SetState(state string) {
 		return
 	}
 	s.state = state
-	s.broadcastLocked(devEvent{T: devEventState, State: state, StreamID: s.id})
+	s.broadcastLocked(s.stateEventLocked())
+}
+
+// SetStep names the start-up step now running. It is ignored once the run has
+// left `starting`, so a late call cannot make a ready page look busy again.
+func (s *devStream) SetStep(step int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != devStateStarting {
+		return
+	}
+	s.step = step
+	s.broadcastLocked(s.stateEventLocked())
+}
+
+func (s *devStream) stateEventLocked() devEvent {
+	ev := devEvent{T: devEventState, State: s.state, StreamID: s.id}
+	if s.state == devStateStarting {
+		ev.Step = s.step
+	}
+	return ev
 }
 
 func (s *devStream) State() string {
@@ -237,7 +268,7 @@ func (s *devStream) Subscribe(lastID string) (*devSubscription, func(), error) {
 	sub := &devSubscription{events: make(chan devEvent, devStreamQueue), done: make(chan struct{})}
 	// The current state first, so a page that connects late is not told it is
 	// still starting by the absence of an event it missed.
-	sub.backlog = append(sub.backlog, devEvent{T: devEventState, State: s.state, StreamID: s.id})
+	sub.backlog = append(sub.backlog, s.stateEventLocked())
 	reason := ""
 	if streamID != "" && streamID != s.id {
 		reason = "stream-restarted"
