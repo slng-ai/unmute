@@ -185,6 +185,23 @@ func TestSkillInstallAgentCodexWritesOnlyTheCanonicalDestination(t *testing.T) {
 	}
 }
 
+// The claude files are pointers into .agents, so --agent claude has to write
+// what they point at. Every other assistant reads the canonical copy itself.
+func TestSkillInstallAgentClaudeWritesWhatItsPointersName(t *testing.T) {
+	project := t.TempDir()
+	if _, _, err := runSkillInstallCommand(t, "--dir", project, "--agent", "claude"); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"unmute", "unmute-manifest", "unmute-deploy"} {
+		for _, root := range []string{".agents", ".claude"} {
+			file := filepath.Join(project, root, "skills", dir, "SKILL.md")
+			if _, err := os.Stat(file); err != nil {
+				t.Errorf("--agent claude did not write %s: %v", file, err)
+			}
+		}
+	}
+}
+
 func TestSkillInstallDeduplicatesSharedDestinations(t *testing.T) {
 	project := t.TempDir()
 	stdout, _, err := runSkillInstallCommand(t, "--dir", project, "--agent", "codex,cursor,copilot")

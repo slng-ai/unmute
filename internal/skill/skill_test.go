@@ -358,10 +358,10 @@ func TestDestinationsResolvesAndDeduplicates(t *testing.T) {
 	}{
 		{name: "default is all", in: nil, want: []string{"canonical", "pointer", "manifest canonical", "manifest pointer", "deploy canonical", "deploy pointer"}},
 		{name: "all", in: []string{"all"}, want: []string{"canonical", "pointer", "manifest canonical", "manifest pointer", "deploy canonical", "deploy pointer"}},
-		{name: "claude is the pointers only", in: []string{"claude"}, want: []string{"pointer", "manifest pointer", "deploy pointer"}},
+		{name: "claude takes the canonicals its pointers name", in: []string{"claude"}, want: []string{"canonical", "pointer", "manifest canonical", "manifest pointer", "deploy canonical", "deploy pointer"}},
 		{name: "codex is the canonicals only", in: []string{"codex"}, want: []string{"canonical", "manifest canonical", "deploy canonical"}},
 		{name: "three names, one set of directories", in: []string{"codex", "cursor", "copilot"}, want: []string{"canonical", "manifest canonical", "deploy canonical"}},
-		{name: "both kinds", in: []string{"claude", "codex"}, want: []string{"pointer", "manifest pointer", "deploy pointer", "canonical", "manifest canonical", "deploy canonical"}},
+		{name: "both kinds", in: []string{"claude", "codex"}, want: []string{"canonical", "pointer", "manifest canonical", "manifest pointer", "deploy canonical", "deploy pointer"}},
 		{name: "case and space tolerated", in: []string{" Codex "}, want: []string{"canonical", "manifest canonical", "deploy canonical"}},
 		{name: "unknown fails", in: []string{"emacs"}, fails: true},
 		{name: "unknown fails even beside a known one", in: []string{"codex", "emacs"}, fails: true},

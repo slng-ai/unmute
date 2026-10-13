@@ -124,8 +124,12 @@ func (d Destination) Rel() string { return path.Join(d.dir...) }
 
 // Assistants maps the --agent names onto destinations. Several names share a
 // destination, which is why the resolver deduplicates rather than writing twice.
+//
+// claude takes every destination, not only the pointers: a pointer says "read
+// .agents/skills/unmute/SKILL.md", so a pointer without the canonical copy
+// beside it sends Claude to a file that does not exist.
 var assistants = map[string][]Destination{
-	"claude":  {Pointer, ManifestPointer, DeployPointer},
+	"claude":  All,
 	"codex":   {Canonical, ManifestCanonical, DeployCanonical},
 	"cursor":  {Canonical, ManifestCanonical, DeployCanonical},
 	"copilot": {Canonical, ManifestCanonical, DeployCanonical},
