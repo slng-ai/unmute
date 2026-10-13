@@ -16,6 +16,668 @@ kinds were validated live here.
 
 {/* changelog:entries */}
 
+<Update label="October 2026" description="v0.7.3" tags={["CLI"]}>
+
+Dev page Metrics fixes and a working Claude skill install.
+
+How to upgrade:
+
+1. Upgrade unmute: `brew upgrade --cask slng-ai/tap/unmute`.
+2. If you use Claude, run `unmute skill install --agent claude` again.
+   You do not need to compile your agents again.
+
+Fixes:
+
+* Metrics view: each reply now sits on the caller turn it answers.
+  Before, a reply was shown on the turn before it, and the last turn
+  showed ", ". This affected typed calls and mic calls on LiveKit.
+* Metrics view: when you open a turn, its parts are now listed in the
+  order they started. Before, they were grouped by type. A tool turn
+  now reads the way it ran: LLM, tool, filler speech, LLM, tool, reply.
+* `unmute skill install --agent claude` now also writes the shared
+  skill files under `.agents/skills/`. Before, it wrote only the
+  `.claude` pointers, and they pointed at files that did not exist.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.7.3)
+
+</Update>
+
+<Update label="October 2026" description="v0.7.2" tags={["CLI"]}>
+
+A new dev page with metrics, state and text chat, plus runtime fixes.
+
+How to upgrade:
+
+1. Upgrade unmute: `brew upgrade --cask slng-ai/tap/unmute`.
+2. Compile your agents again. The generated Pipecat and LiveKit
+   projects changed: `call_state.py`, `pyproject.toml` and the
+   LiveKit `agent.py`.
+
+Highlights:
+
+* The `unmute dev` page has a new look, in the style of SLNG Studio.
+  It has a top bar, a call bar, a transcript with a speaker column, and
+  a side panel with call details.
+* New Metrics view. It shows p90 tiles and one row per caller turn,
+  with the time for each part: STT, LLM, TTS and tools. Open a turn to
+  see each part on its own row. Latency by model is grouped by STT,
+  LLM, TTS, and tools and handoffs.
+* Reply latency colours: green up to 900ms, yellow up to 1200ms,
+  orange above. Red now means failed only. Turns with tool calls are
+  not rated. A legend explains the colours.
+* Live call state. Every save to `State` shows as a row in the
+  conversation, with what set it and the value before. A new State
+  panel lists every field from `state.py` with its current value.
+* Type to the agent. During a call, a text box under the conversation
+  sends a line as the caller's turn. A new **Text only** button starts
+  a call with no microphone.
+* A start screen shows progress while the agent starts. If the start
+  fails, it shows the first error and a link to Logs.
+
+Fixes:
+
+* `unmute dev --target pipecat` no longer fails at startup for a
+  package with `knowledge:` on Linux. Generated projects now tell uv
+  to copy packages, not hard-link them.
+* A LiveKit worker behind `HTTPS_PROXY` now connects to its server
+  directly when `NO_PROXY` lists the server. Before, the proxy
+  answered 405 and the worker gave up.
+* Pipecat reply latency is now linked to its reply. Before, every
+  Pipecat turn in Metrics showed ", ".
+* On LiveKit, a hang-up during a task is now recorded as `cancelled`,
+  not `failed`.
+* The docs changelog workflow works again. It now opens a pull request
+  after each release.
+
+Examples:
+
+* New `examples/salon-concierge-unoptimized`. All three salon examples
+  now use the same model, tools and turn-taking. You can compare their
+  token use directly. salon-concierge uses 36 to 45% fewer tokens than
+  the unoptimized one.
+* `scripts/text_run_livekit.py` now prints token usage.
+
+Privacy note: the dev page and `build/<target>/dev.log` now show state
+values. These can include tool results and caller details. They stay
+on your machine.
+
+Run `unmute skill install` to refresh the bundled assistant guidance.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.7.2)
+
+</Update>
+
+<Update label="October 2026" description="v0.7.1" tags={["CLI"]}>
+
+SLNG deploy fixes.
+
+How to upgrade:
+
+1. Upgrade voiceai: `brew upgrade slng-ai/tap/voiceai`. Deploy needs
+   voiceai 0.1.22 or later.
+2. Upgrade unmute: `brew upgrade --cask slng-ai/tap/unmute`.
+3. Compile and deploy your SLNG agents again.
+
+Fixes:
+
+* end_call: the caller hears one goodbye, not two. The `announce:` on
+  end_call is now the goodbye line itself.
+* Inbound calls no longer fail when a prompt uses a call fact, such as
+  `from_number`.
+* A package that also targets LiveKit or Pipecat no longer fails to
+  deploy because of `world_part`.
+* Deploy works again after api.slng.ai went offline.
+* A dry run no longer refuses an MCP server whose snapshot is old.
+
+New:
+
+* Deploy warns you when inbound phone calls are not ready.
+
+Changed:
+
+* The deploy report drops `organisation` (report_version 2).
+
+Run `unmute skill install` to refresh the bundled assistant guidance.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.7.1)
+
+</Update>
+
+<Update label="October 2026" description="v0.7.0" tags={["CLI"]}>
+
+Call state in state.py, and tasks on SLNG managed agents.
+
+How to upgrade:
+
+1. Upgrade voiceai: `brew upgrade slng-ai/tap/voiceai`. Deploying a
+   task that lists tools needs voiceai 0.1.20 or later.
+2. Upgrade unmute: `brew upgrade --cask slng-ai/tap/unmute`.
+3. Install uv (https://docs.astral.sh/uv/) if a package has variables.
+   unmute now reads state.py with it. The first run needs network.
+4. Run `unmute validate` on each package. Every old form is refused
+   with its file, its line and where it moved. The fixes are below.
+5. Run `unmute compile` and deploy.
+
+Breaking changes:
+
+* The call state is a Pydantic model in state.py. Why: types,
+  defaults and descriptions are now real Python that Pydantic checks,
+  not a type grammar inside YAML. How: move each variable's `type:`,
+  `default:` and `description:` to a field on `class State(BaseModel)`
+  in `<package>/state.py`. `variables:` in agent.yaml is now a list. It
+  keeps only the values that need `source:` or `confirm:`.
+
+  ```yaml
+  # before, agent.yaml
+  variables:
+    caller_phone:
+      type: Phone
+      default: ""
+      confirm: verify_contact
+      description: The caller's number in E.164.
+
+  # after, agent.yaml
+  variables:
+    - name: caller_phone
+      confirm: verify_contact
+  ```
+
+  ```python
+  # after, state.py
+  class State(BaseModel):
+      caller_phone: Phone | None = Field(None, description="The caller's number in E.164.")
+  ```
+
+  The old form fails with:
+  `variables: is a list now. Types, defaults and descriptions live on State in state.py`.
+
+* `shapes:` is gone. Why: a shape is a type, and types now live in
+  state.py. How: write each shape as a `BaseModel` class in state.py
+  and use it as a field type on State.
+
+* Templates name a saved value as `{{state.x}}`. Why: the name now says
+  where the value lives, a field on State in state.py. How: change
+  `{{x}}` to `{{state.x}}` in the greeting, prompts, tool `inject:`,
+  webhook `path:` and prefetch `args:`. `{{$NAME}}` is unchanged. The
+  old form fails with:
+  `{{x}} names a value on State; write {{state.x}}`.
+
+* A step must return every value its `assign:` names. Why: every field
+  that starts empty is now `| None`, so `| None` can no longer mean
+  "the step may leave this out". How: add `?` to a value the step may
+  skip: `- callback_time: result.callback_time?`. Lists (`x+:`) stay
+  optional. Nothing fails at validate, so read each `assign:` once.
+
+* Pipecat needs `params.world_part` on SLNG speech. Why: pipecat-slng
+  0.6.0 made it required, and a Pipecat bot without it failed at
+  start. How: add `world_part: eu-north` (or your region) under
+  `params:` on each SLNG `listen` and `speak` binding. `unmute validate`
+  refuses a Pipecat package without it. LiveKit is unchanged. The SLNG
+  target drops `world_part`, so one package can target Pipecat and SLNG.
+
+New:
+
+* Tasks and task groups on SLNG managed agents. Why: SLNG managed
+  agents now run tasks. How: write tasks the same way as for LiveKit
+  and Pipecat, and add `slng` to the targets. A tool that only a task
+  uses is attached hidden from the main agent. `unmute validate` names
+  what SLNG still refuses: a model per task, `finish:` rules,
+  `history: summary`, a group ending in anything but `return`, and
+  handoffs.
+
+* Typed values on SLNG. A value a task saves, or one the model records
+  with `source: conversation`, can be a phone number, email, date,
+  time, `Literal`, list or model. A value the dispatch fills stays
+  plain text.
+
+* Logfire tracing on LiveKit and Pipecat: `tracing.provider: logfire`
+  with `LOGFIRE_TOKEN`. Langfuse and Coval settings are unchanged.
+  LiveKit no longer installs the langfuse SDK, and its traces drop the
+  empty wrapper rows.
+
+Generated code:
+
+* Generated Python passes its own ruff and ty rules. Each project
+  carries them in pyproject.toml.
+
+* Each code target writes a small project instead of one big file:
+  settings.py, session.py, agents.py, call.py, utils/, and prompts in
+  prompts/*.md. Twilio splits app.py the same way. The entry file
+  keeps its name (bot.py, agent.py, app.py), so deploy commands do not
+  change. If you edited a generated file by hand, find your edit in
+  the new layout.
+
+* The saved call state is a real Pydantic model at runtime. A saved
+  model holds a model, not a dict. Call-start values and carrier
+  facts now go through the same check as every other save.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.7.0)
+
+</Update>
+
+<Update label="September 2026" description="v0.6.1" tags={["CLI"]}>
+
+Voice agents on Twilio, with SLNG optimization by default.
+
+Highlights:
+- Twilio is now a compilation target. Turn your agent spec into a
+  standalone FastAPI application for inbound ConversationRelay calls.
+  Twilio handles speech recognition and synthesis; your app manages
+  conversation history, tools, and streamed model responses.
+
+- Start with `unmute init my-agent --target twilio`. The starter uses
+  SLNG Context Router with OpenAI upstream to reuse eligible responses
+  and send other requests to the model. Direct OpenAI and Gemini
+  bindings are also supported.
+
+- Host the generated app wherever you choose, then connect your number
+  with `unmute deploy --target twilio`. Deployment checks the hosted
+  build and signed webhook, saves the previous route, and updates the
+  number. Use `--dry-run` to check before making changes.
+
+- The generated app includes signature validation, streamed replies,
+  interruption handling, local tools, end_call, health checks, and
+  graceful shutdown. Custom Python logic and post-session TwiML let
+  you control what happens during and after a conversation.
+
+- A first-call walkthrough covers Twilio account setup, getting a
+  number, compiling locally, publishing the app, and connecting it.
+  Hosting examples show container services, a VM, and a laptop tunnel.
+
+- The shipped example was verified on a deployed application with a
+  real phone call through SLNG, including an opening-hours tool call
+  and a clean hangup.
+
+Getting started:
+  unmute init my-agent --target twilio
+  cd my-agent
+  unmute validate
+  unmute compile
+
+Follow the guide to host the app and connect your number:
+https://unmute.ai/telephony/twilio-conversation-relay
+
+Run `unmute skill install` to refresh the bundled assistant guidance.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.6.1)
+
+</Update>
+
+<Update label="September 2026" description="v0.6.0" tags={["CLI"]}>
+
+Pipecat steps that start on the caller's words, one trace per call, and prompts checked against replayed calls.
+
+Highlights:
+
+* Pipecat: a task step now opens on an instruction. It speaks its
+  opening line first, then gives the model an instruction that points at
+  what the caller already said. Before, the request ended on the model's
+  own sentence. The model then asked again for details it had, sometimes
+  invented a value, and sometimes returned nothing. That last case left
+  the caller in silence. Without any instruction, a step acted on a
+  request before asking for a yes.
+
+* Pipecat tracing: two calls on one worker stay apart. Per-call state
+  lives in a context variable now. A warm worker no longer files one
+  call's spans under another call's session.
+
+* LiveKit tracing: one call is one trace again. The event loop monitor
+  sent an `event_loop_blocked` span with no parent when the loop stalled
+  for more than 100 ms. That span could split a call into two traces.
+  It is no longer exported.
+
+* Every Pipecat build answers the Twilio route of the runner. A
+  browser-only example can now take a simulated phone call too.
+
+* `{{$NAME}}` in a prompt or greeting now fails `unmute validate` on
+  every target. On `slng` it used to pass validation and then fail at
+  push, because the backend removed org variables on 2026-09-02. The
+  error says where a Vault token still works: an MCP server URL. A tool
+  still names its secret by bare name in `auth:`.
+
+* The salon prompts were fixed where replayed calls showed them wrong.
+  The agent asks for a number it does not have instead of inventing
+  one. It reads back a number given in pieces once, whole. It runs
+  verification before it records a complaint, so it never says it saved
+  something it did not. It no longer offers a transfer nobody asked for.
+
+For contributors:
+
+* `make sim TEST_SET=<id>` runs one Coval test set against the examples
+  running on your laptop, on both LiveKit and Pipecat. It exits 1 when a
+  call did not finish, the agent never spoke, or a metric said NO. See
+  `utils/coval_sim/README.md`.
+
+* `scripts/text_run_pipecat.py` drives a compiled Pipecat bot through
+  scripted caller lines. It uses the real model and the local tools, with
+  no audio. It takes the same flags as `text_run_livekit.py`.
+
+Upgrade notes:
+
+* Recompile. The Pipecat bot template and both tracing templates
+  changed.
+
+* If a prompt or greeting uses `{{$NAME}}`, move the value into a
+  package variable (`{{name}}`) or into the MCP server URL. It was already
+  refused at push on `slng`. Now `validate` says so first.
+
+* Run `unmute skill install` again. The skill's package and deploy
+  references changed with the Vault token rule.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.6.0)
+
+</Update>
+
+<Update label="September 2026" description="v0.5.6" tags={["CLI"]}>
+
+Task groups that speak on Pipecat, a booking turn that costs one request less, and a docs tree that stopped rotting.
+
+Highlights:
+
+* Task groups work on Pipecat. A step's opening line was emitted as a
+  Flows `tts_say` pre-action, and a pre-action holds the node until the
+  frame behind it reaches the worker sink, a frame this worker queues
+  does not move until the tool call building the flow returns. The
+  first node of every flow waited on itself: nothing spoken, nothing
+  asked of the model, the caller left hanging. It is a queued
+  `TTSSpeakFrame` now, so nothing waits. `opening: listen` was broken
+  the same way and is fixed by the same change. Two runtime smokes
+  hold it; both time out on the old template.
+
+* The salon's `book` group is back, and a booking turn spends one model
+  request fewer. `manage_booking` loses its `when:`, so the group is
+  the only way in, and `skip_when_confirmed:` decides verification
+  again. That is the general shape, now written down at
+  /build/orchestration/task-groups and in the skill: two tasks an agent
+  chooses between spend a request on the choice, and that request
+  speaks nothing and does nothing. A group is chosen once, and every
+  step after the first opens by itself.
+
+* The Vertex bridge emits `HttpOptions` with the enum. `ty` reads a
+  plain dict as `dict[str, str]` and refuses `"COLLECTION"` where a
+  `ResourceScope` belongs, which is what turned the salon's static
+  check red. One `const`, so Pipecat gets it too, and the request on
+  the wire is the same string it was.
+
+* `docs/` is one file. `GATES.md`, `HARNESS_TEST.md` and
+  `SELF_VERIFY.md` each restated something the code, the tests or
+  CLAUDE.md already said, so they rotted against it instead of holding
+  it. `ARCHITECTURE.md` stays, it is the one file that describes the
+  system boundary, the four compiler stages and each target's runtime
+  topology in one place, minus the interactive console. The allow-list
+  test now refuses any other tracked file under `docs/`, so a second
+  one stays a deliberate decision.
+
+Upgrade notes:
+
+* Recompile. The Pipecat template changed, and a package built before
+  this still has a first node that waits on itself.
+
+* Run `unmute skill install` again. The skill now says to reach for a
+  group before two tasks with a `when:` each, and says why.
+
+* Nothing in `agent.yaml` has to change. If you split a group into
+  separate tasks to work around the silence, put the group back.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.5.6)
+
+</Update>
+
+<Update label="September 2026" description="v0.5.5" tags={["CLI"]}>
+
+A skill for the push, curated capabilities from the package, and telephony you can read.
+
+Highlights:
+
+* A third skill, `unmute-deploy`. Pushing is a different job from
+  building, done at a different time and often by somebody who did not
+  write the package. It carries the command loop, what each of the two
+  dry runs checks, how to read the detach list, and what a push
+  replaces against what it leaves alone. That last list is the fourteen
+  fields of the compiled body, held to the code both ways.
+
+* `unmute deploy` attaches a curated capability named by a `slng:`
+  reference. It used to refuse, send the author to the dashboard, and
+  the next push detached what the dashboard attached. `voiceai agents
+  push` accepted the same body all along, so the refusal was ours:
+  three gates, and the organisation-only scope filter alone was enough
+  to stop a curated record, which is global.
+
+* `current_datetime` and `user_phone_number` join the prebuilt
+  registry, now four ids, and `inject:` pins the settings each one
+  takes. A package can pin a timezone the curated tool cannot carry.
+  `announce:` is legal on a prebuilt on SLNG. The registry and its
+  settings are written down at /build/tools/prebuilt.
+
+* A tool that ends the conversation waits for its own `announce:` line.
+  `end_call` hangs up the moment it runs, so a goodbye spoken alongside
+  it was cut off mid-word. Every other announcement still runs
+  alongside the tool.
+
+* Seven refusals found by deploying one package: a `{{placeholder}}`
+  for a `source: conversation` variable (it reached SLNG as a fieldless
+  422), an omitted `provider:` under a manifest, a prebuilt whose id is
+  not its file's name, one name held at two scopes, and a placeholder
+  in a prompt now names its line. The deploy preview compares every
+  setting the package pins, so pinning a timezone no longer reads as
+  deleting it.
+
+* `telephony-setup.sh` is gone. It called bare `lk`, which has no
+  project flag, so on a machine pointed at another project it created
+  the trunk and the dispatch rule in the wrong account and printed
+  success. Compile still writes the two JSON files; the runbook prints
+  the two commands that send them, each naming its project. The Twilio
+  and LiveKit pages are rewritten in step order, with a symptom table,
+  a teardown and a what-to-redo table.
+
+* The salon concierge sounds like a person. Nine passages read like
+  incident reports written to the model on every turn; every rule
+  stayed, every incident went to the README. Behind it, the realism
+  guidance now puts a frequency budget on each technique: at most one
+  filler in a turn, none in most, and a clean grammatical sentence is
+  no longer labelled bad.
+
+Upgrade notes:
+
+* The company contract is `manifest.yaml` now, in a package and in the
+  saved library. A package still holding the old extensionless
+  `manifest` is refused by name. A library saved before this keeps
+  loading.
+
+* Run `unmute skill install` again. The bundle writes three skills.
+
+* If you ever ran `telephony-setup.sh`, check which LiveKit project
+  holds the inbound trunk and the dispatch rule before you dial.
+
+* Recompile to pick up the goodbye before the hangup and the new
+  refusals. Nothing in `agent.yaml` has to change.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.5.5)
+
+</Update>
+
+<Update label="September 2026" description="v0.5.4" tags={["CLI"]}>
+
+Plain init, a skill for company rules, and templates in their own repo.
+
+Highlights:
+
+* `unmute init <name>` writes six files and asks nothing again. A
+  saved default manifest was routing every new package into guided
+  setup, so a new agent could not be created without answering for a
+  contract nobody had asked about. `--from-manifest` is now the one
+  way a contract reaches a new package.
+
+* A second skill, `unmute-manifest`, writes the company contract. An
+  assistant cannot run the picker, so it does the part that is words:
+  ask what the company allows and write the YAML. `unmute manifest
+  create <name> --file draft.yaml` saves it, validates before it
+  saves, and writes nothing when it refuses.
+
+* The salon concierge thinks with Gemini 3.1 Flash-Lite on Vertex in
+  eu, at thinking_level MINIMAL to keep the first token fast. The old
+  OpenAI block stays commented in the file, so switching back is one
+  edit.
+
+* Templates live in slng-ai/unmute-templates. The single copy kept
+  here is gone, and the README, CONTRIBUTING.md and the skill a
+  coding agent reads point at that repo and say what a template
+  carries.
+
+Upgrade notes:
+
+* Replace `unmute init <name> --manifest <name>` with
+  `unmute init <name> --from-manifest` and pick from the list. The
+  `--draft` flag is gone, along with the assistant draft flow it
+  served. The `unmute` console and `manifest use` keep the default.
+
+* Run `unmute skill install` again to pick up `unmute-manifest`. The
+  bundle now writes two skills.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.5.4)
+
+</Update>
+
+<Update label="September 2026" description="v0.5.3" tags={["CLI"]}>
+
+Alternating announce lines, a reworked salon, and steps that don't repeat.
+
+Highlights:
+
+* announce: takes a list. The caller hears one of those lines each
+  time it fires, never the one that site used last, so a flow
+  entered twice in a call does not sound like a recording. A single
+  line still works and needs no change.
+
+* A task speaks its announce as the step is entered, whichever way
+  the step was reached. On a tool the line sits in the tool body and
+  fires once per call, so two calls in one turn played it twice.
+
+* A step the caller has not spoken since is refused instead of run
+  again, on LiveKit and Pipecat. A finished result with no new
+  caller turn above it is the model re-reading its own work.
+
+* LiveKit sessions retry the model once instead of four times. The
+  default sleeps 4.1 seconds before it gives up.
+
+* Rework the salon concierge: seven tools instead of eleven, two
+  plain tasks instead of a task group, and the saved booking now
+  carries the sentence the agent reads out loud.
+
+* Fix a LiveKit call arriving as two Langfuse traces, and name a
+  tool call after its tool on both targets.
+
+Upgrade notes:
+
+* Recompile to pick up the refusal and the retry cap. Nothing in
+  agent.yaml has to change.
+
+* A task group still compiles but speaks nothing on Pipecat. Use
+  plain tasks there until that is fixed.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.5.3)
+
+</Update>
+
+<Update label="September 2026" description="v0.5.2" tags={["CLI"]}>
+
+Speech-to-speech agents, better manifests, and clearer deployment guides.
+
+Highlights:
+
+* Add realtime and live architectures on LiveKit and Pipecat.
+  Run speech-to-speech agents, or pair a realtime model with a
+  separate speech synthesizer. Existing packages default to cascade.
+
+* Add pharmacy-refills and takeaway-orders examples with local
+  tools and knowledge lookup.
+
+* Improve the manifest editor and create agents from saved company
+  rules with unmute init --manifest or --from-manifest.
+
+* Fix LiveKit tool inputs, Pipecat task history, delegated tool
+  timing in the browser, and the Homebrew postflight warning.
+
+* Explain architecture choices, workflow limits, and deployment
+  steps for LiveKit Cloud, Pipecat Cloud, and SLNG.
+
+Upgrade notes:
+
+* Set the LiveKit framework version to 1.8.1 and Pipecat to 1.10.0
+  in targets.yaml.
+
+* Realtime and live currently support single-agent browser calls.
+  Keep cascade for tasks, saved state, tracing, and phone routes.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.5.2)
+
+</Update>
+
+<Update label="September 2026" description="v0.5.1" tags={["CLI"]}>
+
+Google inference locations on LiveKit and Pipecat.
+
+Highlights:
+
+* Choose Google Vertex inference locations with params.location.
+  US, EU, individual regions and explicit global routing now select
+  the corresponding Google endpoint on both LiveKit and Pipecat.
+
+* Keep GOOGLE_API_KEY authentication and provider parameters,
+  including thinking_config. Existing EU routing and Gemini
+  Developer API configurations continue to work.
+
+* Follow Google's endpoint rules without a compiler region allowlist.
+  Unsupported locations and unavailable models fail at the requested
+  endpoint, with no fallback to global or another region.
+
+* Verify real US requests through both generated native clients.
+  Regression checks cover endpoint selection, parameter forwarding,
+  mixed locations, Developer API behavior and provider errors.
+
+* Update the model guide and coding-agent skill reference with
+  location examples and routing behavior.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.5.1)
+
+</Update>
+
+<Update label="September 2026" description="v0.5.0" tags={["CLI"]}>
+
+Reusable company rules, native Gemini, and unified regions.
+
+Highlights:
+
+* Reuse company rules with unmute manifest. Guide new agents through
+  allowed models, languages, regions, targets and tools. Each package
+  carries its own manifest for offline validation and compilation.
+
+* Run native Gemini on LiveKit and Pipecat, including Vertex EU access
+  with an API key. EU requests use the regional endpoint with no global
+  fallback.
+
+* Use one set of 13 SLNG regions across deployment, speech and the
+  Context Router. Listening, thinking and speaking now share
+  params.world_part.
+
+* Build with clearer guides: a first-task walkthrough, complete field
+  references, practical credential setup and example troubleshooting.
+  New checks catch broken links, invalid MDX and missing field docs.
+
+Upgrade notes:
+
+* Replace the Context Router's params.world_part_override with
+  params.world_part. Choose a current region such as eu-west or
+  us-east; the old eu, us, india and indonesia values are refused.
+
+* Update SLNG deployment_region values any, eu-central and ap-south
+  to a supported region. LiveKit now rejects unknown worker regions
+  and media region groups used as deployment regions.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.5.0)
+
+</Update>
+
 <Update label="September 2026" description="v0.4.2" tags={["CLI"]}>
 
 Regional speech, live transcripts, and typed contacts.
