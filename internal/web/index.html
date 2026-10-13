@@ -34,13 +34,16 @@
     --bot:#f0a36e;            /* what the agent said or is saying */
     --ok:#9bd39b;
     --ok-rule:#5e8f5e;
-    --bad:#f07b6e;            /* failed, over the limit */
+    --bad:#f07b6e;            /* failed */
+    --over:#ff8a3d;           /* over its limit: late, not broken */
     --bad-rule:#8f4a42;
     --bad-ground:#2a1714;
     --bad-line:#5a2a24;
     --state-ground:#19170f;   /* a change to the call's state, in the conversation */
     --state-rule:#2a2618;
     --state-mark:#1d1a10;     /* a value the latest change set */
+    --dots-ground:#121009;    /* the start screen's dot grid, as the studio's boot page */
+    --dots:#2e2b26;
     --sans:system-ui,-apple-system,sans-serif;
     --mono:'Geist Mono',ui-monospace,'SF Mono',Menlo,monospace;
     --bar:56px;               /* top bar height */
@@ -69,10 +72,16 @@
   }
   .tag[hidden]{display:none}
   .tag-bad{border-color:var(--bad-rule);color:var(--bad)}
-  /* A number's level against its limit: the studio's LEVEL_COLOR. */
+  /* A number's level against its limit. Green is only for what the caller
+     waited; a stage that is fine stays quiet. Red means failed, never late. */
   .lv-ok{color:var(--muted)}
+  .lv-good{color:var(--ok)}
   .lv-slow{color:var(--yellow)}
-  .lv-bad{color:var(--bad)}
+  .lv-over{color:var(--over)}
+  .lv-failed{color:var(--bad)}
+  .lv-unrated{color:var(--muted)}
+  /* over is told apart by a mark too, not by hue alone */
+  .mval.lv-over::before,.chips .lv-over::before,.tile-value.lv-over::before{content:"▲ "}
   .pulse{animation:pulse 1.4s ease-in-out infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
   @keyframes blink{to{visibility:hidden}}
@@ -109,22 +118,27 @@
   #textonly:hover{background:var(--raised);color:var(--text)}
   #connect[disabled] ~ #textonly,body[data-state="connecting"] #textonly,body[data-state="connected"] #textonly{display:none}
 
-  /* typed line: shown only on a live call, in both transports */
-  #chatform{display:none;flex:1 1 280px;min-width:0;gap:8px;align-items:center}
+  /* typed line: under the conversation it writes into, on a live call in both
+     transports. No mic here: the microphone lives in the call bar. */
+  #chatform{display:none;flex:none;align-items:stretch;height:56px;border-top:1px solid var(--rule);background:var(--aside)}
   body[data-state="connected"] #chatform{display:flex}
+  body.textonly #chatform{border-top:2px solid var(--yellow)}
   #chatinput{
-    flex:1 1 auto;min-width:0;height:var(--control);padding:0 12px;border:1px solid var(--rule-strong);border-radius:0;
-    background:var(--sunk);color:var(--text);font-family:var(--mono);font-size:13px;
+    flex:1 1 auto;min-width:0;padding:0 20px;border:0;border-radius:0;
+    background:transparent;color:var(--text);font-family:var(--sans);font-size:15px;
   }
   #chatinput::placeholder{color:var(--faint)}
-  #chatinput:focus-visible{outline:2px solid var(--yellow);outline-offset:0}
+  #chatinput:focus-visible{outline:2px solid var(--yellow);outline-offset:-2px}
   #chatsend{
-    font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;
-    height:var(--control);padding:0 14px;border:1px solid var(--rule-strong);border-radius:0;
-    background:transparent;color:var(--muted);cursor:pointer;
+    flex:none;width:112px;display:flex;align-items:center;justify-content:center;gap:8px;
+    font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    border:0;border-left:1px solid var(--rule-soft);border-radius:0;
+    background:var(--yellow);color:var(--ground);cursor:pointer;
   }
-  #chatsend:hover:not([disabled]){background:var(--raised);color:var(--text)}
-  #chatsend[disabled]{border-style:dashed;color:var(--faint);cursor:not-allowed}
+  #chatsend:hover:not([disabled]){background:var(--yellow-hover)}
+  #chatsend:focus-visible{outline-color:var(--text);outline-offset:-2px}
+  #chatsend kbd{border-color:currentColor;color:inherit}
+  #chatsend[disabled]{background:transparent;color:var(--faint);cursor:not-allowed}
 
   /* ── page frame ─────────────────────────────────────────── */
   .app{height:100%;display:flex;flex-direction:column;min-height:0}
@@ -160,6 +174,7 @@
   body[data-state="connecting"] .runtag{border-color:var(--yellow);color:var(--yellow);animation:pulse 1.4s ease-in-out infinite}
   body[data-state="connected"] .runtag{border-color:var(--yellow);color:var(--yellow)}
   body[data-state="error"] .runtag{border-color:var(--bad-rule);color:var(--bad)}
+  body[data-run="starting"] .runtag{border-color:var(--yellow);color:var(--yellow);animation:pulse 1.4s ease-in-out infinite}
 
   /* ── controls: studio .callbar ─────────────────────────────
      Above every view: a control that disappears when you switch view is the same
@@ -182,7 +197,14 @@
   #mute[data-mic="live"]{background:var(--caller);color:var(--ground)}
   #mute[data-mic="muted"]{border-color:var(--rule-strong);color:var(--dim)}
   #mute[data-mic="unavailable"]{border:1px dashed var(--rule-strong);color:var(--faint);cursor:not-allowed}
+  #mute[data-why="blocked"]{border-color:var(--bad-rule);color:var(--bad)}
+  .mic-slash{display:none}
+  #mute[data-why="text"] .mic-slash,#mute[data-why="blocked"] .mic-slash{display:inline}
   .mic-text{color:var(--faint)}
+  #mute[data-why="blocked"] + .callbar-level .mic-text{color:var(--bad)}
+  .mic-line{display:flex;align-items:center;gap:10px;min-width:0}
+  .mic-line .sep{font-family:var(--mono);font-size:11px;color:var(--rule-strong)}
+  .hint[hidden]{display:none}
   #mute[data-mic="live"] + .callbar-level .mic-text{color:var(--caller)}
   #mute[data-mic="muted"] + .callbar-level .mic-text{color:var(--muted)}
   /* input level, inside the control it describes */
@@ -194,8 +216,9 @@
   /* The level is driven by an inline transform, which outranks any rule here, so
      renderMic() zeroes it on leaving `live` rather than a selector doing it. */
 
-  /* meter: live conversation level (mic + agent) */
-  .meter{display:flex;align-items:flex-end;gap:3px;height:18px}
+  /* meter: live conversation level (mic + agent), only while there is a call */
+  .meter{display:none;align-items:flex-end;gap:3px;height:18px}
+  body[data-state="connected"] .meter{display:flex}
   .meter i{
     display:block;width:5px;height:100%;background:var(--rule-strong);
     transform:scaleY(.08);transform-origin:bottom;transition:transform .09s linear;
@@ -203,14 +226,15 @@
   body[data-state="connected"] .meter i{background:var(--caller)}
   body.muted[data-state="connected"] .meter i{opacity:.5}
 
-  /* mic selector, shown only when two or more inputs exist */
+  /* mic selector, on the mic's own line, shown only when two or more inputs exist */
   .microw{display:flex;align-items:center;gap:10px;min-width:0}
   .microw[hidden]{display:none}
   #micsel{
-    max-width:280px;min-width:0;background:var(--sunk);border:1px solid var(--rule-strong);border-radius:0;
-    color:var(--text);padding:9px 10px;font-size:14px;cursor:pointer;text-overflow:ellipsis;
+    height:22px;max-width:260px;min-width:0;background:transparent;border:0;border-bottom:1px dashed var(--rule-strong);border-radius:0;
+    color:var(--soft);padding:0 2px;font-family:var(--mono);font-size:11px;cursor:pointer;text-overflow:ellipsis;
   }
-  #micsel:focus{outline:none;border-color:var(--yellow)}
+  #micsel option{background:var(--sunk);color:var(--text)}
+  #micsel:focus{outline:none;border-bottom-color:var(--yellow)}
 
   /* ── views ─────────────────────────────────────────────── */
   .views{flex:1;min-height:0;display:flex;flex-direction:column}
@@ -246,6 +270,7 @@
     scrollbar-width:thin;scrollbar-color:var(--rule-strong) transparent;
   }
   #latest{position:absolute;right:20px;bottom:12px;height:32px;z-index:1;background:var(--ground)}
+  body[data-state="connected"] #latest{bottom:68px}
   #latest[hidden]{display:none}
 
   .exchange{flex:none;min-width:0;display:flex;flex-direction:column;gap:8px;position:relative}
@@ -379,9 +404,13 @@
   /* caller turns: a closed turn is one row, an open one lists its stages */
   .turns-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:8px 16px;padding:18px 16px 10px}
   .turns-head .hint{margin:4px 0 0}
-  .turns-legend{display:flex;gap:14px;align-items:center;font-family:var(--mono);font-size:11px;color:var(--muted)}
-  .turns-legend span{display:flex;align-items:center;gap:6px}
-  .turns-legend i{height:12px;border-left:2px solid var(--bad-rule)}
+  /* what the colours mean, under the turns they describe */
+  .legend{margin:12px 16px 0;padding:14px 16px;border:1px solid var(--rule-soft);background:var(--aside);display:flex;flex-direction:column;gap:10px}
+  .legend-keys{display:flex;flex-wrap:wrap;gap:8px 24px;font-family:var(--mono);font-size:12px;color:var(--soft)}
+  .legend-keys span{display:flex;align-items:center;gap:8px}
+  .legend-keys i{display:block;width:10px;height:10px}
+  .legend-keys i.tick{width:0;height:12px;border-left:2px solid var(--rule-strong)}
+  .legend .hint{margin:0}
   .turns{margin:0 16px;border:1px solid var(--rule-soft);overflow-x:auto}
   .mrow{display:grid;grid-template-columns:minmax(260px,34fr) 90px minmax(160px,28fr) minmax(220px,38fr);gap:0 14px;align-items:center;min-width:860px;padding:9px 14px;border-bottom:1px solid var(--rule-faint)}
   .mturn > summary{list-style:none;cursor:pointer;background:var(--aside);border-bottom-color:var(--rule-soft)}
@@ -406,7 +435,7 @@
   .mtotal > .mono:first-child{color:var(--text)}
   .tbar{position:relative;height:10px;background:var(--hover)}
   .tbar > span{position:absolute;left:0;top:0;bottom:0}
-  .tbar > i{position:absolute;top:-3px;bottom:-3px;border-left:2px solid var(--bad-rule)}
+  .tbar > i{position:absolute;top:-3px;bottom:-3px;border-left:2px solid var(--rule-strong)}
   .chips{display:flex;flex-wrap:wrap;gap:2px 14px;font-family:var(--mono);font-size:12px;color:var(--dim)}
   .chips .lv-ok{color:var(--dim)}
   /* latency by model: one section per kind, each with its own columns */
@@ -424,9 +453,53 @@
   .spread > span{position:absolute;top:3px;width:2px;height:10px;background:var(--caller)}
   .spread > span.lv-ok{background:var(--muted)}
   .spread > span.lv-slow{background:var(--yellow)}
-  .spread > span.lv-bad{background:var(--bad)}
+  .spread > span.lv-over{background:var(--over)}
   .spread > i{position:absolute;top:0;bottom:0;border-left:1px dashed var(--yellow-dim)}
-  .spread > i.limit{border-left-color:var(--bad-rule)}
+  .spread > i.limit{border-left-color:var(--rule-strong)}
+
+  /* ── start screen: the studio's boot page, while the agent starts ──
+     The page cannot know how far along a start is, so the bar loops: it fills
+     from the left, then drains from the left, and never sits full. */
+  .boot{display:none;flex:1;min-height:0;overflow-y:auto;justify-content:center;align-items:flex-start;padding:72px 16px 64px;
+    background-color:var(--dots-ground);background-image:radial-gradient(var(--dots) 1px,transparent 1px);background-size:16px 16px}
+  body[data-run="starting"] .boot,body[data-run="failed"]:not([data-has-history="true"]) .boot{display:flex}
+  body[data-run="starting"] .stage,body[data-run="starting"] .transcript,body[data-run="starting"] .controls,
+  body[data-run="failed"]:not([data-has-history="true"]) .stage,
+  body[data-run="failed"]:not([data-has-history="true"]) .transcript,
+  body[data-run="failed"]:not([data-has-history="true"]) .controls{display:none}
+  .boot-in{width:100%;max-width:760px;display:flex;flex-direction:column;gap:28px}
+  .boot-in > *{flex:none}
+  .boot-head{display:flex;flex-direction:column;gap:12px}
+  .boot-cmd{font-family:var(--mono);font-size:13px;color:var(--dim)}
+  .boot-cmd .cursor{color:var(--yellow);animation:blink 1s steps(2,start) infinite}
+  .boot-title{margin:0;font-size:56px;line-height:1;font-weight:800;letter-spacing:-.02em}
+  .boot-step{margin:0;font-size:22px;line-height:1.35;color:var(--yellow);min-height:30px}
+  .boot-step .boot-count{font-family:var(--mono);font-size:13px;color:var(--dim);margin-left:8px}
+  body[data-run="failed"] .boot-step{color:var(--bad)}
+  .cells{position:relative;height:14px}
+  .cells > i,.cells > b{position:absolute;inset:0;display:block;background-size:calc((100% + 3px) / 24) 100%}
+  .cells > i{background-image:linear-gradient(to right,var(--rule-soft) calc(100% - 3px),transparent 0)}
+  .cells > b{background-image:linear-gradient(to right,var(--yellow) calc(100% - 3px),transparent 0);animation:cells 3.6s infinite}
+  @keyframes cells{
+    0%{clip-path:inset(0 100% 0 0);animation-timing-function:steps(24,end)}
+    50%{clip-path:inset(0 0 0 0);animation-timing-function:steps(24,end)}
+    100%{clip-path:inset(0 0 0 100%)}
+  }
+  body[data-run="failed"] .cells > b{animation:none;clip-path:inset(0 62.5% 0 0);
+    background-image:linear-gradient(to right,var(--bad) calc(100% - 3px),transparent 0)}
+  .boot-out{background:var(--ground);border:1px solid var(--rule)}
+  .boot-out-h{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--rule-soft)}
+  .boot-lines{padding:6px 0;min-height:40px}
+  .boot-line{display:block;padding:4px 16px;font-family:var(--mono);font-size:12px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .boot-line:nth-last-child(2){color:var(--dim)}
+  .boot-line:last-child{color:var(--soft)}
+  .boot-line.flagged{color:var(--bad)}
+  .boot-error{font-family:var(--mono);font-size:12px;color:var(--bad);background:var(--bad-ground);border:1px solid var(--bad-line);padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere}
+  .boot-error[hidden]{display:none}
+  .boot-logs{display:block;width:100%;text-align:left;padding:10px 16px;border:0;border-top:1px solid var(--rule-soft);border-radius:0;
+    background:transparent;color:var(--yellow);font-family:var(--mono);font-size:12px;cursor:pointer}
+  .boot-logs:hover{background:var(--hover)}
+  .boot-foot{margin:0;font-family:var(--mono);font-size:11px;color:var(--faint)}
 
   /* ── logs view: studio .toolbar, .segs, .panel ──────────── */
   .toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex:none;padding:10px 20px;border-bottom:1px solid var(--rule-soft)}
@@ -476,9 +549,14 @@
     /* one row for the call: mic, level, connect; the input picker under it */
     .callbar-level{flex:1 1 0}
     .controls-gap{display:none}
-    #chatform{order:2;flex:1 1 100%}
-    .microw{order:1;flex:1 1 100%}
-    #micsel{flex:1;max-width:none}
+    #micsel{max-width:100%}
+    /* the typed line stays at the very bottom, under the state panel */
+    .conversation-scroll{display:contents}
+    .tlist{flex:1 1 auto}
+    #chatform{order:2}
+    .boot{padding:40px 16px}
+    .boot-title{font-size:40px}
+    .boot-step{font-size:18px}
     .meter{gap:2px}
     .meter i{width:4px}
     .transcript{flex-direction:column}
@@ -503,6 +581,8 @@
   @media (prefers-reduced-motion:reduce){
     .pulse,.state .cursor,.runtag,.operation[data-state="running"]{animation:none!important}
     .meter i,.mic-level i{transition:none}
+    .cells > b{animation:none;clip-path:inset(0 50% 0 0)}
+    .boot-cmd .cursor{animation:none}
   }
 </style>
 </head>
@@ -536,29 +616,49 @@
     <section class="controls" aria-label="Call controls">
       <button id="mute" type="button" data-mic="unavailable" disabled
               aria-label="MIC —" title="M to toggle, hold SPACE to talk">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="3" width="6" height="11"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="3" width="6" height="11"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path><path class="mic-slash" d="M4 4l16 16"></path></svg>
         <span class="mic-level" aria-hidden="true"><i id="miclevel"></i></span>
       </button>
       <div class="callbar-level">
-        <span class="lbl mic-text" aria-live="polite">MIC —</span>
+        <div class="mic-line">
+          <span class="lbl mic-text" aria-live="polite">MIC OFF</span>
+          <label class="microw" id="microw" hidden>
+            <span class="sep" aria-hidden="true">//</span>
+            <select id="micsel" aria-label="Microphone"></select>
+          </label>
+        </div>
         <div class="meter" id="meter" aria-hidden="true"></div>
-        <span class="hint"><kbd>M</kbd> to toggle, hold <kbd>Space</kbd> to talk</span>
+        <span class="hint" id="mickeys" hidden><kbd>M</kbd> to toggle, hold <kbd>Space</kbd> to talk</span>
+        <span class="hint" id="micwhy">It starts when you connect.</span>
       </div>
-      <label class="microw" id="microw" hidden>
-        <span class="lbl">input //</span>
-        <select id="micsel" aria-label="Microphone"></select>
-      </label>
       <span class="controls-gap"></span>
-      <form id="chatform" autocomplete="off" aria-label="Type to the agent">
-        <input id="chatinput" type="text" maxlength="2000" placeholder="type a line to the agent" aria-label="Message to the agent">
-        <button id="chatsend" type="submit" disabled>send</button>
-      </form>
       <button id="connect" type="button">connect</button>
       <button id="textonly" type="button" title="Start a call without a microphone: type, and hear the agent">text only</button>
     </section>
 
     <div class="views" id="views">
       <div class="view" id="view-conversation" data-view="conversation" data-active="true">
+        <section class="boot" aria-label="Agent start-up">
+          <div class="boot-in">
+            <div class="boot-head">
+              <div class="boot-cmd">$ unmute dev · <span id="boot-agent">agent</span><span class="cursor">▍</span></div>
+              <h2 class="boot-title" id="boot-title">Starting your agent</h2>
+              <p class="boot-step" id="boot-step" aria-live="polite">Starting the agent…</p>
+            </div>
+            <div class="cells" role="progressbar" aria-label="Agent start-up, length unknown"><i></i><b></b></div>
+            <pre class="boot-error" id="boot-error" hidden></pre>
+            <section class="boot-out" aria-label="Latest output">
+              <div class="boot-out-h">
+                <span class="lbl" id="boot-target">Latest output</span>
+                <span class="summary-gap"></span>
+                <span class="mono dim" id="boot-clock">0:00</span>
+              </div>
+              <div class="boot-lines" id="boot-lines"></div>
+              <button class="boot-logs" id="boot-logs" type="button">Open the full output in Logs →</button>
+            </section>
+            <p class="boot-foot">ctrl+c stops the agent · the first start can take a few minutes · the full output is also in dev.log, next to the compiled project</p>
+          </div>
+        </section>
         <section class="stage">
           <div class="lbl">Conversation</div>
           <div class="state" id="state" aria-live="polite" role="status">ready</div>
@@ -569,6 +669,10 @@
           <div class="conversation-scroll">
             <div class="tlist" id="tlist"></div>
             <button id="latest" class="btn" type="button" hidden>Latest</button>
+            <form id="chatform" autocomplete="off" aria-label="Type to the agent">
+              <input id="chatinput" type="text" maxlength="2000" placeholder="Type a line to the agent" aria-label="Message to the agent">
+              <button id="chatsend" type="submit" disabled>send <kbd>↵</kbd></button>
+            </form>
           </div>
           <aside class="inspector" id="inspector" aria-label="Call state and diagnostics" hidden>
             <details id="state-panel" open hidden>
@@ -635,6 +739,16 @@ const el = {
   microw: document.getElementById("microw"),
   micsel: document.getElementById("micsel"),
   micText: document.querySelector(".controls .mic-text"),
+  micKeys: document.getElementById("mickeys"),
+  micWhy: document.getElementById("micwhy"),
+  bootAgent: document.getElementById("boot-agent"),
+  bootTitle: document.getElementById("boot-title"),
+  bootStep: document.getElementById("boot-step"),
+  bootError: document.getElementById("boot-error"),
+  bootTarget: document.getElementById("boot-target"),
+  bootClock: document.getElementById("boot-clock"),
+  bootLines: document.getElementById("boot-lines"),
+  bootLogs: document.getElementById("boot-logs"),
   micLevel: document.getElementById("miclevel"),
   tlist: document.getElementById("tlist"),
   transcript: document.querySelector('.transcript'),
@@ -658,6 +772,7 @@ const el = {
   chatsend: document.getElementById('chatsend'),
 };
 el.agent.textContent = AGENT;
+el.bootAgent.textContent = AGENT;
 
 const bars = Array.from({length: BARS}, () => {
   const i = document.createElement("i");
@@ -673,6 +788,7 @@ let audioCtx = null, analyser = null, micNode = null, remoteNode = null, raf = 0
 let micAnalyser = null;                               // mic-only tap, drives the level in the control
 let muted = false, selectedDeviceId = null;
 let micState = "unavailable";                         // "unavailable" | "live" | "muted"
+let micWhy = "off";                                   // why unavailable: "off" | "text" | "blocked"
 let holding = false, heldWasMuted = false;            // hold-to-talk
 // ── views ───────────────────────────────────────────────
 // State, not navigation: tearing the page down would end the call, so there is
@@ -705,25 +821,74 @@ const logRows = [];                  // {kind:"output"|"metric", text, flagged}
 let flagged = 0;
 let ready = false;
 
-function setRunState(state){
+// While the agent starts, the conversation view is a start screen in the
+// studio's style: the step running now, the latest output and the time spent.
+// Both targets take the same two steps, so the words never name a framework.
+const BOOT_STEP = {1:"Starting the agent", 2:"Waiting for the agent to answer"};
+let runState = "", bootStep = 0, bootStarted = Date.now(), bootTimer = 0;
+
+function setRunState(state, step){
+  runState = state;
+  el.body.dataset.run = state;
+  el.runtag.textContent = state === "starting" ? "starting" : RUN_TAG[el.body.dataset.state];
   el.connect.disabled = !transport && !connecting && !ready && state !== "ready";
   el.logproblem.hidden = state !== "failed" || !!transport;
+  if (state === "starting" && !bootTimer) nameBootTarget();
+  if (state === "starting"){
+    bootStep = step || 0;
+    renderBoot();
+    if (!bootTimer) bootTimer = setInterval(renderBootClock, 1000);
+  } else {
+    clearInterval(bootTimer); bootTimer = 0;
+  }
   if (state === "ready"){
     ready = true;
     el.connect.disabled = false;
-    // Move to the conversation once there is one to have, unless something went
-    // wrong on the way up, in which case the output is the more useful view.
     if (!viewPinned && !flagged) showView("conversation");
   } else if (state === "failed"){
     ready = false;
     connectionLost = false;
     el.connect.disabled = !transport && !connecting;
     if (!transport) setState("error", "error", "the agent did not start; see the output");
-    if (!viewPinned) showView("logs");
-  } else if (!viewPinned && currentView !== "logs"){
-    showView("logs");
+    renderBoot();
+    // With a call on the page, the output is the more useful view. Without one,
+    // the start screen says why and links to the output.
+    if (!viewPinned && el.body.dataset.hasHistory === "true") showView("logs");
   }
 }
+function renderBoot(){
+  const failed = runState === "failed";
+  const step = BOOT_STEP[bootStep] || BOOT_STEP[1];
+  el.bootTitle.textContent = failed ? "The agent did not start" : "Starting your agent";
+  if (failed){
+    el.bootStep.textContent = (bootStep ? "Stopped at step " + bootStep + " of 2, " + step.toLowerCase() + ". " : "") + "The first error is below.";
+    const first = logRows.find(row => row.kind === "output" && row.flagged);
+    el.bootError.textContent = first ? first.text : "No error line was printed. The full output may say more.";
+    el.bootError.hidden = false;
+  } else {
+    el.bootStep.replaceChildren(step + "…", ...(bootStep ? [node("span", "boot-count", "step " + bootStep + " of 2")] : []));
+    el.bootError.hidden = true;
+  }
+  renderBootLines();
+  renderBootClock();
+}
+// The session answers before the runtime exists, with the transport it will use.
+async function nameBootTarget(){
+  try {
+    const session = await (await fetch("/api/session")).json();
+    el.bootTarget.textContent = "Latest output · " + (session.kind === "livekit" ? "livekit" : "pipecat");
+  } catch { /* the header keeps its plain name */ }
+}
+function renderBootLines(){
+  if (runState !== "starting" && runState !== "failed") return;
+  const rows = logRows.filter(row => row.kind === "output" && row.text.trim()).slice(-5);
+  el.bootLines.replaceChildren(...rows.map(row => node("span", "boot-line" + (row.flagged ? " flagged" : ""), row.text)));
+}
+function renderBootClock(){
+  const s = Math.floor((Date.now() - bootStarted) / 1000);
+  el.bootClock.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+el.bootLogs.addEventListener("click", () => { showView("logs", true); });
 
 function pushLogRow(row){
   logRows.push(row);
@@ -734,6 +899,7 @@ function pushLogRow(row){
     el.flagcount.hidden = false;
   }
   if (currentView === "logs") renderLog();
+  if (runState === "starting") renderBootLines();
 }
 
 // One compact line per record, so the log view answers "was it slow" without
@@ -844,7 +1010,7 @@ function startEventStream(){
     if (ev.t==='gap' || ev.reason) historyGap=true;
     feedFresh=true;
     renderFeed();
-    if (ev.t === "state") setRunState(ev.state);
+    if (ev.t === "state") setRunState(ev.state, ev.step);
     else if (ev.t === "log") pushLogRow({kind:"output", text: ev.text || "", flagged: !!ev.flagged});
     else if (ev.t === "metric"){
       const text=metricText(ev.record);
@@ -1114,7 +1280,8 @@ function renderData(){
       const parts=[latency!=null?'Reply latency '+secs(latency):'',count].filter(Boolean);
       const text=parts.join(' · ') || 'Response measurements';
       if (view.summary.textContent!==text){
-        view.summary.replaceChildren(...parts.map((part,i)=>node('span',i===0&&latency!=null?'lv-'+level(latency,'reply_latency'):undefined,(i?' · ':'')+part)));
+        const lv=unratedReply(operations) ? 'unrated' : level(latency,'reply_latency');
+        view.summary.replaceChildren(...parts.map((part,i)=>node('span',i===0&&latency!=null?'lv-'+(lv==='ok'?'good':lv):undefined,(i?' · ':'')+part)));
         if (!parts.length) view.summary.textContent=text;
       }
     } else setText(view.summary,id==='reply-time'?'Reply time':id==='call-details'?'Call measurements':id==='unassigned'?'Unassigned activity and measurements':'Input measurements');
@@ -1142,10 +1309,11 @@ function renderData(){
 // is measured twice or kept anywhere else.
 //
 // What counts as slow, in milliseconds except LLM requests per reply, which is
-// a count. These are the studio's defaults, its Limits:
-// change them there and here together.
+// a count. These are the studio's defaults, its Limits: change them there and
+// here together. Reply latency is rated only for a turn the model answered in
+// one request; a tool turn runs the model twice and is not rated at all.
 const LIMITS = {
-  reply_latency:      {slow:1000, bad:1500, what:'Reply latency'},
+  reply_latency:      {slow:900,  bad:1200, what:'Reply latency'},
   llm_first_token:    {slow:600,  bad:700,  what:'LLM first token'},
   llm_request:        {slow:1000, bad:1500, what:'LLM request that did not stream'},
   tts_first_byte:     {slow:300,  bad:400,  what:'TTS first audio'},
@@ -1156,11 +1324,12 @@ const FAILED = ['failed','timed_out'];
 function level(value, key){
   if (value == null) return 'ok';
   const limit=LIMITS[key], v=limit.count ? value : value*1000;
-  return v>limit.bad ? 'bad' : v>limit.slow ? 'slow' : 'ok';
+  return v>limit.bad ? 'over' : v>limit.slow ? 'slow' : 'ok';
 }
-function over(value, key){
-  const limit=LIMITS[key], lv=level(value,key);
-  return limit.what+' over '+(lv==='bad'?limit.bad:limit.slow)+(limit.count?'':'ms');
+// A reply the model made more than once, around a tool or not, cannot meet a
+// one-request budget, so colouring it would flag every tool turn.
+function unratedReply(ops){
+  return ops.some(o=>o.operation.type==='tool') || ops.filter(o=>o.operation.type==='llm').length>1;
 }
 // A percentile, inclusive and interpolated: .9 is the p90 a studio tile shows.
 function pct(values, q){
@@ -1247,7 +1416,9 @@ function spread(values, limitKey){
   return element;
 }
 const STAGE_COLOR={stt:'var(--caller)',llm:'var(--soft)',tool:'var(--muted)',handoff:'var(--muted)',tts:'var(--bot)',total:'var(--ok)'};
-function levelColor(lv, kind){ return lv==='bad' ? 'var(--bad)' : lv==='slow' ? 'var(--yellow)' : STAGE_COLOR[kind]; }
+function levelColor(lv, kind){
+  return lv==='failed' ? 'var(--bad)' : lv==='over' ? 'var(--over)' : lv==='slow' ? 'var(--yellow)' : lv==='unrated' ? 'var(--faint)' : STAGE_COLOR[kind];
+}
 
 function renderMetrics(){
   const all=Array.from(records.values()).sort((a,b)=>a.order-b.order);
@@ -1280,7 +1451,7 @@ function renderMetrics(){
   main.append(h('div','turns-head',
     h('div',undefined,h('div','lbl','Caller turns'),
       h('p','hint','How long the caller waited in silence, and which stage took the time. Open a turn to see each stage.')),
-    h('div','turns-legend',h('span',undefined,'bars 0 – '+BAR_SCALE+'s'),h('span',undefined,h('i'),"that stage's limit"))));
+    ));
   if (!turns.length) main.append(h('p','empty','No caller turns yet. Connect and talk to your agent; each turn shows here as its timings arrive.'));
   else {
     const latest=turns[turns.length-1].key;
@@ -1308,7 +1479,7 @@ function renderMetrics(){
         const op=o.operation, first=byOperation(o.id,'first_response'), duration=byOperation(o.id,type==='tool'?'tool_duration':'request_duration');
         const failed=FAILED.includes(op.state), model=op.model||measured.find(m=>m.operation_id===o.id && m.model)?.model;
         const stage={kind:type,name:type==='handoff'?'Handoff':type==='tool'?'Tool':type.toUpperCase()};
-        if (failed){ stage.text=op.state.replaceAll('_',' '); stage.lv='bad'; }
+        if (failed){ stage.text=op.state.replaceAll('_',' '); stage.lv='failed'; }
         if (type==='llm'){
           stage.limit=first!=null||duration==null ? 'llm_first_token' : 'llm_request';
           stage.value=first??duration;
@@ -1329,7 +1500,12 @@ function renderMetrics(){
         for (const m of measured.filter(m=>!m.operation_id && groups.has(measurementGroup(m)) && firstKind(m)==='tts'))
           stages.push({kind:'tts',name:'TTS',value:m.value,limit:'tts_first_byte',note:'first audio'+(m.model?' · '+m.model:'')});
       for (const s of stages) if (!s.lv && s.limit && s.value!=null) s.lv=level(s.value,s.limit);
-      const waitedKey=turn.input ? 'reply_latency' : null, waitedLv=waitedKey ? level(waited,waitedKey) : 'ok';
+      const tools=stages.filter(s=>s.kind==='tool'), llmCount=stages.filter(s=>s.kind==='llm').length;
+      const unrated=!!turn.input && unratedReply(ops);
+      const unratedNote=tools.length ? 'not rated · tool turn' : 'not rated · '+llmCount+' model requests';
+      const waitedKey=turn.input && !unrated ? 'reply_latency' : null;
+      const waitedLv=unrated ? 'unrated' : waitedKey ? level(waited,waitedKey) : 'ok';
+      const waitedClass='lv-'+(waitedKey && waitedLv==='ok' ? 'good' : waitedLv);
 
       // Closed, a turn is one line: the first of each stage, and a count when
       // there were more of them.
@@ -1338,16 +1514,16 @@ function renderMetrics(){
         const of=stages.filter(s=>s.kind===kind), first=of.find(s=>s.value!=null);
         if (first) chips.push(h('span','lv-'+(first.lv||'ok'),kind.toUpperCase()+' '+secs(first.value)+(of.length>1?' ×'+of.length:'')));
       }
-      const tools=stages.filter(s=>s.kind==='tool');
-      if (tools.length) chips.push(h('span',tools.some(s=>s.lv==='bad')?'lv-bad':undefined,tools.length+' tool'+(tools.length>1?'s':'')));
-      for (const s of stages.filter(s=>s.kind==='handoff')) chips.push(h('span',s.lv==='bad'?'lv-bad':undefined,'→ handoff '+s.note+(s.text?' · '+s.text:'')));
+      if (tools.length) chips.push(h('span',tools.some(s=>s.lv==='failed')?'lv-failed':undefined,tools.length+' tool'+(tools.length>1?'s':'')));
+      for (const s of stages.filter(s=>s.kind==='handoff')) chips.push(h('span',s.lv==='failed'?'lv-failed':undefined,'→ handoff '+s.note+(s.text?' · '+s.text:'')));
+      if (unrated) chips.push(h('span','tag',unratedNote));
 
       const details=h('details','mturn');
       details.open=turnsTouched ? openTurns.has(turn.key) : turn.key===latest;
       const label=turn.input ? 'T'+turns.slice(0,i+1).filter(t=>t.input).length : 'GREETING';
       const summary=h('summary','mrow',
         h('span','mwho',h('span','mono',label),said?h('span',turn.input?'caller-said':'agent-said',turn.input?'“'+said+'”':said):null),
-        h('span','mono mval lv-'+waitedLv,waited!=null?secs(waited):'—'),
+        h('span','mono mval '+waitedClass,waited!=null?secs(waited):'—'),
         bar(waited,levelColor(waitedLv,'total'),waitedKey),
         h('span','chips',...chips));
       // The first touch keeps the latest turn as it was; from then on every
@@ -1362,12 +1538,24 @@ function renderMetrics(){
         h('span','dim',[s.value!=null&&s.text?s.text:'',s.note].filter(Boolean).join(' · '))));
       details.append(h('div','mrow mstage mtotal',
         h('span','mono',turn.input?'Caller waited':'First audio'),
-        h('span','mono mval lv-'+waitedLv,waited!=null?secs(waited):'—'),
+        h('span','mono mval '+waitedClass,waited!=null?secs(waited):'—'),
         bar(waited,levelColor(waitedLv,'total'),waitedKey),
-        h('span','dim',(turn.input?'caller quiet → ':'connect → ')+(heard?'“'+heard+'”':'first audio'))));
+        h('span','dim',[unrated?unratedNote:'',(turn.input?'caller quiet → ':'connect → ')+(heard?'“'+heard+'”':'first audio')].filter(Boolean).join(' · '))));
       list.append(details);
     }
     main.append(list);
+    const key=(cls,text)=>h('span',undefined,h('i',cls),text);
+    const swatch=color=>{ const i=h('i'); i.style.background=color; return i; };
+    main.append(h('footer','legend',
+      h('div','lbl','What the colours mean · caller waited'),
+      h('div','legend-keys',
+        h('span',undefined,swatch('var(--ok)'),'up to '+secs(LIMITS.reply_latency.slow/1000)),
+        h('span',undefined,swatch('var(--yellow)'),secs(LIMITS.reply_latency.slow/1000)+' to '+secs(LIMITS.reply_latency.bad/1000)),
+        h('span',undefined,swatch('var(--over)'),'▲ over '+secs(LIMITS.reply_latency.bad/1000)),
+        h('span',undefined,swatch('var(--faint)'),'not rated: the model ran more than once, as in a tool turn'),
+        h('span',undefined,swatch('var(--bad)'),'failed'),
+        key('tick','the limit for that row')),
+      h('p','hint','Each stage uses the same colours against its own limit: LLM first token '+LIMITS.llm_first_token.slow+'ms and '+LIMITS.llm_first_token.bad+'ms, TTS first audio '+LIMITS.tts_first_byte.slow+'ms and '+LIMITS.tts_first_byte.bad+'ms. Bars run from 0 to '+BAR_SCALE+'s.')));
   }
   if (turns.length && measured.some(m=>m.metric==='reply_latency' && measurementGroup(m)==='unassigned'))
     main.append(h('p','hint','Some reply latencies name no reply, as on Pipecat. They count in the tiles and are split part by part below, not matched to a turn here.'));
@@ -1399,8 +1587,8 @@ function renderMetrics(){
     rows[rows.length-2].firstChild.colSpan=11;
   };
   const judged=(vals,key)=>{
-    const over=vals.filter(v=>level(v,key)==='bad').length;
-    return h('td','n'+(over?' lv-bad':''),vals.length?over+' of '+vals.length:'—');
+    const over=vals.filter(v=>level(v,key)==='over').length;
+    return h('td','n'+(over?' lv-over':''),vals.length?over+' of '+vals.length:'—');
   };
   // STT: LiveKit times each turn's final transcript and turn decision against
   // the reply; Pipecat times the service's first result on its request.
@@ -1414,7 +1602,7 @@ function renderMetrics(){
     section('stt','STT','per caller turn',['Model','Provider',transcripts.length?'Turns':'Requests',(transcripts.length?'Transcript':'First result')+' p50','p90','max','Turn decision p90','','','Errors','Spread · 0 – 1.2s']);
     rows.push(h('tr',undefined,h('td','mono',sttModel||'—'),h('td','dim',sttProvider||'—'),h('td','n',String(sttValues.length)),
       ...stats(sttValues),h('td','n',ms(pct(decisions,.9))),h('td'),h('td'),
-      h('td','n'+(sttFailed?' lv-bad':''),String(sttFailed)),h('td',undefined,spread(sttValues))));
+      h('td','n'+(sttFailed?' lv-failed':''),String(sttFailed)),h('td',undefined,spread(sttValues))));
   }
   // LLM: one row per model, so a swap mid-call is two rows.
   const llms=new Map();
@@ -1437,7 +1625,7 @@ function renderMetrics(){
         ...stats(tt).map((cell,i)=>{const v=[pct(tt,.5),pct(tt,.9),tt.length?Math.max(...tt):null][i]; if (v!=null) cell.classList.add('lv-'+level(v,'llm_first_token')); return cell;}),
         h('td','n',ms(pct(totals,.9))),
         h('td','n'+(most!=null?' lv-'+level(most,'requests_per_reply'):''),counts.length?(Math.round(counts.reduce((a,b)=>a+b,0)/counts.length*10)/10)+' · '+most:'—'),
-        judged(tt,'llm_first_token'),h('td','n'+(failed?' lv-bad':''),String(failed)),h('td',undefined,spread(tt,'llm_first_token'))));
+        judged(tt,'llm_first_token'),h('td','n'+(failed?' lv-failed':''),String(failed)),h('td',undefined,spread(tt,'llm_first_token'))));
     }
   }
   // TTS: the model is on the request on Pipecat and on its measurements on LiveKit.
@@ -1459,7 +1647,7 @@ function renderMetrics(){
       const failed=ops.filter(op=>FAILED.includes(op.state)).length;
       rows.push(h('tr',undefined,h('td','mono',g.model||'—'),h('td','dim',g.provider||'—'),h('td','n',String(g.firsts.length)),
         ...stats(g.firsts),h('td','n',ms(pct(totals,.9))),h('td','n',String(unplayed)),
-        judged(g.firsts,'tts_first_byte'),h('td','n'+(failed?' lv-bad':''),String(failed)),h('td',undefined,spread(g.firsts,'tts_first_byte'))));
+        judged(g.firsts,'tts_first_byte'),h('td','n'+(failed?' lv-failed':''),String(failed)),h('td',undefined,spread(g.firsts,'tts_first_byte'))));
     }
   }
   // Tools and handoffs run in the agent, so they are listed by name.
@@ -1475,7 +1663,7 @@ function renderMetrics(){
       const op=calls[0].operation, durations=calls.map(o=>byOperation(o.id,'tool_duration')).filter(v=>v!=null);
       const failed=calls.filter(o=>FAILED.includes(o.operation.state)).length;
       rows.push(h('tr',undefined,h('td','mono',op.name),h('td','dim',op.type),h('td','n',String(calls.length)),
-        ...stats(durations),h('td'),h('td'),h('td'),h('td','n'+(failed?' lv-bad':''),String(failed)),h('td')));
+        ...stats(durations),h('td'),h('td'),h('td'),h('td','n'+(failed?' lv-failed':''),String(failed)),h('td')));
     }
   }
   if (rows.length){
@@ -1492,7 +1680,7 @@ function renderMetrics(){
       tile('STT + turn p90',pct(values('turn_detection'),.9),null,transcripts.length?'final transcript '+secs(pct(transcripts,.9)):'turn decision'),
       tile('LLM first token p90',pct(firsts('llm'),.9),'llm_first_token',firsts('llm').length+' requests · '+target('llm_first_token')),
       tile('TTS first audio p90',pct(firsts('tts'),.9),'tts_first_byte',firsts('tts').length+' requests · '+target('tts_first_byte')),
-      h('div','tile',h('span','lbl','Errors'),h('span','tile-value'+(errors?' lv-bad':''),String(errors)),
+      h('div','tile',h('span','lbl','Errors'),h('span','tile-value'+(errors?' lv-failed':''),String(errors)),
         h('span','tile-note',selectedCallID?'1 call':'no call yet'))),
     main);
   el.metrics.scrollTop=top;
@@ -1761,18 +1949,35 @@ function teardown(state, hint){
   el.connect.textContent = "connect";
   el.connect.disabled = !ready;
   el.chatinput.value = ""; el.chatsend.disabled = true;
+  el.body.classList.remove("textonly");
   transport = null;
   setState(state, state === "error" ? "error" : "ready",
     state === "error" ? hint : "press connect and talk to your agent");
 }
 
 // ── microphone: the control names the state, styling carries the affordance ──
-const MIC_LABEL = {unavailable:"MIC —", live:"MIC LIVE", muted:"MIC MUTED"};
+// No mic has three reasons, and each says what happens next: before a call it
+// starts on connect, on a text-only call there is none on purpose, and a
+// blocked one needs the browser's permission.
+const MIC_LABEL = {live:"MIC LIVE", muted:"MIC MUTED"};
+const MIC_OFF = {
+  off:     {label:"MIC OFF",            hint:"It starts when you connect."},
+  text:    {label:"NO MIC · TEXT ONLY", hint:"Type under the conversation. You hear the agent."},
+  blocked: {label:"NO MIC · BLOCKED",   hint:"Allow the microphone in the address bar, or press text only."},
+};
 function renderMic(){
+  const off = micState === "unavailable" ? MIC_OFF[micWhy] : null;
+  const label = off ? off.label : MIC_LABEL[micState];
   el.mute.dataset.mic = micState;
+  el.mute.dataset.why = off ? micWhy : "";
   el.mute.disabled = micState === "unavailable";
-  el.micText.textContent = MIC_LABEL[micState];
-  el.mute.setAttribute("aria-label", MIC_LABEL[micState]);
+  el.micText.textContent = label;
+  el.mute.setAttribute("aria-label", label);
+  el.micKeys.hidden = !!off;
+  el.micWhy.hidden = !off;
+  if (off) el.micWhy.textContent = off.hint;
+  // A choice of input only means something with a live mic and two inputs.
+  el.microw.hidden = !!off || el.micsel.options.length < 2;
   el.body.classList.toggle("muted", micState === "muted");
   if (micState !== "live") el.micLevel.style.transform = "scaleX(0)";
 }
@@ -1783,8 +1988,8 @@ function setMuted(v){
   if (mic) mic.getAudioTracks().forEach(t => t.enabled = !muted);        // pipecat
   if (room) { try { room.localParticipant.setMicrophoneEnabled(!muted); } catch {} } // livekit
 }
-function setMicUnavailable(){
-  muted = false; micState = "unavailable"; holding = false;
+function setMicUnavailable(why = "off"){
+  muted = false; micState = "unavailable"; holding = false; micWhy = why;
   renderMic();
 }
 function toggleMute(){
@@ -1827,6 +2032,7 @@ async function connect(textMode=false){
   if (DEMO) return simulate();
   if (transport || connecting) return;
   textOnly = textMode === true;
+  setMicUnavailable(textOnly ? "text" : "off");
   clearTranscript();
   connecting = true;
   const generation = ++connectionGeneration;
@@ -1961,7 +2167,7 @@ async function connectPipecat(session){
     await refreshMics();
     if (!currentConnection(session)) return;
   } catch {
-    if (currentConnection(session)) teardown('error','microphone permission denied');
+    if (currentConnection(session)){ teardown('error','microphone permission denied'); setMicUnavailable('blocked'); }
     return;
   }
   }
@@ -2009,7 +2215,7 @@ async function connectPipecat(session){
     if (!textOnly) setMuted(false);
     el.connect.textContent = "end call";
     setState('connected','live',textOnly?'type to your agent':'talk to your agent');
-    chatReady();
+    openComposer();
   } catch(err){if(currentConnection(session))teardown('error',String(err.message || err));}
 }
 
@@ -2073,7 +2279,7 @@ async function connectLivekit(session){
     connecting=false;
     setState('connected','live',textOnly?'type to your agent':'talk to your agent');
     el.connect.textContent = "end call";
-    chatReady();
+    openComposer();
   } catch(err){if(currentConnection(session))teardown('error',String(err.message || err));return;}
   if (textOnly) return;
   try {
@@ -2082,7 +2288,7 @@ async function connectLivekit(session){
     setMuted(false);attachLocalMic();await refreshMics();
   } catch {
     if (!currentConnection(session)) return;
-    setMicUnavailable();
+    setMicUnavailable('blocked');
     el.state.textContent='live — microphone blocked; allow access and reconnect';
   }
 }
@@ -2122,6 +2328,13 @@ function dropEcho(record){
   }
 }
 function chatReady(){ el.chatsend.disabled = el.chatinput.value.trim() === ""; }
+// On a text-only call the box is the only way in, so it starts focused.
+function openComposer(){
+  el.body.classList.toggle("textonly", textOnly);
+  el.chatinput.placeholder = textOnly ? "No mic on this call. Type to the agent." : "Type a line to the agent";
+  chatReady();
+  if (textOnly) el.chatinput.focus();
+}
 el.chatinput.addEventListener("input", chatReady);
 function showTyped(text){
   let top = 0;
