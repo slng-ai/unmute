@@ -353,21 +353,40 @@ func TestValidateSlngScope(t *testing.T) {
 	}
 }
 
-func TestSlngAllRolesShareDeploymentRegions(t *testing.T) {
-	for _, region := range SlngRegions {
-		want := "https://" + region + ".context-router.slng.ai/v1"
-		got, ok := SlngRouterBaseURL(region)
+// Speech and the router take the world parts; deployment takes the agents API's
+// agent region codes, a different list that shares twelve spellings with it.
+// Holding them as one list refused us-east-slng, eu-central and ap-south at
+// deployment, and sent us-east meaning SLNG's own US East where the agents API
+// reads LiveKit Cloud's.
+func TestSlngRolesTakeTheirOwnRegionLists(t *testing.T) {
+	for _, part := range SlngRegions {
+		want := "https://" + part + ".context-router.slng.ai/v1"
+		got, ok := SlngRouterBaseURL(part)
 		if !ok || got != want {
-			t.Errorf("region %s: got %s, %v; want %s", region, got, ok, want)
+			t.Errorf("world part %s: got %s, %v; want %s", part, got, ok, want)
 		}
-		if err := CheckSlngRegion(region); err != nil {
-			t.Error(err)
-		}
-		if _, err := ParseSlngSpeechGateway(Pipecat, map[string]any{"world_part": region}); err != nil {
+		if _, err := ParseSlngSpeechGateway(Pipecat, map[string]any{"world_part": part}); err != nil {
 			t.Error(err)
 		}
 	}
-	for _, region := range []string{"", "any", "eu", "us", "india", "indonesia", "eu-central", "ap-south", "na", "ap", "EU", "eu ", "europe"} {
+	for _, region := range SlngDeploymentRegions {
+		if err := CheckSlngRegion(region); err != nil {
+			t.Error(err)
+		}
+	}
+	// Agent regions that are no world part deploy, and reach no model service.
+	for _, region := range []string{"us-east-slng", "eu-central", "ap-south"} {
+		if err := CheckSlngRegion(region); err != nil {
+			t.Error(err)
+		}
+		if _, ok := SlngRouterBaseURL(region); ok {
+			t.Errorf("router accepted agent region %q, which is no world part", region)
+		}
+		if _, err := ParseSlngSpeechGateway(Pipecat, map[string]any{"world_part": region}); err == nil {
+			t.Errorf("speech accepted agent region %q, which is no world part", region)
+		}
+	}
+	for _, region := range []string{"", "any", "eu", "us", "india", "indonesia", "na", "ap", "EU", "eu ", "europe", "us-central"} {
 		if _, ok := SlngRouterBaseURL(region); ok {
 			t.Errorf("router accepted retired/invalid region %q", region)
 		}

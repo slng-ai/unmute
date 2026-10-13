@@ -721,6 +721,29 @@ func TestRouterWorldPartsReachEveryReaderFacingSurface(t *testing.T) {
 	}
 }
 
+// An SLNG target deploys to the agents API's agent regions, which are not the
+// world parts speech and the router take, and every surface that states the
+// target's deployment_region lists them all. Held against
+// target.SlngDeploymentRegions rather than a list written here: the deployment
+// list was once the world part list, which refused three agent regions and sent
+// a fourth to a different place than its author meant.
+func TestSlngDeploymentRegionsReachEveryReaderFacingSurface(t *testing.T) {
+	for name, content := range map[string]string{
+		"references/package.md":      bundleFile(t, "references/package.md"),
+		"docs-site/targets/slng.mdx": trackedFile(t, "docs-site/targets/slng.mdx"),
+	} {
+		for _, region := range target.SlngDeploymentRegions {
+			if !strings.Contains(content, "`"+region+"`") {
+				t.Errorf("%s omits SLNG deployment region %q", name, region)
+			}
+		}
+		// The one spelling that means a different place on each side.
+		if !strings.Contains(strings.Join(strings.Fields(content), " "), "`us-east` is LiveKit Cloud's US East") {
+			t.Errorf("%s does not say that the deployment region us-east is LiveKit Cloud's US East", name)
+		}
+	}
+}
+
 func TestThinkingAudioValuesMatchCode(t *testing.T) {
 	want := []string{string(ir.ThinkingNone), string(ir.ThinkingSubtle)}
 	for name, content := range map[string]string{

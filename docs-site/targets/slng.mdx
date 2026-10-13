@@ -86,9 +86,11 @@ Write these inside `targets.<name>`. The name selects this target with
 </ParamField>
 
 <ParamField path="deployment_region" type="string or one-item list of strings" required>
-  Accepts `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`. Exactly one region is
+  Accepts SLNG's own regions `us-east-slng`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`,
+  and the LiveKit Cloud regions `us-east`, `eu-central` and `ap-south`. Exactly one region is
   required; omission, an unknown name, and multiple regions are refused.
-  The retired `any` value is refused. These are the same names speech and the router use.
+  The retired `any` value is refused. These are the agents API's region names, not the world parts
+  that speech and the router take. `us-east` is LiveKit Cloud's US East; SLNG's own is `us-east-slng`.
 </ParamField>
 
 <ParamField path="models" type="map of model definitions">

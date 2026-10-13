@@ -72,7 +72,7 @@ func TestManifestReferenceDocumentsEveryFieldAndClosedValue(t *testing.T) {
 	enums := map[string][]string{
 		"targets.allow":                  providers,
 		"regions.models[].allow":         target.SlngRegions,
-		"regions.deployments[].allow":    target.SlngRegions,
+		"regions.deployments[].allow":    target.SlngDeploymentRegions,
 		"regions.deployments[].provider": providers,
 		"regions.models[].role":          {string(ir.KindListen), string(ir.KindSpeak), string(ir.KindThink)},
 		"tools.kinds.allow":              manifestExecutionKinds(t),

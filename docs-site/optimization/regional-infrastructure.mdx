@@ -99,10 +99,12 @@ actually use before deciding whether to change providers or model deployments.
 |---|---|---|---|
 | `params.world_part` | SLNG `listen` and `speak` models on code targets | `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` | The speech gateway endpoint |
 | `params.world_part` | SLNG Context Router `think` models | `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au` | The router endpoint |
-| `deployment_region` | Each target in `targets.yaml` | LiveKit: `us-east`, `eu-central`, `ap-south`. SLNG: the same 13 world parts listed above. Pipecat: one platform region name, forwarded without a value check | The agent worker on code targets; call placement on SLNG |
+| `deployment_region` | Each target in `targets.yaml` | LiveKit: `us-east`, `eu-central`, `ap-south`. SLNG: its [agent regions](/targets/slng#targets-yaml), not the world parts above. Pipecat: one platform region name, forwarded without a value check | The agent worker on code targets; call placement on SLNG |
 
-SLNG speech, routing, and deployment now share region names. LiveKit keeps its
-own worker names. Each setting is still independent of the others. None alone guarantees
+SLNG speech and routing share the world part names. SLNG deployment takes the
+agents API's region names instead. Twelve are spelled like a world part, but
+`us-east` there is LiveKit Cloud's US East and SLNG's own is `us-east-slng`.
+LiveKit keeps its own worker names. Each setting is still independent of the others. None alone guarantees
 data residency: model providers, media, tools, traces, and storage have their
 own locations. A nearby speech gateway does not prove where its model runs.
 LiveKit's compute names come from its
@@ -200,8 +202,8 @@ speech binding and `eu-north` on a think binding are the same place, and a
 package can keep listening, thinking and speaking in one world part. The LLM
 behind the router keeps its own provider settings.
 
-SLNG deployment uses these same 13 region names. The location of each service
-is still chosen separately.
+SLNG deployment takes [agent regions](/targets/slng#targets-yaml), a separate
+list. The location of each service is still chosen separately.
 
 ## Place the worker near your users and models
 
