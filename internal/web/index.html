@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>unmute dev</title>
 <style>
-  /* The SLNG studio's tokens (slng-ai/unmute-beat, studio/web/src/styles/tokens.css),
+  /* The UNMUTE studio's tokens,
      one to one, plus the few literals the studio writes inline. Dark ground, one
      yellow, square corners, 1 px rules. Each signal colour means one thing. Saans
      is licensed and the page ships inside the binary, so sans falls back to the
@@ -98,6 +98,33 @@
   #connect[disabled],#connect[disabled]:hover{
     background:transparent;border:1px dashed var(--rule-strong);color:var(--faint);cursor:not-allowed;
   }
+
+  /* text only: the quiet second way in. It is gone while a call runs or while
+     connect is unavailable, so it never offers a call the page cannot start. */
+  #textonly{
+    font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+    height:var(--control);padding:0 14px;border:1px solid var(--rule-strong);border-radius:0;
+    background:transparent;color:var(--muted);cursor:pointer;white-space:nowrap;
+  }
+  #textonly:hover{background:var(--raised);color:var(--text)}
+  #connect[disabled] ~ #textonly,body[data-state="connecting"] #textonly,body[data-state="connected"] #textonly{display:none}
+
+  /* typed line: shown only on a live call, in both transports */
+  #chatform{display:none;flex:1 1 280px;min-width:0;gap:8px;align-items:center}
+  body[data-state="connected"] #chatform{display:flex}
+  #chatinput{
+    flex:1 1 auto;min-width:0;height:var(--control);padding:0 12px;border:1px solid var(--rule-strong);border-radius:0;
+    background:var(--sunk);color:var(--text);font-family:var(--mono);font-size:13px;
+  }
+  #chatinput::placeholder{color:var(--faint)}
+  #chatinput:focus-visible{outline:2px solid var(--yellow);outline-offset:0}
+  #chatsend{
+    font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+    height:var(--control);padding:0 14px;border:1px solid var(--rule-strong);border-radius:0;
+    background:transparent;color:var(--muted);cursor:pointer;
+  }
+  #chatsend:hover:not([disabled]){background:var(--raised);color:var(--text)}
+  #chatsend[disabled]{border-style:dashed;color:var(--faint);cursor:not-allowed}
 
   /* ── page frame ─────────────────────────────────────────── */
   .app{height:100%;display:flex;flex-direction:column;min-height:0}
@@ -449,6 +476,7 @@
     /* one row for the call: mic, level, connect; the input picker under it */
     .callbar-level{flex:1 1 0}
     .controls-gap{display:none}
+    #chatform{order:2;flex:1 1 100%}
     .microw{order:1;flex:1 1 100%}
     #micsel{flex:1;max-width:none}
     .meter{gap:2px}
@@ -521,7 +549,12 @@
         <select id="micsel" aria-label="Microphone"></select>
       </label>
       <span class="controls-gap"></span>
+      <form id="chatform" autocomplete="off" aria-label="Type to the agent">
+        <input id="chatinput" type="text" maxlength="2000" placeholder="type a line to the agent" aria-label="Message to the agent">
+        <button id="chatsend" type="submit" disabled>send</button>
+      </form>
       <button id="connect" type="button">connect</button>
+      <button id="textonly" type="button" title="Start a call without a microphone: type, and hear the agent">text only</button>
     </section>
 
     <div class="views" id="views">
@@ -619,6 +652,10 @@ const el = {
   metrics: document.getElementById("metrics"),
   feed: document.getElementById('feed-status'),
   latest: document.getElementById('latest'),
+  textonly: document.getElementById('textonly'),
+  chatform: document.getElementById('chatform'),
+  chatinput: document.getElementById('chatinput'),
+  chatsend: document.getElementById('chatsend'),
 };
 el.agent.textContent = AGENT;
 
@@ -631,6 +668,7 @@ const bars = Array.from({length: BARS}, () => {
 let transport = null;                 // "webrtc-offer" | "livekit" while connected
 let pc = null, mic = null, pcId = null, dc = null;   // pipecat transport
 let room = null;                                     // livekit transport
+let textOnly = false;                                // this call has no microphone
 let audioCtx = null, analyser = null, micNode = null, remoteNode = null, raf = 0;
 let micAnalyser = null;                               // mic-only tap, drives the level in the control
 let muted = false, selectedDeviceId = null;
@@ -858,6 +896,7 @@ function clearTranscript(){
   stateLatest=new Set();
   renderStatePanel();
   records.clear(); recordNodes.clear(); exchangeNodes.clear(); messageNodes.clear();
+  pendingEchoes.clear();
   selectedCallID = null;
   locallyEnded = false;
   connectionLost = false;
@@ -1103,8 +1142,8 @@ function renderData(){
 // is measured twice or kept anywhere else.
 //
 // What counts as slow, in milliseconds except LLM requests per reply, which is
-// a count. These are the studio's defaults, Limits in slng-ai/unmute-beat
-// studio/src/studio/metrics/models.py: change them there and here together.
+// a count. These are the studio's defaults, its Limits:
+// change them there and here together.
 const LIMITS = {
   reply_latency:      {slow:1000, bad:1500, what:'Reply latency'},
   llm_first_token:    {slow:600,  bad:700,  what:'LLM first token'},
@@ -1598,6 +1637,7 @@ function attachRecord(record){
   const key=record.kind+':'+record.id, prior=records.get(key);
   if (prior && record.revision<=prior.revision) return;
   if (prior?.text?.state==='final' && record.text?.state==='provisional') return;
+  dropEcho(record);
   const reading=readingPosition();
   const selection=window.getSelection();
   const selected=selection && !selection.isCollapsed && el.transcript.contains(selection.anchorNode) && el.transcript.contains(selection.focusNode)
@@ -1720,6 +1760,7 @@ function teardown(state, hint){
   setMicUnavailable();
   el.connect.textContent = "connect";
   el.connect.disabled = !ready;
+  el.chatinput.value = ""; el.chatsend.disabled = true;
   transport = null;
   setState(state, state === "error" ? "error" : "ready",
     state === "error" ? hint : "press connect and talk to your agent");
@@ -1782,9 +1823,10 @@ document.addEventListener("keyup", (e) => {
 });
 
 // ── bootstrap: ask the CLI which transport this target uses ──
-async function connect(){
+async function connect(textMode=false){
   if (DEMO) return simulate();
   if (transport || connecting) return;
+  textOnly = textMode === true;
   clearTranscript();
   connecting = true;
   const generation = ++connectionGeneration;
@@ -1900,8 +1942,10 @@ function sendClientReady(){
 
 async function connectPipecat(session){
   const offerUrl = session.offerUrl || '/api/offer';
+  let stream = null;
+  if (textOnly) setState('connecting','connecting','connecting without a microphone');
+  else {
   setState('connecting','connecting','requesting microphone');
-  let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({audio:audioConstraint()});
     if (!currentConnection(session)){stream.getTracks().forEach(t=>t.stop());return;}
@@ -1920,10 +1964,12 @@ async function connectPipecat(session){
     if (currentConnection(session)) teardown('error','microphone permission denied');
     return;
   }
+  }
   const peer = new RTCPeerConnection();
   pc = peer;
   try {
-    stream.getTracks().forEach(t=>peer.addTrack(t,stream));
+    if (stream) stream.getTracks().forEach(t=>peer.addTrack(t,stream));
+    else peer.addTransceiver('audio',{direction:'recvonly'});   // still hear the agent
     peer.addEventListener('track',e=>{
       if (!currentConnection(session)) return;
       el.remote.srcObject=e.streams[0];startMeter(e.streams[0]);
@@ -1960,9 +2006,10 @@ async function connectPipecat(session){
     await waitForPeer(peer);
     if (!currentConnection(session)) return;
     connecting=false;
-    setMuted(false);
+    if (!textOnly) setMuted(false);
     el.connect.textContent = "end call";
-    setState('connected','live','talk to your agent');
+    setState('connected','live',textOnly?'type to your agent':'talk to your agent');
+    chatReady();
   } catch(err){if(currentConnection(session))teardown('error',String(err.message || err));}
 }
 
@@ -2024,9 +2071,11 @@ async function connectLivekit(session){
     await nextRoom.connect(session.url,session.token);
     if (!currentConnection(session)){nextRoom.disconnect();return;}
     connecting=false;
-    setState('connected','live','talk to your agent');
+    setState('connected','live',textOnly?'type to your agent':'talk to your agent');
     el.connect.textContent = "end call";
+    chatReady();
   } catch(err){if(currentConnection(session))teardown('error',String(err.message || err));return;}
+  if (textOnly) return;
   try {
     await nextRoom.localParticipant.setMicrophoneEnabled(true);
     if (!currentConnection(session)) return;
@@ -2042,6 +2091,74 @@ async function connectLivekit(session){
 // Keep native focus; the keyboard handler owns push-to-talk.
 el.connect.addEventListener("click", () => {
   (connecting || el.body.dataset.state === "connected") ? teardown("idle") : connect();
+});
+el.textonly.addEventListener("click", () => { connect(true); });
+
+// ── typed lines ─────────────────────────────────────────
+// Pipecat reads an RTVI client message `send-text` on the data channel (the
+// RTVI processor's _handle_send_text, pipecat-ai 1.10 and 1.12): the line joins
+// the context as a user turn, the bot is interrupted, and it answers by voice.
+// LiveKit reads a text stream on the lk.chat topic, which AgentSession's room
+// input listens to by default. Neither runtime reports the line back as a
+// transcript, so the page writes the caller's words itself.
+let typedCount = 0;
+const pendingEchoes = new Map();                     // echo id -> typed text, until a record says it
+const sameWords = text => text.trim().toLowerCase();
+// The echo is a placeholder. When the bot reports the same words as the
+// caller's, that record owns the row and the echo goes. Matching is by the
+// words only, never by time, and an echo nothing matches stays.
+function dropEcho(record){
+  const data = record.text;
+  if (!data || data.speaker !== "user" || pendingEchoes.size === 0 || record.id.startsWith("typed-")) return;
+  for (const [id, text] of pendingEchoes){
+    if (text !== sameWords(data.text)) continue;
+    pendingEchoes.delete(id);
+    records.delete("exchange:"+id); records.delete("text:"+id+"-text");
+    recordNodes.delete("text:"+id+"-text");
+    messageNodes.delete(JSON.stringify(["user",id,""]));
+    exchangeNodes.get("exchange:"+id)?.element.remove();
+    exchangeNodes.delete("exchange:"+id);
+    return;
+  }
+}
+function chatReady(){ el.chatsend.disabled = el.chatinput.value.trim() === ""; }
+el.chatinput.addEventListener("input", chatReady);
+function showTyped(text){
+  let top = 0;
+  for (const r of records.values()) top = Math.max(top, r.order || 0);
+  const id = "typed-" + (++typedCount), order = top + 0.5;
+  attachRecord({version:2,kind:"exchange",call_id:selectedCallID,id,revision:1,order,
+    exchange:{role:"input",state:"ended",link_status:"unavailable",playback:"unknown"}});
+  attachRecord({version:2,kind:"text",call_id:selectedCallID,id:id+"-text",revision:1,order:order+0.1,
+    text:{exchange_id:id,message_id:id,speaker:"user",text,state:"final",origin:"typed",separator_before:""}});
+  pendingEchoes.set(id, sameWords(text));
+}
+async function sendTyped(text){
+  if (transport === "livekit"){
+    if (!room) throw new Error("not connected");
+    await room.localParticipant.sendText(text,{topic:"lk.chat"});
+  } else {
+    if (!dc || dc.readyState !== "open") throw new Error("the data channel is not open yet");
+    dc.send(JSON.stringify({
+      label:"rtvi-ai", type:"send-text", id:"unmute-dev-text-"+(typedCount+1),
+      data:{content:text, options:{run_immediately:true, audio_response:true}},
+    }));
+  }
+}
+el.chatform.addEventListener("submit", async event => {
+  event.preventDefault();
+  const text = el.chatinput.value.trim();
+  if (!text || el.body.dataset.state !== "connected") return;
+  el.chatsend.disabled = true;
+  try {
+    await sendTyped(text);
+    showTyped(text);
+    el.chatinput.value = "";
+  } catch (err) {
+    el.hint.textContent = "could not send: " + String(err.message || err);
+  }
+  chatReady();
+  el.chatinput.focus();
 });
 el.mute.addEventListener("click", () => { toggleMute(); });
 if (!DEMO && navigator.mediaDevices && navigator.mediaDevices.addEventListener)

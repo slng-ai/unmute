@@ -29,6 +29,7 @@ On this page:
 - [The one way to run](#the-one-way-to-run) - one command
 - [What it does, in order](#what-it-does-in-order) - the five things it runs
 - [Every flag](#every-flag) - targets, ports, seeding
+- [Typing instead of talking](#typing-instead-of-talking) - a text box and a no-microphone call
 - [The two views](#the-two-views) - the transcript and the timings
 - [Advanced](#advanced) - environment, seeding, more than one session
 
@@ -135,6 +136,28 @@ unmute dev examples/salon-concierge --target pipecat --port 8790 --bot-port 7890
 The web page URL always carries the target name, for example
 `http://localhost:8765/?agent=pipecat`.
 
+## Typing instead of talking
+
+You can type to the agent as well as talk to it. While a call is connected, a
+text box sits in the call bar. Type a line and press Enter, or press **Send**.
+The agent takes it as the caller's turn and answers by voice, as it does for
+speech. Your line shows in the conversation as the caller's words.
+
+To start a call with no microphone, press **Text only** next to **Connect**.
+The page never asks for microphone permission. You still hear the agent, and
+you type your side. **Connect** is unchanged and still uses the microphone.
+
+How the line reaches the agent depends on the target:
+
+| Target | What the page sends |
+|---|---|
+| Pipecat | An RTVI `send-text` message on the `chat` data channel. It interrupts the agent if it is speaking, then runs the model on your line. |
+| LiveKit | A text stream on the `lk.chat` topic. The generated agent reads it, because LiveKit's agent session listens on that topic by default. |
+
+A text-only Pipecat call sends no audio, so a package with an idle prompt can
+speak up after a quiet spell. That is the same prompt a silent caller would
+hear.
+
 ## The two views
 
 The page has two views and one set of call controls that stays put across both,
@@ -215,7 +238,7 @@ each stage. A turn can hold several replies, such as a filler and then the
 answer, so its wait sits on the turn and not on each reply. Open a turn to see
 every stage on its own row: STT and turn decision, each LLM request, each tool,
 each TTS request, and the wait. Each bar runs from zero to two seconds and marks
-that stage's limit. These limits are the SLNG studio's defaults.
+that stage's limit. These limits are the UNMUTE studio's defaults.
 
 Below the turns, **Latency by model** has one section per kind. STT shows the
 final transcript and the turn decision. LLM shows time to first token, the whole

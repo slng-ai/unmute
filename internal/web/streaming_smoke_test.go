@@ -10,9 +10,10 @@ import (
 	"testing"
 )
 
-// This runs the shipped page in Chromium. Only network/media boundaries are
-// replaced; the renderer, browser layout and native controls stay real.
-func TestSmokeDevUIStreaming(t *testing.T) {
+// playwrightScript starts the shipped page on a local server and runs one
+// Playwright script against it, skipping when Node or Chromium is missing.
+func playwrightScript(t *testing.T, name string) {
+	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not available")
@@ -23,14 +24,25 @@ func TestSmokeDevUIStreaming(t *testing.T) {
 	}
 	server := httptest.NewServer(http.FileServer(http.FS(FS)))
 	defer server.Close()
-	script, err := filepath.Abs("../testdata/web/streaming-replay.js")
+	script, err := filepath.Abs(filepath.Join("../testdata/web", name))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.CommandContext(t.Context(), node, script, server.URL)
-	out, err := cmd.CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), node, script, server.URL).CombinedOutput()
 	if err != nil {
-		t.Fatalf("shipped-page replay: %v\n%s", err, out)
+		t.Fatalf("shipped-page %s: %v\n%s", name, err, out)
 	}
 	t.Log(string(out))
+}
+
+// TestSmokeDevUITextChat types lines and starts a text-only call on both
+// transports, with the media and network boundaries replaced.
+func TestSmokeDevUITextChat(t *testing.T) {
+	playwrightScript(t, "text-chat.js")
+}
+
+// This runs the shipped page in Chromium. Only network/media boundaries are
+// replaced; the renderer, browser layout and native controls stay real.
+func TestSmokeDevUIStreaming(t *testing.T) {
+	playwrightScript(t, "streaming-replay.js")
 }
