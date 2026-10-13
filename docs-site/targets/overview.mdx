@@ -4,8 +4,8 @@ description: "What a target is, what targets.yaml holds, and how one package com
 ---
 
 A target is where your agent runs. Unmute compiles one package into a native
-project for the target you pick: SLNG, LiveKit, Pipecat, or Twilio. Two are
-framework code targets, one is hosted, and one is a small phone app.
+project or deployment body for the target you pick: SLNG, LiveKit, Pipecat,
+Twilio, or Agora.
 
 **SLNG** is a hosted target: `unmute deploy` compiles a deployment body and
 pushes it, and SLNG runs the agent. There is nothing to host and no
@@ -20,7 +20,12 @@ you host it. It answers inbound phone calls only, and has no `unmute dev`.
 Once it is hosted, `unmute deploy --target <name>` points your number at it.
 See [The Twilio ConversationRelay app](/targets/twilio).
 
-Those four are the only values `provider` accepts.
+**Agora** emits a Python session service and an RTC browser example for a
+single hosted conversation. Its [initial supported surface](/targets/agora)
+is smaller than the other targets. It has no `unmute init`, `unmute dev` or
+`unmute deploy` support; copy the Agora example and follow its runbook.
+
+Those five are the only values `provider` accepts.
 
 On this page:
 
@@ -58,49 +63,51 @@ is yours: a package with two Twilio setups might call them `pipecat_twilio` and
 
 One is required everywhere. The rest depend on the provider you chose.
 
-<ParamField path="provider" type="slng | livekit | pipecat | twilio" required>
-  Which runtime this instance compiles for. Those four names are the whole
+<ParamField path="provider" type="slng | livekit | pipecat | twilio | agora" required>
+  Which runtime this instance compiles for. Those five names are the whole
   list. `vapi` and `deepgram` were target names once, and both are now refused
   by name.
 </ParamField>
 
 <ParamField path="version" type="exact framework version">
   The framework release an emitted project pins, written with all three
-  numbers. Required on `livekit` and `pipecat`. Refused on `slng`, which owns
+  numbers. Required on `livekit`, `pipecat` and `agora`. Refused on `slng`, which owns
   the version its agents run on, and on `twilio`, whose app runs on no
   framework and pins its own packages.
 </ParamField>
 
 <ParamField path="sdk_language" type="python">
   The language an emitted project is written in. `python` is the only value
-  either driver has templates for, and LiveKit needs it stated to compile an
+  the project drivers have templates for, and LiveKit needs it stated to compile an
   MCP tool. Refused on `slng`.
 </ParamField>
 
 <ParamField path="pins" type="package name to version">
   Package versions for the emitted LiveKit project, limited to names the
   LiveKit driver knows. Pipecat reads none of them, so leave it out there.
-  Refused on `slng` and `twilio`.
+  Refused on `slng`, `twilio` and `agora`.
 </ParamField>
 
 <ParamField path="connection" type="connection file stem">
   The one [connection file](/reference/connections-yaml) carrying this target's
   phone calls. Required once the package declares a phone channel on `livekit`,
   `pipecat` or `twilio`, and refused when nothing in the package uses a phone route.
-  Refused on `slng`, which has no carrier state in a package.
+  Refused on `slng`, which has no carrier state in a package, and on `agora`,
+  which supports browser audio only.
 </ParamField>
 
 <ParamField path="deployment_region" type="string or list of strings">
   LiveKit accepts `us-east`, `eu-central`, or `ap-south`, singly or in a duplicate-free list.
   Pipecat forwards one non-empty platform region. Both use platform placement when omitted.
   SLNG requires one of its [13 world parts](/targets/slng#targets-yaml); no default is inferred.
-  Twilio refuses it: you choose where its one process runs.
+  Twilio refuses it: you choose where its one process runs. Agora also refuses
+  it; its API area is runtime environment configuration.
 </ParamField>
 
 <ParamField path="warm_instances" type="integer, zero or more" default="0">
   Instances the platform holds ready, so the first call after a quiet period is
   not waiting for a container to start. Pipecat only: LiveKit, `slng` and
-  `twilio` refuse a stated pool. Left out means none, and the platform scales to zero when idle.
+  `twilio` and `agora` refuse a stated pool. Left out means none, and the platform scales to zero when idle.
 </ParamField>
 
 <ParamField path="models" type="model entry name to a model definition">
@@ -242,5 +249,8 @@ browser agent, either.
   </Card>
   <Card title="The Twilio ConversationRelay app" icon="phone" href="/targets/twilio">
     What a twilio target writes, and how to host it.
+  </Card>
+  <Card title="The Agora browser example" icon="microphone" href="/targets/agora">
+    A Python session service and browser client for a hosted conversation.
   </Card>
 </CardGroup>

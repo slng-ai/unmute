@@ -836,6 +836,9 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	if provider == targetcap.Slng {
 		validateSlngTarget(agent, resolved, row)
 	}
+	if provider == targetcap.Agora {
+		validateAgoraTarget(agent, resolved, row)
+	}
 	if provider == targetcap.Twilio {
 		validateTwilioTarget(agent, resolved, row)
 	} else if resolved.Logic != nil {

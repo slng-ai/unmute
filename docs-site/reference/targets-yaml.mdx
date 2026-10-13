@@ -30,12 +30,12 @@ targets:
 </ParamField>
 
 <ParamField path="targets.<name>.provider" type="string" required>
-  Target provider. Accepts `slng`, `livekit`, `pipecat`, `twilio`. Required; omission is refused.
+  Target provider. Accepts `slng`, `livekit`, `pipecat`, `twilio`, `agora`. Required; omission is refused.
 </ParamField>
 
 <ParamField path="targets.<name>.version" type="string">
   Framework version pinned in an emitted project. Accepts exact `x.y.z` in the supported
-  window for LiveKit and Pipecat. Required for LiveKit and Pipecat; omit on SLNG, which
+  window for LiveKit, Pipecat and Agora. Required for those three targets; omit on SLNG, which
   emits no framework project, and on Twilio, whose app runs on no framework.
 </ParamField>
 
@@ -51,8 +51,8 @@ targets:
 
 <ParamField path="targets.<name>.connection" type="string">
   This target's phone route; illegal when the package has no phone use. Accepts connection
-  file stem. If omitted, there is no phone route; required for LiveKit or Pipecat
-  telephony.
+  file stem. If omitted, there is no phone route; required for LiveKit, Pipecat or Twilio
+  telephony. Agora refuses it.
 </ParamField>
 
 <ParamField path="targets.<name>.deployment_region" type="string or list of strings">
@@ -86,7 +86,7 @@ provider with different settings, for example `pipecat_twilio` and
 
 That is the whole list. A target says where the agent runs and, for a phone
 agent, which one connection carries the call. `unmute compile` compiles a
-project for `livekit`, `pipecat` and `twilio`; a `slng` target compiles to a
+project for `livekit`, `pipecat`, `twilio` and `agora`; a `slng` target compiles to a
 deployment body instead, which [Deploy to SLNG](/deploy/slng) covers. A
 `twilio` project is one app you host; see [the Twilio target](/targets/twilio).
 
@@ -96,7 +96,7 @@ deployment body instead, which [Deploy to SLNG](/deploy/slng) covers. A
 ```text
 provider "deepgram" was retired: the deepgram target never emitted a runnable project and
   was retired on 2026-08-24; deepgram remains available as a model vendor, for example
-  slng/deepgram/nova:3-en. Supported providers: livekit, pipecat, slng, twilio
+  slng/deepgram/nova:3-en. Supported providers: livekit, pipecat, slng, twilio, agora
 ```
 
 Deepgram stays a model vendor: what the refusal calls out is the target name,
@@ -104,12 +104,12 @@ never the vendor.
 
 ## Framework versions are exact
 
-For LiveKit and Pipecat, write all three numbers, such as `1.10.0`. Unmute installs
+For LiveKit, Pipecat and Agora, write all three numbers, such as `1.10.0`. Unmute installs
 exactly what the target declares. It never widens the pin or silently upgrades it
 for a feature.
 
 This Unmute release supports exactly `livekit-agents` 1.8.1 and
-exactly `pipecat-ai` 1.10.0. Any other version is refused.
+exactly `pipecat-ai` 1.10.0, plus exactly `agora-agents` 2.11.0. Any other version is refused.
 
 ## Deployment regions
 
@@ -156,7 +156,7 @@ for a deployed example.
 `pins` is a LiveKit-only escape hatch for packages already known to the LiveKit
 driver. Unknown package names and versions below the catalogue floor are errors.
 On a `pipecat` target the map validates with no error, and nothing reads it.
-SLNG refuses a non-empty `pins` map. Leave it out on both targets.
+SLNG, Twilio and Agora refuse a non-empty `pins` map. Leave it out on those targets and Pipecat.
 
 ## models overrides
 
@@ -229,3 +229,7 @@ Where the target names no connection, the first two messages say
     What each generated project looks like.
   </Card>
 </Columns>
+
+The [Agora target](/targets/agora) runs a local browser example with a hosted
+conversation. It refuses `pins`, `connection`, `deployment_region` and
+`warm_instances`; its API area is runtime environment configuration.

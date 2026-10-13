@@ -47,9 +47,11 @@ On this page:
       [`agent.yaml`](/reference/agent-yaml) is the agent,
       `instructions.md` is its prompt, and
       [`targets.yaml`](/reference/targets-yaml) picks the target this package
-      compiles to. Unmute compiles to four targets: Pipecat, LiveKit,
-      SLNG or Twilio (see [targets](/targets/overview)); this scaffold picks
+      compiles to. Unmute compiles to five targets: Pipecat, LiveKit,
+      SLNG, Twilio or Agora (see [targets](/targets/overview)); this scaffold picks
       LiveKit Agents. Their configuration pages list every supported key.
+      Agora has no `unmute init` or `unmute dev` support; start from its
+      [browser example](/targets/agora) and follow the runbook instead.
       `.env.example` lists the keys to fill in. The scaffold uses SLNG speech
       models for listening and speaking.
     </Accordion>

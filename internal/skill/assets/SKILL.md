@@ -7,7 +7,7 @@ metadata:
 
 # Build voice agents with Unmute
 
-Unmute compiles one declarative package into native LiveKit Agents or Pipecat projects. Author the package; do not hand-write framework Python or edit generated `build/` files.
+Unmute compiles declarative packages for LiveKit, Pipecat, SLNG, Twilio and Agora, within each target's supported surface. Author the package; do not hand-write framework Python or edit generated `build/` files.
 
 ## Start with one reference
 
@@ -73,7 +73,7 @@ For every change:
 1. Write the package.
 2. Run `unmute validate`; read the exact error and fix the package, not the refusal.
 3. Run `unmute compile` when validation is clean.
-4. Run `unmute dev` and talk to the agent.
+4. Run `unmute dev` for LiveKit or Pipecat and talk to the agent; use the target runbook for other providers.
 5. For a slng target only, the `unmute-deploy` skill pushes it: a push replaces the live agent rather than merging with it.
 
 Repeat validation until clean. If commands cannot run, give the exact package
@@ -81,6 +81,7 @@ path and commands and ask for their output. If audio cannot be heard, run the
 other checks and say that the agent still needs a listening test. Never claim a
 package works because files were written.
 
+For `provider: agora`, read [references/agora.md](references/agora.md); copy its example instead of `unmute init`.
 ## Hard rules
 
 - The CLI wins when a reference and validation disagree.
@@ -90,8 +91,7 @@ package works because files were written.
   values. Secrets never use `{{templates}}`.
 
 ## Finish clearly
-
-Tell the user:
+Tell the user the following:
 
 1. the target and smallest structure chosen;
 2. every model bound by role;

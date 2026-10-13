@@ -107,7 +107,7 @@ func TestAgentInstructionsNameTheTwoFactsAgentsGetWrong(t *testing.T) {
 	// the framework package is still livekit-agents, and the changelog still
 	// says so about the version it pinned, but no page teaches the longer name.
 	// twilio joined on 2026-09-25, a target and a carrier name at once.
-	for _, want := range []string{"pipecat", "livekit", "slng", "twilio", "four targets"} {
+	for _, want := range []string{"pipecat", "livekit", "slng", "twilio", "agora", "five targets"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("docs-site/docs.json markdown.instructions never says %q; an agent that does not know the target set invents a provider name", want)
 		}

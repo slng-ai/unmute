@@ -1077,6 +1077,7 @@ const (
 	ProviderPipecat Provider = "pipecat"
 	ProviderSlng    Provider = "slng"
 	ProviderTwilio  Provider = "twilio"
+	ProviderAgora   Provider = "agora"
 )
 
 type Bindings struct {

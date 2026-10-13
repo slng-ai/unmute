@@ -400,10 +400,12 @@ for that provider.
 
 #### `regions.deployments[].provider`
 
-Type: `livekit | pipecat | slng`. Required within its block.
+Type: `livekit | pipecat | slng | twilio | agora`. Required within its block.
 
-Exactly one of `livekit`, `pipecat`, or `slng`. Match the target's
-`provider`, not its instance name. There is no default.
+Exactly one of `livekit`, `pipecat`, `slng`, `twilio`, or `agora`. Match the target's
+`provider`, not its instance name. There is no default. Twilio and Agora refuse
+`deployment_region`; the former is an app you host, and the latter uses runtime
+environment configuration for its API area.
 
 #### `regions.deployments[].allow`
 
@@ -431,7 +433,7 @@ Restricts where the package can be compiled or deployed. Its only key is
 
 Type: `string[]`. Required within its block.
 
-Any subset of `livekit`, `pipecat`, and `slng`. These are deployment
+Any subset of `livekit`, `pipecat`, `slng`, `twilio`, and `agora`. These are deployment
 providers, not target instance names. An empty list allows no target.
 Every target declared in the package is checked, even when a command
 selects only one of them.
@@ -500,7 +502,7 @@ Its only key is `allow`. This rule applies only to builtin tools.
 
 Type: `string[]`. Required within its block.
 
-Exact builtin IDs. Currently `end_call` is supported on all three targets;
+Exact builtin IDs. Currently `end_call` is supported on LiveKit, Pipecat, SLNG and Twilio;
 `send_sms` is supported only on SLNG. The manifest accepts nonempty ID
 strings, while tool validation checks whether the ID and target are
 supported. An empty list forbids builtin tools.

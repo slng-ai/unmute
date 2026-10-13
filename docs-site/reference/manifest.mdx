@@ -381,10 +381,12 @@ models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no
   for that provider.
 </ParamField>
 
-<ParamField path="regions.deployments[].provider" type="slng | livekit | pipecat | twilio" required>
-  Exactly one of `slng`, `livekit`, `pipecat`, or `twilio`. Match the target's
+<ParamField path="regions.deployments[].provider" type="slng | livekit | pipecat | twilio | agora" required>
+  Exactly one of `slng`, `livekit`, `pipecat`, `twilio`, or `agora`. Match the target's
   `provider`, not its instance name. There is no default. A `twilio` target
   takes no `deployment_region`, because you host its one process yourself.
+  An `agora` target also refuses `deployment_region`; its API area is runtime
+  environment configuration.
 </ParamField>
 
 <ParamField path="regions.deployments[].allow" type="string[]" required>
@@ -406,7 +408,7 @@ models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no
 </ParamField>
 
 <ParamField path="targets.allow" type="string[]" required>
-  Any subset of `slng`, `livekit`, `pipecat`, and `twilio`. These are deployment
+  Any subset of `slng`, `livekit`, `pipecat`, `twilio`, and `agora`. These are deployment
   providers, not target instance names. An empty list allows no target.
   Every target declared in the package is checked, even when a command
   selects only one of them.
@@ -461,7 +463,7 @@ models.reasoning.model: "gemini/google/gemini-3.1-flash-lite:latest" declares no
 </ParamField>
 
 <ParamField path="tools.builtin.allow" type="string[]" required>
-  Exact builtin IDs. Currently `end_call` is supported on all four targets;
+  Exact builtin IDs. Currently `end_call` is supported on LiveKit, Pipecat, SLNG and Twilio;
   `send_sms` is supported only on SLNG. The manifest accepts nonempty ID
   strings, while tool validation checks whether the ID and target are
   supported. An empty list forbids builtin tools.

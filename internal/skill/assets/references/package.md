@@ -414,13 +414,13 @@ provider with different settings, for example `pipecat_twilio` and
 
 | Field | What it is |
 |---|---|
-| `provider` | `livekit`, `pipecat`, `slng`, or `twilio` |
-| `version` | required exact `x.y.z` framework version for LiveKit and Pipecat; refused on `slng` and `twilio` |
-| `pins` | LiveKit-only known package pins, name to semantic version; refused on `slng` and `twilio` |
+| `provider` | `livekit`, `pipecat`, `slng`, `twilio`, or `agora` |
+| `version` | required exact `x.y.z` framework version for LiveKit, Pipecat and Agora; refused on `slng` and `twilio` |
+| `pins` | LiveKit-only known package pins, name to semantic version; refused on `slng`, `twilio` and `agora` |
 | `sdk_language` | `python` when written; refused on `slng` |
-| `connection` | required for LiveKit, Pipecat or Twilio telephony; illegal with no phone use; refused on `slng` |
-| `deployment_region` | LiveKit: `us-east`, `eu-central`, or `ap-south`, one or a duplicate-free list; Pipecat: one non-empty region; on `slng` exactly one of `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`; refused on `twilio` |
-| `warm_instances` | instances the platform holds ready; zero or more; **Pipecat only**, refused on `livekit`, `slng` and `twilio` |
+| `connection` | required for LiveKit, Pipecat or Twilio telephony; illegal with no phone use; refused on `slng` and `agora` |
+| `deployment_region` | LiveKit: `us-east`, `eu-central`, or `ap-south`, one or a duplicate-free list; Pipecat: one non-empty region; on `slng` exactly one of `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`; refused on `twilio` and `agora` |
+| `warm_instances` | instances the platform holds ready; zero or more; **Pipecat only**, refused on `livekit`, `slng`, `twilio` and `agora` |
 | `models` | per target overrides of named `models` entries |
 
 That is the whole list. A `models` override is keyed by the entry name from
@@ -501,13 +501,16 @@ every field that entry needs.
 | `livekit` | yes | yes |
 | `slng` | yes | no |
 | `twilio` | yes | yes |
+| `agora` | yes | yes |
 
-Those are the only four. A provider earns a place here by having a driver that
+Those are the five supported targets. A provider earns a place here by having a driver that
 owns its whole output, so validate and compile agree about what exists.
 
 `pipecat` and `livekit` generate a runnable Python project you host and run.
 `twilio` generates a small Python web app that Twilio ConversationRelay calls;
 see "The twilio target" below.
+`agora` generates a local Python session service with a browser RTC example;
+see [Agora authoring](agora.md) for its supported surface and launch commands.
 `slng` generates a deployment body for a platform that runs the agent for you,
 so there is nothing to run locally and `unmute dev` does not apply to it. See
 "The slng target" below.
@@ -518,7 +521,7 @@ retired on 2026-08-24. Naming either as a target is refused. Note that
 are unaffected. A target and a model vendor are different things that can share
 a word.
 
-LiveKit and Pipecat versions are exact three-part versions in this release's
+LiveKit, Pipecat and Agora versions are exact three-part versions in this release's
 supported window. Unmute never widens the pin. `pins` accepts only packages the
 LiveKit driver knows; other providers do not consume it. A target's `models`
 map is keyed by an existing model entry name and takes the same model fields.
@@ -839,3 +842,10 @@ in the same reply as its goodbye. `handoff` has `reason`, `data`, `call`, `statu
 never put a secret in `end()` data. A turn has 30 seconds. Compile copies the folder as written, never formatted, and it
 counts in `artifact_id`. Every other target refuses `logic:`. See the [custom agent logic reference](https://unmute.ai/targets/twilio#bring-your-own-agent-logic)
 for the `respond(session)` interface.
+
+## The agora target
+
+`agora` emits a Python session service and browser client. Pin `version: "2.11.0"`.
+See [Agora authoring](agora.md) for its deliberately small supported surface and
+launch commands. Copy `examples/agora-voice` to start; `unmute init`,
+`unmute dev` and `unmute deploy` do not support this target.

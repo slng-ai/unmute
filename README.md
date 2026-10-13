@@ -31,6 +31,10 @@ the way. It is never in the call path.
 > to a voice you can talk to in your browser. The full guide lives at
 > [unmute.ai](https://unmute.ai).
 
+The [Agora voice example](examples/agora-voice/) compiles to an Agora Agents
+Python service and an RTC browser client. Its first target supports a single
+managed cascade conversation; its README describes the supported boundary.
+
 ## Quickstart
 
 ```sh
@@ -153,7 +157,7 @@ runtime cannot run a model as defined, it overrides that single entry by name,
 the way LiveKit does with the turn detector above. The agent itself does not
 change.
 
-## Four targets
+## Five targets
 
 | Target | Kind | What you get |
 |---|---|---|
@@ -161,11 +165,15 @@ change.
 | [Pipecat](https://unmute.ai/targets/pipecat) | code | `build/pipecat/bot.py`, plus a `pcc-deploy.toml` for Pipecat Cloud |
 | [SLNG](https://unmute.ai/targets/slng) | hosted | `unmute deploy` pushes a deployment body and SLNG runs the agent |
 | [Twilio](https://unmute.ai/targets/twilio) | phone app | `build/<target>/app.py`, a small app Twilio ConversationRelay calls; you host it |
+| [Agora](https://unmute.ai/targets/agora) | hosted conversation | `build/<target>/server.py`, a local Python session service and RTC browser example |
 
-`pipecat`, `livekit`, `slng` and `twilio` are the only values `provider`
+`livekit`, `pipecat`, `slng`, `twilio` and `agora` are the only values `provider`
 accepts. A code target gives you something to host. The hosted target has
 nothing to host, and no `unmute dev`. The Twilio target answers inbound phone
-calls only, and has no `unmute dev` either.
+calls only, and has no `unmute dev` either. Agora supports a single browser
+agent within its [supported surface](https://unmute.ai/targets/agora); copy
+its example and follow the runbook, without `unmute init`, `unmute dev` or
+`unmute deploy`.
 
 ## What compile writes
 
@@ -522,7 +530,7 @@ per feature of the compiler, held to every gate in this repository.
 
 ## Examples
 
-[`examples/`](examples/) holds four packages.
+[`examples/`](examples/) holds packages illustrating supported features.
 
 - [`customer-intake`](examples/customer-intake/) is the small one: one agent,
   three tasks, one local tool. It takes a caller's number, name, email address,
@@ -567,7 +575,7 @@ published SLNG conformance fixtures and needs network.
 ## Contributing
 
 Contributions are welcome, from anyone. Unmute is MIT licensed and every part of
-it is open: the compiler, the four targets, the examples, the skill and the
+it is open: the compiler, the five targets, the examples, the skill and the
 docs site.
 
 A pull request needs five things:

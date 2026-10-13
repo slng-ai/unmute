@@ -1,3 +1,21 @@
+=== agora listen deepgram ===
+binding:  provider=deepgram model=model-1
+class:    DeepgramSTT
+args:     model="model-1", language="es-MX", sample_rate=24000
+install:  ships with the framework
+
+=== agora reason openai ===
+binding:  provider=openai model=model-1
+class:    OpenAI
+args:     model="model-1", sample_rate=24000
+install:  ships with the framework
+
+=== agora speak minimax ===
+binding:  provider=minimax model=model-1 voice=voice-1
+class:    MiniMaxTTS
+args:     voice_id="voice-1", model="model-1", sample_rate=24000
+install:  ships with the framework
+
 === livekit listen assemblyai ===
 binding:  provider=assemblyai model=model-1
 class:    assemblyai.STT

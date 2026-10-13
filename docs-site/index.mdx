@@ -1,12 +1,12 @@
 ---
 title: "Unmute"
-description: "A declarative standard for voice agents. Describe the agent once, compile it to SLNG, LiveKit, Pipecat, or Twilio."
+description: "A declarative standard for voice agents. Describe the agent once, compile it to SLNG, LiveKit, Pipecat, Twilio, or Agora."
 sidebarTitle: "Overview"
 ---
 
 Unmute is a declarative standard for voice agents. You describe the agent
 once, in YAML and Markdown. The compiler turns that package into a native
-project for the target you pick: SLNG, LiveKit, Pipecat, or Twilio.
+project for the target you pick: SLNG, LiveKit, Pipecat, Twilio, or Agora.
 
 ## The problem
 
@@ -40,16 +40,19 @@ compiles the package into what that target expects:
   `.env.example`, and runbook. You own, host, and run that project.
 - **Twilio** generates a FastAPI app for ConversationRelay. You host it,
   then `unmute deploy --target twilio` connects your Twilio number to it.
+- **Agora** emits a Python session service and an RTC browser example for
+  a single hosted conversation. See its [supported surface](/targets/agora).
 
 <Columns cols={2}>
   <Card title="One package" icon="file-code" href="/build/how-a-package-fits-together">
     `agent.yaml`, your prompts, your tool files. Read it and you know what the
     agent does.
   </Card>
-  <Card title="Four targets" icon="boxes" href="/targets/overview">
+  <Card title="Five targets" icon="boxes" href="/targets/overview">
     The same package compiles to SLNG, LiveKit, and Pipecat. Same
     prompt, same tools, same behavior. A phone agent with one prompt can
-    also compile to a Twilio ConversationRelay app.
+    also compile to a Twilio ConversationRelay app. Agora supports a single
+    browser agent within its smaller supported surface.
   </Card>
 </Columns>
 

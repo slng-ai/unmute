@@ -10,6 +10,7 @@ const (
 	// calls. ConversationRelay listens and speaks; the app thinks and runs
 	// tools. Its rows live in twilio_target.go.
 	Twilio Provider = "twilio"
+	Agora  Provider = "agora"
 )
 
 // Providers is every target a package may name. A provider earns a place here by
@@ -22,7 +23,7 @@ const (
 // runnable project; slng emits a deployment body for a platform that runs the
 // agent, which is a complete output of a different shape (constitution 6.0.0).
 // What is still forbidden is a provider that validates and produces nothing.
-var Providers = []Provider{LiveKit, Pipecat, Slng, Twilio}
+var Providers = []Provider{LiveKit, Pipecat, Slng, Twilio, Agora}
 
 // Retired names a provider this repository used to accept as a target. The
 // value is what to tell the author, because "unknown provider" is true and
@@ -45,17 +46,12 @@ func IsCode(provider Provider) bool {
 }
 
 // EmitsProject reports whether a provider's driver writes a runnable project.
-// It stopped agreeing with Providers in constitution 6.0.0: slng is a target and
-// emits no project, so this is now the question "is there something to run, pin
-// and version here", which is what every caller was really asking. It is what
-// separates a target that has a `dev`, a framework version and dependency pins
-// from one that has none of the three.
-//
-// Twilio emits a runnable project that hosts the package's tools, so it answers
-// yes. It has no framework, so it has no version window and no author pins; the
-// framework half of the question is IsCode.
+// SLNG emits a deployment body. LiveKit and Pipecat run local pipelines;
+// Twilio and Agora emit services for hosted speech or conversations. This says
+// nothing about dev/deploy support or a framework version: those are separate
+// target contracts.
 func EmitsProject(provider Provider) bool {
-	return provider == LiveKit || provider == Pipecat || provider == Twilio
+	return provider == LiveKit || provider == Pipecat || provider == Twilio || provider == Agora
 }
 
 type Tag string
@@ -294,7 +290,7 @@ func (t Table) HistorySupport(history History, provider Provider) HistorySupport
 }
 
 func Default() Table {
-	return addTwilio(Table{
+	table := Table{
 		Fields: map[Field]map[Provider]Capability{
 			FieldListenLocal: field(deny(Slng, slngNoPlacement("listen"))),
 			FieldSpeakLocal:  field(deny(Slng, slngNoPlacement("speak"))),
@@ -837,7 +833,18 @@ func Default() Table {
 		FallbackSlots: map[Provider]FallbackSlot{
 			LiveKit: FallbackComponent, Pipecat: FallbackGenerated, Slng: FallbackComponent,
 		},
-	})
+	}
+	// Agora owns hosted turn taking. New feature rows stay denied until their
+	// generated settings and runtime implementation explicitly support them.
+	for field, providers := range table.Fields {
+		providers[Agora] = Capability{Tag: Gated, Note: "agora target does not emit " + string(field) + "; remove it or choose another target"}
+	}
+	table.Fields[FieldMaxDuration][Agora] = Capability{Tag: Core}
+	for _, role := range []Role{Listen, Reason, Speak} {
+		table.Roles[role][Agora] = Open
+	}
+	table.FallbackSlots[Agora] = FallbackComponent
+	return addTwilio(table)
 }
 
 // slngNoPlacement and slngNoHandoff each carry one reason shared by
@@ -901,7 +908,7 @@ func routedControls(name string) map[Provider]ControlCapability {
 }
 
 func controls(livekit, pipecat, slng ControlCapability) map[Provider]ControlCapability {
-	return map[Provider]ControlCapability{LiveKit: livekit, Pipecat: pipecat, Slng: slng}
+	return map[Provider]ControlCapability{LiveKit: livekit, Pipecat: pipecat, Slng: slng, Agora: controlDeny("agora target emits browser audio only; remove phone controls")}
 }
 
 type override struct {
@@ -923,7 +930,7 @@ func allow(provider Provider) override {
 	return override{provider, Capability{Tag: Core}}
 }
 
-// field seeds the providers whose drivers emit a project and nothing else.
+// field seeds only the established local pipeline drivers.
 //
 // It used to seed every provider in Providers with Core, which read as a
 // convenience and was a trapdoor: the day a third provider joined the list, all
@@ -931,7 +938,7 @@ func allow(provider Provider) override {
 // own comments already described the managed answer. Twenty-four of them carry no
 // override at all, so nothing would have looked wrong in this file.
 //
-// Leaving Slng out makes TestDefaultTableIsCompleteAndTyped, which already
+// Leaving hosted targets out makes TestDefaultTableIsCompleteAndTyped, which already
 // existed, fail once per undecided row until a person writes an answer. No new
 // test buys 48 forced decisions.
 //
@@ -953,12 +960,13 @@ func field(overrides ...override) map[Provider]Capability {
 }
 
 func role(livekit, pipecat, slng RoleKind) map[Provider]RoleKind {
-	return map[Provider]RoleKind{LiveKit: livekit, Pipecat: pipecat, Slng: slng}
+	return map[Provider]RoleKind{LiveKit: livekit, Pipecat: pipecat, Slng: slng, Agora: Integrated}
 }
 
 func history(livekit, pipecat, slng HistoryKind) map[Provider]HistorySupport {
 	values := map[Provider]HistorySupport{
 		LiveKit: {Kind: livekit}, Pipecat: {Kind: pipecat}, Slng: {Kind: slng},
+		Agora: {Kind: HistoryFail, Note: "agora target serves one agent; remove task and handoff history"},
 	}
 	// One value fails on Pipecat now rather than four, so the note names what
 	// the target does support. A refusal that only says what is missing leaves

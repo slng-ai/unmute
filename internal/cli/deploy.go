@@ -436,7 +436,8 @@ func noSlngTargetGuidance(selected []ir.Target) string {
 		"    targets:\n      slng:\n        provider: slng\n        deployment_region: eu-north\n"+
 		"  a livekit or pipecat target is compiled with `unmute compile` and deployed by that platform's own tool.\n"+
 		"  a twilio target is compiled with `unmute compile` and hosted by you; then\n"+
-		"  `unmute deploy --target <name>` points your Twilio number at it.", have)
+		"  `unmute deploy --target <name>` points your Twilio number at it.\n"+
+		"  an agora target is compiled with `unmute compile`; follow its generated README.md to run the browser service.", have)
 }
 
 func missingPushToolGuidance() string {
