@@ -1,5 +1,7 @@
 package target
 
+import "strings"
+
 type Provider string
 
 const (
@@ -723,7 +725,7 @@ func Default() Table {
 			// provider is gated, each in its own words. Verified 2026-08-12.
 			FieldDeploymentMultiRegion: field(
 				deny(Pipecat, "Pipecat Cloud agent names are globally unique across regions, so a second region needs a differently named agent: declare one region here and deploy the second with `pipecat cloud deploy <name>-<region> --region <region>`"),
-				deny(Slng, "slng target takes exactly one deployment region: name one of us-east, us-west, br, eu-west, eu-north, gb, za, il, jp, sg, id, in, au"),
+				deny(Slng, "slng target takes exactly one deployment region: name one of "+strings.Join(SlngDeploymentRegions, ", ")),
 			),
 			// Instances held ready (warm_instances). Only Pipecat Cloud takes the
 			// number in a file this compiler writes: `[scaling] min_agents` in

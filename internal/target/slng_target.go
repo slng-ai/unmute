@@ -21,18 +21,30 @@ import (
 // Last read at 0957de04. One fact had drifted: the {{$NAME}} grammar in
 // prompts and greetings, added by backend 22e0d434 and removed by 39b119eb on
 // 2026-09-02, after the previous read here; validateVaultTokens in internal/ir
-// carries the story. SlngRegions was checked against the live
-// agent_region_bucket table the same turn and is right: twelve of its thirteen
-// codes are enabled buckets backed by SLNG's own clusters. `in` is the
-// exception and has no bucket at all, so a package naming it compiles here and
-// is refused by the push. Left as it is rather than removed, because whether
-// India gets its own SLNG region or keeps being served by the LiveKit-side
-// ap-south bucket is a platform decision and not this file's to make.
+// carries the story. SlngDeploymentRegions has its own date below.
 const SlngTargetVerified = "2026-09-22"
 
-// SlngRegions is the shared deployment, speech and router region list,
-// supplied by the SLNG team on 2026-09-14.
+// SlngRegions is the speech and router world part list, supplied by the SLNG
+// team on 2026-09-14: what params.world_part names on a listen, speak or think
+// binding. It is not where the agent runs, which is SlngDeploymentRegions.
 var SlngRegions = []string{"us-east", "us-west", "br", "eu-west", "eu-north", "gb", "za", "il", "jp", "sg", "id", "in", "au"}
+
+// SlngDeploymentRegions are the agent region codes SLNG's agents API takes as an
+// agent's region: what an SLNG target's deployment_region names, copied into
+// agent.json as written. Read from the agents API's region catalog on
+// 2026-10-13.
+//
+// They are not the world parts in SlngRegions, although twelve are spelled the
+// same and mean the same place. On the API, us-east is LiveKit Cloud's US East,
+// and SLNG's own cluster there is us-east-slng; eu-central and ap-south are
+// LiveKit Cloud too. LiveKit Cloud runs LiveKit agents only, which is what this
+// target deploys.
+var SlngDeploymentRegions = []string{
+	// SLNG's own clusters.
+	"us-east-slng", "us-west", "br", "eu-west", "eu-north", "gb", "za", "il", "jp", "sg", "id", "in", "au",
+	// LiveKit Cloud.
+	"us-east", "eu-central", "ap-south",
+}
 
 // The push tool's own surface, read from slng-ai/sdks on 2026-08-25: the CLI
 // lives in that monorepo under cli/, ships as the `voiceai` binary, and reads
@@ -313,21 +325,21 @@ func SlngDiagnostic(format string, args ...any) string {
 	return "slng target " + message
 }
 
-// CheckSlngRegion reports whether a deployment region is one SLNG accepts. The
-// message lists the accepted regions, because the useful part of a refusal is which
-// ones are right.
+// CheckSlngRegion reports whether a deployment region is one SLNG accepts
+// (SlngDeploymentRegions). The message lists the accepted regions, because the
+// useful part of a refusal is which ones are right.
 //
 // For other deployment targets, validateRegions checks for
 // an empty or duplicated entry and forwards whatever else it is given, because
 // every other target's platform owns its own region names.
 func CheckSlngRegion(region string) error {
-	if slices.Contains(SlngRegions, region) {
+	if slices.Contains(SlngDeploymentRegions, region) {
 		return nil
 	}
 	if region == "" {
 		return fmt.Errorf("%s", SlngDiagnostic("requires a deployment_region: one of %s",
-			strings.Join(SlngRegions, ", ")))
+			strings.Join(SlngDeploymentRegions, ", ")))
 	}
 	return fmt.Errorf("%s", SlngDiagnostic("does not deploy to region %q: use one of %s",
-		region, strings.Join(SlngRegions, ", ")))
+		region, strings.Join(SlngDeploymentRegions, ", ")))
 }
