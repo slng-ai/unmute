@@ -32,18 +32,26 @@ var SlngRegions = []string{"us-east", "us-west", "br", "eu-west", "eu-north", "g
 // SlngDeploymentRegions are the agent region codes SLNG's agents API takes as an
 // agent's region: what an SLNG target's deployment_region names, copied into
 // agent.json as written. Read from the agents API's region catalog on
-// 2026-10-13.
+// 2026-10-14, when LiveKit Cloud's regions took a -livekit suffix.
 //
 // They are not the world parts in SlngRegions, although twelve are spelled the
-// same and mean the same place. On the API, us-east is LiveKit Cloud's US East,
-// and SLNG's own cluster there is us-east-slng; eu-central and ap-south are
-// LiveKit Cloud too. LiveKit Cloud runs LiveKit agents only, which is what this
-// target deploys.
+// same and mean the same place. SLNG's own cluster in US East is us-east-slng.
+// The -livekit codes are LiveKit Cloud's, which runs LiveKit agents only, which
+// is what this target deploys.
 var SlngDeploymentRegions = []string{
 	// SLNG's own clusters.
 	"us-east-slng", "us-west", "br", "eu-west", "eu-north", "gb", "za", "il", "jp", "sg", "id", "in", "au",
 	// LiveKit Cloud.
-	"us-east", "eu-central", "ap-south",
+	"us-east-livekit", "eu-central-livekit", "ap-south-livekit",
+}
+
+// slngRenamedRegions are LiveKit Cloud's codes before the -livekit suffix, each
+// with its new code. The agents API refuses them (AGENT_REGION_RENAMED), so a
+// package that names one is told the new code at validation, not at push.
+var slngRenamedRegions = map[string]string{
+	"us-east":    "us-east-livekit",
+	"eu-central": "eu-central-livekit",
+	"ap-south":   "ap-south-livekit",
 }
 
 // The push tool's own surface, read from slng-ai/sdks on 2026-08-25: the CLI
@@ -327,7 +335,8 @@ func SlngDiagnostic(format string, args ...any) string {
 
 // CheckSlngRegion reports whether a deployment region is one SLNG accepts
 // (SlngDeploymentRegions). The message lists the accepted regions, because the
-// useful part of a refusal is which ones are right.
+// useful part of a refusal is which ones are right, or names the new code of a
+// renamed one.
 //
 // For other deployment targets, validateRegions checks for
 // an empty or duplicated entry and forwards whatever else it is given, because
@@ -339,6 +348,15 @@ func CheckSlngRegion(region string) error {
 	if region == "" {
 		return fmt.Errorf("%s", SlngDiagnostic("requires a deployment_region: one of %s",
 			strings.Join(SlngDeploymentRegions, ", ")))
+	}
+	if renamed, ok := slngRenamedRegions[region]; ok {
+		// us-east is also a world part, so the author may have meant SLNG's own.
+		also := ""
+		if region == "us-east" {
+			also = `, or "us-east-slng" for SLNG's own US East`
+		}
+		return fmt.Errorf("%s", SlngDiagnostic("deployment region %q was renamed: use %q (LiveKit Cloud)%s",
+			region, renamed, also))
 	}
 	return fmt.Errorf("%s", SlngDiagnostic("does not deploy to region %q: use one of %s",
 		region, strings.Join(SlngDeploymentRegions, ", ")))

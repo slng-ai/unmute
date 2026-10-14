@@ -419,7 +419,7 @@ provider with different settings, for example `pipecat_twilio` and
 | `pins` | LiveKit-only known package pins, name to semantic version; refused on `slng` and `twilio` |
 | `sdk_language` | `python` when written; refused on `slng` |
 | `connection` | required for LiveKit, Pipecat or Twilio telephony; illegal with no phone use; refused on `slng` |
-| `deployment_region` | LiveKit: `us-east`, `eu-central`, or `ap-south`, one or a duplicate-free list; Pipecat: one non-empty region; on `slng` exactly one agent region: SLNG's own `us-east-slng`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`, or LiveKit Cloud's `us-east`, `eu-central`, `ap-south`; refused on `twilio` |
+| `deployment_region` | LiveKit: `us-east`, `eu-central`, or `ap-south`, one or a duplicate-free list; Pipecat: one non-empty region; on `slng` exactly one agent region: SLNG's own `us-east-slng`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`, or LiveKit Cloud's `us-east-livekit`, `eu-central-livekit`, `ap-south-livekit`; refused on `twilio` |
 | `warm_instances` | instances the platform holds ready; zero or more; **Pipecat only**, refused on `livekit`, `slng` and `twilio` |
 | `models` | per target overrides of named `models` entries |
 
@@ -573,7 +573,7 @@ targets:
     deployment_region: eu-north
 ```
 
-That is the whole target. `deployment_region` takes exactly one agent region: SLNG's own `us-east-slng`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`, or LiveKit Cloud's `us-east`, `eu-central`, `ap-south`. These are the agents API's names, not the world parts a model's `params.world_part` takes: `us-east` is LiveKit Cloud's US East. `version`, `pins`, `sdk_language` and `connection` are all refused by
+That is the whole target. `deployment_region` takes exactly one agent region: SLNG's own `us-east-slng`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`, or LiveKit Cloud's `us-east-livekit`, `eu-central-livekit`, `ap-south-livekit`. These are the agents API's names, not the world parts a model's `params.world_part` takes: `us-east-livekit` is LiveKit Cloud's US East, and SLNG's own is `us-east-slng`. LiveKit Cloud's codes before the `-livekit` suffix (`us-east`, `eu-central`, `ap-south`) are refused with the new code. `version`, `pins`, `sdk_language` and `connection` are all refused by
 name: each describes a generated project and there is none.
 
 Write models as two fields here, the same as everywhere else. SLNG names a

@@ -609,8 +609,8 @@ and once with the think binding pointed at the router.
 | `deployment_region` | Each target in `targets.yaml` | LiveKit: `us-east`, `eu-central`, `ap-south`. SLNG: its agent regions (see `package.md`), not the world parts above. Pipecat: one platform region name, forwarded without a value check | The agent worker on code targets; call placement on SLNG |
 
 SLNG speech and routing share the world part names. SLNG deployment takes the
-agents API's region names instead. Twelve are spelled like a world part, but
-`us-east` there is LiveKit Cloud's US East and SLNG's own is `us-east-slng`.
+agents API's region names instead. Twelve are spelled like a world part, and
+SLNG's own US East is `us-east-slng`. LiveKit Cloud's end in `-livekit`.
 LiveKit keeps its own worker names. Each setting is still independent of the others. None alone guarantees
 data residency: model providers, media, tools, traces, and storage have their
 own locations. A nearby speech gateway does not prove where its model runs.
