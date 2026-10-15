@@ -16,6 +16,41 @@ kinds were validated live here.
 
 {/* changelog:entries */}
 
+<Update label="October 2026" description="v0.7.4" tags={["CLI"]}>
+
+Deploy to the new SLNG agent region codes.
+
+How to upgrade:
+
+1. Upgrade unmute: `brew upgrade --cask slng-ai/tap/unmute`.
+2. If your package sets `deployment_region` on the slng target, check
+   it against the list below. You do not need to compile LiveKit or
+   Pipecat agents again.
+
+Fixes:
+
+* The slng target now uses the agent region codes of the SLNG agents
+  API. Before, it checked `deployment_region` against the world part
+  list, so the API refused some valid regions.
+* LiveKit Cloud's agent regions are renamed. `us-east`, `eu-central`
+  and `ap-south` are now `us-east-livekit`, `eu-central-livekit` and
+  `ap-south-livekit`. The API refuses the old codes with
+  `422 AGENT_REGION_RENAMED`.
+* `unmute validate` now catches an old code and names the new one.
+  Before, you found out only at `unmute deploy`.
+* SLNG's own US East region is `us-east-slng`. It is not renamed yet.
+* The error for more than one region now lists the agent region
+  codes, not the world parts.
+
+Only the slng target changes. The livekit and pipecat targets keep
+their own platform region names.
+
+Run `unmute skill install` to refresh the bundled assistant guidance.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.7.4)
+
+</Update>
+
 <Update label="October 2026" description="v0.7.3" tags={["CLI"]}>
 
 Dev page Metrics fixes and a working Claude skill install.
