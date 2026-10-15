@@ -737,9 +737,9 @@ func TestSlngDeploymentRegionsReachEveryReaderFacingSurface(t *testing.T) {
 				t.Errorf("%s omits SLNG deployment region %q", name, region)
 			}
 		}
-		// The one spelling that means a different place on each side.
-		if !strings.Contains(strings.Join(strings.Fields(content), " "), "`us-east` is LiveKit Cloud's US East") {
-			t.Errorf("%s does not say that the deployment region us-east is LiveKit Cloud's US East", name)
+		// us-east is a world part and was LiveKit Cloud's agent region code.
+		if !strings.Contains(strings.Join(strings.Fields(content), " "), "`us-east-livekit` is LiveKit Cloud's US East") {
+			t.Errorf("%s does not say that the deployment region us-east-livekit is LiveKit Cloud's US East", name)
 		}
 	}
 }

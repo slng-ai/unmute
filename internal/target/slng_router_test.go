@@ -355,9 +355,9 @@ func TestValidateSlngScope(t *testing.T) {
 
 // Speech and the router take the world parts; deployment takes the agents API's
 // agent region codes, a different list that shares twelve spellings with it.
-// Holding them as one list refused us-east-slng, eu-central and ap-south at
+// Holding them as one list refused us-east-slng and LiveKit Cloud's regions at
 // deployment, and sent us-east meaning SLNG's own US East where the agents API
-// reads LiveKit Cloud's.
+// read LiveKit Cloud's.
 func TestSlngRolesTakeTheirOwnRegionLists(t *testing.T) {
 	for _, part := range SlngRegions {
 		want := "https://" + part + ".context-router.slng.ai/v1"
@@ -381,7 +381,7 @@ func TestSlngRolesTakeTheirOwnRegionLists(t *testing.T) {
 		t.Errorf("multi-region refusal does not offer the deployment regions: %q", refusal)
 	}
 	// Agent regions that are no world part deploy, and reach no model service.
-	for _, region := range []string{"us-east-slng", "eu-central", "ap-south"} {
+	for _, region := range []string{"us-east-slng", "us-east-livekit", "eu-central-livekit", "ap-south-livekit"} {
 		if err := CheckSlngRegion(region); err != nil {
 			t.Error(err)
 		}
@@ -402,5 +402,31 @@ func TestSlngRolesTakeTheirOwnRegionLists(t *testing.T) {
 		if _, err := ParseSlngSpeechGateway(Pipecat, map[string]any{"world_part": region}); err == nil {
 			t.Errorf("speech accepted retired/invalid region %q", region)
 		}
+	}
+}
+
+// LiveKit Cloud's agent regions took a -livekit suffix, and the agents API
+// refuses their old codes. A package naming one hears the new code from
+// validate, and us-east, which is also a world part, hears SLNG's own US East
+// too.
+func TestSlngRenamedRegionsNameTheNewCode(t *testing.T) {
+	for old, want := range map[string][]string{
+		"us-east":    {`"us-east-livekit"`, "us-east-slng"},
+		"eu-central": {`"eu-central-livekit"`},
+		"ap-south":   {`"ap-south-livekit"`},
+	} {
+		err := CheckSlngRegion(old)
+		if err == nil {
+			t.Errorf("deployment accepted renamed region %q", old)
+			continue
+		}
+		for _, w := range want {
+			if !strings.Contains(err.Error(), w) {
+				t.Errorf("refusal of %q does not name %s: %v", old, w, err)
+			}
+		}
+	}
+	if _, ok := SlngRouterBaseURL("us-east"); !ok {
+		t.Error("router refused us-east, which is still a world part")
 	}
 }
