@@ -396,8 +396,9 @@ and it does not have to match: `salon-concierge` deploys to `eu-central` and
 speaks through `eu-north`.
 
 SLNG deployment takes the agents API's region names, a separate list: SLNG's own
-US East there is `us-east-slng`, and LiveKit Cloud's is `us-east-livekit`. The
-location of each service is still chosen separately.
+are spelled like the world parts, such as `us-east`, and LiveKit Cloud's end in
+`-livekit`, such as `us-east-livekit`. The location of each service is still
+chosen separately.
 
 ### Turn taking you can hear
 

@@ -416,7 +416,7 @@ region is declared. With a nonempty list, an omitted region warns.
 
 LiveKit and Pipecat use their platform's region strings; Unmute does not
 maintain a closed list. SLNG uses its agent regions, not its model services' world parts:
-  `us-east-slng`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`,
+  `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`,
   and LiveKit Cloud's `us-east-livekit`, `eu-central-livekit`, `ap-south-livekit`. The retired `any` value is refused. See [Targets](https://unmute.ai/reference/targets-yaml).
 
 ### Deployment targets

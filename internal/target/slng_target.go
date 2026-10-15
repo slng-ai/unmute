@@ -32,26 +32,28 @@ var SlngRegions = []string{"us-east", "us-west", "br", "eu-west", "eu-north", "g
 // SlngDeploymentRegions are the agent region codes SLNG's agents API takes as an
 // agent's region: what an SLNG target's deployment_region names, copied into
 // agent.json as written. Read from the agents API's region catalog on
-// 2026-10-14, when LiveKit Cloud's regions took a -livekit suffix.
+// 2026-10-15, when SLNG's own US East took us-east.
 //
-// They are not the world parts in SlngRegions, although twelve are spelled the
-// same and mean the same place. SLNG's own cluster in US East is us-east-slng.
-// The -livekit codes are LiveKit Cloud's, which runs LiveKit agents only, which
-// is what this target deploys.
+// SLNG's own are spelled like the world parts in SlngRegions and mean the same
+// place, but the agents API names them, so they are a list of their own. The
+// -livekit codes are LiveKit Cloud's, which runs LiveKit agents only, which is
+// what this target deploys.
 var SlngDeploymentRegions = []string{
 	// SLNG's own clusters.
-	"us-east-slng", "us-west", "br", "eu-west", "eu-north", "gb", "za", "il", "jp", "sg", "id", "in", "au",
+	"us-east", "us-west", "br", "eu-west", "eu-north", "gb", "za", "il", "jp", "sg", "id", "in", "au",
 	// LiveKit Cloud.
 	"us-east-livekit", "eu-central-livekit", "ap-south-livekit",
 }
 
-// slngRenamedRegions are LiveKit Cloud's codes before the -livekit suffix, each
-// with its new code. The agents API refuses them (AGENT_REGION_RENAMED), so a
-// package that names one is told the new code at validation, not at push.
-var slngRenamedRegions = map[string]string{
-	"us-east":    "us-east-livekit",
-	"eu-central": "eu-central-livekit",
-	"ap-south":   "ap-south-livekit",
+// slngRenamedRegions are the agent region codes the agents API renamed, each with
+// the code to use and the place it names: LiveKit Cloud's before the -livekit
+// suffix, and SLNG's own US East before it took us-east. The agents API refuses
+// them (AGENT_REGION_RENAMED), so a package that names one is told the new code
+// at validation, not at push.
+var slngRenamedRegions = map[string]struct{ code, place string }{
+	"eu-central":   {"eu-central-livekit", "LiveKit Cloud"},
+	"ap-south":     {"ap-south-livekit", "LiveKit Cloud"},
+	"us-east-slng": {"us-east", "SLNG's own US East"},
 }
 
 // The push tool's own surface, read from slng-ai/sdks on 2026-08-25: the CLI
@@ -350,13 +352,8 @@ func CheckSlngRegion(region string) error {
 			strings.Join(SlngDeploymentRegions, ", ")))
 	}
 	if renamed, ok := slngRenamedRegions[region]; ok {
-		// us-east is also a world part, so the author may have meant SLNG's own.
-		also := ""
-		if region == "us-east" {
-			also = `, or "us-east-slng" for SLNG's own US East`
-		}
-		return fmt.Errorf("%s", SlngDiagnostic("deployment region %q was renamed: use %q (LiveKit Cloud)%s",
-			region, renamed, also))
+		return fmt.Errorf("%s", SlngDiagnostic("deployment region %q was renamed: use %q (%s)",
+			region, renamed.code, renamed.place))
 	}
 	return fmt.Errorf("%s", SlngDiagnostic("does not deploy to region %q: use one of %s",
 		region, strings.Join(SlngDeploymentRegions, ", ")))
