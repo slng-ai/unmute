@@ -115,3 +115,24 @@ func TestALiveModelIsRefusedUntilCoreHasABackend(t *testing.T) {
 		t.Fatalf("a live model compiled, or was refused for another reason: %v", err)
 	}
 }
+
+func TestTwilioRefusesTheVersion2KeysItsRuntimeCannotRun(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", voiceAgentTestsDir, "relay-desk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := buildWithState(t, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := targetByProvider(t, agent, ir.ProviderTwilio)
+	if _, err := Generate(agent, resolved, target.Default()); err != nil {
+		t.Fatalf("relay-desk on version 2 does not compile for twilio: %v", err)
+	}
+	tool := agent.Tools["opening_hours"]
+	tool.Replies = []ir.Reply{{When: map[string][]string{"open": {"true"}}, Say: []string{"We're open."}}}
+	agent.Tools["opening_hours"] = tool
+	if _, err := Generate(agent, resolved, target.Default()); err == nil || !strings.Contains(err.Error(), "cannot run tools/opening_hours.yaml replies") {
+		t.Fatalf("a reply compiled for twilio, or was refused for another reason: %v", err)
+	}
+}
