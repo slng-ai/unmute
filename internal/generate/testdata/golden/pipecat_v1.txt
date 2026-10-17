@@ -52,20 +52,6 @@ COPY pyproject.toml ./
 # then fails to index; with it, both bases index.
 RUN uv pip install --link-mode=copy -r pyproject.toml
 
-# Bake NLTK's sentence tokenizer into the image. Pipecat's TTS splits text into
-# sentences with it, and without it here the container downloads it on first
-# use — a live-call SSL race that, when it fails, silently mutes the agent
-# (B15). Pin the data dir so build and runtime agree on the path, retry through
-# the intermittent SSL flake, and assert it is present so a failure fails the
-# build rather than shipping a mute image.
-ENV NLTK_DATA=/usr/local/share/nltk_data
-RUN mkdir -p "$NLTK_DATA" && \
-    for i in 1 2 3 4 5; do \
-      python -c "import nltk; nltk.download('punkt_tab', download_dir='$NLTK_DATA')" && \
-      python -c "import nltk.data; nltk.data.find('tokenizers/punkt_tab')" && break || sleep 4; \
-    done; \
-    python -c "import nltk.data; nltk.data.find('tokenizers/punkt_tab')"
-
 # Named paths, never `COPY . .`: /app is the base image's own directory, and
 # copying over it replaces the server that answers /bot.
 #
@@ -1093,6 +1079,10 @@ async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev: 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
+            # pipecat-ai 1.12.0 answers a turn with no transcript by adding a
+            # "please repeat" developer message and running the model. Off, so
+            # the model sees only the conversation, the same as on LiveKit.
+            empty_user_turn=None,
             # The FLOOR: how long silence has to last before speech counts as
             # stopped. Pipecat's own default, and it does not move with the pace.
             #
@@ -1275,7 +1265,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Self, get_args, get_origin
+from typing import Any, ClassVar, Self, get_args, get_origin
 
 from loguru import logger
 from pydantic import (
@@ -1855,8 +1845,7 @@ def _field_type(name: str) -> Any:
         The annotation, wrapped back in Annotated when the field carries
         constraints, because FieldInfo keeps those apart from the annotation.
     """
-    info = CallState.model_fields[name]
-    return Annotated[(info.annotation, *info.metadata)] if info.metadata else info.annotation
+    return CallState.model_fields[name].rebuild_annotation()
 
 
 def _item_type(annotation: Any) -> Any:
@@ -2085,11 +2074,11 @@ STEP_RESULTS = {step: StepResult.for_step(step) for step in CallState.RESULTS}
 {
   "target": "pipecat",
   "provider": "pipecat",
-  "version": "1.10.0",
+  "version": "1.12.0",
   "supported": {
-    "floor": "1.10.0",
-    "ceiling": "1.10.0",
-    "verified": "2026-09-12"
+    "floor": "1.12.0",
+    "ceiling": "1.12.0",
+    "verified": "2026-10-17"
   },
   "entry_agent": "intake",
   "agents": [
@@ -2243,7 +2232,7 @@ STEP_RESULTS = {step: StepResult.for_step(step) for step in CallState.RESULTS}
     "interruption ignore_phrases emitted as IGNORE_PHRASES; short phrases are also suppressed by the min-words turn-start strategy",
     "listen: deepgram via DeepgramSTTService (pipecat-ai[deepgram], verified 2026-07-15)",
     "reason: openai via OpenAILLMService (pipecat-ai[openai], verified 2026-07-15)",
-    "speak: slng via SlngTTSService (pipecat-slng\u003e=0.6.0,\u003c0.7, verified 2026-10-02)",
+    "speak: slng via SlngTTSService (pipecat-slng\u003e=0.7.0,\u003c0.8, verified 2026-10-02)",
     "turn role lowers to on-device VAD (Silero); its binding is advisory",
     "turn pace balanced (silence 0.2s from the pace, closes at 1.6s)"
   ]
@@ -2335,10 +2324,10 @@ You are the front desk voice agent for Acme Support. This is a phone call, so ke
 name = "safe-core-fixture"
 version = "0.1.0"
 description = "Generated Pipecat voice agent (compiled by unmute)."
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-    "pipecat-ai[deepgram,openai,runner,silero,webrtc,websocket]==1.10.0",
-    "pipecat-slng>=0.6.0,<0.7",
+    "pipecat-ai[deepgram,openai,runner,silero,webrtc,websocket]==1.12.0",
+    "pipecat-slng>=0.7.0,<0.8",
     "python-dotenv>=1.0",
 
     "httpx>=0.27",
@@ -2368,7 +2357,7 @@ convention = "google"
 "logic/*" = ["D", "ANN"]
 
 [tool.ty.environment]
-python-version = "3.11"
+python-version = "3.12"
 === session.py ===
 """How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
 
@@ -3514,6 +3503,11 @@ class _PlaybackLatencyObserver(UserBotLatencyObserver):
     handled, and a task keeps the context variables it was created with. So
     each event handler reads, from _PLAYING, the context of its own speech.
     The same start and stop frames time the bot's speech.
+
+    Since pipecat-ai 1.12.0 the framework's observer sees only a frame's first
+    push, and the transport's push of a TTSStartedFrame is a repeat: the
+    synthesizer pushed it first. So this one watches every push, and hands the
+    framework only the first pushes it asked for.
     """
 
     def __init__(self, reporter: DevReporter) -> None:
@@ -3528,6 +3522,11 @@ class _PlaybackLatencyObserver(UserBotLatencyObserver):
         self._started: float | None = None
         self._speech_context: str | None = None
 
+    @property
+    def observe_every_push(self) -> bool:
+        """See the transport's repeat pushes, where playback is visible."""
+        return True
+
     async def on_push_frame(self, data: Any) -> None:
         """Follow the transport's playback, then let the framework measure.
 
@@ -3536,7 +3535,7 @@ class _PlaybackLatencyObserver(UserBotLatencyObserver):
         """
         frame = data.frame
         if data.direction != FrameDirection.DOWNSTREAM or not isinstance(data.source, BaseOutputTransport):
-            await super().on_push_frame(data)
+            await self._measure(data)
             return
         if isinstance(frame, TTSStartedFrame):
             self._context = frame.context_id
@@ -3548,14 +3547,23 @@ class _PlaybackLatencyObserver(UserBotLatencyObserver):
             self._started, self._speech_context = time.monotonic(), self._context
             token = _PLAYING.set(self._context)
             try:
-                await super().on_push_frame(data)
+                await self._measure(data)
             finally:
                 _PLAYING.reset(token)
             return
         elif isinstance(frame, BotStoppedSpeakingFrame) and self._started is not None:
             started, self._started = self._started, None
             self._reporter.speech_measured(time.monotonic() - started, self._reporter.reply_of(self._speech_context))
-        await super().on_push_frame(data)
+        await self._measure(data)
+
+    async def _measure(self, data: Any) -> None:
+        """Hand the framework a push, if it is the first push of its frame.
+
+        Args:
+            data: The observed frame push.
+        """
+        if data.first_push:
+            await super().on_push_frame(data)
 
 
 def install_dev_metrics(runner_args: RunnerArguments) -> DevReporter:

@@ -811,8 +811,7 @@ def _field_type(name: str) -> Any:
         The annotation, wrapped back in Annotated when the field carries
         constraints, because FieldInfo keeps those apart from the annotation.
     """
-    info = CallState.model_fields[name]
-    return Annotated[(info.annotation, *info.metadata)] if info.metadata else info.annotation
+    return CallState.model_fields[name].rebuild_annotation()
 
 
 def _item_type(annotation: Any) -> Any:
@@ -1040,7 +1039,7 @@ STEP_RESULTS = {step: StepResult.for_step(step) for step in CallState.RESULTS}
 `
 
 // callStateTypingNames are the typing names call_state.py reads.
-var callStateTypingNames = []string{"Annotated", "Any", "ClassVar", "Self", "get_args", "get_origin"}
+var callStateTypingNames = []string{"Any", "ClassVar", "Self", "get_args", "get_origin"}
 
 // withTypingNames adds names to a `from typing import` list, in the order
 // ruff's import sorter keeps: classes first, then functions, each sorted.

@@ -2,7 +2,7 @@ package target
 
 // LiveKit realtime entries: one model on OpenAI's Realtime API, hearing the
 // caller's audio and answering it. Same contract as catalog_livekit.go (the
-// livekit_v1 driver templates, livekit-agents ==1.8.1).
+// livekit_v1 driver templates, livekit-agents ==1.8.8).
 //
 // This is a different class and a different section from `models.live`, and the
 // difference is the one that decides what a package may carry: this model

@@ -2,7 +2,7 @@ package target
 
 // LiveKit live entries: one model that listens, thinks and speaks, standing
 // where the transcriber, the model and the synthesizer stood. Same contract as
-// catalog_livekit.go (the livekit_v1 driver templates, livekit-agents ==1.8.1).
+// catalog_livekit.go (the livekit_v1 driver templates, livekit-agents ==1.8.8).
 //
 // 1.8.1 is the floor for this row and the reason the support window moved: the
 // module did not exist in 1.7.0, 1.7.1 or 1.8.0, checked by downloading each

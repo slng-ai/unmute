@@ -225,6 +225,18 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // starts speaking, so the dev page's turn view shows them. It runs only under
 // `unmute dev`.
 //
+// And on 2026-10-17, for every package: the framework pins moved to
+// livekit-agents 1.8.8 and pipecat-ai 1.12.0, with Python 3.12, OpenTelemetry
+// 1.40 and pipecat-slng 0.7.0 floors, so every pyproject.toml and compile
+// report moved. The fixes the new versions needed moved code too: LiveKit's
+// SLNG router client is httpx2, Pipecat leaves its new empty-turn reply off
+// and no longer bakes NLTK data, and the dev page's Pipecat playback observer
+// watches every push. The same day three ty diagnostics that already failed
+// the smoke suite on main were fixed: call_state.py asks Pydantic for the
+// constrained annotation (rebuild_annotation) instead of building Annotated,
+// agent.py reaches proxy_bypass_environment through urllib.request, and two
+// context managers return Generator types.
+//
 // Each is named in the pull request that ships it. A regeneration without that
 // treatment is the thing this test exists to stop.
 func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {

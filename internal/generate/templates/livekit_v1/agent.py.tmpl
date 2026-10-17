@@ -2,13 +2,14 @@
 
 load_dotenv()
 
-# livekit-agents 1.8.1 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
-# connection to LIVEKIT_URL and ignores NO_PROXY (worker.py:358). A proxy that
+# livekit-agents 1.8.8 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
+# connection to LIVEKIT_URL and ignores NO_PROXY (worker.py:363). A proxy that
 # only tunnels HTTPS answers that request with 405, and the worker never
 # registers. So a LiveKit host listed in NO_PROXY is reached directly. Anything
-# else gets the value the SDK would have picked itself.
+# else gets the value the SDK would have picked itself. proxy_bypass_environment
+# is stdlib but has no typeshed stub, hence the ignore.
 WORKER_PROXY = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
-if proxy_bypass_environment(urlparse(os.getenv("LIVEKIT_URL", "")).hostname or ""):
+if urllib.request.proxy_bypass_environment(urlparse(os.getenv("LIVEKIT_URL", "")).hostname or ""):  # ty: ignore[unresolved-attribute]
     WORKER_PROXY = None
 
 {{- if .Telephony}}
