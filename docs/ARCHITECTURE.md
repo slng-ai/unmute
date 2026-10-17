@@ -50,7 +50,7 @@ Four rules hold the boundary:
 - Maintained runtime code in this repository is Go.
 - Python exists in templates, copied local handlers, examples, and generated
   output.
-- Generated projects contain no Unmute runtime dependency.
+- A version 1 project carries its own runtime and no Unmute dependency. A version 2 project runs on the unmute-core library from PyPI: `compile` writes its data to `agent.json`, and `spec.py` and `agent.py` are the same in every project (`internal/generate/core_livekit.go`).
 - Authors edit the source package and compile again instead of editing
   `build/<target>/`.
 

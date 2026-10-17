@@ -227,6 +227,8 @@ models:
       params:
         vertexai: true
         location: eu
+        thinking_config:
+          thinking_level: MINIMAL
   speak:
     # Fish Audio's "Isabella": warm, and clear in both languages. One voice per
     # agent, so a language can take its own voice later.

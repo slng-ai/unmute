@@ -244,6 +244,8 @@ models:
       params:
         vertexai: true
         location: eu
+        thinking_config:
+          thinking_level: MINIMAL
   speak:
     voice:
       provider: slng
