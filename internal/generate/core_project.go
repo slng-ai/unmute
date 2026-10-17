@@ -59,11 +59,34 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 	if spec["models"], err = coreModels(resolved); err != nil {
 		return nil, err
 	}
+	transfers, err := coreTransfers(agent, resolved)
+	if err != nil {
+		return nil, err
+	}
+	spec["transfers"] = transfers
 	data, err := json.MarshalIndent(spec, "", "  ")
 	if err != nil {
 		return nil, err
 	}
-	fill := map[string]string{"CorePin": target.CorePin, "Name": agent.Name}
+	fill := map[string]string{"CorePin": target.CorePin, "Name": agent.Name, "Extras": "", "Deps": ""}
+	var needs []string // variables the knowledge embedders and transfers read
+	if len(agent.Knowledge) > 0 {
+		fill["Extras"] = ",knowledge"
+		var deps []string
+		for _, name := range sortedKeys(agent.Knowledge) {
+			embed, _ := target.LookupEmbeddingService(agent.Knowledge[name].Embed)
+			if !slices.Contains(deps, embed.PythonDep) {
+				deps = append(deps, embed.PythonDep)
+				fill["Deps"] += fmt.Sprintf("\n    %q,", embed.PythonDep)
+			}
+			if embed.CredentialEnv != "" {
+				needs = append(needs, embed.CredentialEnv)
+			}
+		}
+	}
+	for _, name := range sortedKeys(transfers) {
+		needs = append(needs, transfers[name].(map[string]any)["destination_env"].(string))
+	}
 	// .python-version holds uv to the Python unmute-core is developed and tested on.
 	files := []File{{Path: "agent.json", Content: append(data, '\n')}, {Path: ".python-version", Content: []byte("3.12\n")}}
 	for _, item := range append([]struct{ path, source string }{{"spec.py", coreSpecPy}}, entrypoints[:]...) {
@@ -87,12 +110,17 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 	for _, path := range sortedKeys(handlers) {
 		files = append(files, File{Path: path, Content: []byte(handlers[path]), Verbatim: true})
 	}
+	for _, document := range knowledgeFiles(agent) {
+		document.Verbatim = true
+		files = append(files, document)
+	}
 	env := slices.Clone(agent.Secrets)
 	for _, binding := range resolved.Models.Reason {
-		for _, name := range slngBindingCredentialEnvs(binding) {
-			if !slices.Contains(env, name) {
-				env = append(env, name)
-			}
+		needs = append(needs, slngBindingCredentialEnvs(binding)...)
+	}
+	for _, name := range needs {
+		if !slices.Contains(env, name) {
+			env = append(env, name)
 		}
 	}
 	slices.Sort(env)

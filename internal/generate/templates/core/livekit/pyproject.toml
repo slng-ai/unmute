@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "{{.Name}} on LiveKit Agents, on unmute-core. Written by unmute compile."
 requires-python = ">=3.12"
 dependencies = [
-    "unmute-core[livekit,slng]=={{.CorePin}}",
+    "unmute-core[livekit,slng{{.Extras}}]=={{.CorePin}}",{{.Deps}}
     "livekit-agents[google]>=1.8.7,<1.9",
     "livekit-plugins-silero>=1.8.7",
     "livekit-plugins-slng>=1.8.7",
