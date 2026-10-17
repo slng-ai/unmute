@@ -1495,6 +1495,12 @@ func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
 // they declare, and generate.
 const voiceAgentTestsDir = "voice-agents-tests"
 
+// coreNotYet are version 2 packages the unmute-core templates refuse today, by
+// the words of the refusal. Each one leaves this list when its feature lands.
+var coreNotYet = map[string]string{
+	"parcel-desk": `think "router": version 2 compiles a google model only so far`,
+}
+
 func TestVoiceAgentTestPackagesValidateAndGenerate(t *testing.T) {
 	root := filepath.Join("..", voiceAgentTestsDir)
 	entries, err := os.ReadDir(root)
@@ -1533,9 +1539,10 @@ func TestVoiceAgentTestPackagesValidateAndGenerate(t *testing.T) {
 						t.Errorf("%s: %v", name, row.Errors)
 					}
 				}
-				// ponytail: a version 2 package validates here and runs in `make e2e`. It
-				// generates here too once the unmute-core templates land.
-				if pkg.Agent.Version == spec.Version2 {
+				if reason, ok := coreNotYet[entry.Name()]; ok {
+					if _, err := Generate(agent, resolved, target.Default()); err == nil || !strings.Contains(err.Error(), reason) {
+						t.Errorf("generate %s: want the refusal naming %q, got %v; drop it from coreNotYet once it compiles", name, reason, err)
+					}
 					continue
 				}
 				if _, err := Generate(agent, resolved, target.Default()); err != nil {

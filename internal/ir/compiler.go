@@ -40,6 +40,8 @@ type Agent struct {
 	// fourth case.
 	Architecture Architecture `json:"architecture" yaml:"architecture"`
 	EntryAgent   string       `json:"entry_agent" yaml:"entry_agent"`
+	// EntryBy picks the first agent from a State value. Version 2, nil when unset.
+	EntryBy *EntryBy `json:"entry_by,omitempty" yaml:"entry_by,omitempty"`
 	// Mode is how a step hands back to its agent, version 2 only: record or
 	// status. Empty on version 1.
 	Mode TasksMode `json:"mode,omitempty" yaml:"mode,omitempty"`
@@ -438,6 +440,9 @@ type Prefetch struct {
 	Background bool `json:"background,omitempty" yaml:"background,omitempty"`
 	// NeedsConfirmed names State values the caller must have agreed to first.
 	NeedsConfirmed []string `json:"needs_confirmed,omitempty" yaml:"needs_confirmed,omitempty"`
+	// RefuseCall is the line logged when the entry saves nothing, and the call
+	// does not start. Version 2, tool entries only.
+	RefuseCall string `json:"refuse_call,omitempty" yaml:"refuse_call,omitempty"`
 	// Inputs are the declared variables Args reads, sorted. Resolved here so the
 	// emitted skip check and the per-target warning both read one list rather
 	// than each re-parsing the templates.
@@ -1245,3 +1250,10 @@ func (b Binding) Router() bool { return b.Provider == ProviderSlngRouter }
 // three roles; what differs is the accepted region set and this role's own
 // upstream block.
 const ProviderSlngRouter = "slng"
+
+// EntryBy is the resolved entry_by: the State value, and the agent each of its
+// values starts the call with.
+type EntryBy struct {
+	Value  string            `json:"value" yaml:"value"`
+	Agents map[string]string `json:"agents" yaml:"agents"`
+}

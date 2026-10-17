@@ -24,14 +24,13 @@ The scenarios in `scenarios/` are unmute-core's, unchanged. The e2e suite expect
 
 | Core behaviour | What is written instead |
 |---|---|
-| `{{input.x}}` and `{{result.x}}` in lines | Saved to state (`day`, `at`, `concern`, `concern_note`, `said`, `when_said`) and read as `{{state.x}}` |
+| `{{input.x}}` and `{{result.x}}` in lines | Lines read `{{state.x}}`. The compiler reads a value the line's tool fills from its input or result, so the words are the same |
 | One `FinishRule` per concern kind, each with its own receipt | One `note_concern` finish rule (v2 refuses two entries for a tool). The tool returns the receipt in `said`, and the line is `{{state.said}}`. Same words |
 | `good_time` false ends the step, then the main agent starts a callback | A reply says the same line, and the step stays open. The model then calls `schedule_callback` in the same step. Not covered by a scenario |
-| `outcome` saved from the task by `result.status?` | Saved by each write tool's own `assign` |
-| `birth_date` saved from the verified result | Saved from the input once the check matches, so the read-back line can say it |
-| Refusal text of a dispatch with no account, a malformed one or an unknown one | The required variable, the pattern and the prefetch's `ToolError` refuse the call. The exact messages are the compiler's, not core's |
+| `birth_date` saved from the verified result | Saved from the input once the check matches |
+| `new_call` refuses an account the ledger does not hold | The `account` prefetch's `refuse_call:` says the same line, and the call does not start |
 | Agent language `en` and timezone `Asia/Dubai` | Only the prefetch clock and the TTS language carry them |
-| The idle texts and `UNMUTE_CALL_START` | Core sets no idle nudge, so none is written. `UNMUTE_CALL_START` has no package key |
+| A web call is `outbound` (`CallInfo(direction="outbound")`) | Not expressed: a web call has no direction. No scenario reads it |
 | Ledger as a class | Module-level data and functions in `tools/ledger.py`, with the words helpers inlined |
 | Core turn pace `balanced` on both targets | `targets.yaml` sets `balanced` on the LiveKit detector: v2 refuses a per-target pace |
 

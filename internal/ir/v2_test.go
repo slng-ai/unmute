@@ -78,6 +78,12 @@ func TestV2Refusals(t *testing.T) {
 		}, `non_blocking names "manage_booking", which is not one of its steps`},
 		{"a handoff saves a value State lacks", withHandoff(packagespec.Handoff{To: "desk", Saves: []packagespec.Pair{{Key: "nickname", Value: "x"}}}), `saves "nickname", which State in state.py does not declare`},
 		{"a handoff opens with a tool the next agent lacks", withHandoff(packagespec.Handoff{To: "desk", OpensWith: &packagespec.OpensWith{Tool: "lookup_account"}}), `opens_with names "lookup_account", which agent "desk" does not list under tools`},
+		{"entry_by starts on an agent the package lacks", func(p *packagespec.Package) {
+			p.Agent.EntryBy = &packagespec.EntryBy{Value: "caller_name", Agents: []packagespec.Pair{{Key: "Ana", Value: "front_desk"}}}
+		}, `entry_by starts Ana on "front_desk", which is not an agent of this package`},
+		{"refuse_call sits on an entry that runs no tool", func(p *packagespec.Package) {
+			p.Agent.Prefetch = append(p.Agent.Prefetch, packagespec.Prefetch{Name: "today", Clock: "now", Timezone: "Europe/Madrid", Assign: []packagespec.Pair{{Key: "reason", Value: "result.date"}}, RefuseCall: "Closed."})
+		}, `refuse_call refuses a call whose lookup finds nothing, so it goes on a tool: entry`},
 		{"mode is neither record nor status", func(p *packagespec.Package) {
 			p.Agent.Mode = "fast"
 		}, "mode: fast; write record or status"},

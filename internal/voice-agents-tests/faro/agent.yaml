@@ -21,6 +21,14 @@ name: faro
 
 entry_agent: faro_en
 
+# The call starts on the agent of the caller's own language, which the
+# prefetch reads from their profile. A new caller starts in English.
+entry_by:
+  value: explanation
+  agents:
+    - EN: faro_en
+    - ES: faro_es
+
 mode: record
 
 agents:
@@ -227,6 +235,8 @@ models:
       params:
         vertexai: true
         location: eu
+        thinking_config:
+          thinking_level: MINIMAL
   speak:
     # Fish Audio's "Isabella": warm, and clear in both languages. One voice per
     # agent, so a language can take its own voice later.
