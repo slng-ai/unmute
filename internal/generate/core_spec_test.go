@@ -76,3 +76,35 @@ func TestAWebhookToolCompilesWithItsEndpointAndRefusesReplies(t *testing.T) {
 		t.Fatalf("a webhook with replies compiled, or said something else: %v", err)
 	}
 }
+
+func TestSpeechThatIsNotSlngComesFromTheCatalogue(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "speech_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := buildWithState(t, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for provider, wants := range map[ir.Provider][]string{
+		ir.ProviderLiveKit: {"deepgram.STT(", "cartesia.TTS(", "elevenlabs.TTS(", "deepgram.TTS("},
+		ir.ProviderPipecat: {"DeepgramSTTService(", "CartesiaTTSService(", "ElevenLabsTTSService(", "DeepgramTTSService("},
+	} {
+		artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
+		if err != nil {
+			t.Fatalf("%s: %v", provider, err)
+		}
+		speech := artifactFile(t, artifact, "speech.py")
+		for _, want := range wants {
+			if !strings.Contains(speech, want) {
+				t.Errorf("%s: speech.py builds no %s", provider, want)
+			}
+		}
+		report := artifactFile(t, artifact, "compile-report.json")
+		for _, name := range []string{"DEEPGRAM_API_KEY", "CARTESIA_API_KEY"} {
+			if !strings.Contains(report, `"`+name+`"`) {
+				t.Errorf("%s: required_env lacks %s", provider, name)
+			}
+		}
+	}
+}

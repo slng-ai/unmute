@@ -68,8 +68,18 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	fill := map[string]string{"CorePin": target.CorePin, "Name": agent.Name, "Extras": "", "Deps": ""}
-	var needs []string // variables the knowledge embedders and transfers read
+	speech, err := buildCoreSpeech(resolved)
+	if err != nil {
+		return nil, err
+	}
+	fill := map[string]string{"CorePin": target.CorePin, "Name": agent.Name, "Extras": "", "Deps": "", "FrameworkExtras": ""}
+	for _, extra := range speech.Extras {
+		fill["FrameworkExtras"] += "," + extra
+	}
+	for _, pkg := range speech.Packages {
+		fill["Deps"] += fmt.Sprintf("\n    %q,", pkg)
+	}
+	needs := slices.Clone(speech.Env) // variables the speech, knowledge and webhooks read
 	if len(agent.Knowledge) > 0 {
 		fill["Extras"] = ",knowledge"
 		var deps []string
@@ -85,7 +95,11 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 		}
 	}
 	// .python-version holds uv to the Python unmute-core is developed and tested on.
-	files := []File{{Path: "agent.json", Content: append(data, '\n')}, {Path: ".python-version", Content: []byte("3.12\n")}}
+	files := []File{
+		{Path: "agent.json", Content: append(data, '\n')},
+		{Path: ".python-version", Content: []byte("3.12\n")},
+		{Path: "speech.py", Content: []byte(speech.Source)},
+	}
 	for _, item := range append([]struct{ path, source string }{{"spec.py", coreSpecPy}}, entrypoints[:]...) {
 		content, err := fillTemplate(item.source, fill)
 		if err != nil {

@@ -5,7 +5,7 @@ description = "{{.Name}} on Pipecat, on unmute-core. Written by unmute compile."
 requires-python = ">=3.12"
 dependencies = [
     "unmute-core[pipecat,slng{{.Extras}}]=={{.CorePin}}",{{.Deps}}
-    "pipecat-ai[google,openai,runner,silero,webrtc,websocket]>=1.12.0,<1.13",
+    "pipecat-ai[google,openai,runner,silero,webrtc,websocket{{.FrameworkExtras}}]>=1.12.0,<1.13",
     "pipecat-slng>=0.7.0,<0.8",
     "python-dotenv>=1.0",
 ]

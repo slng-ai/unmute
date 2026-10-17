@@ -643,13 +643,8 @@ func coreModels(resolved ir.Target) (map[string]any, error) {
 			return nil, fmt.Errorf("think %q: version 2 compiles a google or openai model, or the slng router, only so far, and this one is %s", name, binding.Provider)
 		}
 	}
-	for name, binding := range models.Speak {
-		if binding.Provider != "slng" {
-			return nil, fmt.Errorf("speak %q: version 2 compiles slng speech only so far, and this one is %s", name, binding.Provider)
-		}
-	}
-	if models.Listen == nil || models.Listen.Provider != "slng" {
-		return nil, fmt.Errorf("listen: version 2 compiles slng speech to text only so far")
+	if models.Listen == nil {
+		return nil, fmt.Errorf("listen: version 2 needs a speech-to-text model")
 	}
 	if models.Turn == nil {
 		return nil, fmt.Errorf("turn: version 2 needs a turn model")
