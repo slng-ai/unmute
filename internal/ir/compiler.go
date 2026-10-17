@@ -14,6 +14,10 @@ import (
 // second copy is how a value reaches one list and goes missing from another.
 type Architecture = packagespec.Architecture
 
+// Version2 is the agent.yaml version that maps onto unmute-core's typed
+// concepts.
+const Version2 = packagespec.Version2
+
 const (
 	ArchitectureCascade  = packagespec.ArchitectureCascade
 	ArchitectureRealtime = packagespec.ArchitectureRealtime
@@ -36,6 +40,11 @@ type Agent struct {
 	// fourth case.
 	Architecture Architecture `json:"architecture" yaml:"architecture"`
 	EntryAgent   string       `json:"entry_agent" yaml:"entry_agent"`
+	// EntryBy picks the first agent from a State value. Version 2, nil when unset.
+	EntryBy *EntryBy `json:"entry_by,omitempty" yaml:"entry_by,omitempty"`
+	// Mode is how a step hands back to its agent, version 2 only: record or
+	// status. Empty on version 1.
+	Mode TasksMode `json:"mode,omitempty" yaml:"mode,omitempty"`
 	// Models flattens the authoring sections into one name-keyed map; each
 	// entry's Kind records its section (names are one namespace, N15).
 	Models map[string]ModelDef `json:"models" yaml:"models"`
@@ -394,7 +403,12 @@ type Variable struct {
 	// existed before the prefetch feature.
 	Confirm          string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
 	ConfirmInherited bool   `json:"confirm_inherited,omitempty" yaml:"confirm_inherited,omitempty"`
-	Description      string `json:"description,omitempty" yaml:"description,omitempty"`
+	// CallStart is required or optional for a value dispatched with the call,
+	// version 2 only. Source is call_start whenever it is set.
+	CallStart CallStartRule `json:"call_start,omitempty" yaml:"call_start,omitempty"`
+	// Dependencies name the values a prefetched value was looked up from.
+	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
+	Description  string   `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 // Pair is one resolved item of an authored pair list. Ordered, because the
@@ -422,6 +436,13 @@ type Prefetch struct {
 	Writes bool   `json:"writes,omitempty" yaml:"writes,omitempty"`
 	Args   []Pair `json:"args,omitempty" yaml:"args,omitempty"`
 	Assign []Pair `json:"assign,omitempty" yaml:"assign,omitempty"`
+	// Background runs the entry beside the greeting rather than before it.
+	Background bool `json:"background,omitempty" yaml:"background,omitempty"`
+	// NeedsConfirmed names State values the caller must have agreed to first.
+	NeedsConfirmed []string `json:"needs_confirmed,omitempty" yaml:"needs_confirmed,omitempty"`
+	// RefuseCall is the line logged when the entry saves nothing, and the call
+	// does not start. Version 2, tool entries only.
+	RefuseCall string `json:"refuse_call,omitempty" yaml:"refuse_call,omitempty"`
 	// Inputs are the declared variables Args reads, sorted. Resolved here so the
 	// emitted skip check and the per-target warning both read one list rather
 	// than each re-parsing the templates.
@@ -510,7 +531,64 @@ type Task struct {
 	// replace. Scoped this way on purpose: a package naming no skip keeps
 	// today's behaviour exactly.
 	Withdraws bool `json:"withdraws,omitempty" yaml:"withdraws,omitempty"`
+	// The version 2 step keys, each unmute-core's TaskSpec field of the same
+	// name. Empty on version 1.
+	Replies   []Reply     `json:"replies,omitempty" yaml:"replies,omitempty"`
+	OpensWith *OpensWith  `json:"opens_with,omitempty" yaml:"opens_with,omitempty"`
+	Inputs    []TaskInput `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Arguments []string    `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+	Via       []string    `json:"via,omitempty" yaml:"via,omitempty"`
 }
+
+// Reply is a set of lines code speaks for a typed tool result: when every
+// When field holds one of its values, one Say line is spoken. Tool is set on
+// a step's reply and empty on a tool's own.
+type Reply struct {
+	Tool string              `json:"tool,omitempty" yaml:"tool,omitempty"`
+	When map[string][]string `json:"when,omitempty" yaml:"when,omitempty"`
+	Say  []string            `json:"say" yaml:"say"`
+}
+
+// OpensWith is a tool code runs as a step opens. Arguments maps each tool
+// parameter to the State value it takes.
+type OpensWith struct {
+	Tool      string            `json:"tool" yaml:"tool"`
+	Arguments map[string]string `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+	Say       []string          `json:"say,omitempty" yaml:"say,omitempty"`
+}
+
+// TaskInput is one thing a step reads at the end of its prompt.
+type TaskInput struct {
+	Kind  TaskInputKind `json:"kind" yaml:"kind"`
+	Name  string        `json:"name" yaml:"name"`
+	Value string        `json:"value,omitempty" yaml:"value,omitempty"`
+}
+
+// TaskInputKind is memory (a State value), tool (a prefetch entry's result)
+// or input (a fixed text).
+type TaskInputKind string
+
+const (
+	TaskInputMemory TaskInputKind = "memory"
+	TaskInputTool   TaskInputKind = "tool"
+	TaskInputText   TaskInputKind = "input"
+)
+
+// TasksMode is unmute-core's TasksSpec.mode.
+type TasksMode string
+
+const (
+	TasksStatus TasksMode = "status"
+	TasksRecord TasksMode = "record"
+)
+
+// CallStartRule says whether a value dispatched with the call must be there.
+type CallStartRule string
+
+const (
+	CallStartRequired CallStartRule = "required"
+	CallStartOptional CallStartRule = "optional"
+)
 
 type ResultField struct {
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
@@ -555,6 +633,8 @@ type TaskGroup struct {
 	Then         GroupThen    `json:"then" yaml:"then"`
 	ThenTarget   string       `json:"then_target,omitempty" yaml:"then_target,omitempty"`
 	Merge        GroupMerge   `json:"merge,omitempty" yaml:"merge,omitempty"`
+	Arguments    []string     `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+	NonBlocking  []string     `json:"non_blocking,omitempty" yaml:"non_blocking,omitempty"`
 }
 
 type ContextScope string
@@ -638,6 +718,12 @@ type AssignTo struct {
 	// it assigns, because a field that may hold None in the state is not one a
 	// step may leave out: None there means no value yet.
 	Optional bool `json:"optional,omitempty" yaml:"optional,omitempty"`
+	// FromInput reads Field from the closing tool's input rather than its
+	// result, as `- booking: input.booking`. Version 2 only. It is saved with
+	// the result rows when the closing tool succeeds, never before. A confirm
+	// line still names it as {{state.booking}}, and the compiler reads that
+	// from the tool's input, so nothing is saved before the caller's yes.
+	FromInput bool `json:"from_input,omitempty" yaml:"from_input,omitempty"`
 }
 
 // AssignedVars names the variables an assign list writes to, sorted. Both the
@@ -660,6 +746,10 @@ type AgentTransfer struct {
 	To       string          `json:"to" yaml:"to"`
 	Announce string          `json:"announce,omitempty" yaml:"announce,omitempty"`
 	Context  TransferContext `json:"context" yaml:"context"`
+	// Saves are the State values set as the call moves. Version 2.
+	Saves map[string]any `json:"saves,omitempty" yaml:"saves,omitempty"`
+	// OpensWith is the next agent's tool code runs as it takes the call. Version 2.
+	OpensWith *OpensWith `json:"opens_with,omitempty" yaml:"opens_with,omitempty"`
 }
 
 func (*AgentTransfer) control() {}
@@ -708,14 +798,25 @@ const (
 )
 
 type Tool struct {
-	Description   string         `json:"description,omitempty" yaml:"description,omitempty"`
-	Input         map[string]any `json:"input,omitempty" yaml:"input,omitempty"`
-	Output        map[string]any `json:"output,omitempty" yaml:"output,omitempty"`
-	Execution     ToolExecution  `json:"execution" yaml:"execution"`
-	Builtin       string         `json:"builtin,omitempty" yaml:"builtin,omitempty"` // prebuilt registry id (builtin only)
-	Instructions  string         `json:"instructions,omitempty" yaml:"instructions,omitempty"`
-	Handler       string         `json:"handler,omitempty" yaml:"handler,omitempty"`
-	HandlerSource string         `json:"-" yaml:"-"` // local handler file content, loaded by spec.Load
+	Description  string         `json:"description,omitempty" yaml:"description,omitempty"`
+	Input        map[string]any `json:"input,omitempty" yaml:"input,omitempty"`
+	Output       map[string]any `json:"output,omitempty" yaml:"output,omitempty"`
+	Execution    ToolExecution  `json:"execution" yaml:"execution"`
+	Builtin      string         `json:"builtin,omitempty" yaml:"builtin,omitempty"` // prebuilt registry id (builtin only)
+	Instructions string         `json:"instructions,omitempty" yaml:"instructions,omitempty"`
+	Handler      string         `json:"handler,omitempty" yaml:"handler,omitempty"`
+	// HandlerFunction is the function a version 2 handler names, after the
+	// colon in `file.py:function`. Empty on version 1, where it is the file's
+	// own name.
+	HandlerFunction string `json:"handler_function,omitempty" yaml:"handler_function,omitempty"`
+	// Assign, Replies, Precheck and Hidden are version 2: what the tool's
+	// result saves to State, the lines code speaks for a typed result, the
+	// function run before it, and the result fields the model never reads.
+	Assign        []AssignTo `json:"assign,omitempty" yaml:"assign,omitempty"`
+	Replies       []Reply    `json:"replies,omitempty" yaml:"replies,omitempty"`
+	Precheck      string     `json:"precheck,omitempty" yaml:"precheck,omitempty"`
+	Hidden        []string   `json:"hidden,omitempty" yaml:"hidden,omitempty"`
+	HandlerSource string     `json:"-" yaml:"-"` // local handler file content, loaded by spec.Load
 	// Dependencies are the local handler's exact `name==version` pins, as the
 	// author wrote them. Canonicalisation happens where they are emitted.
 	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
@@ -879,8 +980,10 @@ type Conversation struct {
 }
 
 type Greeting struct {
-	SpeaksFirst SpeaksFirst `json:"speaks_first" yaml:"speaks_first"`
-	Text        string      `json:"text,omitempty" yaml:"text,omitempty"`
+	SpeaksFirst   SpeaksFirst `json:"speaks_first" yaml:"speaks_first"`
+	Text          string      `json:"text,omitempty" yaml:"text,omitempty"`
+	Instruction   string      `json:"instruction,omitempty" yaml:"instruction,omitempty"`
+	Interruptible *bool       `json:"interruptible,omitempty" yaml:"interruptible,omitempty"`
 }
 
 type SpeaksFirst string
@@ -924,6 +1027,8 @@ type Interruption struct {
 type Inactivity struct {
 	NudgeAfter Duration `json:"nudge_after,omitempty" yaml:"nudge_after,omitempty"`
 	EndAfter   Duration `json:"end_after,omitempty" yaml:"end_after,omitempty"`
+	NudgeText  string   `json:"nudge_text,omitempty" yaml:"nudge_text,omitempty"`
+	EndText    string   `json:"end_text,omitempty" yaml:"end_text,omitempty"`
 }
 
 type Duration string
@@ -1145,3 +1250,10 @@ func (b Binding) Router() bool { return b.Provider == ProviderSlngRouter }
 // three roles; what differs is the accepted region set and this role's own
 // upstream block.
 const ProviderSlngRouter = "slng"
+
+// EntryBy is the resolved entry_by: the State value, and the agent each of its
+// values starts the call with.
+type EntryBy struct {
+	Value  string            `json:"value" yaml:"value"`
+	Agents map[string]string `json:"agents" yaml:"agents"`
+}

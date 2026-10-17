@@ -160,7 +160,7 @@ func TestExtraTypesRefusesAnUnlistedModule(t *testing.T) {
 func TestParsePropertyReadsAToolOutput(t *testing.T) {
 	typ, err := ParseProperty(map[string]any{"type": "object", "properties": map[string]any{
 		"status": map[string]any{"enum": []any{"done"}}, "tags": map[string]any{"type": "array"},
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,5 +168,26 @@ func TestParsePropertyReadsAToolOutput(t *testing.T) {
 	tags, _ := typ.Field("tags")
 	if status.Type.String() != `Literal["done"]` || tags.Type.String() != "list[str]" {
 		t.Fatalf("status %s, tags %s", status.Type, tags.Type)
+	}
+}
+
+func TestAUnionOfOneScalarKindReadsAsThatKind(t *testing.T) {
+	kind := func(branches ...any) (*Type, error) {
+		return ParseProperty(map[string]any{"anyOf": branches}, nil)
+	}
+	timeOrPart, err := kind(
+		map[string]any{"type": "string", "format": "time"},
+		map[string]any{"type": "string", "enum": []any{"morning", "night"}},
+		map[string]any{"type": "null"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if timeOrPart.Kind != KindString || !timeOrPart.Nullable || timeOrPart.Format != "" || timeOrPart.Enum != nil {
+		t.Fatalf("time | Literal | None read as %+v", timeOrPart)
+	}
+	if _, err := kind(map[string]any{"type": "integer"}, map[string]any{"type": "string"}); err == nil ||
+		!strings.Contains(err.Error(), "a union of 2 types") {
+		t.Fatalf("int | str: got %v", err)
 	}
 }

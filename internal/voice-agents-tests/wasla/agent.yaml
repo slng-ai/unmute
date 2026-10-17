@@ -1,0 +1,306 @@
+# Wasla: an outbound payment reminder, ported from unmute-core's examples/wasla.
+#
+# One agent, Lina, and three task groups:
+# 1. account: identify (date of birth, read back by code), then talk_account
+#    (good time, promise or concern, each read back for a yes).
+# 2. callback: a day and time, read back, then the call ends.
+# 3. wrong_number: off the list on a yes, then the call ends.
+#
+# Only the holder's name is known before the greeting. The scenarios in
+# scenarios/ are unmute-core's, unchanged.
+version: 2
+
+name: wasla
+
+entry_agent: lina
+
+mode: record
+
+variables:
+  # The dispatch must name the account. A call without one never starts.
+  - name: account_id
+    call_start: required
+  # Only the identify step confirms the date of birth.
+  - name: birth_date
+    confirm: identify
+
+agents:
+  lina:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - payment_policy
+      - end_call
+    task_groups:
+      - account
+      - callback
+      - wrong_number
+    tasks:
+      - name: identify
+        when: >-
+          Only when the holder wants to correct the date of birth they gave.
+          Never before `account`: that flow checks the date of birth itself.
+        instructions: tasks/identify.md
+        announce: >-
+          Thank you. To make sure I'm speaking with the right person, could you
+          tell me your date of birth?
+        opening: listen
+        tools:
+          - verify_holder
+          - end_call
+        replies:
+          - tool: verify_holder
+            when:
+              - status:
+                  - mismatch
+            say:
+              - >-
+                I'm sorry, that doesn't match our records. Could you tell me
+                your date of birth again?
+          - tool: verify_holder
+            when:
+              - status:
+                  - locked
+            say:
+              - >-
+                I'm sorry, I can't go on with this call today. Wasla support is
+                on eight hundred, nine two seven, five two, from nine AM to six
+                PM, or by email at help at wasla dot a e. Goodbye.
+        finish:
+          - tool: verify_holder
+            success:
+              - status:
+                  - verified
+            confirm:
+              - "Is your date of birth {{state.birth_date}}?"
+            say:
+              - >-
+                Thank you, that matches. Is now a good time to talk about your
+                Wasla account?
+        assign:
+          - birth_date: input.birth_date
+          - amount_words: result.amount_words?
+          - merchant: result.merchant?
+          - purchase_spoken: result.purchase_spoken?
+          - due_spoken: result.due_spoken?
+
+      - name: talk_account
+        instructions: tasks/talk-account.md
+        opening: listen
+        tools:
+          - good_time
+          - record_promise
+          - note_concern
+          - schedule_callback
+          - payment_policy
+        replies:
+          - tool: good_time
+            when:
+              - good_time:
+                  - true
+            say:
+              - "{{state.said}}"
+          - tool: good_time
+            when:
+              - good_time:
+                  - false
+            say:
+              - No problem at all. When would be a good day and time to call you back?
+        finish:
+          - tool: record_promise
+            success:
+              - status:
+                  - PTP
+            confirm:
+              - "Shall I record your promise to pay {{state.amount_words}} for {{state.day}}?"
+            say:
+              - >-
+                Thank you. Your promise to pay {{state.when_said}} is recorded.
+                You can pay in the Wasla app or on our website. Is there
+                anything else I can help with?
+          - tool: note_concern
+            success:
+              - status:
+                  - HARDSHIP
+                  - LEGAL
+                  - DISPUTE
+                  - RTP
+            confirm:
+              - "Shall I pass this to our team as a {{state.concern}}: {{state.concern_note}}?"
+            say:
+              - "{{state.said}}"
+          - tool: schedule_callback
+            success:
+              - status:
+                  - CB
+            confirm:
+              - "Shall I note a call back for {{state.day}} at {{state.at}}?"
+            say:
+              - "That's noted: we'll call back {{state.when_said}}. Thank you for your time. Goodbye."
+        # Each closing tool takes some of these inputs. A row is saved when the tool
+        # that ends the step took it.
+        assign:
+          - day: input.day?
+          - at: input.at?
+          - concern: input.kind?
+          - concern_note: input.note?
+          - outcome: result.status
+
+      - name: take_callback
+        instructions: tasks/callback.md
+        tools:
+          - schedule_callback
+        opens_with:
+          tool: schedule_callback
+          arguments:
+            - day: callback_day
+            - at: callback_time
+        finish:
+          - tool: schedule_callback
+            success:
+              - status:
+                  - CB
+            confirm:
+              - "Shall I note a call back for {{state.day}} at {{state.at}}?"
+            say:
+              - "That's noted: we'll call back {{state.when_said}}. Thank you for your time. Goodbye."
+
+        assign:
+          - day: input.day
+          - at: input.at
+          - outcome: result.status
+
+      - name: take_off_list
+        instructions: tasks/wrong-number.md
+        tools:
+          - mark_wrong_number
+          - end_call
+        opens_with:
+          tool: mark_wrong_number
+        finish:
+          - tool: mark_wrong_number
+            success:
+              - status:
+                  - WN
+            confirm:
+              - >-
+                I'm sorry to have bothered you. Shall I take this number off our
+                list, so we don't call it again?
+            say:
+              - >-
+                Done. You won't get any more calls from us on this number. Sorry
+                for the trouble. Goodbye.
+        assign:
+          - outcome: result.status
+
+task_groups:
+  account:
+    when: The person says they are the account holder, or asks what this is about.
+    steps:
+      - task: identify
+        skip_when_confirmed: birth_date
+      - talk_account
+    context_scope: shared
+    then: return
+  callback:
+    when: >-
+      Someone other than the holder answered, or the holder wants to talk
+      another time.
+    steps:
+      - take_callback
+    context_scope: shared
+    then: end
+    arguments:
+      - callback_day
+      - callback_time
+  wrong_number:
+    when: Nobody of the holder's name can be reached at this number.
+    steps:
+      - take_off_list
+    context_scope: shared
+    then: end
+
+prefetch:
+  - name: today
+    clock: now
+    timezone: Asia/Dubai
+    assign:
+      - today: result.date
+      - weekday: result.day_of_week
+  # Whose account it is, before the greeting. Nothing else of it.
+  - name: account
+    tool: open_account
+    writes: false
+    # An id the ledger does not hold: the call never starts, so nobody is rung
+    # about nothing.
+    refuse_call: "call_start: account_id: no account {{state.account_id}}"
+    assign:
+      - first_name: result.first_name
+      - last_name: result.last_name
+      - deadline: result.deadline
+      - deadline_spoken: result.deadline_spoken
+
+secrets:
+  - GOOGLE_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: google
+      model: gemini-3.1-flash-lite
+      params:
+        vertexai: true
+        location: eu
+        thinking_config:
+          thinking_level: MINIMAL
+  speak:
+    voice:
+      provider: slng
+      model: "slng/fish/tts:s2.1-pro"
+      # Fish Audio's "Sarah": a warm, calm voice.
+      voice: "933563129e564b19a115bedd57b7406a"
+      language: en
+      params:
+        world_part: eu-north
+  listen:
+    transcriber:
+      provider: slng
+      model: "soniox/speech-ai:rt-v5"
+      language: en
+      params:
+        world_part: eu-north
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: balanced
+
+tools:
+  - open_account
+  - verify_holder
+  - good_time
+  - record_promise
+  - schedule_callback
+  - mark_wrong_number
+  - note_concern
+  - payment_policy
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: >-
+      Hello, this is Lina calling from Wasla. Am I speaking with
+      {{state.first_name}} {{state.last_name}}?
+  max_duration: 10m
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  avg_session_duration: 5m

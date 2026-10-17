@@ -67,6 +67,16 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		}
 		return Artifact{}, fmt.Errorf("generate %s: %w", resolved.Name, err)
 	}
+	// Version 2 runs on unmute-core, on LiveKit or Pipecat. Other targets are
+	// refused rather than compiled with templates that would drop every key
+	// version 2 adds.
+	if agent.Version == ir.Version2 {
+		files, err := GenerateCore(agent, resolved)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("generate %s %s: %w", resolved.Name, resolved.Provider, err)
+		}
+		return Artifact{Kind: CodeTarget, Files: files}, nil
+	}
 	artifact := Artifact{Kind: artifactKind(resolved.Provider), Telephony: TelephonyRuntimePlanFor(resolved)}
 	artifact.Notes.ForwardedBindings = report.ForwardedBindings
 	artifact.Notes.Sizing = report.Sizing

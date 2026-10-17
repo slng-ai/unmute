@@ -1,0 +1,11 @@
+local:
+  handler: tools/lessons.py:remember
+inject:
+  - learner_id: "{{state.learner_id}}"
+  - explanation: "{{state.explanation}}"
+assign:
+  - notes: result.notes
+  - said: result.said
+replies:
+  - say:
+      - "{{state.said}}"

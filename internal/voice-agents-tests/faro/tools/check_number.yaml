@@ -1,0 +1,23 @@
+local:
+  handler: tools/lessons.py:check_number
+inject:
+  - explanation: "{{state.explanation}}"
+# A number from outside Spain is refused before it is read back.
+precheck: tools/lessons.py:not_spanish_number
+assign:
+  - said: result.said
+replies:
+  - when:
+      - status:
+          - foreign
+      - explanation:
+          - EN
+    say:
+      - Faro only takes Spanish numbers, starting with plus thirty-four. What is your Spanish number?
+  - when:
+      - status:
+          - foreign
+      - explanation:
+          - ES
+    say:
+      - Faro solo acepta números españoles, que empiezan por más treinta y cuatro. ¿Cuál es tu número español?

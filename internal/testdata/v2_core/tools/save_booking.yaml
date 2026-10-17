@@ -1,0 +1,6 @@
+local:
+  handler: tools/salon.py:save_booking
+inject:
+  - customer_phone: "{{state.caller_phone}}"
+interruption: provider_default
+effect: returns_data

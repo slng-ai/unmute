@@ -1,0 +1,10 @@
+{
+  "name": "An exact address searches nearby straight away, then a new craving searches again",
+  "call_start": {"customer_name": "Jordi"},
+  "turns": [
+    {"caller": "I'm at Passeig de Sant Joan 55, Barcelona.", "expect": ["So that's Passeig de Sant Joan, 55"], "max_requests": 1},
+    {"caller": "Yes, that's it.", "expect": ["I found Bar Snack 55"], "reject": ["What are you in the mood for"], "max_requests": 1},
+    {"caller": "Actually, I'd rather have sushi.", "expect": ["couldn't find anything like that"], "max_requests": 1}
+  ],
+  "state": {"craving": "sushi", "offer": null}
+}

@@ -1,0 +1,839 @@
+{
+  "digest": "7ba2c175b13adeeb984f2fc3cea049b616db36660c1d99e6f7104e87a812eb8e",
+  "report": {
+    "tools": {
+      "coverage_guide": {
+        "description": "Read the coverage guide: cover, the excess, a courtesy car, recovery, what happens next.\n\nCall it only when the caller asks about one of these, and answer from it.",
+        "input": {
+          "properties": {},
+          "title": "coverage_guide_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``coverage_guide`` returns.",
+          "properties": {
+            "guide": {
+              "title": "Guide",
+              "type": "string"
+            }
+          },
+          "required": [
+            "guide"
+          ],
+          "title": "Guide",
+          "type": "object"
+        }
+      },
+      "end_call": {
+        "description": "End the call once the caller says they are done. Say your goodbye in the same reply.",
+        "input": {
+          "properties": {},
+          "title": "end_call_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``end_call`` returns.",
+          "properties": {
+            "ended": {
+              "title": "Ended",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ended"
+          ],
+          "title": "Ended",
+          "type": "object"
+        }
+      },
+      "file_claim": {
+        "description": "File the claim exactly as it was read back. Call it once the report is complete.\n\nIt first reads the whole claim back to the caller, so never read it back yourself.\nCall it again after their yes.",
+        "input": {
+          "properties": {
+            "report": {
+              "$ref": "#/$defs/Report"
+            },
+            "policy_number": {
+              "title": "Policy Number",
+              "type": "string"
+            },
+            "call": {
+              "title": "Call",
+              "type": "string"
+            }
+          },
+          "$defs": {
+            "Report": {
+              "description": "The facts of the incident, each empty until the caller gives it.",
+              "properties": {
+                "incident_day": {
+                  "anyOf": [
+                    {
+                      "format": "date",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Incident Day"
+                },
+                "incident_time": {
+                  "anyOf": [
+                    {
+                      "format": "time",
+                      "type": "string"
+                    },
+                    {
+                      "enum": [
+                        "morning",
+                        "afternoon",
+                        "evening",
+                        "night"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Incident Time"
+                },
+                "place": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Place"
+                },
+                "what_happened": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "What Happened"
+                },
+                "injuries": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Injuries"
+                },
+                "police_report": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Police Report"
+                },
+                "other_party": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Other Party"
+                },
+                "vehicle_drivable": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Vehicle Drivable"
+                },
+                "vehicle": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "The plate of the car it happened to.",
+                  "title": "Vehicle"
+                }
+              },
+              "title": "Report",
+              "type": "object"
+            }
+          },
+          "required": [
+            "report",
+            "policy_number",
+            "call"
+          ],
+          "title": "file_claim_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``file_claim`` returns. The claim number is said a character at a time.",
+          "properties": {
+            "filed": {
+              "title": "Filed",
+              "type": "boolean"
+            },
+            "claim_number": {
+              "format": "spelled",
+              "title": "Claim Number",
+              "type": "string"
+            }
+          },
+          "required": [
+            "filed",
+            "claim_number"
+          ],
+          "title": "Filed",
+          "type": "object"
+        }
+      },
+      "lookup_policy": {
+        "description": "Find the caller's policy by its number and the policy holder's date of birth.\n\nCall it as soon as you have both. It first reads both back to the caller, so never\nread them back yourself. Call it again with the same values after their yes.",
+        "input": {
+          "properties": {
+            "policy_number": {
+              "description": "The policy number: KP and six digits, like KP482913. Never guess a digit.",
+              "format": "spelled",
+              "title": "Policy Number",
+              "type": "string"
+            },
+            "birth_date": {
+              "format": "birth-date",
+              "title": "Birth Date",
+              "type": "string"
+            }
+          },
+          "required": [
+            "policy_number",
+            "birth_date"
+          ],
+          "title": "lookup_policy_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Policy": {
+              "description": "The policy the caller's number and date of birth found.",
+              "properties": {
+                "policy_number": {
+                  "title": "Policy Number",
+                  "type": "string"
+                },
+                "first_name": {
+                  "title": "First Name",
+                  "type": "string"
+                },
+                "vehicles": {
+                  "items": {
+                    "$ref": "#/$defs/Vehicle"
+                  },
+                  "title": "Vehicles",
+                  "type": "array"
+                }
+              },
+              "required": [
+                "policy_number",
+                "first_name",
+                "vehicles"
+              ],
+              "title": "Policy",
+              "type": "object"
+            },
+            "Vehicle": {
+              "description": "One car on a policy.",
+              "properties": {
+                "plate": {
+                  "title": "Plate",
+                  "type": "string"
+                },
+                "words": {
+                  "description": "How the car is said, like \"the blue Toyota Corolla\".",
+                  "title": "Words",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "plate",
+                "words"
+              ],
+              "title": "Vehicle",
+              "type": "object"
+            }
+          },
+          "description": "What ``lookup_policy`` returns.\n\nAttributes:\n    status: ``looked_up``, or ``not_a_number`` when the number is not KP and six\n        digits. Then nothing is looked up or read back, and the tool's reply asks again.",
+          "properties": {
+            "found": {
+              "title": "Found",
+              "type": "boolean"
+            },
+            "status": {
+              "default": "looked_up",
+              "enum": [
+                "looked_up",
+                "not_a_number"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "policy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Policy"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "first_name": {
+              "default": "",
+              "title": "First Name",
+              "type": "string"
+            },
+            "hint": {
+              "default": "",
+              "title": "Hint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "found"
+          ],
+          "title": "PolicyFound",
+          "type": "object"
+        }
+      },
+      "note_facts": {
+        "description": "Note every fact of the incident the caller just gave, all in one call.\n\nPass only what they said. The application asks the next question itself. When it\nanswers complete, call file_claim at once.",
+        "input": {
+          "properties": {
+            "report": {
+              "$ref": "#/$defs/Report"
+            },
+            "policy": {
+              "$ref": "#/$defs/Policy"
+            },
+            "incident_day": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The day it happened, as YYYY-MM-DD. Work it out from today's date. Pass it even when it is in the future: the application checks it.",
+              "title": "Incident Day"
+            },
+            "incident_time": {
+              "anyOf": [
+                {
+                  "format": "time",
+                  "type": "string"
+                },
+                {
+                  "enum": [
+                    "morning",
+                    "afternoon",
+                    "evening",
+                    "night"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "HH:MM on a 24-hour clock, or morning, afternoon, evening, night.",
+              "title": "Incident Time"
+            },
+            "place": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Where it happened, in the caller's own words.",
+              "title": "Place"
+            },
+            "what_happened": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "What happened, in the caller's own words: the shortest excerpt.",
+              "title": "What Happened"
+            },
+            "injuries": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Whether anyone was hurt.",
+              "title": "Injuries"
+            },
+            "police_report": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The police reference they gave, or \"none\" for no report.",
+              "title": "Police Report"
+            },
+            "other_party": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Whether another vehicle or driver was involved.",
+              "title": "Other Party"
+            },
+            "vehicle_drivable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Whether their car can still be driven.",
+              "title": "Vehicle Drivable"
+            },
+            "vehicle": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The car it happened to: its plate or its name.",
+              "title": "Vehicle"
+            }
+          },
+          "$defs": {
+            "Policy": {
+              "description": "The policy the caller's number and date of birth found.",
+              "properties": {
+                "policy_number": {
+                  "title": "Policy Number",
+                  "type": "string"
+                },
+                "first_name": {
+                  "title": "First Name",
+                  "type": "string"
+                },
+                "vehicles": {
+                  "items": {
+                    "$ref": "#/$defs/Vehicle"
+                  },
+                  "title": "Vehicles",
+                  "type": "array"
+                }
+              },
+              "required": [
+                "policy_number",
+                "first_name",
+                "vehicles"
+              ],
+              "title": "Policy",
+              "type": "object"
+            },
+            "Report": {
+              "description": "The facts of the incident, each empty until the caller gives it.",
+              "properties": {
+                "incident_day": {
+                  "anyOf": [
+                    {
+                      "format": "date",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Incident Day"
+                },
+                "incident_time": {
+                  "anyOf": [
+                    {
+                      "format": "time",
+                      "type": "string"
+                    },
+                    {
+                      "enum": [
+                        "morning",
+                        "afternoon",
+                        "evening",
+                        "night"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Incident Time"
+                },
+                "place": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Place"
+                },
+                "what_happened": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "What Happened"
+                },
+                "injuries": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Injuries"
+                },
+                "police_report": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Police Report"
+                },
+                "other_party": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Other Party"
+                },
+                "vehicle_drivable": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Vehicle Drivable"
+                },
+                "vehicle": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "The plate of the car it happened to.",
+                  "title": "Vehicle"
+                }
+              },
+              "title": "Report",
+              "type": "object"
+            },
+            "Vehicle": {
+              "description": "One car on a policy.",
+              "properties": {
+                "plate": {
+                  "title": "Plate",
+                  "type": "string"
+                },
+                "words": {
+                  "description": "How the car is said, like \"the blue Toyota Corolla\".",
+                  "title": "Words",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "plate",
+                "words"
+              ],
+              "title": "Vehicle",
+              "type": "object"
+            }
+          },
+          "required": [
+            "report",
+            "policy"
+          ],
+          "title": "note_facts_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Report": {
+              "description": "The facts of the incident, each empty until the caller gives it.",
+              "properties": {
+                "incident_day": {
+                  "anyOf": [
+                    {
+                      "format": "date",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Incident Day"
+                },
+                "incident_time": {
+                  "anyOf": [
+                    {
+                      "format": "time",
+                      "type": "string"
+                    },
+                    {
+                      "enum": [
+                        "morning",
+                        "afternoon",
+                        "evening",
+                        "night"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Incident Time"
+                },
+                "place": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Place"
+                },
+                "what_happened": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "What Happened"
+                },
+                "injuries": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Injuries"
+                },
+                "police_report": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Police Report"
+                },
+                "other_party": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Other Party"
+                },
+                "vehicle_drivable": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Vehicle Drivable"
+                },
+                "vehicle": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "The plate of the car it happened to.",
+                  "title": "Vehicle"
+                }
+              },
+              "title": "Report",
+              "type": "object"
+            }
+          },
+          "description": "What ``note_facts`` returns: the report so far, and what code says next.\n\nAttributes:\n    report: Every fact so far, the new ones merged in.\n    status: ``noted``, or ``future_day`` when the day given has not happened yet. That\n        day is left out of the report, and the tool's reply asks for it again.\n    complete: True once every fact and the car are known.\n    next_question: The question for the first missing fact, while one is missing.\n    read_back: The whole claim in code's words, once it is complete.",
+          "properties": {
+            "report": {
+              "$ref": "#/$defs/Report"
+            },
+            "status": {
+              "default": "noted",
+              "enum": [
+                "noted",
+                "future_day"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "complete": {
+              "title": "Complete",
+              "type": "boolean"
+            },
+            "next_question": {
+              "default": "",
+              "title": "Next Question",
+              "type": "string"
+            },
+            "read_back": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Read Back"
+            }
+          },
+          "required": [
+            "report",
+            "complete"
+          ],
+          "title": "Noted",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "internal/voice-agents-tests/kestrel"
+}

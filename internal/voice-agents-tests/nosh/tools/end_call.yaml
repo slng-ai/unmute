@@ -1,0 +1,4 @@
+local:
+  handler: tools/finder.py:end_call
+effect: ends_conversation
+announce: Enjoy your meal! Bye for now.

@@ -1,0 +1,3 @@
+local:
+  handler: tools/claims.py:end_call
+effect: ends_conversation

@@ -1,0 +1,13 @@
+{
+  "name": "A disputed purchase is noted in the holder's own words",
+  "dispatch": {"account_id": "WA-1001"},
+  "turns": [
+    {"caller": "Yes, speaking.", "expect": ["date of birth"], "max_requests": 1},
+    {"caller": "March the fourteenth, 1990.", "expect": ["Is your date of birth"], "max_requests": 1},
+    {"caller": "Yes.", "expect": ["Is now a good time"], "max_requests": 1},
+    {"caller": "Yes.", "expect": ["Falcon Electronics"], "max_requests": 1},
+    {"caller": "I never bought anything from Falcon Electronics. This isn't mine.", "expect": ["Shall I pass this to our team as a purchase dispute"], "max_requests": 1},
+    {"caller": "Yes.", "expect": ["I've recorded your dispute"], "max_requests": 1}
+  ],
+  "state": {"outcome": "DISPUTE", "concern": "purchase-dispute"}
+}

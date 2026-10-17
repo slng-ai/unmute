@@ -1,5 +1,5 @@
 {
-  "source": "internal/testdata/slng_tasks/state.py",
+  "source": "internal/voice-agents-tests/slng-tasks/state.py",
   "digest": "6d0785467ce3d8f3b95d8a057c3f9b1c424054ea6a3f60d7031a624e19135b4d",
   "report": {
     "schema": {

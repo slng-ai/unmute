@@ -1,0 +1,738 @@
+{
+  "digest": "6a496c4d1c391acbc59454d66da86be778ca00e8699f67063426289d28efa155",
+  "report": {
+    "tools": {
+      "check_number": {
+        "description": "Look the caller up by the number they said. It first reads the number back.\n\nCall it again with the same number after their yes.",
+        "input": {
+          "properties": {
+            "phone": {
+              "description": "The whole number the caller said, with its country code, like +34 600 111 222.",
+              "format": "phone",
+              "title": "Phone",
+              "type": "string"
+            },
+            "explanation": {
+              "enum": [
+                "EN",
+                "ES"
+              ],
+              "title": "Explanation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phone",
+            "explanation"
+          ],
+          "title": "check_number_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What finding or creating a learner returns: who they are, and code's next line.",
+          "properties": {
+            "status": {
+              "enum": [
+                "known",
+                "new",
+                "created",
+                "foreign"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "said": {
+              "title": "Said",
+              "type": "string"
+            },
+            "phone": {
+              "title": "Phone",
+              "type": "string"
+            },
+            "explanation": {
+              "enum": [
+                "EN",
+                "ES"
+              ],
+              "title": "Explanation",
+              "type": "string"
+            },
+            "learner_id": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Learner Id"
+            },
+            "learner_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Learner Name"
+            },
+            "notes": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Notes"
+            }
+          },
+          "required": [
+            "status",
+            "said",
+            "phone",
+            "explanation"
+          ],
+          "title": "Identified",
+          "type": "object"
+        }
+      },
+      "continue_lesson": {
+        "description": "Put the next exercise of their plan to the learner. Code says it.",
+        "input": {
+          "properties": {
+            "learner_id": {
+              "title": "Learner Id",
+              "type": "integer"
+            },
+            "explanation": {
+              "enum": [
+                "EN",
+                "ES"
+              ],
+              "title": "Explanation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "learner_id",
+            "explanation"
+          ],
+          "title": "continue_lesson_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``continue_lesson`` and ``grade_answer`` return: code's line, and what waits.",
+          "properties": {
+            "said": {
+              "title": "Said",
+              "type": "string"
+            },
+            "waiting": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Waiting"
+            },
+            "helped": {
+              "default": false,
+              "title": "Helped",
+              "type": "boolean"
+            },
+            "lesson_complete": {
+              "default": false,
+              "title": "Lesson Complete",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "said"
+          ],
+          "title": "Exercise",
+          "type": "object"
+        }
+      },
+      "create_profile": {
+        "description": "Create the new learner's profile and plan. It first reads it back.\n\nCall it again with the same values after their yes.",
+        "input": {
+          "properties": {
+            "name": {
+              "description": "What they want to be called.",
+              "maxLength": 40,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "learn": {
+              "description": "The language they want to learn.",
+              "enum": [
+                "English",
+                "Spanish"
+              ],
+              "title": "Learn",
+              "type": "string"
+            },
+            "goal": {
+              "description": "What it is for: travel, work or daily life.",
+              "enum": [
+                "travel",
+                "work",
+                "daily-life"
+              ],
+              "title": "Goal",
+              "type": "string"
+            },
+            "level": {
+              "description": "Their level: A1 for a beginner, A2 for some, B1 for confident.",
+              "enum": [
+                "A1",
+                "A2",
+                "B1",
+                "B2"
+              ],
+              "title": "Level",
+              "type": "string"
+            },
+            "phone": {
+              "title": "Phone",
+              "type": "string"
+            },
+            "explanation": {
+              "enum": [
+                "EN",
+                "ES"
+              ],
+              "title": "Explanation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "learn",
+            "goal",
+            "level",
+            "phone",
+            "explanation"
+          ],
+          "title": "create_profile_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What finding or creating a learner returns: who they are, and code's next line.",
+          "properties": {
+            "status": {
+              "enum": [
+                "known",
+                "new",
+                "created",
+                "foreign"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "said": {
+              "title": "Said",
+              "type": "string"
+            },
+            "phone": {
+              "title": "Phone",
+              "type": "string"
+            },
+            "explanation": {
+              "enum": [
+                "EN",
+                "ES"
+              ],
+              "title": "Explanation",
+              "type": "string"
+            },
+            "learner_id": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Learner Id"
+            },
+            "learner_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Learner Name"
+            },
+            "notes": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Notes"
+            }
+          },
+          "required": [
+            "status",
+            "said",
+            "phone",
+            "explanation"
+          ],
+          "title": "Identified",
+          "type": "object"
+        }
+      },
+      "end_call": {
+        "description": "End the call once the learner says they are done. Say your goodbye in the same reply.",
+        "input": {
+          "properties": {},
+          "title": "end_call_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``end_call`` returns.",
+          "properties": {
+            "ended": {
+              "title": "Ended",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ended"
+          ],
+          "title": "Ended",
+          "type": "object"
+        }
+      },
+      "give_hint": {
+        "description": "Help with the exercise waiting. The application says your hint, so say nothing else.\n\nA right answer after a hint counts as practised with help.",
+        "input": {
+          "properties": {
+            "hint": {
+              "description": "What you say to help, in the explanation language: an answer to their question, a slower explanation or a hint. Never the whole answer.",
+              "maxLength": 300,
+              "minLength": 1,
+              "title": "Hint",
+              "type": "string"
+            },
+            "waiting": {
+              "title": "Waiting",
+              "type": "string"
+            }
+          },
+          "required": [
+            "hint",
+            "waiting"
+          ],
+          "title": "give_hint_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``give_hint`` returns: the hint, said by code, and that help was given.",
+          "properties": {
+            "helped": {
+              "title": "Helped",
+              "type": "boolean"
+            },
+            "said": {
+              "title": "Said",
+              "type": "string"
+            }
+          },
+          "required": [
+            "helped",
+            "said"
+          ],
+          "title": "Hinted",
+          "type": "object"
+        }
+      },
+      "grade_answer": {
+        "description": "Grade the learner's attempt at the exercise waiting. Code says what follows.",
+        "input": {
+          "properties": {
+            "answer": {
+              "description": "The learner's attempt at the exercise, copied from what they said.",
+              "maxLength": 600,
+              "minLength": 1,
+              "title": "Answer",
+              "type": "string"
+            },
+            "grade": {
+              "description": "correct: does what was asked, in the target language, and can be understood; small slips are fine. partly: in the target language, but does only part of it or needs a real fix. wrong: does not do what was asked, or is mostly not in the target language. unclear: too cut off or garbled to judge. Judge meaning, never spelling or pronunciation.",
+              "enum": [
+                "correct",
+                "partly",
+                "wrong",
+                "unclear"
+              ],
+              "title": "Grade",
+              "type": "string"
+            },
+            "feedback": {
+              "description": "Said before the next line, in the explanation language. correct: brief praise. partly or wrong: what was wrong, then the right sentence in the target language. unclear: ask them to say it again.",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Feedback",
+              "type": "string"
+            },
+            "learner_id": {
+              "title": "Learner Id",
+              "type": "integer"
+            },
+            "explanation": {
+              "enum": [
+                "EN",
+                "ES"
+              ],
+              "title": "Explanation",
+              "type": "string"
+            },
+            "waiting": {
+              "title": "Waiting",
+              "type": "string"
+            },
+            "helped": {
+              "title": "Helped",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "answer",
+            "grade",
+            "feedback",
+            "learner_id",
+            "explanation",
+            "waiting",
+            "helped"
+          ],
+          "title": "grade_answer_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``continue_lesson`` and ``grade_answer`` return: code's line, and what waits.",
+          "properties": {
+            "said": {
+              "title": "Said",
+              "type": "string"
+            },
+            "waiting": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Waiting"
+            },
+            "helped": {
+              "default": false,
+              "title": "Helped",
+              "type": "boolean"
+            },
+            "lesson_complete": {
+              "default": false,
+              "title": "Lesson Complete",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "said"
+          ],
+          "title": "Exercise",
+          "type": "object"
+        }
+      },
+      "language_of": {
+        "description": "Return the language to explain in for a caller's number, before the greeting.\n\nNothing about the learner is said or shown: the number is not confirmed yet. The\nresult also carries the greeting's number read-back, in that language.",
+        "input": {
+          "properties": {
+            "phone": {
+              "title": "Phone",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phone"
+          ],
+          "title": "language_of_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What the prefetch of the caller's number returns, before anything is said.",
+          "properties": {
+            "explanation": {
+              "enum": [
+                "EN",
+                "ES"
+              ],
+              "title": "Explanation",
+              "type": "string"
+            },
+            "phone_spaced": {
+              "title": "Phone Spaced",
+              "type": "string"
+            },
+            "number_question": {
+              "title": "Number Question",
+              "type": "string"
+            }
+          },
+          "required": [
+            "explanation",
+            "phone_spaced",
+            "number_question"
+          ],
+          "title": "Language",
+          "type": "object"
+        }
+      },
+      "read_progress": {
+        "description": "Say what the learner has done, what needs review and what comes next. Changes nothing.",
+        "input": {
+          "properties": {
+            "learner_id": {
+              "title": "Learner Id",
+              "type": "integer"
+            },
+            "explanation": {
+              "enum": [
+                "EN",
+                "ES"
+              ],
+              "title": "Explanation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "learner_id",
+            "explanation"
+          ],
+          "title": "read_progress_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "A line code says, and the learner's notes as they stand now.",
+          "properties": {
+            "said": {
+              "title": "Said",
+              "type": "string"
+            },
+            "notes": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Notes"
+            }
+          },
+          "required": [
+            "said"
+          ],
+          "title": "Said",
+          "type": "object"
+        }
+      },
+      "remember": {
+        "description": "Remember something the learner told you about themselves, for later calls.\n\nA correction uses the same key as the fact it replaces.",
+        "input": {
+          "properties": {
+            "key": {
+              "description": "A short stable name, like hobby.",
+              "maxLength": 40,
+              "minLength": 1,
+              "title": "Key",
+              "type": "string"
+            },
+            "text": {
+              "description": "What they told you, in one short sentence, like \"Enjoys climbing.\"",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Text",
+              "type": "string"
+            },
+            "learner_id": {
+              "title": "Learner Id",
+              "type": "integer"
+            },
+            "explanation": {
+              "enum": [
+                "EN",
+                "ES"
+              ],
+              "title": "Explanation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "text",
+            "learner_id",
+            "explanation"
+          ],
+          "title": "remember_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "A line code says, and the learner's notes as they stand now.",
+          "properties": {
+            "said": {
+              "title": "Said",
+              "type": "string"
+            },
+            "notes": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Notes"
+            }
+          },
+          "required": [
+            "said"
+          ],
+          "title": "Said",
+          "type": "object"
+        }
+      },
+      "use_this_number": {
+        "description": "The caller said yes to the number read back in the greeting: look them up.",
+        "input": {
+          "properties": {
+            "phone": {
+              "title": "Phone",
+              "type": "string"
+            },
+            "explanation": {
+              "enum": [
+                "EN",
+                "ES"
+              ],
+              "title": "Explanation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phone",
+            "explanation"
+          ],
+          "title": "use_this_number_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What finding or creating a learner returns: who they are, and code's next line.",
+          "properties": {
+            "status": {
+              "enum": [
+                "known",
+                "new",
+                "created",
+                "foreign"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "said": {
+              "title": "Said",
+              "type": "string"
+            },
+            "phone": {
+              "title": "Phone",
+              "type": "string"
+            },
+            "explanation": {
+              "enum": [
+                "EN",
+                "ES"
+              ],
+              "title": "Explanation",
+              "type": "string"
+            },
+            "learner_id": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Learner Id"
+            },
+            "learner_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Learner Name"
+            },
+            "notes": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Notes"
+            }
+          },
+          "required": [
+            "status",
+            "said",
+            "phone",
+            "explanation"
+          ],
+          "title": "Identified",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "internal/voice-agents-tests/faro"
+}

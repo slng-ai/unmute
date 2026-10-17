@@ -1,0 +1,39 @@
+# Compiles each scenario package for each code target and runs its scenarios as
+# whole calls on the real model (`make e2e`). It needs provider keys, so it runs
+# nightly and by hand, never on a pull request. A failure is a real call that
+# said the wrong thing: read the transcript in the job log.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [kestrel, wasla, nosh, faro]
+        framework: [livekit, pipecat]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # compile formats emitted Python with ruff, like the emitted-python job in ci.yml.
+      - run: pip install uv==0.11.16 ruff==0.15.7
+      - run: make e2e PKG=${{ matrix.package }} FW=${{ matrix.framework }}
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          SLNG_API_KEY: ${{ secrets.SLNG_API_KEY }}
+          FARO_DB: ":memory:"

@@ -4,6 +4,11 @@ package target
 // with. It is the same line the Twilio project runs on.
 const StatePython = TwilioPython
 
+// CorePin is the unmute-core release `unmute` reads a version 2 package's
+// local tool handlers with, through its own local_tool, so the compiler and
+// the runtime read the same types. Moving it changes every tool recording.
+const CorePin = "0.16.1"
+
 // StatePins are the exact versions `unmute validate` and `unmute compile`
 // install to read a package's state.py. The author may import Pydantic, and
 // three pydantic-extra-types modules (phone_numbers, currency_code,

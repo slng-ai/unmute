@@ -1,0 +1,302 @@
+# Faro: a bilingual language tutor, ported from unmute-core's examples/faro.
+#
+# Two agents, one per explanation language, built from one prompt: faro_en and
+# faro_es. A known caller is greeted by the agent of their own language, picked
+# before the greeting from their number. A learner who asks to switch language
+# is handed to the other agent.
+#
+# The model grades and code teaches. The lesson needs no task: continue_lesson,
+# grade_answer, give_hint, read_progress and remember are agent tools, and each
+# result's `said` is saved to state and spoken by a reply. Two tasks read back
+# before code acts: a number the caller says (other_number) and a new profile
+# (sign_up). They are written once per agent because their lines are in the
+# agent's language, and a task name is one name across the package, so the
+# Spanish agent's are other_number_es and sign_up_es.
+#
+# The scenarios in scenarios/ are unmute-core's, word for word. Progress is kept
+# in SQLite (FARO_DB, see README.md).
+version: 2
+
+name: faro
+
+entry_agent: faro_en
+
+# The call starts on the agent of the caller's own language, which the
+# prefetch reads from their profile. A new caller starts in English.
+entry_by:
+  value: explanation
+  agents:
+    - EN: faro_en
+    - ES: faro_es
+
+mode: record
+
+agents:
+  faro_en:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice_en
+    tools:
+      - use_this_number
+      - continue_lesson
+      - grade_answer
+      - give_hint
+      - read_progress
+      - remember
+      - end_call
+    handoffs:
+      - to_spanish
+    tasks:
+      - name: other_number
+        when: >-
+          The caller says the number read back is wrong, or there was no number
+          to read back.
+        instructions: tasks/other-number.md
+        opening: listen
+        announce:
+          - What is your full phone number, starting with plus thirty-four?
+        arguments:
+          - phone
+        tools:
+          - check_number
+        opens_with:
+          tool: check_number
+          arguments:
+            - phone: phone
+        finish:
+          - tool: check_number
+            success:
+              - status:
+                  - known
+                  - new
+            confirm:
+              - "Let me check: is your number {{state.phone}}?"
+            say:
+              - "{{state.said}}"
+        assign:
+          - phone: input.phone
+          - learner_id: result.learner_id?
+          - learner_name: result.learner_name?
+          - notes: result.notes?
+
+      - name: sign_up
+        when: A caller with no profile agrees to create one.
+        instructions: tasks/sign-up.md
+        opening: listen
+        announce:
+          - Great. What would you like me to call you?
+        tools:
+          - create_profile
+        finish:
+          - tool: create_profile
+            success:
+              - status:
+                  - created
+            confirm:
+              - >-
+                Shall I create your profile as {{state.profile_name}}, learning
+                {{state.profile_learn}} for {{state.profile_goal}}, at level
+                {{state.profile_level}}?
+            say:
+              - "{{state.said}}"
+        assign:
+          - profile_name: input.name
+          - profile_learn: input.learn
+          - profile_goal: input.goal
+          - profile_level: input.level
+          - learner_id: result.learner_id?
+          - learner_name: result.learner_name?
+          - notes: result.notes?
+
+  faro_es:
+    instructions: instructions-es.md
+    think: reasoning
+    speak: voice_es
+    tools:
+      - use_this_number
+      - continue_lesson
+      - grade_answer
+      - give_hint
+      - read_progress
+      - remember
+      - end_call
+    handoffs:
+      - to_english
+    tasks:
+      - name: other_number_es
+        when: >-
+          The caller says the number read back is wrong, or there was no number
+          to read back.
+        instructions: tasks/other-number.md
+        opening: listen
+        announce:
+          - ¿Me dices tu número de teléfono completo, empezando por más treinta y cuatro?
+        arguments:
+          - phone
+        tools:
+          - check_number
+        opens_with:
+          tool: check_number
+          arguments:
+            - phone: phone
+        finish:
+          - tool: check_number
+            success:
+              - status:
+                  - known
+                  - new
+            confirm:
+              - "A ver si lo tengo bien: ¿tu número es {{state.phone}}?"
+            say:
+              - "{{state.said}}"
+        assign:
+          - phone: input.phone
+          - learner_id: result.learner_id?
+          - learner_name: result.learner_name?
+          - notes: result.notes?
+
+      - name: sign_up_es
+        when: A caller with no profile agrees to create one.
+        instructions: tasks/sign-up.md
+        opening: listen
+        announce:
+          - Genial. ¿Cómo quieres que te llame?
+        tools:
+          - create_profile
+        finish:
+          - tool: create_profile
+            success:
+              - status:
+                  - created
+            confirm:
+              - >-
+                ¿Creo tu perfil como {{state.profile_name}}, con nivel
+                {{state.profile_level}}?
+            say:
+              - "{{state.said}}"
+        assign:
+          - profile_name: input.name
+          - profile_learn: input.learn
+          - profile_goal: input.goal
+          - profile_level: input.level
+          - learner_id: result.learner_id?
+          - learner_name: result.learner_name?
+          - notes: result.notes?
+
+handoffs:
+  # Each switch saves the language code speaks in, then re-reads the exercise
+  # waiting in that language, with no model request.
+  to_spanish:
+    to: faro_es
+    when: The caller asks you to explain in Spanish, or keeps speaking Spanish to you.
+    context:
+      history: messages
+    saves:
+      - explanation: ES
+    opens_with:
+      tool: continue_lesson
+
+  to_english:
+    to: faro_en
+    when: The caller asks you to explain in English, or keeps speaking English to you.
+    context:
+      history: messages
+    saves:
+      - explanation: EN
+    opens_with:
+      tool: continue_lesson
+
+prefetch:
+  - name: caller
+    source: from_number
+    assign:
+      - phone: result.value
+  # Before the greeting: which language to greet this number in, and the
+  # number read back. Nothing about the learner is said or shown.
+  - name: language
+    tool: language_of
+    writes: false
+    needs_confirmed:
+      - phone
+    assign:
+      - explanation: result.explanation
+      - phone_spaced: result.phone_spaced
+      - number_question: result.number_question
+
+secrets:
+  - GOOGLE_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: google
+      model: gemini-3.1-flash-lite
+      params:
+        vertexai: true
+        location: eu
+        thinking_config:
+          thinking_level: MINIMAL
+  speak:
+    # Fish Audio's "Isabella": warm, and clear in both languages. One voice per
+    # agent, so a language can take its own voice later.
+    voice_en:
+      provider: slng
+      model: "slng/fish/tts:s2.1-pro"
+      voice: "15e288e662ca4072b2276d5c7c962bb2"
+      language: en
+      params:
+        world_part: eu-north
+    voice_es:
+      provider: slng
+      model: "slng/fish/tts:s2.1-pro"
+      voice: "15e288e662ca4072b2276d5c7c962bb2"
+      language: es
+      params:
+        world_part: eu-north
+  listen:
+    transcriber:
+      provider: slng
+      model: "soniox/speech-ai:rt-v5"
+      language: es
+      params:
+        world_part: eu-north
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: patient
+
+tools:
+  - use_this_number
+  - check_number
+  - create_profile
+  - continue_lesson
+  - grade_answer
+  - give_hint
+  - read_progress
+  - remember
+  - end_call
+  - language_of
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: >-
+      Hi, I'm Faro, your language companion. Si prefieres hablar en español,
+      dímelo. {{state.number_question}}
+    # With no caller ID there is no number to read back, so the model asks.
+    instruction: >-
+      Say exactly: "Hi, I'm Faro, your language companion. Si prefieres hablar
+      en español, dímelo. What is your full phone number, starting with plus
+      thirty-four?"
+  max_duration: 20m
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  avg_session_duration: 8m

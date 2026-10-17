@@ -242,6 +242,9 @@ func TestPackagesWritingNoNewKeyEmitTheSameBytes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: load: %v", name, err)
 		}
+		if pkg.Agent.Version == spec.Version2 {
+			continue // every key of a version 2 package is new to this test
+		}
 		agent, err := buildWithState(t, pkg)
 		if err != nil {
 			t.Fatalf("%s: build: %v", name, err)

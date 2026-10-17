@@ -1,0 +1,33 @@
+local:
+  handler: tools/finder.py:find_places
+# A search runs only on the spot that was read back to the caller.
+inject:
+  - spot: "{{state.spot}}"
+announce:
+  - Let me have a look.
+  - One sec, let me see what's around.
+hidden:
+  - listed
+assign:
+  - craving: result.craving
+  - offer: result.offer
+  - details: result.details
+  - listed: result.listed
+replies:
+  - when:
+      - ask_craving:
+          - true
+    say:
+      - What are you in the mood for? A cuisine, a bar, or no preference?
+  - when:
+      - found:
+          - true
+    say:
+      - "I found {{state.listed}}. Do any of those sound good?"
+  - when:
+      - found:
+          - false
+    say:
+      - >-
+        Hmm, I couldn't find anything like that right there. Want me to try a
+        bit wider, or a different kind of place?

@@ -1,0 +1,8 @@
+local:
+  handler: tools/claims.py:file_claim
+inject:
+  - report: "{{state.report}}"
+  - policy_number: "{{state.policy.policy_number}}"
+  - call: "{{call.session_id}}"
+announce: Filing that now.
+interruption: continue

@@ -1,0 +1,14 @@
+{
+  "name": "A new caller signs up and starts the first lesson",
+  "call_start": {"call": {"direction": "inbound", "calling_number": "+34600777888"}},
+  "greeting": ["Let me check: is your number +34 600 777 888?"],
+  "turns": [
+    {"caller": "Yes.", "expect": ["I can't find a profile with that number. Would you like to create one"], "max_requests": 1},
+    {"caller": "Yes, please.", "expect": ["What would you like me to call you?"], "max_requests": 1},
+    {"caller": "Call me Nico.", "max_requests": 1},
+    {"caller": "I want to learn Spanish, for travel. I'm a complete beginner.", "expect": ["Shall I create your profile as Nico, learning Spanish for travel, at level A1?"], "max_requests": 1},
+    {"caller": "Yes.", "expect": ["Nice to meet you, Nico. Your plan is Spanish A1 for travel"], "max_requests": 1},
+    {"caller": "Yes, let's start.", "expect": ["Introducing yourself, first exercise. Answer in Spanish: Say hello and tell me your name."], "max_requests": 1}
+  ],
+  "state": {"learner_name": "Nico", "waiting": "es-travel-1-1"}
+}

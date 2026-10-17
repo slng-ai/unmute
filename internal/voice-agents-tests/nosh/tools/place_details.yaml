@@ -1,0 +1,24 @@
+local:
+  handler: tools/finder.py:place_details
+# A pick counts only if it was offered: the tool refuses any other id.
+inject:
+  - offer: "{{state.offer}}"
+hidden:
+  - spoken
+assign:
+  - details: result.details
+  - spoken: result.spoken
+  - place_name: result.name
+replies:
+  - when:
+      - found:
+          - true
+    say:
+      - "{{state.spoken}}"
+  - when:
+      - found:
+          - false
+    say:
+      - >-
+        Sorry, I can't pull up {{state.place_name}}'s details just now. Want to
+        hear about another one?

@@ -1,0 +1,4 @@
+local:
+  handler: tools/ledger.py:open_account
+inject:
+  - account_id: "{{state.account_id}}"

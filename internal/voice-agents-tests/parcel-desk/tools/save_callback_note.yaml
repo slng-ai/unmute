@@ -1,0 +1,4 @@
+local:
+  handler: tools/depot.py:save_callback_note
+inject:
+  - call: "{{call.session_id}}"

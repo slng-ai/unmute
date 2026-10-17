@@ -72,7 +72,7 @@ func Load(dir string) (*Package, error) {
 		// A local tool's handler travels with the package (code targets copy
 		// it into the generated project), so load it like instructions.
 		if tool.Local != nil {
-			handler := tool.Local.Handler
+			handler, _ := SplitHandler(tool.Local.Handler)
 			if handler == "" {
 				handler = filepath.Join("tools", name+".py")
 			}
@@ -81,6 +81,14 @@ func Load(dir string) (*Package, error) {
 				return nil, err
 			}
 			pkg.Handlers[handler] = string(content)
+			// A precheck is Python beside the handler and travels the same way.
+			if precheck, _ := SplitHandler(tool.Precheck); precheck != "" {
+				content, err := readWithin(root, precheck)
+				if err != nil {
+					return nil, err
+				}
+				pkg.Handlers[precheck] = string(content)
+			}
 		}
 		// A hosted tool's definition travels with the package too, for the same
 		// reason: the code targets run the mirrored module, and every target
@@ -107,6 +115,9 @@ func Load(dir string) (*Package, error) {
 	}
 
 	if err := pkg.flattenTasks(); err != nil {
+		return nil, err
+	}
+	if err := pkg.checkVersionKeys(); err != nil {
 		return nil, err
 	}
 

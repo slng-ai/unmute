@@ -87,6 +87,7 @@ func buildPrefetch(pkg *packagespec.Package, agent *Agent) error {
 		if err := deriveConfirmation(pkg, agent, &entry, where); err != nil {
 			return err
 		}
+		entry.Background, entry.NeedsConfirmed, entry.RefuseCall = raw.Background, raw.NeedsConfirmed, FlattenPaths(raw.RefuseCall)
 		agent.Prefetch = append(agent.Prefetch, entry)
 	}
 	return nil
@@ -563,7 +564,8 @@ func prefetchResultType(agent *Agent, entry Prefetch, field string) *stateschema
 	if !ok {
 		return text
 	}
-	typ, err := stateschema.ParseProperty(property)
+	defs, _ := agent.Tools[entry.Tool].Output["$defs"].(map[string]any)
+	typ, err := stateschema.ParseProperty(property, defs)
 	if err != nil {
 		return text
 	}

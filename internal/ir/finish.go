@@ -20,6 +20,10 @@ type TerminalTool struct {
 	// here and a list in the authoring surface is the usual split: this is the
 	// resolved shape, and every reader wants it by field name.
 	Success map[string][]string `json:"success" yaml:"success"`
+	// Confirm is read back by code before the tool runs, and Say is spoken
+	// when the step ends on it. Version 2 only.
+	Confirm []string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
+	Say     []string `json:"say,omitempty" yaml:"say,omitempty"`
 }
 
 // EndsOnTools names the tools this task ends on, sorted, for the report and the
@@ -69,6 +73,7 @@ func terminalTools(taskName string, raw packagespec.Task, agent *Agent, result m
 			return nil, fmt.Errorf("finish names %q, which is not a tool of this package", entry.Tool)
 		}
 		properties, _ := tool.Output["properties"].(map[string]any)
+		defs, _ := tool.Output["$defs"].(map[string]any)
 		success := map[string][]string{}
 		for _, pair := range entry.Success {
 			declared, err := declaredEnum(entry.Tool, properties, pair.Field)
@@ -93,22 +98,30 @@ func terminalTools(taskName string, raw packagespec.Task, agent *Agent, result m
 			return nil, fmt.Errorf("finish names %q with no success:; a step cannot end on a result nothing checks", entry.Tool)
 		}
 		for _, field := range sortedKeys(result) {
-			if err := terminalResultFits(entry.Tool, properties, field, result[field]); err != nil {
+			if err := terminalResultFits(entry.Tool, properties, defs, field, result[field]); err != nil {
 				return nil, err
 			}
 		}
-		out = append(out, TerminalTool{Tool: entry.Tool, Success: success})
+		out = append(out, TerminalTool{Tool: entry.Tool, Success: success, Confirm: entry.Confirm, Say: entry.Say})
 	}
 	return out, nil
 }
 
 // declaredEnum is the success grammar: a success value has to be one the tool
 // declares, because a compiler that cannot read the set cannot tell a typo from
-// a value, and a typo means a step that never ends by itself.
+// a value, and a typo means a step that never ends by itself. A boolean field
+// declares true and false, as unmute-core reads a `found: [true]` rule.
 func declaredEnum(tool string, properties map[string]any, field string) ([]string, error) {
 	property, ok := properties[field].(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("%s declares no %s in its output:; a success field has to be one the tool returns", tool, field)
+	}
+	if property["type"] == "boolean" {
+		return []string{"true", "false"}, nil
+	}
+	// Pydantic writes a one-value Literal as const, not as an enum of one.
+	if only, ok := property["const"].(string); ok {
+		return []string{only}, nil
 	}
 	values, err := stringSlice(property["enum"])
 	if err != nil || len(values) == 0 {
@@ -130,7 +143,7 @@ func declaredEnum(tool string, properties map[string]any, field string) ([]strin
 // the tool declares fits inside a larger one the variable allows: a tool that
 // only ever returns `create` fits a variable allowing create, modify or
 // cancel.
-func terminalResultFits(tool string, properties map[string]any, field string, want ResultField) error {
+func terminalResultFits(tool string, properties, defs map[string]any, field string, want ResultField) error {
 	// The reserved escape is the model's own, never a tool's.
 	if field == UnservedResultField {
 		return nil
@@ -139,7 +152,7 @@ func terminalResultFits(tool string, properties map[string]any, field string, wa
 	if !ok {
 		return fmt.Errorf("%s returns no %s; every tool under finish: has to return what assign: saves", tool, field)
 	}
-	returned, err := stateschema.ParseProperty(property)
+	returned, err := stateschema.ParseProperty(property, defs)
 	if err == nil {
 		err = stateschema.Fits(returned, want.Type)
 	}

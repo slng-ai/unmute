@@ -1,0 +1,12 @@
+{
+  "name": "Priya tells it in one breath, picks a car, then corrects it",
+  "turns": [
+    {"caller": "KP731508, and I was born on the 23rd of January 1992.", "expect": ["Is your policy number"], "max_requests": 2},
+    {"caller": "Yes.", "expect": ["Thank you, Priya"], "max_requests": 1},
+    {"caller": "Yesterday afternoon in the Tesco car park in Leeds, someone scraped my door. Nobody was hurt, no police, the other driver left a note, and it still drives.", "expect": ["Which car was it: the white Kia Niro or the black Ford Fiesta?"], "max_requests": 1},
+    {"caller": "The Kia.", "expect": ["Shall I file your claim for the white Kia Niro"], "max_requests": 2},
+    {"caller": "Actually, sorry, it was the Fiesta.", "expect": ["Shall I file your claim for the black Ford Fiesta"], "max_requests": 3},
+    {"caller": "Yes.", "expect": ["Your claim is filed"], "max_requests": 1}
+  ],
+  "state": {"report.vehicle": "GH19RST", "report.injuries": false}
+}

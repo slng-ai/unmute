@@ -677,3 +677,17 @@ func skipPackage(t *testing.T, skip, on string) *packagespec.Package {
 	withState(reloaded, state...)
 	return reloaded
 }
+
+func TestABooleanSuccessFieldDeclaresTrueAndFalse(t *testing.T) {
+	got, err := declaredEnum("lookup_policy", map[string]any{"found": map[string]any{"type": "boolean"}}, "found")
+	if err != nil || !slices.Equal(got, []string{"true", "false"}) {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}
+
+func TestAOneValueLiteralDeclaresItsValue(t *testing.T) {
+	got, err := declaredEnum("reschedule", map[string]any{"status": map[string]any{"const": "rescheduled", "type": "string"}}, "status")
+	if err != nil || !slices.Equal(got, []string{"rescheduled"}) {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}

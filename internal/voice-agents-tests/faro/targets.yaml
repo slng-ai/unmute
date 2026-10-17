@@ -1,0 +1,17 @@
+# The same package compiles to both code targets. The e2e suite runs its
+# scenarios on each one.
+targets:
+  livekit:
+    provider: livekit
+    version: "1.8.1"
+    sdk_language: python
+    models:
+      # LiveKit runs its own turn model rather than Silero.
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+        pace: patient
+
+  pipecat:
+    provider: pipecat
+    version: "1.10.0"

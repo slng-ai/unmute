@@ -1,0 +1,522 @@
+{
+  "digest": "819c141008ee2e09231c7a859c7c10e7705b43450a4550a4213fb1fda73a6127",
+  "report": {
+    "tools": {
+      "end_call": {
+        "description": "End the call once it is over. Say your goodbye in the same reply.",
+        "input": {
+          "properties": {},
+          "title": "end_call_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``end_call`` returns.",
+          "properties": {
+            "ended": {
+              "title": "Ended",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ended"
+          ],
+          "title": "Ended",
+          "type": "object"
+        }
+      },
+      "good_time": {
+        "description": "Note whether now is a good time to talk about the account. Code says what follows.",
+        "input": {
+          "properties": {
+            "good_time": {
+              "description": "Whether now is a good time for them to talk.",
+              "title": "Good Time",
+              "type": "boolean"
+            },
+            "amount_words": {
+              "title": "Amount Words",
+              "type": "string"
+            },
+            "merchant": {
+              "title": "Merchant",
+              "type": "string"
+            }
+          },
+          "required": [
+            "good_time",
+            "amount_words",
+            "merchant"
+          ],
+          "title": "good_time_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``good_time`` returns: whether to go on, and what code says next.",
+          "properties": {
+            "good_time": {
+              "title": "Good Time",
+              "type": "boolean"
+            },
+            "said": {
+              "title": "Said",
+              "type": "string"
+            }
+          },
+          "required": [
+            "good_time",
+            "said"
+          ],
+          "title": "GoodTime",
+          "type": "object"
+        }
+      },
+      "mark_wrong_number": {
+        "description": "Take this number off the list, so it is not called again. Call it after their yes.",
+        "input": {
+          "properties": {
+            "account_id": {
+              "title": "Account Id",
+              "type": "string"
+            },
+            "call": {
+              "title": "Call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "account_id",
+            "call"
+          ],
+          "title": "mark_wrong_number_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What every write returns: the outcome code, its reference, and the words for it.\n\n``past_day`` and ``after_deadline`` are the outcomes of ``outside_window``: nothing is\nwritten.",
+          "properties": {
+            "status": {
+              "enum": [
+                "PTP",
+                "CB",
+                "WN",
+                "HARDSHIP",
+                "LEGAL",
+                "DISPUTE",
+                "RTP",
+                "past_day",
+                "after_deadline"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "reference": {
+              "default": "",
+              "title": "Reference",
+              "type": "string"
+            },
+            "when": {
+              "default": "",
+              "title": "When",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "Recorded",
+          "type": "object"
+        }
+      },
+      "note_concern": {
+        "description": "Note what stops the holder from promising a payment, for the right team.\n\nIt first reads the note back, so never read it back yourself. Call it again with the\nsame values after their yes.",
+        "input": {
+          "properties": {
+            "kind": {
+              "description": "hardship: illness, disability, losing a job, money trouble. legal-matter: police, a lawyer, a regulator, a threat. purchase-dispute: they never made or got the purchase, or suspect fraud. refusal-to-pay: they will not pay in this period.",
+              "enum": [
+                "hardship",
+                "legal-matter",
+                "purchase-dispute",
+                "refusal-to-pay"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "note": {
+              "description": "What they said about it, in their own words.",
+              "minLength": 1,
+              "title": "Note",
+              "type": "string"
+            },
+            "account_id": {
+              "title": "Account Id",
+              "type": "string"
+            },
+            "call": {
+              "title": "Call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "note",
+            "account_id",
+            "call"
+          ],
+          "title": "note_concern_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``note_concern`` returns: the receipt of one kind of concern.",
+          "properties": {
+            "status": {
+              "enum": [
+                "HARDSHIP",
+                "LEGAL",
+                "DISPUTE",
+                "RTP"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "reference": {
+              "title": "Reference",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "hardship",
+                "legal-matter",
+                "purchase-dispute",
+                "refusal-to-pay"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "said": {
+              "title": "Said",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "reference",
+            "kind",
+            "said"
+          ],
+          "title": "Noted",
+          "type": "object"
+        }
+      },
+      "open_account": {
+        "description": "Read whose account a call is about, before the greeting. Nothing else of it.",
+        "input": {
+          "properties": {
+            "account_id": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "account_id"
+          ],
+          "title": "open_account_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``open_account`` returns: who the call is for, and the last day it may name.",
+          "properties": {
+            "first_name": {
+              "title": "First Name",
+              "type": "string"
+            },
+            "last_name": {
+              "title": "Last Name",
+              "type": "string"
+            },
+            "deadline": {
+              "format": "date",
+              "title": "Deadline",
+              "type": "string"
+            },
+            "deadline_spoken": {
+              "title": "Deadline Spoken",
+              "type": "string"
+            }
+          },
+          "required": [
+            "first_name",
+            "last_name",
+            "deadline",
+            "deadline_spoken"
+          ],
+          "title": "Opened",
+          "type": "object"
+        }
+      },
+      "payment_policy": {
+        "description": "Read the payment policy: how to pay, plans, a new due date, hardship, support.\n\nCall it only when the holder asks about one of these, and answer from it.",
+        "input": {
+          "properties": {},
+          "title": "payment_policy_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``payment_policy`` returns.",
+          "properties": {
+            "policy": {
+              "title": "Policy",
+              "type": "string"
+            }
+          },
+          "required": [
+            "policy"
+          ],
+          "title": "Guide",
+          "type": "object"
+        }
+      },
+      "record_promise": {
+        "description": "Record the holder's promise to pay the full amount on a day.\n\nIt first reads the promise back, so never read it back yourself. Call it again with\nthe same day after their yes.",
+        "input": {
+          "properties": {
+            "day": {
+              "description": "The day, as YYYY-MM-DD, from today up to the deadline.",
+              "format": "date",
+              "title": "Day",
+              "type": "string"
+            },
+            "account_id": {
+              "title": "Account Id",
+              "type": "string"
+            },
+            "call": {
+              "title": "Call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "day",
+            "account_id",
+            "call"
+          ],
+          "title": "record_promise_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What every write returns: the outcome code, its reference, and the words for it.\n\n``past_day`` and ``after_deadline`` are the outcomes of ``outside_window``: nothing is\nwritten.",
+          "properties": {
+            "status": {
+              "enum": [
+                "PTP",
+                "CB",
+                "WN",
+                "HARDSHIP",
+                "LEGAL",
+                "DISPUTE",
+                "RTP",
+                "past_day",
+                "after_deadline"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "reference": {
+              "default": "",
+              "title": "Reference",
+              "type": "string"
+            },
+            "when": {
+              "default": "",
+              "title": "When",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "Recorded",
+          "type": "object"
+        }
+      },
+      "schedule_callback": {
+        "description": "Note a day and time to call back. Call it once you have both.\n\nIt first reads them back, so never read them back yourself. Call it again with the\nsame values after their yes.",
+        "input": {
+          "properties": {
+            "day": {
+              "description": "The day, as YYYY-MM-DD, from today up to the deadline.",
+              "format": "date",
+              "title": "Day",
+              "type": "string"
+            },
+            "at": {
+              "description": "The time, HH:MM on a 24-hour clock.",
+              "format": "time",
+              "title": "At",
+              "type": "string"
+            },
+            "account_id": {
+              "title": "Account Id",
+              "type": "string"
+            },
+            "call": {
+              "title": "Call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "day",
+            "at",
+            "account_id",
+            "call"
+          ],
+          "title": "schedule_callback_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What every write returns: the outcome code, its reference, and the words for it.\n\n``past_day`` and ``after_deadline`` are the outcomes of ``outside_window``: nothing is\nwritten.",
+          "properties": {
+            "status": {
+              "enum": [
+                "PTP",
+                "CB",
+                "WN",
+                "HARDSHIP",
+                "LEGAL",
+                "DISPUTE",
+                "RTP",
+                "past_day",
+                "after_deadline"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "reference": {
+              "default": "",
+              "title": "Reference",
+              "type": "string"
+            },
+            "when": {
+              "default": "",
+              "title": "When",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "Recorded",
+          "type": "object"
+        }
+      },
+      "verify_holder": {
+        "description": "Check the holder's date of birth. Call it as soon as they say it.\n\nIt first reads the date back, so never read it back yourself. Call it again with the\nsame date after their yes.",
+        "input": {
+          "properties": {
+            "account_id": {
+              "title": "Account Id",
+              "type": "string"
+            },
+            "birth_date": {
+              "description": "Their date of birth as YYYY-MM-DD. Never guess a part.",
+              "format": "birth-date",
+              "title": "Birth Date",
+              "type": "string"
+            }
+          },
+          "required": [
+            "account_id",
+            "birth_date"
+          ],
+          "title": "verify_holder_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``verify_holder`` returns: the account's details only when the date matched.",
+          "properties": {
+            "status": {
+              "enum": [
+                "verified",
+                "mismatch",
+                "locked"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "birth_date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Birth Date"
+            },
+            "tries_left": {
+              "default": 0,
+              "title": "Tries Left",
+              "type": "integer"
+            },
+            "amount_words": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Amount Words"
+            },
+            "merchant": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Merchant"
+            },
+            "purchase_spoken": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Purchase Spoken"
+            },
+            "due_spoken": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Due Spoken"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "Verified",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "internal/voice-agents-tests/wasla"
+}

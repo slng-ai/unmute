@@ -331,12 +331,23 @@ func Parse(schema []byte) (*Model, error) {
 
 // ParseProperty reads one property of a tool's output: schema, as the author
 // wrote it in YAML. An untyped property is read as text, as it always was.
-func ParseProperty(property map[string]any) (*Type, error) {
+// defs is the output's own $defs, which a property read from a handler's
+// Pydantic model refers into; nil for a schema written in YAML.
+func ParseProperty(property, defs map[string]any) (*Type, error) {
 	data, err := json.Marshal(property)
 	if err != nil {
 		return nil, err
 	}
 	r := &resolver{lenient: true}
+	if len(defs) > 0 {
+		encoded, err := json.Marshal(defs)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(encoded, &r.defs); err != nil {
+			return nil, err
+		}
+	}
 	return r.node(data, "")
 }
 
@@ -446,7 +457,9 @@ func (r *resolver) kind(node raw, where string) (Kind, bool, error) {
 	return "", false, fmt.Errorf("%s is Any; give it a type", orField(where))
 }
 
-// union reads anyOf. The only union a state value may be is one type or None.
+// union reads anyOf. A state value is one type or None, or a union of scalars
+// that all read as one kind, like `time | Literal["morning", "night"]`: both
+// are text, so the value reads as text with no format or closed set.
 func (r *resolver) union(branches []json.RawMessage, where string) (*Type, error) {
 	var kept []json.RawMessage
 	nullable := false
@@ -458,12 +471,17 @@ func (r *resolver) union(branches []json.RawMessage, where string) (*Type, error
 		}
 		kept = append(kept, branch)
 	}
-	if len(kept) != 1 {
-		return nil, fmt.Errorf("%s is a union of %d types; a state value is one type, or one type | None", orField(where), len(kept))
+	if len(kept) == 0 {
+		return nil, fmt.Errorf("%s is a union of 0 types; a state value is one type, or one type | None", orField(where))
 	}
 	typ, err := r.node(kept[0], where)
 	if err != nil {
 		return nil, err
+	}
+	if len(kept) > 1 {
+		if typ, err = r.sameKind(typ, kept[1:], where); err != nil {
+			return nil, err
+		}
 	}
 	if nullable && !typ.Nullable {
 		copied := *typ
@@ -471,6 +489,27 @@ func (r *resolver) union(branches []json.RawMessage, where string) (*Type, error
 		typ = &copied
 	}
 	return typ, nil
+}
+
+// sameKind reads the other branches of a union, and returns the one scalar kind
+// every branch has. Branches of different kinds, or of an object or a list, are
+// refused.
+func (r *resolver) sameKind(first *Type, rest []json.RawMessage, where string) (*Type, error) {
+	refuse := fmt.Errorf("%s is a union of %d types; a state value is one type, or one type | None",
+		orField(where), len(rest)+1)
+	if first.Kind == KindObject || first.Kind == KindArray {
+		return nil, refuse
+	}
+	for _, branch := range rest {
+		other, err := r.node(branch, where)
+		if err != nil {
+			return nil, err
+		}
+		if other.Kind != first.Kind {
+			return nil, refuse
+		}
+	}
+	return &Type{Kind: first.Kind}, nil
 }
 
 func (r *resolver) ref(ref, where string) (*Type, error) {
