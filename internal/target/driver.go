@@ -60,14 +60,15 @@ type SupportWindow struct {
 // Each runtime intentionally supports one tested SDK version rather than
 // claiming a compatibility range the release matrix does not exercise.
 var supportWindows = map[Provider]SupportWindow{
-	// 1.8.7 is the line unmute-core needs: it brings OpenTelemetry 1.45 and
-	// openai 3, which the library builds on. GPT-Live (architecture: live)
-	// first shipped in 1.8.1, so no live package loses anything here.
+	// 1.8.8 is the newest release, and the line unmute-core is on: it brings
+	// OpenTelemetry 1.45 and openai 3, which the library builds on. GPT-Live
+	// (architecture: live) first shipped in 1.8.1, so no live package loses
+	// anything here.
 	//
 	// Verified on 2026-10-17 by the offline suite and the opt-in smoke suite
-	// running every emitted LiveKit module against the real 1.8.7 wheels, with
+	// running every emitted LiveKit module against the real 1.8.8 wheels, with
 	// the same smoke tests run on main at 1.8.1 first so a failure could be
-	// attributed. What 1.8.7 changed in the emitted code, and why:
+	// attributed. What 1.8.2 to 1.8.8 changed in the emitted code, and why:
 	//
 	//  - livekit-agents and livekit-plugins-openai moved to openai 3, which is
 	//    built on httpx2 and no longer pulls httpx. The SLNG router client is an
@@ -78,6 +79,13 @@ var supportWindows = map[Provider]SupportWindow{
 	//  - livekit-plugins-speechmatics 1.8.2 moved to Agent STT and drops ten
 	//    settings with only a log warning. retired_params.go refuses them, and
 	//    the catalogue row takes model: in place of operating_point.
+	//  - 1.8.8 moved GPT-Live into livekit-agents (llm/_realtime/gpt_live.py).
+	//    livekit.plugins.openai.realtime.GPTLiveModel is a thin subclass now,
+	//    so the emitted import is unchanged. Its voice `aster` became `cedar`,
+	//    because OpenAI does not support `aster` (1.8.8 release notes). Neither
+	//    the compiler nor the plugin checks a voice name; it goes to OpenAI as
+	//    written. inference.RealtimeModel no longer
+	//    subclasses the plugin's RealtimeModel; nothing emitted checks that.
 	//
 	// Checks OWED rather than made:
 	//
@@ -102,7 +110,7 @@ var supportWindows = map[Provider]SupportWindow{
 	// every traced span carries, so it is its own change. The eleven
 	// AgentSession keywords marked for removal in v2.0.0 are not owed either:
 	// the emitted module passes TurnHandlingOptions and none of the old ones.
-	LiveKit: {Floor: "1.8.7", Ceiling: "1.8.7", Verified: "2026-10-17"},
+	LiveKit: {Floor: "1.8.8", Ceiling: "1.8.8", Verified: "2026-10-17"},
 	// 1.12.0 is the line unmute-core needs. Verified on 2026-10-17 by the
 	// offline suite and the opt-in smoke suite running every emitted Pipecat
 	// module against the real 1.12.0 wheel, pipecat-slng 0.7.0 beside it, with
@@ -213,11 +221,11 @@ func ParseVersion(v string) ([3]int, bool) {
 // floor the driver emits cannot drift apart (FR-003).
 //
 // It tracks the support window because livekit's plugins version in lockstep
-// with the framework and declare it: livekit-plugins-silero 1.8.7 requires
-// livekit-agents>=1.8.7. A floor left at an older release still resolved, since
+// with the framework and declare it: livekit-plugins-silero 1.8.8 requires
+// livekit-agents>=1.8.8. A floor left at an older release still resolved, since
 // the newest plugin wins and an old one cannot pair with new agents anyway, but
 // it stated a requirement that was no longer true.
-const SileroFloor = ">=1.8.7"
+const SileroFloor = ">=1.8.8"
 
 // PinFloors is the pinnable package set for a driver, with each one's catalogue
 // floor. Empty for a driver that pins nothing.

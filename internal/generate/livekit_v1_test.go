@@ -2541,12 +2541,12 @@ func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
 		t.Fatal(err)
 	}
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
-	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.8.8"}
+	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.8.9"}
 	artifact, err := Generate(agent, tgt, target.Default())
 	if err != nil {
 		t.Fatalf("generate with pin: %v", err)
 	}
-	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, `"livekit-plugins-slng>=1.8.8"`) {
+	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, `"livekit-plugins-slng>=1.8.9"`) {
 		t.Errorf("pin did not raise the plugin floor:\n%s", pyproject)
 	}
 	// No deployment config file is emitted: the platform assigns both of its
@@ -2935,7 +2935,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	tgt.Connection = "twilio_sip"
 	tgt.Models.Reason["backup"] = ir.Binding{Model: "openai/gpt-4o"}
 	tgt.Destinations = map[string]string{"line": "+14155550123"}
-	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.8.8"}
+	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.8.9"}
 
 	artifact, err := Generate(agent, tgt, target.Default())
 	if err != nil {
@@ -2954,8 +2954,9 @@ func TestCheckLiveKitVersion(t *testing.T) {
 		version string
 		ok      bool
 	}{
-		{"1.8.7", true},
-		{"1.8.1", false}, // the previous pin
+		{"1.8.8", true},
+		{"1.8.7", false}, // the previous pin
+		{"1.8.1", false},
 		// A declared version is an exact install pin, so half a version is no
 		// longer accepted and resolved on the author's behalf.
 		{"1.5", false},

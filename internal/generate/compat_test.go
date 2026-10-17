@@ -226,7 +226,7 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // `unmute dev`.
 //
 // And on 2026-10-17, for every package: the framework pins moved to
-// livekit-agents 1.8.7 and pipecat-ai 1.12.0, with Python 3.12, OpenTelemetry
+// livekit-agents 1.8.8 and pipecat-ai 1.12.0, with Python 3.12, OpenTelemetry
 // 1.40 and pipecat-slng 0.7.0 floors, so every pyproject.toml and compile
 // report moved. The fixes the new versions needed moved code too: LiveKit's
 // SLNG router client is httpx2, Pipecat leaves its new empty-turn reply off

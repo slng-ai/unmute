@@ -51,7 +51,7 @@ binding:  provider=slng model=slng/deepgram/nova:3
 class:    slng.STT
 args:     api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import slng
-install:  livekit-plugins-slng>=1.8.7
+install:  livekit-plugins-slng>=1.8.8
 env:      SLNG_API_KEY
 
 === livekit listen soniox ===
@@ -242,7 +242,7 @@ binding:  provider=slng model=slng/deepgram/aura:2-en voice=voice-1
 class:    slng.TTS
 args:     api_key=os.environ["SLNG_API_KEY"], voice="voice-1", model="slng/deepgram/aura:2-en", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import slng
-install:  livekit-plugins-slng>=1.8.7
+install:  livekit-plugins-slng>=1.8.8
 env:      SLNG_API_KEY
 
 === livekit speak soniox ===

@@ -2019,7 +2019,7 @@ from settings import LOCAL_INIT_TIMEOUT_SECS
 
 load_dotenv()
 
-# livekit-agents 1.8.7 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
+# livekit-agents 1.8.8 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
 # connection to LIVEKIT_URL and ignores NO_PROXY (worker.py:363). A proxy that
 # only tunnels HTTPS answers that request with 405, and the worker never
 # registers. So a LiveKit host listed in NO_PROXY is reached directly. Anything

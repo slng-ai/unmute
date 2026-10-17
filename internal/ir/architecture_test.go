@@ -243,7 +243,7 @@ func TestRealtimeIsRefusedOnSlngAlone(t *testing.T) {
 		tgt.Provider, tgt.Name = provider, string(provider)
 		switch provider {
 		case ProviderLiveKit:
-			tgt.Version = "1.8.7"
+			tgt.Version = "1.8.8"
 		case ProviderSlng:
 			tgt.Version = ""
 		}

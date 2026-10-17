@@ -21,7 +21,7 @@ var livekitCatalog = []Entry{
 		Framework: LiveKit, Role: Listen, Vendor: "slng",
 		Distributes: []string{"deepgram"},
 		Verified:    "2026-07-15", Docs: "https://docs.livekit.io/agents/models/stt/slng/",
-		Install: InstallSpec{Package: "livekit-plugins-slng", Constraint: ">=1.8.7"},
+		Install: InstallSpec{Package: "livekit-plugins-slng", Constraint: ">=1.8.8"},
 		Import:  "from livekit.plugins import slng",
 		Call: &CallSpec{
 			Class: "slng.STT", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
@@ -138,7 +138,7 @@ var livekitCatalog = []Entry{
 		Framework: LiveKit, Role: Speak, Vendor: "slng",
 		Distributes: []string{"cartesia", "deepgram"},
 		Verified:    "2026-07-15", Docs: "https://docs.livekit.io/agents/models/tts/slng/",
-		Install: InstallSpec{Package: "livekit-plugins-slng", Constraint: ">=1.8.7"},
+		Install: InstallSpec{Package: "livekit-plugins-slng", Constraint: ">=1.8.8"},
 		Import:  "from livekit.plugins import slng",
 		Call: &CallSpec{
 			Class: "slng.TTS", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",

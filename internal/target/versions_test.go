@@ -58,12 +58,12 @@ func TestCheckVersionAgainstWindow(t *testing.T) {
 		version  string
 		wantErr  string // "" means accepted
 	}{
-		{name: "livekit exact", provider: LiveKit, version: "1.8.7"},
+		{name: "livekit exact", provider: LiveKit, version: "1.8.8"},
 		{name: "pipecat exact", provider: Pipecat, version: "1.12.0"},
 
 		// A string compare gets these wrong: "1.6.10" sorts below "1.6.4"
 		// lexically, and "1.9.0" sorts above "1.12.0" the same way.
-		{name: "patch above ceiling", provider: LiveKit, version: "1.8.8", wantErr: "newer than this unmute supports"},
+		{name: "patch above ceiling", provider: LiveKit, version: "1.8.9", wantErr: "newer than this unmute supports"},
 		{name: "minor above ceiling", provider: LiveKit, version: "1.9.0", wantErr: "newer than this unmute supports"},
 		{name: "major above ceiling", provider: Pipecat, version: "2.0.0", wantErr: "newer than this unmute supports"},
 		{name: "above ceiling names the fix", provider: Pipecat, version: "1.13.0", wantErr: "a newer unmute may support it"},
@@ -74,8 +74,8 @@ func TestCheckVersionAgainstWindow(t *testing.T) {
 		// call the old version newer than the one we support and tell the author
 		// to upgrade unmute. It is older, and the message has to say so.
 		{name: "older pipecat pin reads as older", provider: Pipecat, version: "1.9.0", wantErr: "outside the supported range (exactly 1.12.0)"},
-		{name: "previous livekit pin", provider: LiveKit, version: "1.8.1", wantErr: "outside the supported range (exactly 1.8.7)"},
-		{name: "older livekit pin reads as older", provider: LiveKit, version: "1.6.10", wantErr: "outside the supported range (exactly 1.8.7)"},
+		{name: "previous livekit pin", provider: LiveKit, version: "1.8.7", wantErr: "outside the supported range (exactly 1.8.8)"},
+		{name: "older livekit pin reads as older", provider: LiveKit, version: "1.6.10", wantErr: "outside the supported range (exactly 1.8.8)"},
 		{name: "far below floor", provider: LiveKit, version: "0.0.108", wantErr: "outside the supported range"},
 
 		{name: "partial version", provider: LiveKit, version: "1.6", wantErr: "must be three numbers"},

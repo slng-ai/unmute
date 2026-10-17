@@ -27,7 +27,7 @@ func TestRealtimeOverrideKeepsTheTurnDecision(t *testing.T) {
 	targets := `targets:
   livekit:
     provider: livekit
-    version: "1.8.7"
+    version: "1.8.8"
     models:
       voice:
         provider: openai

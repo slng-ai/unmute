@@ -1035,7 +1035,7 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 					t.Pins = map[string]string{"livekit-plugins-silero": "0.0.1"}
 				})
 			},
-			want: `livekit pin livekit-plugins-silero "0.0.1" is below the catalogue floor >=1.8.7`,
+			want: `livekit pin livekit-plugins-silero "0.0.1" is below the catalogue floor >=1.8.8`,
 		},
 		{
 			name:     "version is not a version, livekit",
@@ -1067,7 +1067,7 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 			mutate: func(pkg *packagespec.Package) {
 				setTargetField(pkg, "livekit", func(t *packagespec.Target) { t.Version = "1.6" })
 			},
-			want: `livekit version "1.6" must be three numbers, for example "1.8.7"`,
+			want: `livekit version "1.6" must be three numbers, for example "1.8.8"`,
 		},
 		{
 			// The sharpest of the eight: `voice` is required on every speak entry,

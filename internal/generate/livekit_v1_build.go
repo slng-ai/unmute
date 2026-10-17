@@ -1938,7 +1938,7 @@ func livekitDeps(data livekitData) []string {
 	}
 	deps = append(deps, []string{
 		"python-dotenv",
-		// httpx is for our own webhook and prefetch calls. livekit-agents 1.8.7
+		// httpx is for our own webhook and prefetch calls. livekit-agents 1.8.8
 		// no longer needs it: the framework and its openai plugin import
 		// httpx2, and declare it. ponytail: unconditional, gate it on
 		// NeedsHTTPX if a package without webhooks ever needs a smaller image.

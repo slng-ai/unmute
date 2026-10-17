@@ -56,7 +56,7 @@ Read the `models:` block you actually have before you write the override.
 targets:
   livekit:
     provider: livekit
-    version: "1.8.7"
+    version: "1.8.8"
     sdk_language: python
     models:
       detector:
@@ -336,7 +336,7 @@ instead of being dropped. The LiveKit Responses mode below is the narrow
 compiler-owned exception.
 
 On LiveKit there is a second reason to be explicit. `livekit-plugins-openai`
-1.8.7 injects `reasoning_effort="minimal"` by itself for several older ids in
+1.8.8 injects `reasoning_effort="minimal"` by itself for several older ids in
 the same GPT-5 family, and that is the same 400 once the agent has tools.
 
 ## The SLNG Context Router as the think provider

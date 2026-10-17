@@ -1141,7 +1141,7 @@ def _slng_router_client() -> AsyncOpenAI:
 
     Every value restates the plugin's own default at the pinned version
     (llm.py:185-199): retries off, and that exact httpx2 timeout and limit set.
-    livekit-plugins-openai 1.8.7 builds on openai 3, which takes an httpx2
+    livekit-plugins-openai 1.8.8 builds on openai 3, which takes an httpx2
     client, so this one is httpx2 too.
     Restating them is the point. Anything different here would be a change to
     retry or connection behaviour that nobody asked for and nothing would report.
@@ -2104,7 +2104,7 @@ from settings import LOCAL_INIT_TIMEOUT_SECS
 
 load_dotenv()
 
-# livekit-agents 1.8.7 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
+# livekit-agents 1.8.8 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
 # connection to LIVEKIT_URL and ignores NO_PROXY (worker.py:363). A proxy that
 # only tunnels HTTPS answers that request with 405, and the worker never
 # registers. So a LiveKit host listed in NO_PROXY is reached directly. Anything

@@ -72,7 +72,7 @@ var retiredParams = []RetiredParam{
 
 	// livekit-plugins-speechmatics 1.8.2 moved onto Agent STT too. It still
 	// accepts these keys, then drops them with a log warning (_DROPPED_ARGS in
-	// stt.py, the same through 1.8.7), so a package keeps compiling and quietly
+	// stt.py, the same through 1.8.8), so a package keeps compiling and quietly
 	// loses its turn and speaker settings. They are refused as removed, because
 	// in effect they are. Diffed against the 1.8.1 constructor.
 	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "max_delay", Since: "1.8.2"},

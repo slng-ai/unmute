@@ -96,8 +96,8 @@ func TestSlngRefusesProjectOnlySettings(t *testing.T) {
 		mutate  func(*Target)
 		wantOne string
 	}{
-		{"version", func(target *Target) { target.Version = "1.8.7" }, "does not take version"},
-		{"pins", func(target *Target) { target.Pins = map[string]string{"livekit-agents": "1.8.7"} }, "does not take pins"},
+		{"version", func(target *Target) { target.Version = "1.8.8" }, "does not take version"},
+		{"pins", func(target *Target) { target.Pins = map[string]string{"livekit-agents": "1.8.8"} }, "does not take pins"},
 		{"sdk_language", func(target *Target) { target.SDKLanguage = "python" }, "does not take sdk_language"},
 		{"connection", func(target *Target) { target.Connection = "primary_phone" }, "does not take connection"},
 	} {
@@ -270,7 +270,7 @@ func TestCodeTargetsKeepAuthoredToolBodies(t *testing.T) {
 		agent.Agents["support"] = entry
 
 		resolved := targetFor(agent, ProviderSlng)
-		resolved.Provider, resolved.Name, resolved.Version = provider, string(provider), "1.8.7"
+		resolved.Provider, resolved.Name, resolved.Version = provider, string(provider), "1.8.8"
 		if provider == ProviderPipecat {
 			resolved.Version = "1.12.0"
 		}
@@ -453,7 +453,7 @@ func TestVaultTokenInPromptTextIsRefusedOnEveryTarget(t *testing.T) {
 	agent = slngAgent(t)
 	agent.Conversation.Greeting.Text = greeting
 	target := targetFor(agent, ProviderSlng)
-	target.Provider, target.Name, target.Version = ProviderLiveKit, "livekit", "1.8.7"
+	target.Provider, target.Name, target.Version = ProviderLiveKit, "livekit", "1.8.8"
 	report, err := Validate(agent, []Target{target}, targetcap.Default())
 	if err == nil {
 		t.Fatal("a Vault token passed on livekit, which cannot resolve one")

@@ -470,7 +470,7 @@ from settings import LOCAL_INIT_TIMEOUT_SECS
 
 load_dotenv()
 
-# livekit-agents 1.8.7 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
+# livekit-agents 1.8.8 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
 # connection to LIVEKIT_URL and ignores NO_PROXY (worker.py:363). A proxy that
 # only tunnels HTTPS answers that request with 405, and the worker never
 # registers. So a LiveKit host listed in NO_PROXY is reached directly. Anything
@@ -2330,10 +2330,10 @@ STEP_RESULTS = {step: StepResult.for_step(step) for step in CallState.RESULTS}
 {
   "target": "livekit",
   "provider": "livekit",
-  "version": "1.8.7",
+  "version": "1.8.8",
   "supported": {
-    "floor": "1.8.7",
-    "ceiling": "1.8.7",
+    "floor": "1.8.8",
+    "ceiling": "1.8.8",
     "verified": "2026-10-17"
   },
   "entry_agent": "Greeter",
@@ -2489,9 +2489,9 @@ STEP_RESULTS = {step: StepResult.for_step(step) for step in CallState.RESULTS}
     }
   ],
   "notes": [
-    "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.8.7, verified 2026-07-15)",
+    "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.8.8, verified 2026-07-15)",
     "reason: openai via openai.LLM (livekit-agents[openai], verified 2026-07-18)",
-    "speak: slng via slng.TTS (livekit-plugins-slng\u003e=1.8.7, verified 2026-07-15)",
+    "speak: slng via slng.TTS (livekit-plugins-slng\u003e=1.8.8, verified 2026-07-15)",
     "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory",
     "turn pace balanced (silence 0.3s from the pace, closes at 1.6s)"
   ]
@@ -2680,9 +2680,9 @@ description = "Generated LiveKit Agents project (unmute livekit driver)"
 requires-python = ">=3.12"
 dependencies = [
     "httpx",
-    "livekit-agents[openai]==1.8.7",
-    "livekit-plugins-silero>=1.8.7",
-    "livekit-plugins-slng>=1.8.7",
+    "livekit-agents[openai]==1.8.8",
+    "livekit-plugins-silero>=1.8.8",
+    "livekit-plugins-slng>=1.8.8",
     "opentelemetry-exporter-otlp-proto-http>=1.40,<2",
     "opentelemetry-sdk>=1.40,<2",
     "python-dotenv",
