@@ -35,6 +35,7 @@ type navigation struct {
 type group struct {
 	Name  string            `json:"group"`
 	Root  string            `json:"root"`
+	Icon  string            `json:"icon"`
 	Pages []json.RawMessage `json:"pages"`
 }
 
@@ -94,6 +95,11 @@ func TestNavigationMatchesPages(t *testing.T) {
 
 func collectPages(t *testing.T, current group, listed map[string]int) {
 	t.Helper()
+	// Section names carry no icon: the sidebar reads as text, and only the
+	// two tabs have one (maintainer decision, 2026-10-17).
+	if current.Icon != "" {
+		t.Errorf("group %q has icon %q; groups carry no icon", current.Name, current.Icon)
+	}
 	if current.Root != "" {
 		listed[current.Root]++
 	}
