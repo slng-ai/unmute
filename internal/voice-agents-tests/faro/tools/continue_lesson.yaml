@@ -1,0 +1,12 @@
+local:
+  handler: tools/lessons.py:continue_lesson
+inject:
+  - learner_id: "{{state.learner_id}}"
+  - explanation: "{{state.explanation}}"
+assign:
+  - waiting: result.waiting
+  - helped: result.helped
+  - said: result.said
+replies:
+  - say:
+      - "{{state.said}}"

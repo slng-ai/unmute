@@ -109,11 +109,19 @@ func terminalTools(taskName string, raw packagespec.Task, agent *Agent, result m
 
 // declaredEnum is the success grammar: a success value has to be one the tool
 // declares, because a compiler that cannot read the set cannot tell a typo from
-// a value, and a typo means a step that never ends by itself.
+// a value, and a typo means a step that never ends by itself. A boolean field
+// declares true and false, as unmute-core reads a `found: [true]` rule.
 func declaredEnum(tool string, properties map[string]any, field string) ([]string, error) {
 	property, ok := properties[field].(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("%s declares no %s in its output:; a success field has to be one the tool returns", tool, field)
+	}
+	if property["type"] == "boolean" {
+		return []string{"true", "false"}, nil
+	}
+	// Pydantic writes a one-value Literal as const, not as an enum of one.
+	if only, ok := property["const"].(string); ok {
+		return []string{only}, nil
 	}
 	values, err := stringSlice(property["enum"])
 	if err != nil || len(values) == 0 {

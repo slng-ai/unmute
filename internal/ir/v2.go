@@ -121,6 +121,11 @@ func buildV2(pkg *packagespec.Package, out *Agent) error {
 		group.Arguments, group.NonBlocking = raw.Arguments, raw.NonBlocking
 		out.TaskGroups[name] = group
 	}
+	for _, name := range sortedKeys(pkg.Agent.Handoffs) {
+		if err := buildV2Handoff(pkg, out, name); err != nil {
+			return fmt.Errorf("%s: handoff %q: %w", pkg.Location("agent.yaml", name), name, err)
+		}
+	}
 	if inactivity := pkg.Agent.Conversation; inactivity != nil && inactivity.Inactivity != nil {
 		for _, line := range []struct{ key, text string }{
 			{"nudge_text", inactivity.Inactivity.NudgeText}, {"end_text", inactivity.Inactivity.EndText},
@@ -228,7 +233,7 @@ func buildV2Task(pkg *packagespec.Package, out *Agent, name string) error {
 	if err != nil {
 		return err
 	}
-	opens, err := buildOpensWith(pkg, out, raw)
+	opens, err := buildOpensWith(pkg, out, raw.OpensWith, raw.Tools, "the step")
 	if err != nil {
 		return err
 	}
@@ -249,9 +254,10 @@ func buildV2Task(pkg *packagespec.Package, out *Agent, name string) error {
 	return nil
 }
 
-// checkInputAssigns holds each `- x: input.<path>` to the input of every tool
-// the step finishes on, because the step may close on any of them and the row
-// reads the input of whichever one it was.
+// checkInputAssigns holds each `- x: input.<path>` to the input of the tools the
+// step finishes on. One of them has to take it. The row is saved when a tool
+// that took it ends the step, as unmute-core reads it, so a step may close on a
+// callback with a day or on a note without one.
 func checkInputAssigns(pkg *packagespec.Package, out *Agent, raw packagespec.Task, assign []AssignTo) error {
 	for _, entry := range assign {
 		if !entry.FromInput {
@@ -260,18 +266,25 @@ func checkInputAssigns(pkg *packagespec.Package, out *Agent, raw packagespec.Tas
 		if len(raw.Finish) == 0 {
 			return fmt.Errorf("assign input.%s reads the input of the tool the step finishes on, and the step has no finish:; add one, or save from result instead", entry.Field)
 		}
+		var tools []string
+		taken := false
 		for _, finish := range raw.Finish {
+			tools = append(tools, finish.Tool)
 			input, err := inputModel(pkg, out, finish.Tool)
 			if err != nil {
 				return err
 			}
 			source, err := modelPath(input, entry.Field)
 			if err != nil {
-				return fmt.Errorf("assign input.%s: %s takes no such input: %w", entry.Field, finish.Tool, err)
+				continue
 			}
 			if err := fitsAssign(entry, source, out); err != nil {
 				return err
 			}
+			taken = true
+		}
+		if !taken {
+			return fmt.Errorf("assign input.%s: no tool the step finishes on takes that input (%s)", entry.Field, strings.Join(tools, ", "))
 		}
 	}
 	return nil
@@ -322,14 +335,14 @@ func buildReplies(pkg *packagespec.Package, out *Agent, file string, raw []packa
 	return replies, nil
 }
 
-// buildOpensWith resolves a step's opens_with:.
-func buildOpensWith(pkg *packagespec.Package, out *Agent, raw packagespec.Task) (*OpensWith, error) {
-	if raw.OpensWith == nil {
+// buildOpensWith resolves an opens_with: of a step or a handoff. tools are the
+// tools of whoever runs it, named by owner in a refusal.
+func buildOpensWith(pkg *packagespec.Package, out *Agent, opens *packagespec.OpensWith, tools []string, owner string) (*OpensWith, error) {
+	if opens == nil {
 		return nil, nil
 	}
-	opens := raw.OpensWith
-	if !slices.Contains(raw.Tools, opens.Tool) {
-		return nil, fmt.Errorf("opens_with names %q, which the step does not list under tools; add it there", opens.Tool)
+	if !slices.Contains(tools, opens.Tool) {
+		return nil, fmt.Errorf("opens_with names %q, which %s does not list under tools; add it there", opens.Tool, owner)
 	}
 	input, err := inputModel(pkg, out, opens.Tool)
 	if err != nil {
@@ -498,4 +511,29 @@ func modelFields(model *stateschema.Model) string {
 		names = append(names, field.Name)
 	}
 	return strings.Join(names, ", ")
+}
+
+// buildV2Handoff resolves a handoff's saves: and opens_with:. A saved value is
+// a State value, and the opening tool is one the next agent has.
+func buildV2Handoff(pkg *packagespec.Package, out *Agent, name string) error {
+	raw := pkg.Agent.Handoffs[name]
+	transfer, ok := out.Controls[name].(*AgentTransfer)
+	if !ok || (len(raw.Saves) == 0 && raw.OpensWith == nil) {
+		return nil
+	}
+	if len(raw.Saves) > 0 {
+		transfer.Saves = make(map[string]any, len(raw.Saves))
+	}
+	for _, pair := range raw.Saves {
+		if _, ok := out.Variables[pair.Key]; !ok {
+			return fmt.Errorf("saves %q, which State in state.py does not declare", pair.Key)
+		}
+		transfer.Saves[pair.Key] = pair.Value
+	}
+	opens, err := buildOpensWith(pkg, out, raw.OpensWith, out.Agents[raw.To].Tools, fmt.Sprintf("agent %q", raw.To))
+	if err != nil {
+		return err
+	}
+	transfer.OpensWith = opens
+	return nil
 }

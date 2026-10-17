@@ -1,0 +1,14 @@
+{
+  "name": "A day past the deadline is refused, then a callback ends the call",
+  "call_start": {"account_id": "WA-1001"},
+  "turns": [
+    {"caller": "Yes, this is Layla.", "expect": ["date of birth"], "max_requests": 1},
+    {"caller": "14 March 1990.", "expect": ["Is your date of birth"], "max_requests": 1},
+    {"caller": "Yes.", "expect": ["Is now a good time"], "max_requests": 1},
+    {"caller": "Sure.", "expect": ["Could you make the payment today?"], "max_requests": 1},
+    {"caller": "I can pay in three weeks.", "reject": ["is recorded"], "max_requests": 2},
+    {"caller": "Actually, can you call me back tomorrow at five in the afternoon?", "expect": ["Shall I note a call back for"], "max_requests": 3},
+    {"caller": "Yes, please.", "expect": ["That's noted"], "max_requests": 1}
+  ],
+  "state": {"outcome": "CB"}
+}

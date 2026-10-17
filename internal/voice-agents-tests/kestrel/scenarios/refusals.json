@@ -1,0 +1,50 @@
+{
+  "name": "A wrong date of birth finds nothing, a future day is refused",
+  "turns": [
+    {
+      "caller": "My policy number is KP482913 and my date of birth is the 5th of June 1980.",
+      "expect": [
+        "Is your policy number"
+      ],
+      "max_requests": 2
+    },
+    {
+      "caller": "Yes.",
+      "expect": [
+        "can't find a policy"
+      ],
+      "reject": [
+        "Daniel",
+        "Corolla"
+      ],
+      "max_requests": 1
+    },
+    {
+      "caller": "Oh sorry, it's 1979, the fifth of June 1979.",
+      "expect": [
+        "Is your policy number"
+      ],
+      "max_requests": 1
+    },
+    {
+      "caller": "Yes.",
+      "expect": [
+        "Thank you, Daniel"
+      ],
+      "max_requests": 1
+    },
+    {
+      "caller": "It happened next Friday.",
+      "expect": [
+        "That day hasn't happened yet"
+      ],
+      "reject": [
+        "Roughly what time"
+      ],
+      "max_requests": 1
+    }
+  ],
+  "state": {
+    "report.incident_day": null
+  }
+}

@@ -1,0 +1,20 @@
+local:
+  handler: tools/ledger.py:record_promise
+inject:
+  - account_id: "{{state.account_id}}"
+  - call: "{{call.session_id}}"
+interruption: continue
+# A day in the past or after the deadline is refused before it is read back.
+precheck: tools/ledger.py:outside_window
+assign:
+  - when_said: result.when
+  - outcome: result.status
+replies:
+  - when:
+      - status: [past_day]
+    say:
+      - That day has already gone. Which other day would suit you?
+  - when:
+      - status: [after_deadline]
+    say:
+      - "I can only note a day up to {{state.deadline_spoken}}. Which day by then works for you?"

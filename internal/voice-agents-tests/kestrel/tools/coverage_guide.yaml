@@ -1,0 +1,2 @@
+local:
+  handler: tools/claims.py:coverage_guide

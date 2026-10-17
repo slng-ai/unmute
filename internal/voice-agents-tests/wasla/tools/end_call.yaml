@@ -1,0 +1,3 @@
+local:
+  handler: tools/ledger.py:end_call
+effect: ends_conversation

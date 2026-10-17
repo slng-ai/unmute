@@ -1,0 +1,25 @@
+local:
+  handler: tools/claims.py:note_facts
+# The report so far and the policy come from the call, never from the model.
+inject:
+  - report: "{{state.report}}"
+  - policy: "{{state.policy}}"
+# The model never reads the report or the read-back: a read-back it could see, it
+# would say in its own words.
+hidden:
+  - report
+  - read_back
+# Saved as soon as it returns, so the next answer merges into the report.
+assign:
+  - report: result.report
+  - read_back: result.read_back
+  - next_question: result.next_question
+replies:
+  - when:
+      - status: [future_day]
+    say:
+      - That day hasn't happened yet. On which day did it happen?
+  - when:
+      - complete: [false]
+    say:
+      - "{{state.next_question}}"

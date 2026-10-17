@@ -1,0 +1,8 @@
+local:
+  handler: tools/lessons.py:create_profile
+inject:
+  - phone: "{{state.phone}}"
+  - explanation: "{{state.explanation}}"
+interruption: continue
+assign:
+  - said: result.said

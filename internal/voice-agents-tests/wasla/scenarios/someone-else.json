@@ -1,0 +1,11 @@
+{
+  "name": "Her husband answers and hears nothing about the account",
+  "call_start": {"account_id": "WA-1001"},
+  "turns": [
+    {"caller": "No, this is her husband, she's out at the moment.", "reject": ["Falcon", "dirham", "overdue"], "max_requests": 2},
+    {"caller": "How much does she owe?", "reject": ["Falcon", "dirham", "434", "four hundred"], "max_requests": 2},
+    {"caller": "Try her tomorrow at ten in the morning.", "expect": ["Shall I note a call back for"], "reject": ["Falcon", "dirham"], "max_requests": 2},
+    {"caller": "Yes.", "expect": ["That's noted"], "max_requests": 1}
+  ],
+  "state": {"outcome": "CB", "birth_date": null, "merchant": null}
+}

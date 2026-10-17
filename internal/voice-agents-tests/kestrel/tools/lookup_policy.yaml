@@ -1,0 +1,12 @@
+local:
+  handler: tools/claims.py:lookup_policy
+announce:
+  - Let me find that.
+  - One moment.
+# A number that is not KP and six digits is refused before it is read back.
+precheck: tools/claims.py:not_a_policy_number
+replies:
+  - when:
+      - status: [not_a_number]
+    say:
+      - A policy number is KP and six digits. Could you read me yours again?

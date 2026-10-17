@@ -1,0 +1,12 @@
+{
+  "name": "A place that cannot be found is asked again, an area with no craving asks for one in the read-back",
+  "dispatch": {"customer_name": "Sam"},
+  "turns": [
+    {"caller": "Somewhere in Nowheresville.", "expect": ["I couldn't place that"], "max_requests": 1},
+    {"caller": "Okay, Gràcia in Barcelona.", "expect": ["So that's Gràcia, Barcelona, Spain.", "in the mood for"], "reject": ["right?"], "max_requests": 1},
+    {"caller": "A cocktail bar.", "expect": ["I found Paradiso"], "max_requests": 1},
+    {"caller": "Wait, what about the Born instead?", "expect": ["So that's El Born, Barcelona, Spain"], "max_requests": 1},
+    {"caller": "Can you text me the list?", "reject": ["I've sent", "texted"], "max_requests": 1}
+  ],
+  "state": {"offer": null, "spot.formatted_address": "El Born, Barcelona, Spain"}
+}

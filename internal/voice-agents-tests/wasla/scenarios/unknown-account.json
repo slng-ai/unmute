@@ -1,0 +1,6 @@
+{
+  "name": "A dispatch about an account the ledger does not hold is refused",
+  "dispatch": {"account_id": "WA-9999"},
+  "refused": "no account WA-9999",
+  "turns": []
+}

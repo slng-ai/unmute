@@ -1,0 +1,28 @@
+local:
+  handler: tools/finder.py:find_area
+announce:
+  - Let me see.
+  - Hmm, let me look.
+# A new area takes back the places on offer and the details said.
+assign:
+  - spot: result.spot
+  - craving: result.craving
+  - offer: result.offer
+  - details: result.details
+replies:
+  - when:
+      - found: [true]
+      - ask_craving: [false]
+    say:
+      - "So that's {{state.spot.formatted_address}}, right?"
+  - when:
+      - found: [true]
+      - ask_craving: [true]
+    say:
+      - "So that's {{state.spot.formatted_address}}. What are you in the mood for? A cuisine, a bar, or no preference?"
+  - when:
+      - found: [false]
+    say:
+      - >-
+        Hmm, I couldn't place that. Could you give me a nearby cross street, a
+        neighbourhood or the city?

@@ -1,0 +1,10 @@
+{
+  "name": "With no caller ID, the number is asked for and read back",
+  "turns": [
+    {"caller": "Hello?", "max_requests": 2},
+    {"caller": "It's plus thirty-four, six hundred, three three three, four four four.", "expect": ["is your number"], "max_requests": 2},
+    {"caller": "Yes.", "expect": ["Diego"], "max_requests": 1},
+    {"caller": "Can I have a recap of my progress?", "expect": ["You have completed"], "max_requests": 1}
+  ],
+  "state": {"learner_name": "Diego", "phone": "+34600333444"}
+}

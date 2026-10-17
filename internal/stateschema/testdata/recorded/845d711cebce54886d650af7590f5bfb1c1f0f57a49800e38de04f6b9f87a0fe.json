@@ -1,0 +1,295 @@
+{
+  "source": "internal/voice-agents-tests/kestrel/state.py",
+  "digest": "845d711cebce54886d650af7590f5bfb1c1f0f57a49800e38de04f6b9f87a0fe",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Policy": {
+          "description": "The policy the caller's number and date of birth found.",
+          "properties": {
+            "policy_number": {
+              "title": "Policy Number",
+              "type": "string"
+            },
+            "first_name": {
+              "title": "First Name",
+              "type": "string"
+            },
+            "vehicles": {
+              "items": {
+                "$ref": "#/$defs/Vehicle"
+              },
+              "title": "Vehicles",
+              "type": "array"
+            }
+          },
+          "required": [
+            "policy_number",
+            "first_name",
+            "vehicles"
+          ],
+          "title": "Policy",
+          "type": "object"
+        },
+        "Report": {
+          "description": "The facts of the incident, each empty until the caller gives it.",
+          "properties": {
+            "incident_day": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Incident Day"
+            },
+            "incident_time": {
+              "anyOf": [
+                {
+                  "format": "time",
+                  "type": "string"
+                },
+                {
+                  "enum": [
+                    "morning",
+                    "afternoon",
+                    "evening",
+                    "night"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Incident Time"
+            },
+            "place": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Place"
+            },
+            "what_happened": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "What Happened"
+            },
+            "injuries": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Injuries"
+            },
+            "police_report": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Police Report"
+            },
+            "other_party": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Other Party"
+            },
+            "vehicle_drivable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Vehicle Drivable"
+            },
+            "vehicle": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The plate of the car it happened to.",
+              "title": "Vehicle"
+            }
+          },
+          "title": "Report",
+          "type": "object"
+        },
+        "Vehicle": {
+          "description": "One car on a policy.",
+          "properties": {
+            "plate": {
+              "title": "Plate",
+              "type": "string"
+            },
+            "words": {
+              "description": "How the car is said, like \"the blue Toyota Corolla\".",
+              "title": "Words",
+              "type": "string"
+            }
+          },
+          "required": [
+            "plate",
+            "words"
+          ],
+          "title": "Vehicle",
+          "type": "object"
+        }
+      },
+      "description": "One claim call. Every value starts empty.\n\nAttributes:\n    today: Today's date on the claims desk's clock, read as the call starts.\n    weekday: Today's weekday, so the model can work out \"on Monday\".\n    policy_number: The number the caller gave, once a lookup ran on it.\n    birth_date: The holder's date of birth the caller gave.\n    policy: The policy found. Nothing about a policy is known before it.\n    report: The incident's facts so far.\n    read_back: The whole claim in code's words, read back before it is filed.\n    next_question: The question code asks next, while a fact is missing.\n    claim_number: The claim number, once filed.",
+      "properties": {
+        "today": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Today"
+        },
+        "weekday": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Weekday"
+        },
+        "policy_number": {
+          "anyOf": [
+            {
+              "format": "spelled",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Policy Number"
+        },
+        "birth_date": {
+          "anyOf": [
+            {
+              "format": "birth-date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The policy holder's date of birth, as YYYY-MM-DD.",
+          "title": "Birth Date"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Policy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "report": {
+          "$ref": "#/$defs/Report"
+        },
+        "read_back": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Read Back"
+        },
+        "next_question": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Question"
+        },
+        "claim_number": {
+          "anyOf": [
+            {
+              "format": "spelled",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claim Number"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

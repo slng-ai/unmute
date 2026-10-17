@@ -1,0 +1,173 @@
+# Kestrel: an inbound motor claim, ported from unmute-core's examples/kestrel.
+#
+# One agent, Sam, and one task group, `claim`, that runs two steps:
+# 1. find_policy: code reads the policy number and date of birth back, and looks
+#    the policy up on the caller's yes.
+# 2. take_report: code asks each question of the report in a fixed order, the
+#    model only notes the answers, and code reads the whole claim back before it
+#    is filed.
+#
+# Every line the caller hears in the flow is code's. The scenarios in
+# scenarios/ are unmute-core's, word for word: the same lines and the same
+# model request counts must hold when Unmute compiles this package.
+version: 2
+
+name: kestrel
+
+entry_agent: sam
+
+mode: record
+
+agents:
+  sam:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - coverage_guide
+      - end_call
+    task_groups:
+      - claim
+    tasks:
+      - name: find_policy
+        instructions: tasks/find-policy.md
+        tools:
+          - lookup_policy
+        # When the main agent passed both values, the read-back plays with no
+        # model request.
+        opens_with:
+          tool: lookup_policy
+          arguments:
+            - policy_number: policy_number
+            - birth_date: birth_date
+        replies:
+          - tool: lookup_policy
+            when:
+              - found: [false]
+              - status: [looked_up]
+            say:
+              - >-
+                I'm sorry, I can't find a policy with that number and date of
+                birth. Could you check the number on your policy documents?
+        finish:
+          - tool: lookup_policy
+            success:
+              - found: [true]
+            confirm:
+              - >-
+                Is your policy number {{state.policy_number}}, with a date of
+                birth of {{state.birth_date}}?
+            say:
+              - "Thank you, {{state.policy.first_name}}, I have your policy."
+        assign:
+          - policy: result.policy
+          - policy_number: input.policy_number
+          - birth_date: input.birth_date
+
+      - name: take_report
+        instructions: tasks/take-report.md
+        tools:
+          - note_facts
+          - file_claim
+        opens_with:
+          tool: note_facts
+          say:
+            - "{{state.next_question}}"
+        finish:
+          - tool: file_claim
+            success:
+              - filed: [true]
+            confirm:
+              - "{{state.read_back}}"
+            say:
+              - >-
+                Your claim is filed. Your claim number is {{state.claim_number}}.
+                A claims handler will call you within one working day. Is there
+                anything else I can help with?
+        assign:
+          - claim_number: result.claim_number
+
+task_groups:
+  claim:
+    when: >-
+      The caller gives a policy number or a date of birth, or wants to report an
+      accident or damage to their car.
+    steps:
+      - find_policy
+      - take_report
+    context_scope: shared
+    then: return
+    arguments:
+      - policy_number
+      - birth_date
+
+prefetch:
+  - name: today
+    clock: now
+    timezone: Europe/London
+    assign:
+      - today: result.date
+      - weekday: result.day_of_week
+
+secrets:
+  - GOOGLE_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: google
+      model: gemini-3.1-flash-lite
+      params:
+        vertexai: true
+        location: eu
+  speak:
+    voice:
+      provider: slng
+      model: "slng/fish/tts:s2.1-pro"
+      # Fish Audio's "Oliver": a calm English voice.
+      voice: "8d8aec63a56c460cb7def795bdf754fa"
+      language: en
+      params:
+        world_part: eu-north
+  listen:
+    transcriber:
+      provider: slng
+      model: "soniox/speech-ai:rt-v5"
+      language: en
+      params:
+        world_part: eu-north
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: patient
+
+tools:
+  - lookup_policy
+  - note_facts
+  - file_claim
+  - coverage_guide
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: >-
+      Thanks for calling Kestrel Insurance claims, this is Sam. Can I take your
+      policy number, please?
+  inactivity:
+    nudge_after: 15s
+    end_after: 50s
+    nudge_text: Are you still there? Take your time.
+    end_text: I'll let you go for now. Call us back any time. Goodbye.
+  max_duration: 15m
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  avg_session_duration: 6m

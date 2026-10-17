@@ -1,0 +1,13 @@
+{
+  "name": "Lucía asks for help, answers with it, then switches to English",
+  "call_start": {"call": {"direction": "inbound", "calling_number": "+34600111222"}},
+  "greeting": ["A ver si lo tengo bien: ¿tu número es +34 600 111 222?"],
+  "turns": [
+    {"caller": "Sí, es ese.", "expect": ["Hola, Lucía", "pedir en una cafetería"], "max_requests": 1, "language": "es"},
+    {"caller": "Seguimos.", "expect": ["Responde en inglés: Ahora di cuántos quieres: pide dos de algo."], "max_requests": 1, "language": "es"},
+    {"caller": "¿Cómo se dice dos en inglés?", "reject": ["Lección completada"], "max_requests": 2, "language": "es"},
+    {"caller": "Two coffees, please.", "expect": ["Pide dos bebidas y pregunta cuánto es en total."], "max_requests": 1},
+    {"caller": "Can you explain things in English from now on, please?", "expect": ["Answer in English: Order two drinks and ask how much it is in total."], "max_requests": 1}
+  ],
+  "state": {"explanation": "EN", "waiting": "en-travel-2-3"}
+}
