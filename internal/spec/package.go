@@ -714,6 +714,9 @@ type Tool struct {
 	Precheck string `json:"precheck,omitempty" yaml:"precheck,omitempty" since:"2"`
 	// Hidden names result fields the model never reads.
 	Hidden []string `json:"hidden,omitempty" yaml:"hidden,omitempty" since:"2"`
+	// AnnounceWait runs the tool once its announce line has played, so a
+	// goodbye is heard in full before a tool that ends the call runs.
+	AnnounceWait bool `json:"announce_wait,omitempty" yaml:"announce_wait,omitempty" since:"2"`
 
 	Webhook        *ToolWebhook   `json:"webhook,omitempty" yaml:"webhook,omitempty"`
 	Local          *ToolLocal     `json:"local,omitempty" yaml:"local,omitempty"`

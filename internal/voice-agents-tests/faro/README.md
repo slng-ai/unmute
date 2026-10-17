@@ -64,9 +64,9 @@ The call starts on the agent of the caller's own language, as in core, through `
 
 What core does that v2 cannot say yet, and what is written instead.
 
-- **Agent language and timezone.** Core sets `language` and `timezone` on each
-  `AgentSpec`. v2 has neither on an agent. Closest: `language` on each agent's speak
-  model (`voice_en`, `voice_es`), both on the same Fish voice. The listen model is `es`.
+- **Agent timezone.** Core sets `Europe/Madrid` on each agent. The package has no
+  clock prefetch, so its agents have no timezone. No line names a date. Each agent's
+  language is its voice's: `en` for `faro_en`, `es` for `faro_es`, as in core.
 - **The same task in two agents.** Core builds one task from a template per language.
   A task name is one name across the package, so the Spanish agent's are `other_number_es`
   and `sign_up_es`, and its prompt, `instructions-es.md`, names them.

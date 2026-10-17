@@ -181,6 +181,11 @@ func checkV2Variables(pkg *packagespec.Package, out *Agent) error {
 func buildV2Tool(pkg *packagespec.Package, out *Agent, name string) error {
 	raw, tool := pkg.Tools[name], out.Tools[name]
 	file := filepath.Join("tools", name+".yaml")
+	if raw.AnnounceWait && len(raw.Announce) == 0 {
+		return fmt.Errorf("%s: announce_wait waits for the announce line, and %s has none; add announce: or remove announce_wait",
+			pkg.Location(file, "announce_wait:"), name)
+	}
+	tool.AnnounceWait = raw.AnnounceWait
 	if len(raw.Assign) == 0 && len(raw.Replies) == 0 && len(raw.Hidden) == 0 {
 		tool.Precheck = raw.Precheck
 		out.Tools[name] = tool

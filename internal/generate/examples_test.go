@@ -1497,9 +1497,7 @@ const voiceAgentTestsDir = "voice-agents-tests"
 
 // coreNotYet are version 2 packages the unmute-core templates refuse today, by
 // the words of the refusal. Each one leaves this list when its feature lands.
-var coreNotYet = map[string]string{
-	"parcel-desk": `think "router": version 2 compiles a google model only so far`,
-}
+var coreNotYet = map[string]string{}
 
 func TestVoiceAgentTestPackagesValidateAndGenerate(t *testing.T) {
 	root := filepath.Join("..", voiceAgentTestsDir)

@@ -812,11 +812,13 @@ type Tool struct {
 	// Assign, Replies, Precheck and Hidden are version 2: what the tool's
 	// result saves to State, the lines code speaks for a typed result, the
 	// function run before it, and the result fields the model never reads.
-	Assign        []AssignTo `json:"assign,omitempty" yaml:"assign,omitempty"`
-	Replies       []Reply    `json:"replies,omitempty" yaml:"replies,omitempty"`
-	Precheck      string     `json:"precheck,omitempty" yaml:"precheck,omitempty"`
-	Hidden        []string   `json:"hidden,omitempty" yaml:"hidden,omitempty"`
-	HandlerSource string     `json:"-" yaml:"-"` // local handler file content, loaded by spec.Load
+	Assign   []AssignTo `json:"assign,omitempty" yaml:"assign,omitempty"`
+	Replies  []Reply    `json:"replies,omitempty" yaml:"replies,omitempty"`
+	Precheck string     `json:"precheck,omitempty" yaml:"precheck,omitempty"`
+	Hidden   []string   `json:"hidden,omitempty" yaml:"hidden,omitempty"`
+	// AnnounceWait is version 2: the tool runs once its announce line has played.
+	AnnounceWait  bool   `json:"announce_wait,omitempty" yaml:"announce_wait,omitempty"`
+	HandlerSource string `json:"-" yaml:"-"` // local handler file content, loaded by spec.Load
 	// Dependencies are the local handler's exact `name==version` pins, as the
 	// author wrote them. Canonicalisation happens where they are emitted.
 	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`

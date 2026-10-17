@@ -1,0 +1,8 @@
+{
+  "name": "A caller asks for a person to call back, says what about, and the call ends",
+  "greeting": ["Hi, this is Parcel Desk"],
+  "turns": [
+    {"caller": "Could someone from your team call me back, please?"},
+    {"caller": "It's about a parcel that arrived damaged yesterday.", "expect": ["Thanks, someone will call you back today. Goodbye."], "max_requests": 2}
+  ]
+}

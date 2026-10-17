@@ -88,6 +88,13 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 		files = append(files, File{Path: path, Content: []byte(handlers[path]), Verbatim: true})
 	}
 	env := slices.Clone(agent.Secrets)
+	for _, binding := range resolved.Models.Reason {
+		for _, name := range slngBindingCredentialEnvs(binding) {
+			if !slices.Contains(env, name) {
+				env = append(env, name)
+			}
+		}
+	}
 	slices.Sort(env)
 	var example strings.Builder
 	for _, name := range env {

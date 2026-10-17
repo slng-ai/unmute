@@ -15,7 +15,7 @@ models:
       upstream:
         provider: openai
       params:
-        world_part: eu-west
+        world_part: eu-north
         # This model requires reasoning_effort: none for Chat Completions tools.
         reasoning_effort: none
         parallel_tool_calls: false

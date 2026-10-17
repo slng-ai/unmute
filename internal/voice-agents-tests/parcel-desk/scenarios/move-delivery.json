@@ -1,0 +1,12 @@
+{
+  "name": "A caller moves a parcel's delivery to a later day",
+  "greeting": ["Hi, this is Parcel Desk"],
+  "turns": [
+    {"caller": "Hi, I won't be home for my parcel. Can it come on another day?"},
+    {"caller": "The tracking id is P D one zero four two."},
+    {"caller": "A week from today, please.", "expect": ["Shall I move the delivery to"], "max_requests": 1},
+    {"caller": "Yes, please.", "expect": ["Done, it now arrives on"], "max_requests": 1},
+    {"caller": "No, that's all. Thanks, bye.", "max_requests": 1}
+  ],
+  "state": {"parcel.tracking_id": "PD-1042", "parcel.town": "Leeds"}
+}
