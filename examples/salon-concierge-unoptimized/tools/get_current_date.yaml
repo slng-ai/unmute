@@ -3,21 +3,8 @@ description: >-
   you work out any relative day such as tomorrow or next Friday, and never guess
   the date yourself.
 
-input:
-  type: object
-  properties: {}
-
-output:
-  type: object
-  properties:
-    date:
-      type: string
-      description: Today's date in the salon's timezone, YYYY-MM-DD
-  required:
-    - date
-
 local:
-  handler: tools/salon.py
+  handler: tools/salon.py:get_current_date
 
 interruption: provider_default
 effect: returns_data

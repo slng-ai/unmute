@@ -1,10 +1,6 @@
 # Emitted bytes, per package and target, for every package writing none of
 # finish:, skip_when_confirmed: or opening:. Written by
 # go test ./internal/generate -run TestPackagesWritingNoNewKeyEmitTheSameBytes -update-compat
-examples/salon-concierge-single-prompt livekit = e6c096e696f07adaaad2e75a76eb9fec68597e8c5d7a047c27b04f83c087e0e7
-examples/salon-concierge-single-prompt pipecat = cb8666aa021e2994a3b3995f0295de322554748dbac70a936032afee667cfee1
-examples/salon-concierge-unoptimized livekit = 02f3b69ee5de5a9b8d6f6742b47ac7ad3d89c97c112624d6518405b866f428b0
-examples/salon-concierge-unoptimized pipecat = 308bebb1ccdcd6dc77ac31a725d80cc82f9be39fe6af14a1f62fc277be6428c4
 testdata/daily_carrier pipecat = 5b379ca7acf106122825303ce7e97b83713d02ba71cfb71ef37b3f72e1e3717d
 testdata/history_core livekit = ea70e87c54c6a28505891decd56e9f6df8a4fe1844d28a6514f9f6926f80de76
 testdata/history_core pipecat = e63788f17d0303d337b458b1cb35b0df9a5bedf7fd5ea14f94a682a59fdc95a4
