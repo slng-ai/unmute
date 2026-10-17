@@ -140,12 +140,12 @@ type AgentFile struct {
 	// Mode is how a step hands back to its agent: `status` (the default) hands
 	// back a status and saves nothing on the way, `record` hands back what the
 	// caller confirmed per step. unmute-core's TasksSpec.mode.
-	Mode       string        `json:"mode,omitempty" yaml:"mode,omitempty" since:"2"`
-	EntryAgent string        `json:"entry_agent" yaml:"entry_agent"`
+	Mode       string `json:"mode,omitempty" yaml:"mode,omitempty" since:"2"`
+	EntryAgent string `json:"entry_agent" yaml:"entry_agent"`
 	// EntryBy picks the agent a call starts with from a State value, read once the
 	// prefetch has run. entry_agent is the one a value it does not list starts with.
-	EntryBy *EntryBy `json:"entry_by,omitempty" yaml:"entry_by,omitempty" since:"2"`
-	Models     ModelSections `json:"models" yaml:"models"`
+	EntryBy *EntryBy      `json:"entry_by,omitempty" yaml:"entry_by,omitempty" since:"2"`
+	Models  ModelSections `json:"models" yaml:"models"`
 	// Listen/Turn select one entry of the matching models section by name.
 	// Optional when the section has at most one entry (the sole entry selects
 	// itself); required with 2+ entries (N15 palette).
