@@ -55,6 +55,7 @@ func coreSpec(agent *ir.Agent) (map[string]any, error) {
 		"prefetch": prefetch,
 		"handoffs": coreHandoffs(agent),
 	}
+	putString(spec, "project_id", agent.ProjectID)
 	if agent.EntryBy != nil {
 		spec["entry_by"] = agent.EntryBy
 	}

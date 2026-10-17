@@ -918,3 +918,27 @@ func TestSlngKeepsOneAnnounceLine(t *testing.T) {
 		t.Errorf("one announce line was refused:\n%s", joined)
 	}
 }
+
+// project_id becomes a header value, so anything but a UUID is refused at
+// compile time instead of on the first request of a live call.
+func TestProjectIDMustBeAUUID(t *testing.T) {
+	for _, tc := range []struct {
+		id string
+		ok bool
+	}{
+		{"", true},
+		{"123e4567-e89b-12d3-a456-426614174000", true},
+		{"123E4567-E89B-12D3-A456-426614174000", true},
+		{"123e4567e89b12d3a456426614174000", false},
+		{" 123e4567-e89b-12d3-a456-426614174000", false},
+		{"my-project", false},
+	} {
+		agent := slngAgent(t)
+		agent.ProjectID = tc.id
+		row := validateSlng(t, agent)
+		refused := strings.Contains(strings.Join(row.Errors, "\n"), "project_id")
+		if refused == tc.ok {
+			t.Errorf("project_id %q: refused=%v, want refused=%v; errors=%v", tc.id, refused, !tc.ok, row.Errors)
+		}
+	}
+}

@@ -994,7 +994,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 		Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions,
 		PromptConst: promptConst, PromptExpr: prompt,
 		RuntimePromptExpr: promptExpr(promptConst, def.Instructions, "self.state", router, "agent:"+name),
-		SlngHeaders:       pipecatRuntimeHeaders(target, profile, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name}),
+		SlngHeaders:       pipecatRuntimeHeaders(agent, target, profile, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name}),
 		LLM:               llm, TTS: tts,
 	}
 
@@ -1389,7 +1389,7 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 		// A task's prompt is not its owner's, so its cache scope is not its
 		// owner's either. This is the value the emitted handlers swap in on the
 		// way into the node and out of on every way back.
-		SlngHeaders: pipecatRuntimeHeaders(tgt, taskProfile, targetcap.SlngSite{Kind: targetcap.SlngSiteTask, Name: name}),
+		SlngHeaders: pipecatRuntimeHeaders(agent, tgt, taskProfile, targetcap.SlngSite{Kind: targetcap.SlngSiteTask, Name: name}),
 	}
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
@@ -2078,6 +2078,7 @@ func pipecatSlngSite(agent *ir.Agent, tgt ir.Target, profile string, site target
 		StateExpr:   pipecatStateExpr,
 		ConfigFunc:  slngConfigFunc(profile),
 		Scope:       targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, site),
+		ProjectID:   agent.ProjectID,
 		// The framework offers a per-request seam after all:
 		// build_chat_completion_params is public, its docstring invites the
 		// override, it returns the dict that is splatted into the SDK call, and
@@ -2096,13 +2097,14 @@ func pipecatSlngSite(agent *ir.Agent, tgt ir.Target, profile string, site target
 // The whole dict, not just the scope: a settings update merges the `extra` dict
 // key by key, so `extra_headers` is replaced wholesale and a delta carrying only
 // the scope would drop the session id from every request after it.
-func pipecatRuntimeHeaders(tgt ir.Target, profile string, site targetcap.SlngSite) string {
+func pipecatRuntimeHeaders(agent *ir.Agent, tgt ir.Target, profile string, site targetcap.SlngSite) string {
 	if profile == "" {
 		return ""
 	}
 	return pyLiteral(slngRequestHeaders(slngSite{
 		SessionExpr: pipecatRuntimeSessionIDExpr,
 		Scope:       targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, site),
+		ProjectID:   agent.ProjectID,
 	}))
 }
 

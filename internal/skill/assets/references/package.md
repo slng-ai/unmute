@@ -92,6 +92,7 @@ That is the shape `unmute init <name>` scaffolds, and it runs in a browser.
 | `version` | yes | the schema version, `1` |
 | `manifest` | when a root manifest exists | the literal `manifest.yaml`, linking the company contract |
 | `name` | yes | what the deployed agent is called |
+| `project_id` | no | the SLNG project UUID the agent's traffic is billed under, sent as `X-Slng-Project-Id` on every Context Router request; required in practice with an organisation-level API key |
 | `entry_agent` | yes | which agent answers |
 | `models` | yes | the model palette, grouped by kind |
 | `listen` | when `models.listen` has two or more entries | which listen entry to use |

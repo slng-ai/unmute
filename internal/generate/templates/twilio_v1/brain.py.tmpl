@@ -169,7 +169,7 @@ class Brain:
         # The router reads its configuration from the body and the cache
         # scope and the call's session from two headers, on every request.
         request["extra_body"] = {{.Body}}
-        request["extra_headers"] = {{"{"}}{{pyq .AgentHeader}}: ROUTER_SCOPE, {{pyq .SessionHeader}}: call.session_id{{"}"}}
+        request["extra_headers"] = {{"{"}}{{pyq .AgentHeader}}: ROUTER_SCOPE, {{pyq .SessionHeader}}: call.session_id{{if .ProjectID}}, {{pyq .ProjectHeader}}: {{pyq .ProjectID}}{{end}}{{"}"}}
         {{- end}}
         if self.tools:
             request["tools"] = self.tools

@@ -82,6 +82,8 @@ type twilioRouter struct {
 	Scope         string   // the cache scope sent as the agent id header
 	AgentHeader   string   // header names, owned by internal/target
 	SessionHeader string   //
+	ProjectHeader string   //
+	ProjectID     string   // the package's SLNG project, empty for none
 	UpstreamEnv   []string // the upstream credentials slng_config reads
 }
 
@@ -372,6 +374,7 @@ func twilioRouterFor(agent *ir.Agent, think ir.Binding) (*twilioRouter, error) {
 	return &twilioRouter{
 		BaseURL: base, Config: config, Body: pyLiteral(slngRequestBody(site, think)), Scope: scope,
 		AgentHeader: targetcap.SlngAgentIDHeader, SessionHeader: targetcap.SlngSessionIDHeader,
+		ProjectHeader: targetcap.SlngProjectIDHeader, ProjectID: agent.ProjectID,
 		UpstreamEnv: slngBindingCredentialEnvs(think),
 	}, nil
 }

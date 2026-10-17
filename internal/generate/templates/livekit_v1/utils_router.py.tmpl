@@ -251,6 +251,9 @@ async def _slng_llm_node(
             "extra_headers": {
                 {{pyq .Slng.AgentIDHeader}}: agent._slng_scope,
                 {{pyq .Slng.SessionIDHeader}}: session.userdata.{{.Slng.SessionIDField}},
+{{- if .Slng.ProjectID}}
+                {{pyq .Slng.ProjectIDHeader}}: {{pyq .Slng.ProjectID}},
+{{- end}}
             },
             # Rebuilt for every request, which is the point: a value this call
             # learns partway through reaches the model from the next turn on.

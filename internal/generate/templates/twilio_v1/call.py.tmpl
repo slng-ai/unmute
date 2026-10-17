@@ -700,7 +700,7 @@ class Session:
             params=dict(MODEL_PARAMS),
             {{- with .Router}}
             extra_body={{.Body}},
-            extra_headers={{"{"}}{{pyq .AgentHeader}}: ROUTER_SCOPE{{"}"}},
+            extra_headers={{"{"}}{{pyq .AgentHeader}}: ROUTER_SCOPE{{if .ProjectID}}, {{pyq .ProjectHeader}}: {{pyq .ProjectID}}{{end}}{{"}"}},
             {{- else}}
             extra_body={},
             extra_headers={},

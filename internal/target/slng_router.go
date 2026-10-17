@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -42,6 +43,24 @@ const (
 	SlngAgentIDHeader   = "X-Slng-Agent-Id"
 	SlngSessionIDHeader = "X-Slng-Session-Id"
 )
+
+// SlngProjectIDHeader names the SLNG project a request is billed and limited
+// under. Optional, and sent only when the package names a project_id: without
+// it SLNG uses the API key's own project.
+const SlngProjectIDHeader = "X-Slng-Project-Id"
+
+// slngProjectID is the canonical UUID form SLNG prints a project id in.
+var slngProjectID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// ValidateSlngProjectID refuses a project_id that is not a UUID. Empty is
+// allowed: the field is optional. The value is echoed because a project id is
+// not a secret, and an author cannot fix a stray character they cannot see.
+func ValidateSlngProjectID(id string) error {
+	if id == "" || slngProjectID.MatchString(id) {
+		return nil
+	}
+	return fmt.Errorf("project_id %q must be a project UUID like 123e4567-e89b-12d3-a456-426614174000: the value becomes the %s header value", id, SlngProjectIDHeader)
+}
 
 // The two per-request extensions a router think request carries, named the way
 // the OpenAI SDK names them, because that is the vocabulary both targets speak:

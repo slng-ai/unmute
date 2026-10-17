@@ -33,6 +33,8 @@ unmute_core.require("{{.CorePin}}")
 
 SPEC: dict[str, Any] = json.loads((Path(__file__).parent / "agent.json").read_text())
 AGENT_ID: str = SPEC["agent_id"]
+PROJECT_ID: str | None = SPEC.get("project_id")
+"""The SLNG project the agent's traffic is billed under, or None for the API key's own."""
 ENTRY: str = SPEC["entry"]
 PLACEHOLDER = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 
@@ -155,7 +157,8 @@ def from_env(value: Any) -> Any:
 def router(binding: Mapping[str, Any], call: CallInfo) -> RouterModelCall:
     """Return the call's SLNG Context Router, from a think binding whose provider is slng.
 
-    The router groups requests by the call's agent and session ids. Needs ``SLNG_API_KEY``.
+    The router groups requests by the call's agent and session ids, and bills them to
+    ``PROJECT_ID`` when the package names one. Needs ``SLNG_API_KEY``.
     """
     return RouterModelCall(
         call,
@@ -164,6 +167,7 @@ def router(binding: Mapping[str, Any], call: CallInfo) -> RouterModelCall:
         config=RouterConfig.model_validate(from_env(binding["config"])),
         pure_proxy=binding.get("pure_proxy", False),
         body=binding.get("body"),
+        extra_headers={"{{.ProjectIDHeader}}": PROJECT_ID} if PROJECT_ID else None,
     )
 
 

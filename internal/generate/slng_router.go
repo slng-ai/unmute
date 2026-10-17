@@ -50,6 +50,9 @@ type slngSite struct {
 	// one cache, which is how the booking specialist's opening turn was served
 	// the concierge's line.
 	Scope string
+	// ProjectID is the package's SLNG project, sent as one more identity
+	// header beside the two above. Empty sends no project header.
+	ProjectID string
 	// HeadersPerRequest says the identity headers travel with each request
 	// rather than being fixed at construction.
 	//
@@ -146,6 +149,11 @@ type slngHelpers struct {
 	AgentIDHeader   string
 	SessionIDHeader string
 	SessionIDField  string
+	// ProjectIDHeader and ProjectID are the optional project header, for a
+	// template that builds the header dict itself. ProjectID is empty when the
+	// package names no project, and then no header is written.
+	ProjectIDHeader string
+	ProjectID       string
 	// BodyParams is every forwardable param this package's router bindings send,
 	// as "profile: key=json" lines. The runbook names them rather than describing
 	// the rule, because a reader checking why a request went where it went wants to
@@ -200,6 +208,8 @@ func slngHelpersFor(agent *ir.Agent, tgt ir.Target) (slngHelpers, error) {
 		AgentIDHeader:   targetcap.SlngAgentIDHeader,
 		SessionIDHeader: targetcap.SlngSessionIDHeader,
 		SessionIDField:  livekitSessionIDField,
+		ProjectIDHeader: targetcap.SlngProjectIDHeader,
+		ProjectID:       agent.ProjectID,
 	}
 	for _, profile := range slices.Sorted(maps.Keys(tgt.Models.Reason)) {
 		binding := tgt.Models.Reason[profile]
@@ -366,18 +376,22 @@ func slngRouterBinding(agent *ir.Agent, tgt ir.Target, model string) (string, bo
 }
 
 // slngRequestHeaders is the identity header dict one prompt site sends: its own
-// cache scope, and the call's session id which scopes nothing and only groups one
-// conversation's requests together.
+// cache scope, the call's session id which scopes nothing and only groups one
+// conversation's requests together, and the package's project when it names one.
 //
 // One owner, two readers. The construction path below puts it on the service that
 // carries it for its whole life, and the Pipecat task handlers swap it on the way
 // into a task and back on the way out. A second spelling of this dict is how a
 // task would come to send its owner's scope.
 func slngRequestHeaders(site slngSite) map[string]any {
-	return map[string]any{
+	headers := map[string]any{
 		targetcap.SlngAgentIDHeader:   site.Scope,
 		targetcap.SlngSessionIDHeader: pyExpr(site.SessionExpr),
 	}
+	if site.ProjectID != "" {
+		headers[targetcap.SlngProjectIDHeader] = site.ProjectID
+	}
+	return headers
 }
 
 // slngClientArgs replaces a router construction's credential and endpoint

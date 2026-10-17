@@ -85,6 +85,9 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	global = append(global, contractErrors...)
 	globalWarnings = append(globalWarnings, contractWarnings...)
 	global = append(global, slngOneAgentIDPerPackage(agent)...)
+	if err := targetcap.ValidateSlngProjectID(agent.ProjectID); err != nil {
+		global = add(global, err.Error())
+	}
 	global = append(global, slngScopeErrors(agent)...)
 	global = append(global, knowledgeErrors(agent)...)
 	globalWarnings = add(globalWarnings, undeclaredSecretWarning(agent))

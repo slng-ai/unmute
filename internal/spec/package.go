@@ -129,6 +129,11 @@ type AgentFile struct {
 	// organisation and a push resolves the agent to update by matching one, so a
 	// name that two packages share is one live agent that two packages overwrite.
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+	// ProjectID is the SLNG project this agent's traffic is billed and limited
+	// under, a UUID. Every request to the SLNG Context Router sends it as the
+	// X-Slng-Project-Id header. Omitted, no header is sent and SLNG uses the API
+	// key's own project, which an organisation-level key does not have.
+	ProjectID string `json:"project_id,omitempty" yaml:"project_id,omitempty"`
 	// Architecture is the pipeline shape this package compiles to: `cascade`,
 	// `realtime` or `live`. Omitted means cascade, which is what every package
 	// written before the key existed gets, so none of their emitted bytes move.

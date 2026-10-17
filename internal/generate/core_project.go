@@ -63,7 +63,7 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	fill := map[string]string{"CorePin": target.CorePin, "Name": agent.Name}
+	fill := map[string]string{"CorePin": target.CorePin, "Name": agent.Name, "ProjectIDHeader": target.SlngProjectIDHeader}
 	// .python-version holds uv to the Python unmute-core is developed and tested on.
 	files := []File{{Path: "agent.json", Content: append(data, '\n')}, {Path: ".python-version", Content: []byte("3.12\n")}}
 	for _, item := range append([]struct{ path, source string }{{"spec.py", coreSpecPy}}, entrypoints[:]...) {

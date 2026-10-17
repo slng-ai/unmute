@@ -87,6 +87,12 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
   to 64 characters. Required; omission is refused.
 </ParamField>
 
+<ParamField path="project_id" type="string">
+  SLNG project the agent's traffic is billed and limited under. Accepts a project UUID.
+  If omitted, no project header is sent and SLNG uses the API key's own project. See
+  [`project_id`](#project_id).
+</ParamField>
+
 <ParamField path="entry_agent" type="string" required>
   Agent that answers. Accepts declared agent name. Required; omission is refused.
 </ParamField>
@@ -254,6 +260,23 @@ There is no way to keep the old bare name. An agent deployed as `livekit` was
 named after the target, and the new name always carries the package half, so the
 first compile after this change renames every existing deployment once. Do that
 rename deliberately, with the steps above, rather than discovering it on a call.
+
+## `project_id`
+
+The SLNG project this agent's traffic is billed and limited under. Optional.
+
+```yaml agent.yaml
+project_id: 123e4567-e89b-12d3-a456-426614174000
+```
+
+Copy the id from the project in the SLNG dashboard. Every request the generated
+agent sends to the SLNG Context Router carries it as the `X-Slng-Project-Id`
+header, next to `X-Slng-Agent-Id` and `X-Slng-Session-Id`. Without it, no
+project header is sent and SLNG uses the project the API key belongs to. An
+organisation-level key belongs to no project, so a package that uses one needs
+`project_id`.
+
+Anything that is not a UUID is refused when you validate or compile.
 
 ## `models`
 
