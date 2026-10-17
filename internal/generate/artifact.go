@@ -67,6 +67,12 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		}
 		return Artifact{}, fmt.Errorf("generate %s: %w", resolved.Name, err)
 	}
+	// Version 2 resolves and validates, and emits nothing yet: the templates
+	// that read its keys land with the move onto unmute-core. Refused rather
+	// than compiled with today's templates, which would drop every key it adds.
+	if agent.Version == ir.Version2 {
+		return Artifact{}, fmt.Errorf("generate %s: agent.yaml version 2 validates but is not emitted yet; compile it once the unmute-core templates land, or write version: 1", resolved.Name)
+	}
 	artifact := Artifact{Kind: artifactKind(resolved.Provider), Telephony: TelephonyRuntimePlanFor(resolved)}
 	artifact.Notes.ForwardedBindings = report.ForwardedBindings
 	artifact.Notes.Sizing = report.Sizing

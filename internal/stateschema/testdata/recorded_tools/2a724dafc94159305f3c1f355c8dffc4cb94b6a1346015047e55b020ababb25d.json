@@ -1,0 +1,192 @@
+{
+  "digest": "2a724dafc94159305f3c1f355c8dffc4cb94b6a1346015047e55b020ababb25d",
+  "report": {
+    "tools": {
+      "find_slots": {
+        "description": "Find free times for a service on one day.",
+        "input": {
+          "properties": {
+            "day": {
+              "format": "date",
+              "title": "Day",
+              "type": "string"
+            },
+            "service": {
+              "default": "cut",
+              "enum": [
+                "cut",
+                "colour"
+              ],
+              "title": "Service",
+              "type": "string"
+            }
+          },
+          "required": [
+            "day"
+          ],
+          "title": "find_slots_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "The free times on one day.",
+          "properties": {
+            "status": {
+              "enum": [
+                "free",
+                "none_free",
+                "closed"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "slots": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Slots",
+              "type": "array"
+            },
+            "read_back": {
+              "default": "",
+              "title": "Read Back",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "Slots",
+          "type": "object"
+        }
+      },
+      "lookup_account": {
+        "description": "Find the caller's account by their number.",
+        "input": {
+          "properties": {
+            "caller_phone": {
+              "title": "Caller Phone",
+              "type": "string"
+            }
+          },
+          "required": [
+            "caller_phone"
+          ],
+          "title": "lookup_account_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "The caller's account.",
+          "properties": {
+            "account_id": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "account_id"
+          ],
+          "title": "Account",
+          "type": "object"
+        }
+      },
+      "save_booking": {
+        "description": "Save the booking the caller agreed to.",
+        "input": {
+          "properties": {
+            "booking": {
+              "$ref": "#/$defs/Booking"
+            },
+            "customer_phone": {
+              "default": "",
+              "title": "Customer Phone",
+              "type": "string"
+            }
+          },
+          "$defs": {
+            "Booking": {
+              "description": "What the caller asked to book, read back before it is saved.",
+              "properties": {
+                "service": {
+                  "enum": [
+                    "cut",
+                    "colour"
+                  ],
+                  "title": "Service",
+                  "type": "string"
+                },
+                "day": {
+                  "format": "date",
+                  "title": "Day",
+                  "type": "string"
+                },
+                "time": {
+                  "format": "time",
+                  "title": "Time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "service",
+                "day",
+                "time"
+              ],
+              "title": "Booking",
+              "type": "object"
+            }
+          },
+          "required": [
+            "booking"
+          ],
+          "title": "save_booking_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Appointment": {
+              "description": "A saved appointment.",
+              "properties": {
+                "reference": {
+                  "title": "Reference",
+                  "type": "string"
+                },
+                "spoken": {
+                  "description": "The appointment as the agent says it aloud.",
+                  "title": "Spoken",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reference",
+                "spoken"
+              ],
+              "title": "Appointment",
+              "type": "object"
+            }
+          },
+          "description": "The outcome of saving a booking.",
+          "properties": {
+            "status": {
+              "enum": [
+                "booked",
+                "slot_taken"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "appointment": {
+              "$ref": "#/$defs/Appointment"
+            }
+          },
+          "required": [
+            "status",
+            "appointment"
+          ],
+          "title": "Saved",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "internal/testdata/v2_core"
+}

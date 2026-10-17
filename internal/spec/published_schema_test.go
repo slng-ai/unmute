@@ -26,6 +26,8 @@ func TestPublishedSchemaAcceptsWhatTheDecoderAccepts(t *testing.T) {
 		// a section the schema lost reads as a package the decoder takes and the
 		// schema refuses.
 		filepath.Join("..", "testdata", "live_model"),
+		// Every key version 2 adds, so a new one the schema lost fails here.
+		filepath.Join("..", "testdata", "v2_core"),
 	} {
 		if err := resolved.Validate(authoredInstance(t, dir)); err != nil {
 			t.Errorf("%s: the published schema refuses a package the decoder accepts: %v", dir, err)

@@ -32,14 +32,24 @@ func (p *Package) readState() error {
 // package, where ir.Build reads it. Load does not do this itself, because the
 // answer comes from Python: a command reads it through uv, and a test through a
 // recorded report, so Load stays free of both.
+//
+// A version 2 package's local tools are read here too, by the same reader,
+// because their types come from Python the same way and may name a model
+// state.py declares.
 func (p *Package) ReadState(ctx context.Context, reader stateschema.Reader) error {
-	if p.StateSource == nil {
-		return nil
+	if p.StateSource != nil {
+		model, err := reader.Read(ctx, p.Root, p.StateSource)
+		if err != nil {
+			return err
+		}
+		p.State = model
 	}
-	model, err := reader.Read(ctx, p.Root, p.StateSource)
-	if err != nil {
-		return err
+	if refs := p.localToolRefs(); len(refs) > 0 {
+		types, err := reader.ReadTools(ctx, p.Root, p.StateSource, refs)
+		if err != nil {
+			return err
+		}
+		p.ToolTypes = types
 	}
-	p.State = model
 	return nil
 }

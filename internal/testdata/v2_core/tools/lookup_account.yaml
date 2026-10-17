@@ -1,0 +1,6 @@
+local:
+  handler: tools/salon.py:lookup_account
+inject:
+  - caller_phone: "{{state.caller_phone}}"
+interruption: provider_default
+effect: returns_data

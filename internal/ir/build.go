@@ -69,6 +69,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		// fourth case. An omitted key is cascade, which is what every package
 		// written before this key existed gets.
 		Architecture: pkg.Agent.Architecture.Or(ArchitectureCascade),
+		Mode:         TasksMode(pkg.Agent.Mode),
 		EntryAgent:   pkg.Agent.EntryAgent,
 		Models:       models,
 		Listen:       listenName,
@@ -99,6 +100,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	for name, tool := range pkg.Tools {
 		built := buildTool(name, tool)
 		built.HandlerSource = pkg.Handlers[built.Handler]
+		if err := handlerTypes(pkg, name, &built); err != nil {
+			return nil, err
+		}
 		// A hosted tool's definition is the mirror, and it is folded in here
 		// rather than in buildTool because buildTool sees one tool file and the
 		// mirror was read from the package. An absent mirror stays absent:
@@ -252,7 +256,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		// names it, so the profile cannot come from where it happens to be written.
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg,
 			cmp.Or(raw.Think, pkg.Agent.Agents[pkg.Agent.EntryAgent].Think)))
-		assign, err := assignments(raw.Assign)
+		assign, err := assignments(raw.Assign, pkg.Agent.Version == packagespec.Version2)
 		if err != nil {
 			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
@@ -359,6 +363,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		return nil, err
 	}
 	if err := checkTemplates(pkg, out); err != nil {
+		return nil, err
+	}
+	if err := buildV2(pkg, out); err != nil {
 		return nil, err
 	}
 	// Last, so a name that does not resolve is reported as unresolved rather than
@@ -889,7 +896,7 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 		tool.Path = FlattenPaths(raw.Webhook.Path)
 		tool.Auth = buildToolAuth(raw.Webhook.Auth)
 	case raw.Local != nil:
-		tool.Handler = raw.Local.Handler
+		tool.Handler, tool.HandlerFunction = packagespec.SplitHandler(raw.Local.Handler)
 		tool.Dependencies = raw.Local.Dependencies
 		if tool.Handler == "" {
 			tool.Handler = filepath.Join("tools", name+".py")
@@ -1042,6 +1049,11 @@ func deriveResult(assign []AssignTo, agent *Agent) (map[string]ResultField, erro
 	result := make(map[string]ResultField)
 	seen := make(map[string]bool)
 	for _, entry := range assign {
+		// An input save reads the closing tool's input, not a field the step
+		// finishes with, so it adds nothing to the result. v2.go checks it.
+		if entry.FromInput {
+			continue
+		}
 		if seen[entry.Var] {
 			return nil, fmt.Errorf("assign writes variable %q twice", entry.Var)
 		}
@@ -1085,7 +1097,7 @@ func deriveResult(assign []AssignTo, agent *Agent) (map[string]ResultField, erro
 	}
 	for _, entry := range assign {
 		root, _, _ := strings.Cut(entry.Field, ".")
-		if _, ok := result[root]; !ok {
+		if _, ok := result[root]; !ok && !entry.FromInput {
 			return nil, fmt.Errorf("assign result.%s needs a whole-field assignment to establish its type; assign result.%s to a variable of that type first", entry.Field, root)
 		}
 	}
@@ -1128,7 +1140,7 @@ func buildCallable(pkg *packagespec.Package, raw packagespec.Callable, agent *Ag
 // representation holds. A pair value is one scalar by the time it decodes, and
 // an assignment is always a `result.<field>` string, so anything else is refused
 // here rather than reaching checkAssignments as something no path can be.
-func assignments(pairs []packagespec.Pair) ([]AssignTo, error) {
+func assignments(pairs []packagespec.Pair, fromInput bool) ([]AssignTo, error) {
 	if len(pairs) == 0 {
 		return nil, nil
 	}
@@ -1143,12 +1155,20 @@ func assignments(pairs []packagespec.Pair) ([]AssignTo, error) {
 		// know that the mark was ever part of a name.
 		name, appends := strings.CutSuffix(pair.Key, "+")
 		field, ok := strings.CutPrefix(text, "result.")
+		input := false
+		if !ok && fromInput {
+			field, input = strings.CutPrefix(text, "input.")
+			ok = input
+		}
 		if !ok {
+			if fromInput {
+				return nil, fmt.Errorf("assign %q must use result.<field> or input.<field>", text)
+			}
 			return nil, fmt.Errorf("assign %q must use result.<field>", text)
 		}
 		// A `?` after the field lets the step finish without it.
 		field, optional := strings.CutSuffix(field, "?")
-		out = append(out, AssignTo{Var: name, Field: field, Append: appends, Optional: optional})
+		out = append(out, AssignTo{Var: name, Field: field, Append: appends, Optional: optional, FromInput: input})
 	}
 	return out, nil
 }
@@ -1233,8 +1253,10 @@ func checkAssignments(taskName string, assign []AssignTo, agent *Agent) error {
 	}
 	task := agent.Tasks[taskName]
 	for _, entry := range assign {
-		want, ok := agent.Variables[entry.Var]
-		if !ok {
+		if entry.FromInput {
+			continue
+		}
+		if _, ok := agent.Variables[entry.Var]; !ok {
 			// Name the file the author has to edit, because "does not resolve"
 			// says neither where to look nor what is wrong.
 			return fmt.Errorf("assign writes to %q, which State in state.py does not declare", entry.Var)
@@ -1254,25 +1276,42 @@ func checkAssignments(taskName string, assign []AssignTo, agent *Agent) error {
 			}
 			source = picked
 		}
-		target := want.Schema
-		if entry.Append {
-			if !target.IsList() {
-				return fmt.Errorf("assign appends to %q with %q, and %q is %s rather than a list. "+
-					"Drop the %q to replace the value, or declare it list[...] in state.py so an entry can be added to it",
-					entry.Var, entry.Var+"+:", entry.Var, target, "+")
-			}
-			target = target.Items
-			// An entry that may be absent is legal to append: the emitted append
-			// skips it, so the list grows only when the step produced something.
-			if source.Nullable {
-				copied := *source
-				copied.Nullable = false
-				source = &copied
-			}
+		if err := fitsAssign(entry, source, agent); err != nil {
+			return err
 		}
-		if err := stateschema.Fits(source, target); err != nil {
-			return fmt.Errorf("assign result %q does not fit variable %q: %w", entry.Field, entry.Var, err)
+	}
+	return nil
+}
+
+// fitsAssign checks that a value read for one assign entry fits the variable
+// it is saved to, an entry of it when the entry appends.
+func fitsAssign(entry AssignTo, source *stateschema.Type, agent *Agent) error {
+	want, ok := agent.Variables[entry.Var]
+	if !ok {
+		return fmt.Errorf("assign writes to %q, which State in state.py does not declare", entry.Var)
+	}
+	from := "result"
+	if entry.FromInput {
+		from = "input"
+	}
+	target := want.Schema
+	if entry.Append {
+		if !target.IsList() {
+			return fmt.Errorf("assign appends to %q with %q, and %q is %s rather than a list. "+
+				"Drop the %q to replace the value, or declare it list[...] in state.py so an entry can be added to it",
+				entry.Var, entry.Var+"+:", entry.Var, target, "+")
 		}
+		target = target.Items
+		// An entry that may be absent is legal to append: the emitted append
+		// skips it, so the list grows only when the step produced something.
+		if source.Nullable {
+			copied := *source
+			copied.Nullable = false
+			source = &copied
+		}
+	}
+	if err := stateschema.Fits(source, target); err != nil {
+		return fmt.Errorf("assign %s %q does not fit variable %q: %w", from, entry.Field, entry.Var, err)
 	}
 	return nil
 }
@@ -2011,7 +2050,10 @@ func buildConversation(raw *packagespec.Conversation) *Conversation {
 	}
 	conversation := &Conversation{MaxDuration: Duration(raw.MaxDuration), ThinkingAudio: ThinkingAudio(raw.ThinkingAudio)}
 	if raw.Greeting != nil {
-		conversation.Greeting = &Greeting{SpeaksFirst: SpeaksFirst(raw.Greeting.SpeaksFirst), Text: FlattenPaths(raw.Greeting.Text)}
+		conversation.Greeting = &Greeting{
+			SpeaksFirst: SpeaksFirst(raw.Greeting.SpeaksFirst), Text: FlattenPaths(raw.Greeting.Text),
+			Instruction: raw.Greeting.Instruction, Interruptible: raw.Greeting.Interruptible,
+		}
 	}
 	if raw.Interruption != nil {
 		conversation.Interruption = &Interruption{
@@ -2032,6 +2074,7 @@ func buildConversation(raw *packagespec.Conversation) *Conversation {
 	if raw.Inactivity != nil {
 		conversation.Inactivity = &Inactivity{
 			NudgeAfter: Duration(raw.Inactivity.NudgeAfter), EndAfter: Duration(raw.Inactivity.EndAfter),
+			NudgeText: FlattenPaths(raw.Inactivity.NudgeText), EndText: FlattenPaths(raw.Inactivity.EndText),
 		}
 	}
 	return conversation

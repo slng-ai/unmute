@@ -1,0 +1,164 @@
+# Version 2 fixture: the smallest package that writes every key version 2 adds.
+#
+# Each key appears once, so the golden IR shows what each one resolves to.
+# The tools' types come from tools/salon.py, read by unmute-core's local_tool.
+# Every spoken line reads only state: a value a line needs is saved first.
+version: 2
+
+name: v2-core
+
+entry_agent: desk
+
+mode: record
+
+secrets:
+  - OPENAI_API_KEY
+  - DEEPGRAM_API_KEY
+  - SLNG_API_KEY
+
+variables:
+  - name: caller_name
+    call_start: required
+  - name: caller_phone
+    call_start: optional
+  - name: account_id
+    dependencies: [caller_phone]
+
+prefetch:
+  - name: account
+    tool: lookup_account
+    writes: false
+    background: true
+    needs_confirmed: [caller_phone]
+    assign:
+      - account_id: result.account_id
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    task_groups:
+      - check_in
+    tasks:
+      - name: manage_booking
+        when: The caller wants to book an appointment.
+        instructions: tasks/booking.md
+        tools:
+          - find_slots
+          - save_booking
+        via:
+          - find_slots
+        arguments:
+          - preferred_day
+        inputs:
+          - memory: caller_name
+          - tool: account
+          - input: policy
+            value: Bookings can be moved up to a day before.
+        opens_with:
+          tool: find_slots
+          arguments:
+            - day: preferred_day
+          say:
+            - "I have {{state.offered_slots}} free. Which suits you?"
+        replies:
+          - tool: save_booking
+            when:
+              - status: slot_taken
+            say:
+              - That time has just gone. Shall I try another?
+        finish:
+          - tool: save_booking
+            success:
+              - status: booked
+            confirm:
+              - "Shall I book your {{state.booking.service}} on {{state.booking.day}} at {{state.booking.time}}?"
+            say:
+              - "You're all set for {{state.appointment.spoken}}."
+        assign:
+          - booking: input.booking
+          - appointment: result.appointment
+        context:
+          history: messages
+
+      - name: take_name
+        instructions: tasks/take_name.md
+        assign:
+          - caller_name: result.caller_name
+        context:
+          history: messages
+
+      - name: note_reason
+        instructions: tasks/note_reason.md
+        assign:
+          - reason: result.reason
+        context:
+          history: messages
+
+task_groups:
+  check_in:
+    when: The caller is new to the salon.
+    steps:
+      - take_name
+      - note_reason
+    context_scope: shared
+    then: end
+    arguments:
+      - caller_phone
+    non_blocking:
+      - note_reason
+
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: openai/gpt-4o-mini
+      agent_id: v2-core-v1
+      upstream:
+        provider: openai
+        key_env: OPENAI_API_KEY
+      params:
+        world_part: eu-west
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+      params:
+        world_part: eu-north
+  listen:
+    transcriber:
+      provider: deepgram
+      model: nova-3
+  turn:
+    vad:
+      provider: local
+      model: silero
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi {{state.caller_name}}, this is the salon. How can I help?"
+    instruction: Greet the caller by name and ask how you can help.
+    interruptible: false
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
+    nudge_text: Are you still there?
+    end_text: I'll let you go now. Call back any time.
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m
+
+tools:
+  - find_slots
+  - save_booking
+  - lookup_account

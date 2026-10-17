@@ -160,7 +160,7 @@ func TestExtraTypesRefusesAnUnlistedModule(t *testing.T) {
 func TestParsePropertyReadsAToolOutput(t *testing.T) {
 	typ, err := ParseProperty(map[string]any{"type": "object", "properties": map[string]any{
 		"status": map[string]any{"enum": []any{"done"}}, "tags": map[string]any{"type": "array"},
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -331,12 +331,23 @@ func Parse(schema []byte) (*Model, error) {
 
 // ParseProperty reads one property of a tool's output: schema, as the author
 // wrote it in YAML. An untyped property is read as text, as it always was.
-func ParseProperty(property map[string]any) (*Type, error) {
+// defs is the output's own $defs, which a property read from a handler's
+// Pydantic model refers into; nil for a schema written in YAML.
+func ParseProperty(property, defs map[string]any) (*Type, error) {
 	data, err := json.Marshal(property)
 	if err != nil {
 		return nil, err
 	}
 	r := &resolver{lenient: true}
+	if len(defs) > 0 {
+		encoded, err := json.Marshal(defs)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(encoded, &r.defs); err != nil {
+			return nil, err
+		}
+	}
 	return r.node(data, "")
 }
 

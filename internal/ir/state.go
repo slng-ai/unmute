@@ -61,12 +61,16 @@ func buildState(pkg *packagespec.Package, out *Agent) error {
 				where, entry.Name, packagespec.StateFile, strings.Join(out.VariableOrder, ", "))
 		case seen[entry.Name]:
 			return fmt.Errorf("%s: variables: lists %q twice; give it one entry", where, entry.Name)
-		case entry.Source == "" && entry.Confirm == "":
+		case entry.Source == "" && entry.Confirm == "" && entry.CallStart == "" && len(entry.Dependencies) == 0:
 			return fmt.Errorf("%s: the variables: entry for %q says nothing. List a field here only to give it "+
 				"source: or confirm:, and drop the entry otherwise", where, entry.Name)
 		}
 		seen[entry.Name] = true
 		variable.Source, variable.Confirm = VariableSource(entry.Source), entry.Confirm
+		if err := callStart(entry, &variable); err != nil {
+			return fmt.Errorf("%s: %w", where, err)
+		}
+		variable.Dependencies = entry.Dependencies
 		out.Variables[entry.Name] = variable
 	}
 	out.State, out.StateSource = model, string(pkg.StateSource)
