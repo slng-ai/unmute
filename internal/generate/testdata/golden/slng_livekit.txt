@@ -112,7 +112,7 @@ def _caller_turns(chat_ctx: llm.ChatContext) -> int:
 
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Self, get_args, get_origin
+from typing import Any, ClassVar, Self, get_args, get_origin
 
 from openai import AsyncOpenAI
 from pydantic import (
@@ -710,8 +710,7 @@ def _field_type(name: str) -> Any:
         The annotation, wrapped back in Annotated when the field carries
         constraints, because FieldInfo keeps those apart from the annotation.
     """
-    info = CallState.model_fields[name]
-    return Annotated[(info.annotation, *info.metadata)] if info.metadata else info.annotation
+    return CallState.model_fields[name].rebuild_annotation()
 
 
 def _item_type(annotation: Any) -> Any:
@@ -1055,7 +1054,7 @@ import os
 from collections.abc import AsyncIterable
 from typing import Any
 
-import httpx
+import httpx2
 from livekit.agents import NOT_GIVEN, ChatContext, FlushSentinel, ModelSettings, llm
 from livekit.agents.llm import ChatChunk, Tool
 from openai import AsyncOpenAI
@@ -1092,7 +1091,7 @@ def _slng_config_fast_reasoning() -> dict:
     """
     return {"tiers": {"1": [{"endpoint": {"api_key": os.environ["OPENAI_API_KEY"], "url": "https://api.openai.com/v1"}, "model": "gpt-5.6-luna", "weight": 100}]}}
 
-async def _slng_log_provenance(response: httpx.Response) -> None:
+async def _slng_log_provenance(response: httpx2.Response) -> None:
     """Say where this answer came from, once per think request.
 
     The router states this only in response headers, and neither framework hands
@@ -1100,7 +1099,7 @@ async def _slng_log_provenance(response: httpx.Response) -> None:
     it the question an operator actually asks about a cache, whether it is
     working, has no answer in this run's own log.
 
-    Three rules, from httpx's own event-hooks documentation, each of which would
+    Three rules, from httpx2's own event-hooks documentation, each of which would
     be a live-call defect if broken. It has to be async, because a sync callable
     on an AsyncClient is never awaited. It reads headers only: the hook runs
     before the body is read, so touching the body would consume the stream the
@@ -1141,7 +1140,9 @@ def _slng_router_client() -> AsyncOpenAI:
     provenance line above costs this function.
 
     Every value restates the plugin's own default at the pinned version
-    (llm.py:161-176): retries off, and that exact httpx timeout and limit set.
+    (llm.py:185-199): retries off, and that exact httpx2 timeout and limit set.
+    livekit-plugins-openai 1.8.8 builds on openai 3, which takes an httpx2
+    client, so this one is httpx2 too.
     Restating them is the point. Anything different here would be a change to
     retry or connection behaviour that nobody asked for and nothing would report.
 
@@ -1155,10 +1156,10 @@ def _slng_router_client() -> AsyncOpenAI:
         api_key=os.environ["SLNG_API_KEY"],
         base_url="https://eu-west.context-router.slng.ai/v1",
         max_retries=0,
-        http_client=httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=15.0, read=5.0, write=5.0, pool=5.0),
+        http_client=httpx2.AsyncClient(
+            timeout=httpx2.Timeout(connect=15.0, read=5.0, write=5.0, pool=5.0),
             follow_redirects=True,
-            limits=httpx.Limits(
+            limits=httpx2.Limits(
                 max_connections=50,
                 max_keepalive_connections=50,
                 keepalive_expiry=120,
@@ -2092,8 +2093,8 @@ async def run_call(ctx: JobContext) -> None:
 from __future__ import annotations
 
 import os
+import urllib.request
 from urllib.parse import urlparse
-from urllib.request import proxy_bypass_environment
 
 from dotenv import load_dotenv
 from livekit.agents import AgentServer, JobContext
@@ -2103,13 +2104,14 @@ from settings import LOCAL_INIT_TIMEOUT_SECS
 
 load_dotenv()
 
-# livekit-agents 1.8.1 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
-# connection to LIVEKIT_URL and ignores NO_PROXY (worker.py:358). A proxy that
+# livekit-agents 1.8.8 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
+# connection to LIVEKIT_URL and ignores NO_PROXY (worker.py:363). A proxy that
 # only tunnels HTTPS answers that request with 405, and the worker never
 # registers. So a LiveKit host listed in NO_PROXY is reached directly. Anything
-# else gets the value the SDK would have picked itself.
+# else gets the value the SDK would have picked itself. proxy_bypass_environment
+# is stdlib but has no typeshed stub, hence the ignore.
 WORKER_PROXY = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
-if proxy_bypass_environment(urlparse(os.getenv("LIVEKIT_URL", "")).hostname or ""):
+if urllib.request.proxy_bypass_environment(urlparse(os.getenv("LIVEKIT_URL", "")).hostname or ""):  # ty: ignore[unresolved-attribute]
     WORKER_PROXY = None
 
 server = AgentServer(http_proxy=WORKER_PROXY)

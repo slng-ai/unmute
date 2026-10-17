@@ -122,7 +122,7 @@ def _settle_task_call(messages: list[Any], name: str, status: Any) -> None:
 
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Self, get_args, get_origin
+from typing import Any, ClassVar, Self, get_args, get_origin
 
 from loguru import logger
 from pydantic import (
@@ -708,8 +708,7 @@ def _field_type(name: str) -> Any:
         The annotation, wrapped back in Annotated when the field carries
         constraints, because FieldInfo keeps those apart from the annotation.
     """
-    info = CallState.model_fields[name]
-    return Annotated[(info.annotation, *info.metadata)] if info.metadata else info.annotation
+    return CallState.model_fields[name].rebuild_annotation()
 
 
 def _item_type(annotation: Any) -> Any:
@@ -2296,6 +2295,10 @@ async def _run_bot(transport: BaseTransport, runner_args: RunnerArguments, dev: 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
+            # pipecat-ai 1.12.0 answers a turn with no transcript by adding a
+            # "please repeat" developer message and running the model. Off, so
+            # the model sees only the conversation, the same as on LiveKit.
+            empty_user_turn=None,
             # The FLOOR: how long silence has to last before speech counts as
             # stopped. Pipecat's own default, and it does not move with the pace.
             #

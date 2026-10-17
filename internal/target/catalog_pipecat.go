@@ -1,13 +1,16 @@
 package target
 
 // Pipecat entries. Contract: the pipecat_v1 driver templates, pipecat-ai
-// ==1.10.0. Official services ship as pipecat-ai extras and take model/
+// ==1.12.0. Official services ship as pipecat-ai extras and take model/
 // voice/params nested in Class.Settings(...) (flat forms deprecated since
 // v0.0.105; verified against the per-service docs 2026-07-15). The SLNG
 // plugin is a standalone package with flat kwargs (verified against the
 // published pipecat_slng-0.6.0 wheel 2026-10-02). Its pin has a ceiling,
 // unlike the rest of this catalog: 0.6.0 made world_part a required kwarg,
-// and a floor alone installed it under every package compiled for 0.5.2. The
+// and a floor alone installed it under every package compiled for 0.5.2.
+// 0.7.0 only adds two optional tracking kwargs, external_agent_id and
+// external_session_id (diff of the 0.6.0.post1 and 0.7.0 wheels, 2026-10-17),
+// which unmute-core passes. The
 // GitHub tag can differ from the PyPI version (v0.5.3 published as 0.5.2), so
 // the pin names the PyPI version.
 
@@ -117,7 +120,7 @@ var pipecatCatalog = []Entry{
 		Framework: Pipecat, Role: Listen, Vendor: "slng",
 		Distributes: []string{"deepgram"},
 		Verified:    "2026-10-02", Docs: pipecatServicesDocs,
-		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.6.0,<0.7"},
+		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.7.0,<0.8"},
 		Import:  "from pipecat_slng import SlngSTTService",
 		Call: &CallSpec{
 			Class: "SlngSTTService", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
@@ -271,7 +274,7 @@ var pipecatCatalog = []Entry{
 		Framework: Pipecat, Role: Speak, Vendor: "slng",
 		Distributes: []string{"cartesia", "deepgram"},
 		Verified:    "2026-10-02", Docs: pipecatServicesDocs,
-		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.6.0,<0.7"},
+		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.7.0,<0.8"},
 		Import:  "from pipecat_slng import SlngTTSService",
 		Call: &CallSpec{
 			Class: "SlngTTSService", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",

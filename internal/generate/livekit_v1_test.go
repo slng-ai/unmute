@@ -260,7 +260,7 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	if !strings.Contains(pyproject, `name = "unmute-remy-fixture"`) {
 		t.Error("pyproject.toml distribution name shadows the livekit dependency")
 	}
-	for _, dep := range []string{`"opentelemetry-sdk>=1.33,<2"`, `"opentelemetry-exporter-otlp-proto-http>=1.33,<2"`} {
+	for _, dep := range []string{`"opentelemetry-sdk>=1.40,<2"`, `"opentelemetry-exporter-otlp-proto-http>=1.40,<2"`} {
 		if !strings.Contains(pyproject, dep) {
 			t.Errorf("pyproject.toml missing %s", dep)
 		}
@@ -446,10 +446,9 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 	// dl§V26 requires the checkers to be declared. The ruff version is pinned on
 	// purpose: unpinned, `uv` resolves whatever ruff shipped today, and 0.16
 	// widened its default rule selection enough to fail an unchanged generator.
-	// The floor is 3.11 because the shipped salon tools import `datetime.UTC`,
-	// and ty reads its Python version from this line: at 3.10 it reported the
-	// import as unresolved on every example.
-	for _, want := range []string{"[dependency-groups]", `"ruff==`, `"ty"`, `requires-python = ">=3.11"`} {
+	// The floor is 3.12 because unmute-core, which the emitted project is moving
+	// onto, requires it. ty reads its Python version from this line.
+	for _, want := range []string{"[dependency-groups]", `"ruff==`, `"ty"`, `requires-python = ">=3.12"`} {
 		if !strings.Contains(artifactFile(t, toolFree, "pyproject.toml"), want) {
 			t.Errorf("pyproject.toml missing %q", want)
 		}
@@ -2295,7 +2294,7 @@ func TestLiveKitWorkerHonoursNoProxy(t *testing.T) {
 	for name, artifact := range map[string]Artifact{"plain": devArtifact(t, ir.ProviderLiveKit), "telephony": telephony} {
 		t.Run(name, func(t *testing.T) {
 			agentPy := artifactFile(t, artifact, "agent.py")
-			if !strings.Contains(agentPy, `if proxy_bypass_environment(urlparse(os.getenv("LIVEKIT_URL", "")).hostname or ""):`) {
+			if !strings.Contains(agentPy, `if urllib.request.proxy_bypass_environment(urlparse(os.getenv("LIVEKIT_URL", "")).hostname or ""):`) {
 				t.Errorf("agent.py does not check NO_PROXY for LIVEKIT_URL:\n%s", agentPy)
 			}
 			if servers, passed := strings.Count(agentPy, "AgentServer("), strings.Count(agentPy, "http_proxy=WORKER_PROXY"); servers != 1 || passed != 1 {
@@ -2542,12 +2541,12 @@ func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
 		t.Fatal(err)
 	}
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
-	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.8.2"}
+	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.8.9"}
 	artifact, err := Generate(agent, tgt, target.Default())
 	if err != nil {
 		t.Fatalf("generate with pin: %v", err)
 	}
-	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, `"livekit-plugins-slng>=1.8.2"`) {
+	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, `"livekit-plugins-slng>=1.8.9"`) {
 		t.Errorf("pin did not raise the plugin floor:\n%s", pyproject)
 	}
 	// No deployment config file is emitted: the platform assigns both of its
@@ -2936,7 +2935,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	tgt.Connection = "twilio_sip"
 	tgt.Models.Reason["backup"] = ir.Binding{Model: "openai/gpt-4o"}
 	tgt.Destinations = map[string]string{"line": "+14155550123"}
-	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.8.2"}
+	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.8.9"}
 
 	artifact, err := Generate(agent, tgt, target.Default())
 	if err != nil {
@@ -2955,7 +2954,9 @@ func TestCheckLiveKitVersion(t *testing.T) {
 		version string
 		ok      bool
 	}{
-		{"1.8.1", true},
+		{"1.8.8", true},
+		{"1.8.7", false}, // the previous pin
+		{"1.8.1", false},
 		// A declared version is an exact install pin, so half a version is no
 		// longer accepted and resolved on the author's behalf.
 		{"1.5", false},

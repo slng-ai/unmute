@@ -1129,6 +1129,11 @@ class _PlaybackLatencyObserver(UserBotLatencyObserver):
     handled, and a task keeps the context variables it was created with. So
     each event handler reads, from _PLAYING, the context of its own speech.
     The same start and stop frames time the bot's speech.
+
+    Since pipecat-ai 1.12.0 the framework's observer sees only a frame's first
+    push, and the transport's push of a TTSStartedFrame is a repeat: the
+    synthesizer pushed it first. So this one watches every push, and hands the
+    framework only the first pushes it asked for.
     """
 
     def __init__(self, reporter: DevReporter) -> None:
@@ -1143,6 +1148,11 @@ class _PlaybackLatencyObserver(UserBotLatencyObserver):
         self._started: float | None = None
         self._speech_context: str | None = None
 
+    @property
+    def observe_every_push(self) -> bool:
+        """See the transport's repeat pushes, where playback is visible."""
+        return True
+
     async def on_push_frame(self, data: Any) -> None:
         """Follow the transport's playback, then let the framework measure.
 
@@ -1151,7 +1161,7 @@ class _PlaybackLatencyObserver(UserBotLatencyObserver):
         """
         frame = data.frame
         if data.direction != FrameDirection.DOWNSTREAM or not isinstance(data.source, BaseOutputTransport):
-            await super().on_push_frame(data)
+            await self._measure(data)
             return
         if isinstance(frame, TTSStartedFrame):
             self._context = frame.context_id
@@ -1163,14 +1173,23 @@ class _PlaybackLatencyObserver(UserBotLatencyObserver):
             self._started, self._speech_context = time.monotonic(), self._context
             token = _PLAYING.set(self._context)
             try:
-                await super().on_push_frame(data)
+                await self._measure(data)
             finally:
                 _PLAYING.reset(token)
             return
         elif isinstance(frame, BotStoppedSpeakingFrame) and self._started is not None:
             started, self._started = self._started, None
             self._reporter.speech_measured(time.monotonic() - started, self._reporter.reply_of(self._speech_context))
-        await super().on_push_frame(data)
+        await self._measure(data)
+
+    async def _measure(self, data: Any) -> None:
+        """Hand the framework a push, if it is the first push of its frame.
+
+        Args:
+            data: The observed frame push.
+        """
+        if data.first_push:
+            await super().on_push_frame(data)
 
 
 def install_dev_metrics(runner_args: RunnerArguments) -> DevReporter:

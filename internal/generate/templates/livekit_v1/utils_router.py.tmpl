@@ -65,7 +65,7 @@ def _slng_vertex_credentials(name: str) -> dict:
         f"the key JSON, that JSON base64 encoded, or a path to the key file"
     )
 {{end}}
-async def _slng_log_provenance(response: httpx.Response) -> None:
+async def _slng_log_provenance(response: httpx2.Response) -> None:
     """Say where this answer came from, once per think request.
 
     The router states this only in response headers, and neither framework hands
@@ -73,7 +73,7 @@ async def _slng_log_provenance(response: httpx.Response) -> None:
     it the question an operator actually asks about a cache, whether it is
     working, has no answer in this run's own log.
 
-    Three rules, from httpx's own event-hooks documentation, each of which would
+    Three rules, from httpx2's own event-hooks documentation, each of which would
     be a live-call defect if broken. It has to be async, because a sync callable
     on an AsyncClient is never awaited. It reads headers only: the hook runs
     before the body is read, so touching the body would consume the stream the
@@ -114,7 +114,9 @@ def _slng_router_client() -> AsyncOpenAI:
     provenance line above costs this function.
 
     Every value restates the plugin's own default at the pinned version
-    (llm.py:161-176): retries off, and that exact httpx timeout and limit set.
+    (llm.py:185-199): retries off, and that exact httpx2 timeout and limit set.
+    livekit-plugins-openai 1.8.8 builds on openai 3, which takes an httpx2
+    client, so this one is httpx2 too.
     Restating them is the point. Anything different here would be a change to
     retry or connection behaviour that nobody asked for and nothing would report.
 
@@ -128,10 +130,10 @@ def _slng_router_client() -> AsyncOpenAI:
         api_key=os.environ[{{pyq .Slng.ClientKeyEnv}}],
         base_url={{pyq .Slng.ClientBaseURL}},
         max_retries=0,
-        http_client=httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=15.0, read=5.0, write=5.0, pool=5.0),
+        http_client=httpx2.AsyncClient(
+            timeout=httpx2.Timeout(connect=15.0, read=5.0, write=5.0, pool=5.0),
             follow_redirects=True,
-            limits=httpx.Limits(
+            limits=httpx2.Limits(
                 max_connections=50,
                 max_keepalive_connections=50,
                 keepalive_expiry=120,

@@ -162,7 +162,8 @@ var listenTurnDetectors = map[Provider]map[string]ListenTurnDetector{
 		// silently changes who ends them on a version bump. Under a listening
 		// decider the new default is what the author asked for, and it is still
 		// written rather than left implicit, because a default that moved once
-		// can move again.
+		// can move again. It did: pipecat-ai 1.11.0 put the default back to
+		// EXTERNAL (stt.py:174 in 1.12.0).
 		"speechmatics": {
 			Vendor: "speechmatics", Switch: SwitchSetting,
 			EnableArg:    "turn_detection_mode",

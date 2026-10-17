@@ -459,8 +459,8 @@ Change the package and recompile.
 from __future__ import annotations
 
 import os
+import urllib.request
 from urllib.parse import urlparse
-from urllib.request import proxy_bypass_environment
 
 from dotenv import load_dotenv
 from livekit.agents import AgentServer, JobContext
@@ -470,13 +470,14 @@ from settings import LOCAL_INIT_TIMEOUT_SECS
 
 load_dotenv()
 
-# livekit-agents 1.8.1 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
-# connection to LIVEKIT_URL and ignores NO_PROXY (worker.py:358). A proxy that
+# livekit-agents 1.8.8 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
+# connection to LIVEKIT_URL and ignores NO_PROXY (worker.py:363). A proxy that
 # only tunnels HTTPS answers that request with 405, and the worker never
 # registers. So a LiveKit host listed in NO_PROXY is reached directly. Anything
-# else gets the value the SDK would have picked itself.
+# else gets the value the SDK would have picked itself. proxy_bypass_environment
+# is stdlib but has no typeshed stub, hence the ignore.
 WORKER_PROXY = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
-if proxy_bypass_environment(urlparse(os.getenv("LIVEKIT_URL", "")).hostname or ""):
+if urllib.request.proxy_bypass_environment(urlparse(os.getenv("LIVEKIT_URL", "")).hostname or ""):  # ty: ignore[unresolved-attribute]
     WORKER_PROXY = None
 
 server = AgentServer(http_proxy=WORKER_PROXY)
@@ -1512,7 +1513,7 @@ async def run_call(ctx: JobContext) -> None:
 
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Self, get_args, get_origin
+from typing import Any, ClassVar, Self, get_args, get_origin
 
 from pydantic import (
     BaseModel,
@@ -2100,8 +2101,7 @@ def _field_type(name: str) -> Any:
         The annotation, wrapped back in Annotated when the field carries
         constraints, because FieldInfo keeps those apart from the annotation.
     """
-    info = CallState.model_fields[name]
-    return Annotated[(info.annotation, *info.metadata)] if info.metadata else info.annotation
+    return CallState.model_fields[name].rebuild_annotation()
 
 
 def _item_type(annotation: Any) -> Any:
@@ -2330,11 +2330,11 @@ STEP_RESULTS = {step: StepResult.for_step(step) for step in CallState.RESULTS}
 {
   "target": "livekit",
   "provider": "livekit",
-  "version": "1.8.1",
+  "version": "1.8.8",
   "supported": {
-    "floor": "1.8.1",
-    "ceiling": "1.8.1",
-    "verified": "2026-09-13"
+    "floor": "1.8.8",
+    "ceiling": "1.8.8",
+    "verified": "2026-10-17"
   },
   "entry_agent": "Greeter",
   "agents": [
@@ -2489,9 +2489,9 @@ STEP_RESULTS = {step: StepResult.for_step(step) for step in CallState.RESULTS}
     }
   ],
   "notes": [
-    "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.8.1, verified 2026-07-15)",
+    "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.8.8, verified 2026-07-15)",
     "reason: openai via openai.LLM (livekit-agents[openai], verified 2026-07-18)",
-    "speak: slng via slng.TTS (livekit-plugins-slng\u003e=1.8.1, verified 2026-07-15)",
+    "speak: slng via slng.TTS (livekit-plugins-slng\u003e=1.8.8, verified 2026-07-15)",
     "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory",
     "turn pace balanced (silence 0.3s from the pace, closes at 1.6s)"
   ]
@@ -2677,14 +2677,14 @@ When this step is complete, call `finish`.
 name = "unmute-remy-fixture"
 version = "0.1.0"
 description = "Generated LiveKit Agents project (unmute livekit driver)"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "httpx",
-    "livekit-agents[openai]==1.8.1",
-    "livekit-plugins-silero>=1.8.1",
-    "livekit-plugins-slng>=1.8.1",
-    "opentelemetry-exporter-otlp-proto-http>=1.33,<2",
-    "opentelemetry-sdk>=1.33,<2",
+    "livekit-agents[openai]==1.8.8",
+    "livekit-plugins-silero>=1.8.8",
+    "livekit-plugins-slng>=1.8.8",
+    "opentelemetry-exporter-otlp-proto-http>=1.40,<2",
+    "opentelemetry-sdk>=1.40,<2",
     "python-dotenv",
 ]
 
@@ -2711,7 +2711,7 @@ convention = "google"
 "logic/*" = ["D", "ANN"]
 
 [tool.ty.environment]
-python-version = "3.11"
+python-version = "3.12"
 === session.py ===
 """How the call's state is filled and read: templates, refusals, pre-fetch and call start."""
 
@@ -4307,7 +4307,7 @@ utils/telemetry.py.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
@@ -4490,7 +4490,7 @@ class TurnTracer:
     @contextmanager
     def start_as_current_span(
         self, name: str, context: Context | None = None, **kwargs: Any
-    ) -> Iterator[trace.Span]:
+    ) -> Generator[trace.Span]:
         """Start a current span, moving livekit's turn spans inside the call's turn."""
         with self._inner.start_as_current_span(
             name, self._call.context_for(name, context), **kwargs

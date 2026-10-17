@@ -58,8 +58,8 @@ func TestEveryRetiredParamSaysWhatToDo(t *testing.T) {
 // TestRetiredParamIsKeyedByFrameworkVendorAndRole is the one that stops this
 // table becoming a liability. `model` is a removed Speechmatics listening
 // setting and an ordinary field on every think binding in the tree, and the
-// LiveKit plugin for the same vendor lost none of these settings: a lookup by
-// key alone would refuse most of the packages here.
+// LiveKit plugin for the same vendor lost a different set: a lookup by key
+// alone would refuse packages that are correct as written.
 func TestRetiredParamIsKeyedByFrameworkVendorAndRole(t *testing.T) {
 	for _, tc := range []struct {
 		framework Provider
@@ -71,10 +71,11 @@ func TestRetiredParamIsKeyedByFrameworkVendorAndRole(t *testing.T) {
 		{Pipecat, "speechmatics", Listen, "include_results", true},
 		{Pipecat, "speechmatics", Listen, "operating_point", true},
 		// Same key, same vendor, DIFFERENT FRAMEWORK. The LiveKit plugin is a
-		// different SDK and lost nothing; on that target operating_point is how
-		// accuracy is chosen, so refusing it would break a working package.
-		{LiveKit, "speechmatics", Listen, "operating_point", false},
+		// different SDK and lost a different set: include_results was never a
+		// LiveKit setting, and include_partials is one still.
 		{LiveKit, "speechmatics", Listen, "include_results", false},
+		{LiveKit, "speechmatics", Listen, "include_partials", false},
+		{LiveKit, "speechmatics", Listen, "operating_point", true},
 		// Same key, different vendor: assemblyai forwards whatever it forwards.
 		{Pipecat, "assemblyai", Listen, "include_results", false},
 		// Same key, different role.
