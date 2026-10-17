@@ -1,4 +1,9 @@
-"""The call state of salon-concierge: every value its agents and tasks share."""
+"""What one salon call knows, shared by both agents and every task.
+
+Ported from unmute-core's examples/salon-concierge-unmute. The values after
+``customer_verified`` are what the lines code speaks read: agent.yaml version 2 lines read
+only State, so each step saves what its read-back or its offer names first.
+"""
 
 from datetime import date, time
 from typing import Literal
@@ -8,42 +13,62 @@ from unmute_core.state import Id, Phone
 
 
 class Appointment(BaseModel):
-    """The latest booking successfully created, moved, or cancelled."""
+    """The latest booking that was created, moved or cancelled."""
 
     booking_id: Id
     service: Literal["haircut", "hair-color", "blowout"]
     date: date
-    spoken: str
     time: time
     action: Literal["book", "move", "cancel"]
 
 
 class State(BaseModel):
-    """What one call knows, shared by every agent and task in it."""
+    """What one call knows. Every value has a default, as ``CallState`` requires."""
 
     appointment: Appointment | None = Field(
-        None,
-        description="The latest successful booking action, saved only after the tool succeeds.",
+        None, description="The latest successful booking action, saved after the tool succeeds."
     )
     booking_date: date | None = Field(
-        None,
-        description='Today\'s date in the salon\'s own timezone, YYYY-MM-DD. Read once from the clock before the greeting, so a caller saying "tomorrow" costs one model request instead of two chained tool calls. A call that crosses midnight keeps the day it started on, which is deliberate: a date changing underneath a conversation would leave the caller and the agent disagreeing about what "tomorrow" means halfway through.',
+        None, description="Today's date in the salon's timezone, read once before the greeting."
     )
-    booking_weekday: str = Field(
-        "",
-        description='The weekday today falls on, spelled out in English: Monday to Sunday. From the same clock reading as `booking_date`, so the two cannot disagree about which day it is. It is what lets the agent answer "next Friday" without a second turn working out what day today is first.',
-    )
+    booking_weekday: str = Field("", description="The weekday of booking_date, in English.")
     salon_local_time: time | None = Field(
-        None,
-        description='The salon\'s own wall clock when the call began, HH:MM on a 24 hour clock. From the same reading as the two above. It is what lets the agent know that a caller asking for "this afternoon" at 17:40 is asking for something that has nearly passed, rather than offering them a slot that is already gone.',
+        None, description="The salon's wall clock when the call began."
     )
-    # confirm: in agent.yaml is verify_customer. Until that step has heard the
-    # caller agree, this value renders in no prompt but its own.
     customer_phone: Phone | None = Field(
         None,
-        description="The caller's phone number in E.164: a plus sign, then digits, with no spaces, brackets or dashes. One shape for every phone number in this package, the MANAGER_PHONE_NUMBER transfer destination included, so no prompt and no tool has to guess which shape it is holding.\nNo `source:` here on purpose. The prefetch block below reads the carrier's fact and this variable receives it, which leaves the per-route refusal for a variable naming a source its target cannot supply exactly as strict as it is: on a route with no caller ID the entry skips and this holds its default.\nOffered to the caller for a yes, never acted on unasked. Somebody may be ringing from a friend's phone, or may hold a second account, so until the verification step has heard them agree this value stays unconfirmed and appears in no prompt but that step's own.",
+        description=(
+            "The caller's phone number in E.164. It shows in no prompt but verify_customer's "
+            "until the caller agrees to it."
+        ),
+    )
+    requested_service: Literal["haircut", "hair-color", "blowout"] | None = Field(
+        None, description="The service the caller asked for. Leave it out if they did not say."
+    )
+    requested_day: date | None = Field(
+        None,
+        description=(
+            "The day the caller asked for, YYYY-MM-DD. Leave it out if they did not name one; "
+            "never guess today."
+        ),
+    )
+    requested_intent: Literal["book", "move", "cancel"] | None = Field(
+        None,
+        description="Whether the caller wants to book a new time, move theirs, or cancel it.",
     )
     customer_verified: str = Field(
         "",
-        description="Whether verification has already run on this call, and what it found. Set by the verification step as it ends, which only happens on a number the caller agreed to, so a value here means the number beside it is confirmed.\nIt exists for customer care, which has to decide whether to identify the caller before writing a complaint down and cannot read `customer_phone` to find out: an unconfirmed number renders in no prompt but the verification step's own, and a confirmed one must not be in front of an agent that might say it out loud. This carries the same fact with nothing sensitive in it.\nThe concierge does not read it. The `book` flow decides the same thing structurally with `skip_when_confirmed:`, off the confirmation itself rather than off a copy of it.\nEmpty means nobody has been verified yet on this call.",
+        description=(
+            "What verification found on this call: existing or created. Empty means nobody "
+            "was verified yet. Customer care reads it instead of the phone number."
+        ),
     )
+    number_heard: Phone | None = Field(
+        None, description="The number the caller gave, read back before verification runs."
+    )
+    chosen_service: Literal["haircut", "hair-color", "blowout"] | None = Field(
+        None, description="The service a booking or a cancellation reads back."
+    )
+    chosen_day: date | None = Field(None, description="The day a booking, move or cancel reads back.")
+    chosen_time: time | None = Field(None, description="The time a booking, move or cancel reads back.")
+    offer: str = Field("", description="The offer find_slots last returned, said by code.")

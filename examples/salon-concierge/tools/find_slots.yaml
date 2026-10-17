@@ -11,30 +11,12 @@ description: >-
   A call for a day nobody named answers nothing, and the second call you then
   have to make speaks a second announcement the caller did not need to hear.
 
-inject:
-  - customer_phone: "{{state.customer_phone}}"
-
 local:
   handler: tools/salon.py:find_slots
 
-# No `announce:` here, and there was one until 2026-09-16. It read the diary, so
-# a line here was honest about what happened next, and it was the only line on a
-# booking after the first.
-#
-# It moved to the `manage_booking` step. A tool's line is emitted inside the
-# tool body, so it fires once per call rather than once per request: on the live
-# call of 2026-09-16 (trace 917975e9) the model called this twice in one turn
-# and the caller heard "Let me see what is free." and "Let me double check what
-# I have available." 0.8 seconds apart. No prompt rule stops a model chaining a
-# tool, and this package had one that said not to.
-#
-# A step's line fires once in `on_enter`, before the model has decided anything,
-# which makes the repetition structurally impossible and also lands the line
-# 0.64 seconds earlier than it did here.
-#
-# There is still exactly one announcement in this flow, which is the rule in the
-# skill's latency page: never put one on two tools that fire in the same turn,
-# or in turns a second apart. `find_or_create_customer` gave up its line first,
-# and this one followed it onto the step that owns the work.
-interruption: provider_default
-effect: returns_data
+inject:
+  - customer_phone: "{{state.customer_phone}}"
+
+# The offer sentence, saved on every result so the booking step can say it in code.
+assign:
+  - offer: result.offer

@@ -7,4 +7,4 @@ description: >-
 
 builtin:
   id: end_call
-  instructions: Say one short goodbye in your own words, then end the call. Do not offer anything else first.
+  instructions: In the same reply as this call, and before it, say one short goodbye in your own words. Nothing is said after the call.

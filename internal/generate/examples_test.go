@@ -44,7 +44,7 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("target %q does not generate: %v", name, err)
 			}
-			if name == "livekit" && !strings.Contains(artifactFile(t, artifact, agentSource), `model="gemini-3.1-flash-lite"`) {
+			if !strings.Contains(artifactFile(t, artifact, "agent.json"), `"model": "gemini-3.1-flash-lite"`) {
 				t.Error("salon-concierge must reason on gemini-3.1-flash-lite")
 			}
 		})
@@ -57,6 +57,8 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 // single-agent shape the compiler tests need.
 func examplePackagePath(name string) string {
 	switch name {
+	case "salon-concierge-v1":
+		return filepath.Join("..", "testdata", name)
 	case "remy", "safe_core", "daily_carrier", "simple-prompt", "typed_state", "typed_inputs", "prefetch_core", "terminal_step", "turn_listener", "turn_listener_gradium", "speechmatics_local", "speechmatics_listen", "live_model":
 		return filepath.Join("..", "testdata", name)
 	case "salon-concierge-v2", "salon-concierge-v3":
@@ -216,8 +218,16 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if transfer.Announce != "" || transfer.Context.History != ir.HistoryMessages {
-			t.Errorf("internal handoff %q must stay silent and carry spoken messages: %#v", name, transfer)
+		if transfer.Context.History != ir.HistoryMessages {
+			t.Errorf("internal handoff %q must carry spoken messages: %#v", name, transfer)
+		}
+		// Customer care says why the call moves. Back to the concierge, it moves silently.
+		want := ""
+		if name == "to_complaints" {
+			want = "I'm sorry to hear that. Let me take this down properly."
+		}
+		if transfer.Announce != want {
+			t.Errorf("internal handoff %q says %q, want %q", name, transfer.Announce, want)
 		}
 	}
 	for name, task := range resolved.Tasks {
@@ -391,14 +401,16 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if !ok || verify.When == "" {
 		t.Errorf("verify_customer = %#v, want a delegate with a when: of its own", resolved.Controls["verify_customer"])
 	}
-	// One read and one write, and the seam is the conversation's own: find_slots
-	// answers "what do they hold" and "what is free" together, because a caller
-	// moving an appointment needs their booking id and the new day's free times
-	// in the same breath, and fetching those separately cost two model round
-	// trips for one request. save_booking is the only tool that changes
-	// anything, so `confirmed` is checked in one place.
-	if !slices.Equal(slices.Sorted(slices.Values(booking.Tools)), []string{"find_slots", "save_booking", "to_complaints"}) {
-		t.Errorf("booking tools = %v, want one read, one write and the complaints handoff", booking.Tools)
+	// One read, and one write per action. find_slots answers "what do they
+	// hold" and "what is free" together, because a caller moving an appointment
+	// needs their booking id and the new day's free times in the same breath,
+	// and fetching those separately cost two model round trips for one request.
+	// Each write is read back by code before it runs, so no tool takes a
+	// `confirmed` flag the model could set on its own.
+	if !slices.Equal(slices.Sorted(slices.Values(booking.Tools)), []string{
+		"book_appointment", "cancel_appointment", "find_slots", "move_appointment", "to_complaints",
+	}) {
+		t.Errorf("booking tools = %v, want one read, a write per action and the complaints handoff", booking.Tools)
 	}
 	// The five narrower booking tools are gone, not merely unlisted: each one the
 	// model could still see was a name it had to choose between, and a package an
@@ -474,15 +486,17 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// confirmed as "3:00 PM" off the caller's earlier words "the same time".
 	// The tool composes it now, so a package that drops this field puts the
 	// agent back to composing one.
-	appointment := modelNamed(resolved, "Appointment")
-	if appointment == nil {
-		t.Fatal("state.py declares no Appointment, so nothing in the tree exercises it")
-	}
-	if _, ok := appointment.Field("spoken"); !ok {
-		t.Error("the Appointment model has no spoken phrase, so the agent composes the day and time itself")
-	}
-	if !strings.Contains(resolved.Agents["concierge"].Instructions, "`spoken` phrase, word for word") {
-		t.Error("the concierge is not told to read the saved phrase word for word")
+	// Code says the booked day and time, from the typed appointment, in the
+	// step's receipt: the model never composes them. The day comes out relative
+	// to the salon's today ("tomorrow, October 9") and the time on the clock.
+	for _, rule := range booking.Finish {
+		if rule.Tool == "cancel_appointment" {
+			continue
+		}
+		said := strings.Join(rule.Say, " ")
+		if !strings.Contains(said, "appointment__date") || !strings.Contains(said, "appointment__time") {
+			t.Errorf("%s's receipt does not say the saved day and time: %q", rule.Tool, rule.Say)
+		}
 	}
 	// Hanging up is the one action with no undo on a live call, so the rule
 	// against it lives in the tool the model reads and not only in a prompt.
@@ -508,18 +522,16 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if got := resolved.Tasks["verify_customer"].EndsOnTools(); !slices.Equal(got, []string{"find_or_create_customer"}) {
 		t.Errorf("verify_customer ends on %v, want its lookup", got)
 	}
-	// One write tool, one entry, and all three of its successes end the step.
-	// Written as three entries the compiler kept only the last, so an ordinary
-	// booking left the step open and spent a model request calling `finish`;
-	// that shape is refused now, and this holds the shape that replaced it.
-	if got := booking.EndsOnTools(); !slices.Equal(got, []string{"save_booking"}) {
-		t.Errorf("manage_booking ends on %v, want its one write tool", got)
+	// Each write ends the step on its own success, read back by code before it
+	// runs and answered by code after, so a booking costs no model request to
+	// confirm or to close.
+	if got := booking.EndsOnTools(); !slices.Equal(got, []string{"book_appointment", "cancel_appointment", "move_appointment"}) {
+		t.Errorf("manage_booking ends on %v, want its three writes", got)
 	}
-	if len(booking.Finish) != 1 {
-		t.Fatalf("manage_booking has %d finish entries, want one naming save_booking", len(booking.Finish))
-	}
-	if got := booking.Finish[0].Success["status"]; !slices.Equal(got, []string{"booked", "moved", "cancelled"}) {
-		t.Errorf("save_booking succeeds on %v, want all three actions", got)
+	for _, rule := range booking.Finish {
+		if len(rule.Confirm) == 0 || len(rule.Say) == 0 {
+			t.Errorf("%s has no read-back or no receipt: %#v", rule.Tool, rule)
+		}
 	}
 	// find_slots returns the caller's own bookings whatever it was asked, which
 	// is what lets one call replace the list-then-check pair. A booking id the
@@ -542,30 +554,6 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if read.Execution != ir.ToolLocal {
 		t.Errorf("find_slots execution = %q, want local", read.Execution)
 	}
-	// The write still refuses an unconfirmed change, and now in one place rather
-	// than three. `confirmed` is the caller's yes, and the backend is where that
-	// rule holds: a live call proved the prompt alone does not.
-	write := resolved.Tools["save_booking"]
-	writeProperties, ok := write.Input["properties"].(map[string]any)
-	if !ok {
-		t.Fatalf("save_booking input properties = %#v, want object", write.Input["properties"])
-	}
-	confirmed, ok := writeProperties["confirmed"].(map[string]any)
-	if !ok || confirmed["type"] != "boolean" {
-		t.Errorf("save_booking confirmed = %#v, want boolean", writeProperties["confirmed"])
-	}
-	writeRequired, ok := write.Input["required"].([]any)
-	if !ok || !slices.Contains(writeRequired, any("confirmed")) || !slices.Contains(writeRequired, any("action")) {
-		t.Errorf("save_booking must require action and confirmed: %#v", write.Input)
-	}
-	action, ok := writeProperties["action"].(map[string]any)
-	if !ok {
-		t.Fatalf("save_booking action = %#v, want an object", writeProperties["action"])
-	}
-	if got, want := action["enum"], []any{"book", "move", "cancel"}; !slices.Equal(got.([]any), want) {
-		t.Errorf("save_booking action enum = %#v, want %v", got, want)
-	}
-
 	requireText := func(name, text string, wants ...string) {
 		t.Helper()
 		text = strings.Join(strings.Fields(text), " ")
@@ -607,12 +595,6 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// context_scope: shared, so the booking step's turns are in the owner's
 	// context when it speaks. Both halves are held, because either one drifting
 	// alone brings one of the two calls back.
-	requireText("concierge", resolved.Agents["concierge"].Instructions,
-		"say\n   the day and the time only when that exchange did not already settle them out\n   loud",
-		"exactly once in the call,\n   never twice and never not at all")
-	requireText("booking task", resolved.Tasks["manage_booking"].Instructions,
-		"Say the whole thing back in one sentence and ask one yes-or-no question",
-		"so say nothing here that would make it the second time they hear it")
 
 	// One placeholder, in the one prompt that says the value. The compiler sends
 	// the union of every name any prompt on the think profile references, so an
@@ -706,12 +688,6 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// re-asked in the same words, which the caller heard as the line breaking.
 	// Replayed against the router 8 times per variant, the step reached the
 	// lookup 1/8 before these lines and 8/8 after.
-	requireText("verification", verification.Instructions,
-		"You never decide whether a number is long enough",
-		"Never invent a country code",
-		"Read every digit back once",
-		"Agreement is a yes, however it arrives",
-		"Never send the same sentence twice")
 	for _, banned := range []string{"first name", "surname", "one letter at a time", "spell"} {
 		if strings.Contains(strings.ToLower(verification.Instructions), banned) {
 			t.Errorf("verification still collects a name: prompt mentions %q", banned)
@@ -731,15 +707,9 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// part, so +34 111 111 111 came back as "3 411 111 1111": a lone "3" standing
 	// in for a country code that is really 34, and a caller hearing their own
 	// number read as somebody else's.
-	requireText("verification", verification.Instructions,
-		"Return it in E.164 and in no other shape",
-		"a plus sign, then digits, with nothing between them",
-		"leaves their order alone")
 	// E.164 is not the shape to say out loud: a model asked to speak it regroups
 	// it, which is measured to cost the turn its cache. The readback speaks
 	// digits one at a time instead, and nothing else reads the number back.
-	requireText("verification", verification.Instructions,
-		"Never read this string back as one long number")
 	if _, returned := verification.Result["customer_phone"]; !returned {
 		t.Error("verification no longer returns customer_phone, so the specialists' {{customer_phone}} has no value and the router answers their first request with a 422")
 	}
@@ -763,11 +733,20 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if got := assignedField(verification.Assign, "customer_phone"); got != "customer_phone" {
 		t.Errorf("verify_customer assigns customer_phone from result.%q, want result.customer_phone", got)
 	}
+	// The read-backs these calls broke on are code now, not prompt wording. The
+	// lookup runs only after code reads the number back and hears a yes, with
+	// core's Phone type saying it digit by digit. A saved number opens the step
+	// on the lookup, so a caller who has one is never asked to recite it. Each
+	// booking write is read back by code before it runs, and its receipt names
+	// the day and time once, after it.
+	verifyFinish := verification.Finish
+	if len(verifyFinish) != 1 || verifyFinish[0].Tool != "find_or_create_customer" || len(verifyFinish[0].Confirm) == 0 {
+		t.Errorf("verify_customer must read the number back in code before the lookup runs: %#v", verifyFinish)
+	}
+	if opens := verification.OpensWith; opens == nil || opens.Tool != "find_or_create_customer" {
+		t.Errorf("verify_customer must open on the lookup with a saved number: %#v", opens)
+	}
 	lookup := resolved.Tools["find_or_create_customer"]
-	requireText("customer lookup", lookup.Description,
-		"exact confirmed phone number",
-		"only after the digit readback got a clear yes",
-		"Never guess a number or pass one the caller has not confirmed")
 	lookupProperties, ok := lookup.Input["properties"].(map[string]any)
 	if !ok {
 		t.Fatalf("find_or_create_customer input properties = %#v, want object", lookup.Input["properties"])
@@ -778,20 +757,6 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// The confirmation gate moved from a step boundary into this one prompt, so
 	// the prompt is now the only thing standing between a spoken time and a
 	// written booking. Every clause that makes it a gate is held here.
-	requireText("booking", booking.Instructions,
-		"Say the whole thing back in one sentence and ask one yes-or-no question",
-		"Nothing said before that question counts as a yes",
-		"including the caller choosing the time",
-		"On a clear yes, save it in the same turn with `confirmed` set to true",
-		"On a no, or on a second unclear answer, use the finish escape and save nothing",
-		// The date arrives pre-fetched, so the prompt names the value rather than a
-		// tool to call for it, and it says out loud not to call one. A model handed
-		// a date and still told to "call get_current_date first" would call a tool
-		// that no longer exists.
-		"Today is `{{booking_weekday}}` `{{booking_date}}`",
-		"the salon clock reads\n   `{{salon_local_time}}`",
-		"Do not\n   call a tool to ask what day or time it is",
-		"Never say a booking is saved, moved, or cancelled unless the matching tool ran in this turn")
 	// Open chat is the entry agent's job now, and it holds exactly one lookup:
 	// the salon's own documents. The prompt's job is the same as the deleted chat
 	// agent's was, to stop it claiming a lookup it cannot perform, but the true
@@ -1179,7 +1144,11 @@ func assertAnswersTwilioRoute(t *testing.T, name string, files []File) {
 	for _, file := range files {
 		contents[file.Path] = string(file.Content)
 	}
-	if !strings.Contains(contents["call.py"], `"twilio": lambda: FastAPIWebsocketParams(`) {
+	transports := contents["call.py"]
+	if transports == "" {
+		transports = contents["bot.py"] // version 2 keeps the transports in its entrypoint
+	}
+	if !strings.Contains(transports, `"twilio": lambda: FastAPIWebsocketParams(`) {
 		t.Errorf("target %q: bot.py has no \"twilio\" entry in transport_params, so `bot.py -t twilio` cannot take a simulated call", name)
 	}
 	if !regexp.MustCompile(`pipecat-ai\[[^\]]*\bwebsocket\b`).MatchString(contents["pyproject.toml"]) {
@@ -1687,10 +1656,18 @@ func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s: %v", provider, err)
 				}
-				entry := agentSource
-				if provider == ir.ProviderLiveKit {
-					entry = agentSource
+				if pkg.Agent.Version == spec.Version2 {
+					// Version 2 starts on unmute-core and checks no list at
+					// startup: compile-report.json says what it needs.
+					report := artifactFile(t, artifact, "compile-report.json")
+					for _, name := range routeOnly {
+						if strings.Contains(report, `"`+name+`"`) {
+							t.Errorf("%s: required_env demands %q, so a browser session cannot start:\n%s", provider, name, report)
+						}
+					}
+					continue
 				}
+				entry := agentSource
 				source := artifactFile(t, artifact, entry)
 				start := strings.Index(source, "REQUIRED_ENV = [")
 				if start < 0 {
@@ -1966,13 +1943,9 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	if !declared {
 		t.Fatal("the package declares no customer_phone")
 	}
-	for _, want := range []string{
-		"E.164",
-		"no spaces, brackets or dashes",
-	} {
-		if !strings.Contains(phone.Description, want) {
-			t.Errorf("customer_phone description omits %q: the phone format must be stated", want)
-		}
+	// unmute-core's Phone type holds the shape: a plus, then digits only.
+	if !strings.Contains(phone.Description, "E.164") {
+		t.Error("customer_phone description omits E.164: the phone format must be stated")
 	}
 	if phone.Confirm == "" {
 		t.Error("customer_phone declares no confirm:, so a pre-fetched number would be acted on without the caller agreeing")
@@ -1991,15 +1964,13 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	if len(holders) != 1 || holders[0] != phone.Confirm {
 		t.Errorf("prompts holding {{customer_phone}} = %v, want exactly [%s], the step that confirms it", holders, phone.Confirm)
 	}
-	// And that prompt has to read it back rather than ask for it, which is the
-	// whole user-visible half of the feature.
-	// Whitespace-normalised, because the prompt is wrapped prose and the phrases
-	// worth pinning straddle line breaks.
-	verification := strings.Join(strings.Fields(taskBodies(resolved.Tasks)[phone.Confirm]), " ")
-	for _, want := range []string{"read it back", "Never ask for a number you were handed"} {
-		if !strings.Contains(verification, want) {
-			t.Errorf("the confirming step's prompt omits %q, so a caller with a known number is still asked to recite it", want)
-		}
+	// And that step has to read a known number back rather than ask for it,
+	// which is the whole user-visible half of the feature. Code does it: the
+	// step opens on the lookup with the saved number, and the lookup's finish
+	// rule reads it back before it runs.
+	confirming := resolved.Tasks[phone.Confirm]
+	if opens := confirming.OpensWith; opens == nil || len(confirming.Finish) == 0 || len(confirming.Finish[0].Confirm) == 0 {
+		t.Errorf("%s does not open on the lookup and read the number back, so a caller with a known number is still asked to recite it", phone.Confirm)
 	}
 	for _, bodies := range []map[string]string{promptBodies(resolved.Agents), taskBodies(resolved.Tasks)} {
 		for name, body := range bodies {

@@ -12,6 +12,7 @@ each call runs the same way:
 5. When the caller connects, the greeting plays and the call's longest length starts.
 
     uv run bot.py -t webrtc   # then open http://localhost:7860
+    uv run bot.py -t twilio   # a Twilio Media Streams phone call
 """
 
 import logging
@@ -39,6 +40,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.workers.runner import WorkerRunner
 from pipecat_slng import SlngSTTService, SlngTTSService
@@ -74,6 +76,7 @@ WINDOW = turn_window(MODELS["turn"].get("pace", "balanced"), "pipecat")
 
 transport_params: dict[str, Callable[..., Any]] = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
 }
 """The transports ``uv run bot.py -t ...`` may pick."""
 

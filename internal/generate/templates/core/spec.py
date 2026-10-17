@@ -9,6 +9,7 @@ again rather than this file.
 
 import importlib
 import json
+import logging
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -20,7 +21,6 @@ from unmute_core.call import CallStartError, save_call_start
 from unmute_core.greeting import Greeting
 from unmute_core.handoff import HandoffContext
 from unmute_core.idle import IdleNudges
-from unmute_core.knowledge import KnowledgeBase
 from unmute_core.prefetch import CallValue, Clock, Lookup, Prefetch
 from unmute_core.settings import env_value
 from unmute_core.slng import RouterConfig, RouterModelCall
@@ -37,6 +37,7 @@ HERE = Path(__file__).parent
 SPEC: dict[str, Any] = json.loads((HERE / "agent.json").read_text())
 AGENT_ID: str = SPEC["agent_id"]
 ENTRY: str = SPEC["entry"]
+logger = logging.getLogger("spec")
 PLACEHOLDER = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 
 
@@ -57,10 +58,18 @@ def embedder(embed: Mapping[str, str]) -> Callable[[], Any]:
     return build
 
 
-def build_knowledge() -> dict[str, KnowledgeBase]:
-    """Return each knowledge base. ``start_knowledge`` reads and indexes them."""
+def build_knowledge() -> dict[str, Any]:
+    """Return each knowledge base. ``start_knowledge`` reads and indexes them.
+
+    The library's knowledge needs its ``knowledge`` extra, which the project installs
+    only when agent.yaml declares a knowledge base, so it is imported only then.
+    """
+    if not SPEC.get("knowledge"):
+        return {}
+    from unmute_core.knowledge import KnowledgeBase
+
     bases = {}
-    for name, base in SPEC.get("knowledge", {}).items():
+    for name, base in SPEC["knowledge"].items():
         embeds = base["mode"] != "keyword"
         bases[name] = KnowledgeBase(
             name,
@@ -230,17 +239,16 @@ def transfers(name: str, line: PhoneLine) -> list[ToolSpec]:
     """Return one agent's transfers to a person, on this call's phone line.
 
     On a call with no phone leg, like a browser call, the model reads that there is no
-    phone caller to transfer.
-
-    Raises:
-        RuntimeError: A transfer's number is not set in the environment.
+    phone caller to transfer. A transfer whose number is not set is left out, with a
+    warning: a browser session needs no phone route to start.
     """
     built = []
     for transfer in SPEC["agents"][name].get("transfers", ()):
         rule = SPEC["transfers"][transfer]
         destination = env_value(rule["destination_env"], str)
         if not destination:
-            raise RuntimeError(f"Set {rule['destination_env']} in the environment or in .env")
+            logger.warning("%s: set %s to offer it", transfer, rule["destination_env"])
+            continue
         person = Transfer(
             transfer,
             destination,

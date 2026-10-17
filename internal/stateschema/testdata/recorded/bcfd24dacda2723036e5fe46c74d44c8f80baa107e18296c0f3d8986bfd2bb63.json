@@ -1,5 +1,5 @@
 {
-  "source": "examples/salon-concierge/state.py",
+  "source": "internal/testdata/salon-concierge-v1/state.py",
   "digest": "bcfd24dacda2723036e5fe46c74d44c8f80baa107e18296c0f3d8986bfd2bb63",
   "report": {
     "schema": {

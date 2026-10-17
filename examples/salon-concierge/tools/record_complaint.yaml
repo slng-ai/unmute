@@ -2,13 +2,10 @@ description: >-
   Record the verified customer's complaint after enough facts are known. This
   does not replace a requested manager transfer.
 
-inject:
-  - customer_phone: "{{state.customer_phone}}"
-
 local:
   handler: tools/salon.py:record_complaint
 
-interruption: provider_default
-effect: returns_data
+inject:
+  - customer_phone: "{{state.customer_phone}}"
 
 announce: Let me get that written down.

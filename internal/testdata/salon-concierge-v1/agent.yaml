@@ -1,0 +1,272 @@
+version: 1
+
+name: salon-concierge
+
+entry_agent: concierge
+
+agents:
+  concierge:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - look_up_salon_info
+      - end_call
+    tasks:
+      - name: verify_customer
+        when: >-
+          Run this when the caller explicitly corrects their phone number, and
+          when a complaint is about to be written down. Never before a booking:
+          the `book` flow runs this step itself when the saved number is not
+          confirmed. A change of date, time or service is not a phone
+          correction.
+        instructions: tasks/verify-customer.md
+        # Spoken as the step is entered, so it covers the lookup's latency. Short
+        # and about the caller, not about the process: "let me verify you first"
+        # is a system describing itself.
+        #
+        # None of these may promise the lookup. The step has to read the number
+        # back and get a yes *before* it calls the tool, and a line saying "I'll
+        # look you up" is the model's own last sentence when it decides what to
+        # do next: on a text run that wording it went straight to the lookup and
+        # skipped the readback. These name the check instead, which is also what
+        # the next sentence out of the step actually is.
+        announce:
+          - Let me confirm who I'm speaking to.
+          - One second, let me check who I've got.
+          - Right, let me make sure I have you.
+        tools:
+          - find_or_create_customer
+        finish:
+          - tool: find_or_create_customer
+            success:
+              - customer_status:
+                  - existing
+                  - created
+        assign:
+          - customer_phone: result.customer_phone
+          - customer_verified: result.customer_status
+        context:
+          history: messages
+
+      # No `when:` here on purpose, which makes this a definition and not
+      # something the concierge can choose. The only way in is the `book` flow
+      # below, so a booking cannot start without verification having been
+      # decided first.
+      - name: manage_booking
+        instructions: tasks/booking.md
+        # The same step books, moves and cancels, so no line may name what it is
+        # about to do. "I'll check the diary" and "let me see what's free" said
+        # it was looking for slots, which sounded odd ahead of a cancellation.
+        announce:
+          - One sec.
+          - Let me have a look.
+          - One moment, let me look.
+        tools:
+          - find_slots
+          - save_booking
+        handoffs:
+          - to_complaints
+        finish:
+          - tool: save_booking
+            success:
+              - status:
+                  - booked
+                  - moved
+                  - cancelled
+        assign:
+          - appointment: result.appointment
+        context:
+          history: messages
+    task_groups:
+      - book
+    handoffs:
+      - to_complaints
+    escalations:
+      - to_manager
+
+  complaint_specialist:
+    instructions: agents/complaint-specialist.md
+    think: reasoning
+    speak: voice
+    tools:
+      - record_complaint
+      - look_up_refund_policy
+      - end_call
+    # A bare name: the definition stays on the concierge, one name across the
+    # package. Customer care needs it in reach because `record_complaint`
+    # injects `customer_phone` and is refused while the caller has not agreed to
+    # it, and a caller who opens with a complaint has never been near booking.
+    tasks:
+      - verify_customer
+    handoffs:
+      - to_concierge
+    escalations:
+      - to_manager
+
+handoffs:
+  to_complaints:
+    to: complaint_specialist
+    when: The caller has a complaint or service problem.
+    context:
+      history: messages
+
+  to_concierge:
+    to: concierge
+    when: The caller changes to a request owned by another specialist.
+    context:
+      history: messages
+
+escalations:
+  to_manager:
+    when: The caller explicitly asks for a manager or is clearly and strongly frustrated.
+    cold:
+      destination: manager_line
+      ring_timeout: 30s
+      on_unavailable: hangup
+
+# One booking request, start to finish, and no model request in the middle of
+# it deciding what comes next. The concierge picks this once; the flow runs
+# verification and then booking itself.
+#
+# No `announce:` on the group. Its line would fire on every entry and no
+# sentence is true on both halves: the flow opens on the verification question
+# the first time and on the diary every time after. Each step carries its own
+# list instead, and a skipped step speaks nothing.
+task_groups:
+  book:
+    when: >-
+      The caller wants to create, move or cancel a booking. Includes a change to
+      an appointment just made.
+    steps:
+      # Skipped once the caller has agreed to their number, which is every
+      # booking after the first on a call. Decided as the flow starts, so a
+      # confirmation withdrawn mid-flow is the next invocation's question.
+      - task: verify_customer
+        skip_when_confirmed: customer_phone
+      - manage_booking
+    context_scope: shared
+    then: return
+
+# How the values on State in state.py behave: where one comes from, and
+# which step confirms it. A value needs an entry only for one of those.
+variables:
+  - name: customer_phone
+    confirm: verify_customer
+
+prefetch:
+  - name: today
+    clock: now
+    timezone: Europe/Madrid
+    assign:
+      - booking_date: result.date
+      - booking_weekday: result.day_of_week
+      - salon_local_time: result.time
+
+  - name: caller
+    source: from_number
+    assign:
+      - customer_phone: result.value
+
+secrets:
+  - OPENAI_API_KEY
+  - GOOGLE_API_KEY
+  - SLNG_API_KEY
+  - LANGFUSE_SECRET_KEY
+  - LANGFUSE_PUBLIC_KEY
+  - LANGFUSE_BASE_URL
+  - MANAGER_PHONE_NUMBER
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_PHONE_NUMBER
+  - SIP_TRUNK_HOSTNAME
+  - SIP_AUTH_USERNAME
+  - SIP_AUTH_PASSWORD
+  - SIP_FROM_NUMBER
+
+destinations:
+  manager_line: MANAGER_PHONE_NUMBER
+
+knowledge:
+  refunds:
+    documents: knowledge/refunds
+  services:
+    documents: knowledge/services
+    chunk_size: 220
+    chunk_overlap: 40
+
+models:
+  think:
+    # The other qualified binding. Swap the two blocks to go back; the README
+    # says what each one was measured on.
+    # reasoning:
+    #   provider: openai
+    #   model: gpt-5.6-luna
+    #   params:
+    #     reasoning_effort: "none"
+    reasoning:
+      provider: google
+      model: gemini-3.1-flash-lite
+      params:
+        vertexai: true
+        location: eu
+        thinking_config:
+          thinking_level: MINIMAL
+  speak:
+    voice:
+      provider: slng
+      model: "cartesia/sonic:3.5"
+      voice: "62ae83ad-4f6a-430b-af41-a9bede9286ca"
+      language: en
+      params:
+        world_part: eu-north
+        warm_standby_enabled: true
+  listen:
+    transcriber:
+      provider: slng
+      model: "soniox/speech-ai:rt-v5"
+      language: en
+      params:
+        world_part: eu-north
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: snappy
+
+tools:
+  - find_or_create_customer
+  - find_slots
+  - save_booking
+  - record_complaint
+  - look_up_refund_policy
+  - look_up_salon_info
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, you've reached Sage and Stone. Robin speaking, what can I do for you?"
+  interruption:
+    enabled: true
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
+  max_duration: 15m
+
+tracing:
+  provider: langfuse
+
+channels:
+  web:
+    kind: realtime_audio
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: false
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  peak_starts_per_second: 1
+  avg_session_duration: 5m

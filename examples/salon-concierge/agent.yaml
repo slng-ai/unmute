@@ -4,6 +4,9 @@ name: salon-concierge
 
 entry_agent: concierge
 
+# Each step saves what the caller confirmed, and holds it until the step ends.
+mode: record
+
 agents:
   concierge:
     instructions: instructions.md
@@ -21,61 +24,109 @@ agents:
           confirmed. A change of date, time or service is not a phone
           correction.
         instructions: tasks/verify-customer.md
-        # Spoken as the step is entered, so it covers the lookup's latency. Short
-        # and about the caller, not about the process: "let me verify you first"
-        # is a system describing itself.
-        #
-        # None of these may promise the lookup. The step has to read the number
-        # back and get a yes *before* it calls the tool, and a line saying "I'll
-        # look you up" is the model's own last sentence when it decides what to
-        # do next: on a text run that wording it went straight to the lookup and
-        # skipped the readback. These name the check instead, which is also what
-        # the next sentence out of the step actually is.
+        # The step asks for the number and waits. With a saved number, code
+        # opens on the lookup instead, and the read-back below asks for a yes.
+        opening: listen
         announce:
-          - Let me confirm who I'm speaking to.
-          - One second, let me check who I've got.
-          - Right, let me make sure I have you.
+          - Sure, what's the best number to reach you on?
+          - Of course. What number should I use?
+          - Sure. What's a good number for you?
+        opens_with:
+          tool: find_or_create_customer
+          arguments:
+            - phone: customer_phone
         tools:
           - find_or_create_customer
         finish:
           - tool: find_or_create_customer
             success:
-              - customer_status:
+              - status:
                   - existing
                   - created
+            # Code reads the number back, and the lookup runs on the caller's yes.
+            confirm:
+              - Is the best number to reach you {{state.number_heard}}?
+              - Just to check, is that {{state.number_heard}}?
         assign:
+          - number_heard: input.phone
           - customer_phone: result.customer_phone
-          - customer_verified: result.customer_status
+          - customer_verified: result.status
         context:
           history: messages
 
-      # No `when:` here on purpose, which makes this a definition and not
-      # something the concierge can choose. The only way in is the `book` flow
-      # below, so a booking cannot start without verification having been
-      # decided first.
+      # No `when:`: the only way in is the `book` flow, so a booking cannot
+      # start before verification has been decided.
       - name: manage_booking
         instructions: tasks/booking.md
-        # The same step books, moves and cancels, so no line may name what it is
-        # about to do. "I'll check the diary" and "let me see what's free" said
-        # it was looking for slots, which sounded odd ahead of a cancellation.
         announce:
-          - One sec.
           - Let me have a look.
-          - One moment, let me look.
+          - One moment, let me check the diary.
+          - Let me see what we have.
+        # The step opens by reading the diary in code, with what the caller
+        # asked for, and says the offer without asking the model.
+        opens_with:
+          tool: find_slots
+          arguments:
+            - service: requested_service
+            - date: requested_day
+            - intent: requested_intent
+          say:
+            - "{{state.offer}}"
         tools:
           - find_slots
-          - save_booking
+          - book_appointment
+          - move_appointment
+          - cancel_appointment
         handoffs:
           - to_complaints
+        replies:
+          - tool: find_slots
+            when:
+              - offered:
+                  - true
+            say:
+              - "{{state.offer}}"
+        # Each write is read back by code first and runs on the caller's yes.
+        # Its receipt is said by code too, so the concierge makes no request.
         finish:
-          - tool: save_booking
+          - tool: book_appointment
             success:
               - status:
                   - booked
+            confirm:
+              - Shall I book your {{state.chosen_service}} for {{state.chosen_day}} at {{state.chosen_time}}?
+              - Would you like your {{state.chosen_service}} booked for {{state.chosen_day}} at {{state.chosen_time}}?
+            say:
+              - Lovely, your {{state.appointment.service}} is booked for {{state.appointment.date}} at {{state.appointment.time}}. Anything else I can do for you?
+              - Great, you're all set for {{state.appointment.date}} at {{state.appointment.time}}. Is there anything else?
+              - Perfect, you're in the diary for {{state.appointment.date}} at {{state.appointment.time}}. Anything else I can help with?
+          - tool: move_appointment
+            success:
+              - status:
                   - moved
+            confirm:
+              - Shall I move it to {{state.chosen_day}} at {{state.chosen_time}}?
+              - Would you like it moved to {{state.chosen_day}} at {{state.chosen_time}}?
+            say:
+              - Done, I've moved it to {{state.appointment.date}} at {{state.appointment.time}}. Anything else?
+              - Great, you're now booked for {{state.appointment.date}} at {{state.appointment.time}}. Is there anything else I can do?
+              - All sorted, it's moved to {{state.appointment.date}} at {{state.appointment.time}}. Anything else I can help with?
+          - tool: cancel_appointment
+            success:
+              - status:
                   - cancelled
+            confirm:
+              - Shall I cancel your {{state.chosen_service}} for {{state.chosen_day}} at {{state.chosen_time}}?
+              - Just to check, cancel your {{state.chosen_service}} for {{state.chosen_day}} at {{state.chosen_time}}?
+            say:
+              - That's cancelled for you. Anything else I can help with?
+              - Done, I've cancelled it. Is there anything else?
+              - All cancelled. Anything else I can do for you?
         assign:
           - appointment: result.appointment
+          - chosen_service: input.service?
+          - chosen_day: input.date
+          - chosen_time: input.time
         context:
           history: messages
     task_groups:
@@ -94,9 +145,9 @@ agents:
       - look_up_refund_policy
       - end_call
     # A bare name: the definition stays on the concierge, one name across the
-    # package. Customer care needs it in reach because `record_complaint`
-    # injects `customer_phone` and is refused while the caller has not agreed to
-    # it, and a caller who opens with a complaint has never been near booking.
+    # package. record_complaint injects customer_phone, which the caller must
+    # confirm first, and a caller who opens with a complaint never went near
+    # booking.
     tasks:
       - verify_customer
     handoffs:
@@ -108,6 +159,7 @@ handoffs:
   to_complaints:
     to: complaint_specialist
     when: The caller has a complaint or service problem.
+    announce: I'm sorry to hear that. Let me take this down properly.
     context:
       history: messages
 
@@ -125,23 +177,19 @@ escalations:
       ring_timeout: 30s
       on_unavailable: hangup
 
-# One booking request, start to finish, and no model request in the middle of
-# it deciding what comes next. The concierge picks this once; the flow runs
-# verification and then booking itself.
-#
-# No `announce:` on the group. Its line would fire on every entry and no
-# sentence is true on both halves: the flow opens on the verification question
-# the first time and on the diary every time after. Each step carries its own
-# list instead, and a skipped step speaks nothing.
+# One booking request, start to finish. The concierge picks this once, with
+# what the caller asked for; the flow runs verification and then booking.
 task_groups:
   book:
     when: >-
       The caller wants to create, move or cancel a booking. Includes a change to
       an appointment just made.
+    arguments:
+      - requested_service
+      - requested_day
+      - requested_intent
     steps:
-      # Skipped once the caller has agreed to their number, which is every
-      # booking after the first on a call. Decided as the flow starts, so a
-      # confirmation withdrawn mid-flow is the next invocation's question.
+      # Skipped once the caller has agreed to their number.
       - task: verify_customer
         skip_when_confirmed: customer_phone
       - manage_booking
@@ -237,7 +285,9 @@ models:
 tools:
   - find_or_create_customer
   - find_slots
-  - save_booking
+  - book_appointment
+  - move_appointment
+  - cancel_appointment
   - record_complaint
   - look_up_refund_policy
   - look_up_salon_info

@@ -2756,7 +2756,7 @@ func TestPipecatDoesNotClaimMultiRegion(t *testing.T) {
 func TestPipecatV1TaskToolAnnounceQueuesFrameFromFlowManager(t *testing.T) {
 	load := func(t *testing.T, announce string) string {
 		t.Helper()
-		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+		pkg, err := spec.Load(filepath.Join("..", "testdata", "salon-concierge-v1"))
 		if err != nil {
 			t.Fatal(err)
 		}

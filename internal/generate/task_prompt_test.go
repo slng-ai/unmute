@@ -53,6 +53,9 @@ func TestEmittedTaskPromptsAlwaysOfferAnEscape(t *testing.T) {
 			if len(agent.Tasks) == 0 {
 				t.Skip("package declares no task")
 			}
+			if pkg.Agent.Version == spec.Version2 {
+				t.Skip("version 2: unmute-core words how a step finishes")
+			}
 			for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
 				resolved := agent.Targets[name]
 				if resolved.Provider != ir.ProviderLiveKit && resolved.Provider != ir.ProviderPipecat {
@@ -102,7 +105,7 @@ func escapeFor(call string) string {
 // be told to read it. Four wiring points, one per target pair, all reachable
 // from one example that has a locked-down step.
 func TestEmittedFinishCarriesTheUnservedRequest(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "salon-concierge-v1"))
 	if err != nil {
 		t.Fatal(err)
 	}

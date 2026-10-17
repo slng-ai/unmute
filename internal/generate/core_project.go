@@ -84,9 +84,6 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 			}
 		}
 	}
-	for _, name := range sortedKeys(transfers) {
-		needs = append(needs, transfers[name].(map[string]any)["destination_env"].(string))
-	}
 	// .python-version holds uv to the Python unmute-core is developed and tested on.
 	files := []File{{Path: "agent.json", Content: append(data, '\n')}, {Path: ".python-version", Content: []byte("3.12\n")}}
 	for _, item := range append([]struct{ path, source string }{{"spec.py", coreSpecPy}}, entrypoints[:]...) {
@@ -117,7 +114,7 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 		document.Verbatim = true
 		files = append(files, document)
 	}
-	env := slices.Clone(agent.Secrets)
+	env := browserSecrets(agent, resolved)
 	for _, binding := range resolved.Models.Reason {
 		needs = append(needs, slngBindingCredentialEnvs(binding)...)
 	}
@@ -130,6 +127,19 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 	var example strings.Builder
 	for _, name := range env {
 		fmt.Fprintf(&example, "%s=\n", name)
+	}
+	phone := slices.DeleteFunc(slices.Clone(agent.Secrets), func(name string) bool { return slices.Contains(env, name) })
+	for _, name := range resolved.Destinations {
+		if !slices.Contains(phone, name) {
+			phone = append(phone, name)
+		}
+	}
+	if len(phone) > 0 {
+		slices.Sort(phone)
+		example.WriteString("\n# Phone calls only. A browser session starts without these.\n")
+		for _, name := range phone {
+			fmt.Fprintf(&example, "%s=\n", name)
+		}
 	}
 	files = append(files, File{Path: ".env.example", Content: []byte(example.String())})
 	report, err := json.MarshalIndent(coreReport{Target: resolved.Name, Runtime: "unmute-core==" + target.CorePin, RequiredEnv: env}, "", "  ")
@@ -149,4 +159,29 @@ func fillTemplate(source string, fill map[string]string) ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+// browserSecrets is the package's secrets a browser session needs: every one
+// but the phone route's. A connection's credentials, the target's telephony
+// variables and a transfer's number are read on a phone call only, so a
+// browser session starts without them.
+func browserSecrets(agent *ir.Agent, resolved ir.Target) []string {
+	route := map[string]bool{}
+	for _, connection := range agent.Connections {
+		for _, name := range connection.Environment {
+			route[name] = true
+		}
+	}
+	if plan := resolved.Telephony; plan != nil {
+		for _, name := range plan.Environment {
+			route[name] = true
+		}
+		for _, name := range slices.Concat(plan.RequiredEnvironment, plan.LocalEnvironment) {
+			route[name] = true
+		}
+	}
+	for _, name := range resolved.Destinations {
+		route[name] = true
+	}
+	return slices.DeleteFunc(slices.Clone(agent.Secrets), func(name string) bool { return route[name] })
 }

@@ -161,7 +161,7 @@ func TestSmokeFixturesGenerateAndKeepTheirPythonSurface(t *testing.T) {
 	for _, fixture := range fixtures {
 		for _, driver := range drivers {
 			t.Run(fixture.name+"/"+string(driver.provider), func(t *testing.T) {
-				pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+				pkg, err := spec.Load(filepath.Join("..", "testdata", "salon-concierge-v1"))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -217,7 +217,7 @@ func TestSmokeFixturesGenerateAndKeepTheirPythonSurface(t *testing.T) {
 // touch either. So every name it uses is pinned here, in the default suite, where
 // a rename fails in seconds instead of waiting for someone to run `make smoke`.
 func TestKnowledgeSmokeKeepsItsPythonSurface(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "salon-concierge-v1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func injectTemplates(tool ir.Tool) []string {
 // owns whether the names it types are still there, in seconds, in the suite that
 // actually gates a PR.
 func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "salon-concierge-v1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +370,7 @@ func TestSalonJourneySmokeKeepsItsPythonSurface(t *testing.T) {
 // scripts replace is present in the emitted module, and the call the emitted
 // module makes matches what the stub accepts.
 func TestSmokeStubbedNamesExistInTheEmittedModule(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "salon-concierge-v1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -729,7 +729,7 @@ var livekitJobContextReads = map[string]bool{
 func TestSmokeLiveKitRunContextStandInCarriesEveryAttributeRead(t *testing.T) {
 	// Both packages a LiveKit salon smoke drives. v3 is here because it emits
 	// reset tasks the concierge does not, so it can read something v1 never does.
-	for _, example := range []string{"salon-concierge", "salon-concierge-v3"} {
+	for _, example := range []string{"salon-concierge-v1", "salon-concierge-v3"} {
 		t.Run(example, func(t *testing.T) {
 			pkg, err := spec.Load(examplePackagePath(example))
 			if err != nil {
