@@ -23,14 +23,16 @@ variables:
   - name: caller_phone
     call_start: optional
   - name: account_id
-    dependencies: [caller_phone]
+    dependencies:
+      - caller_phone
 
 prefetch:
   - name: account
     tool: lookup_account
     writes: false
     background: true
-    needs_confirmed: [caller_phone]
+    needs_confirmed:
+      - caller_phone
     assign:
       - account_id: result.account_id
 
