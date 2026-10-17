@@ -1,8 +1,14 @@
 package generate
 
 import (
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 func TestALineReadsWhatItsToolGivesIt(t *testing.T) {
@@ -33,5 +39,40 @@ func TestAMatchTakesTheTypeTheToolDeclares(t *testing.T) {
 	}
 	if !slices.Equal(got["found"], []any{true}) || !slices.Equal(got["tries"], []any{2}) || !slices.Equal(got["status"], []any{"ok"}) {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestAWebhookToolCompilesWithItsEndpointAndRefusesReplies(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "webhook_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := buildWithState(t, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
+		if err != nil {
+			t.Fatalf("%s: %v", provider, err)
+		}
+		emitted := artifactFile(t, artifact, "agent.json")
+		for _, want := range []string{`"url_env": "ORDERS_API_URL"`, `"path": "/orders"`, `"kind": "bearer"`, `"call": "{{call.session_id}}"`} {
+			if !strings.Contains(emitted, want) {
+				t.Errorf("%s: agent.json lacks %s", provider, want)
+			}
+		}
+		report := artifactFile(t, artifact, "compile-report.json")
+		for _, name := range []string{"ORDERS_API_URL", "ORDERS_API_TOKEN"} {
+			if !strings.Contains(report, `"`+name+`"`) {
+				t.Errorf("%s: required_env lacks %s", provider, name)
+			}
+		}
+	}
+	tool := agent.Tools["look_up_order"]
+	tool.Replies = []ir.Reply{{When: map[string][]string{"status": {"shipped"}}, Say: []string{"It has shipped."}}}
+	agent.Tools["look_up_order"] = tool
+	if _, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default()); err == nil || !strings.Contains(err.Error(), "webhook tool takes neither") {
+		t.Fatalf("a webhook with replies compiled, or said something else: %v", err)
 	}
 }

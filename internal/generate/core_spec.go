@@ -114,8 +114,11 @@ func coreTools(agent *ir.Agent) ([]any, error) {
 			})
 			continue
 		}
-		if tool.Execution != ir.ToolLocal {
-			return nil, fmt.Errorf("tool %q: version 2 compiles local tools only so far, and this one is %s", name, tool.Execution)
+		if tool.Execution != ir.ToolLocal && tool.Execution != ir.ToolWebhook {
+			return nil, fmt.Errorf("tool %q: version 2 compiles local and webhook tools only so far, and this one is %s", name, tool.Execution)
+		}
+		if tool.Execution == ir.ToolWebhook && (len(tool.Replies) > 0 || tool.Precheck != "") {
+			return nil, fmt.Errorf("tool %q: replies and precheck run on a local tool only; unmute-core's webhook tool takes neither", name)
 		}
 		options := map[string]any{"name": name}
 		putString(options, "description", tool.Description)
@@ -153,7 +156,13 @@ func coreTools(agent *ir.Agent) ([]any, error) {
 		if len(replies) > 0 {
 			options["replies"] = replies
 		}
-		built := map[string]any{"handler": tool.Handler + ":" + tool.HandlerFunction, "options": options}
+		built := map[string]any{"options": options}
+		if tool.Execution == ir.ToolWebhook {
+			built["webhook"] = coreWebhook(tool)
+			built["input"], built["output"] = tool.Input, tool.Output
+		} else {
+			built["handler"] = tool.Handler + ":" + tool.HandlerFunction
+		}
 		putString(built, "precheck", tool.Precheck)
 		if len(tool.Assign) > 0 {
 			built["assign"] = coreAssigns(tool.Assign)
@@ -742,4 +751,17 @@ func coreTransfers(agent *ir.Agent, resolved ir.Target) (map[string]any, error) 
 		out[name] = built
 	}
 	return out, nil
+}
+
+// coreWebhook lowers a webhook tool's endpoint: the variable that holds its
+// base URL, the path after it with its placeholders in the library's spelling,
+// and its credential, by variable name only.
+func coreWebhook(tool ir.Tool) map[string]any {
+	hook := map[string]any{"url_env": tool.URLEnv, "path": stateLine(tool.Path)}
+	if auth := tool.Auth; auth != nil {
+		built := map[string]any{"kind": string(auth.Type), "token_env": auth.TokenEnv}
+		putString(built, "header", auth.Header)
+		hook["auth"] = built
+	}
+	return hook
 }

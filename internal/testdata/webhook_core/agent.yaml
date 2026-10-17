@@ -1,0 +1,64 @@
+# A version 2 package with one webhook tool, so the webhook format compiles on
+# both code targets. It has no scenarios: nothing here answers the webhook.
+version: 2
+
+name: webhook-core
+
+entry_agent: desk
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - look_up_order
+
+secrets:
+  - GOOGLE_API_KEY
+  - SLNG_API_KEY
+  - ORDERS_API_URL
+  - ORDERS_API_TOKEN
+
+models:
+  think:
+    reasoning:
+      provider: google
+      model: gemini-3.1-flash-lite
+  speak:
+    voice:
+      provider: slng
+      model: "slng/fish/tts:s2.1-pro"
+      voice: "8d8aec63a56c460cb7def795bdf754fa"
+      language: en
+      params:
+        world_part: eu-north
+  listen:
+    transcriber:
+      provider: slng
+      model: "soniox/speech-ai:rt-v5"
+      language: en
+      params:
+        world_part: eu-north
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: balanced
+
+tools:
+  - look_up_order
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: Hi, this is the order desk. What's your order number?
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  avg_session_duration: 3m
