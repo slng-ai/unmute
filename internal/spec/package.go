@@ -685,7 +685,8 @@ type Tool struct {
 	// so there is nothing here to merge into (validate.go, SCHEMA N40).
 	Inject []Pair `json:"inject,omitempty" yaml:"inject,omitempty"`
 
-	// Assign saves result fields to State on any result, before a reply speaks.
+	// Assign saves result fields to State when the tool returns. Result only:
+	// a tool's own save never reads its input.
 	Assign []Pair `json:"assign,omitempty" yaml:"assign,omitempty" since:"2"`
 	// Replies are lines code speaks for a typed result.
 	Replies []Reply `json:"replies,omitempty" yaml:"replies,omitempty" since:"2"`

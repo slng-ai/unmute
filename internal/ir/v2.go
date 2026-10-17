@@ -250,8 +250,8 @@ func buildV2Task(pkg *packagespec.Package, out *Agent, name string) error {
 }
 
 // checkInputAssigns holds each `- x: input.<path>` to the input of every tool
-// the step finishes on, because the save happens before whichever one it is
-// runs.
+// the step finishes on, because the step may close on any of them and the row
+// reads the input of whichever one it was.
 func checkInputAssigns(pkg *packagespec.Package, out *Agent, raw packagespec.Task, assign []AssignTo) error {
 	for _, entry := range assign {
 		if !entry.FromInput {

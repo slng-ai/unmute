@@ -714,8 +714,10 @@ type AssignTo struct {
 	// step may leave out: None there means no value yet.
 	Optional bool `json:"optional,omitempty" yaml:"optional,omitempty"`
 	// FromInput reads Field from the closing tool's input rather than its
-	// result, as `- booking: input.booking`. Version 2 only: it is saved
-	// unconfirmed before the read-back, so a confirm line reads state.
+	// result, as `- booking: input.booking`. Version 2 only. It is saved with
+	// the result rows when the closing tool succeeds, never before. A confirm
+	// line still names it as {{state.booking}}, and the compiler reads that
+	// from the tool's input, so nothing is saved before the caller's yes.
 	FromInput bool `json:"from_input,omitempty" yaml:"from_input,omitempty"`
 }
 
@@ -798,9 +800,9 @@ type Tool struct {
 	// colon in `file.py:function`. Empty on version 1, where it is the file's
 	// own name.
 	HandlerFunction string `json:"handler_function,omitempty" yaml:"handler_function,omitempty"`
-	// Assign, Replies, Precheck and Hidden are version 2: what the tool saves
-	// on any result, the lines code speaks for a typed result, the function
-	// run before it, and the result fields the model never reads.
+	// Assign, Replies, Precheck and Hidden are version 2: what the tool's
+	// result saves to State, the lines code speaks for a typed result, the
+	// function run before it, and the result fields the model never reads.
 	Assign        []AssignTo `json:"assign,omitempty" yaml:"assign,omitempty"`
 	Replies       []Reply    `json:"replies,omitempty" yaml:"replies,omitempty"`
 	Precheck      string     `json:"precheck,omitempty" yaml:"precheck,omitempty"`

@@ -2,7 +2,8 @@
 #
 # Each key appears once, so the golden IR shows what each one resolves to.
 # The tools' types come from tools/salon.py, read by unmute-core's local_tool.
-# Every spoken line reads only state: a value a line needs is saved first.
+# Every spoken line names values only as {{state.x}}. Where the step fills x
+# from the tool's input or result, the compiler reads it from there.
 version: 2
 
 name: v2-core
