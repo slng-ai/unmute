@@ -54,6 +54,9 @@ func coreSpec(agent *ir.Agent) (map[string]any, error) {
 		"prefetch": prefetch,
 		"handoffs": coreHandoffs(agent),
 	}
+	if agent.EntryBy != nil {
+		spec["entry_by"] = agent.EntryBy
+	}
 	if conversation := agent.Conversation; conversation != nil {
 		if greeting := conversation.Greeting; greeting != nil {
 			built := map[string]any{"speaks_first": string(greeting.SpeaksFirst)}
@@ -137,7 +140,7 @@ func coreTools(agent *ir.Agent) ([]any, error) {
 func coreAgent(agent *ir.Agent, name string) (map[string]any, error) {
 	def := agent.Agents[name]
 	var own, handoffs []string
-	var tasks, groups []any
+	tasks, groups := []any{}, []any{}
 	steps := map[string]bool{}
 	for _, item := range def.Tools {
 		if _, ok := agent.Tools[item]; ok {
@@ -187,12 +190,18 @@ func coreAgent(agent *ir.Agent, name string) (map[string]any, error) {
 			groups = append(groups, built)
 		}
 	}
+	for _, task := range tasks {
+		delete(steps, task.(map[string]any)["name"].(string)) // offered directly: it keeps its when
+	}
 	for _, step := range sortedKeys(steps) {
 		built, err := coreTask(agent, step, "", nil)
 		if err != nil {
 			return nil, err
 		}
 		tasks = append(tasks, built)
+	}
+	if own == nil {
+		own = []string{}
 	}
 	out := map[string]any{"instructions": def.Instructions, "tools": own, "model": def.Model, "voice": def.Voice}
 	if len(handoffs) > 0 {
@@ -253,7 +262,7 @@ func coreTask(agent *ir.Agent, name, when string, announce []string) (map[string
 			built["confirm"] = rewriteLines(rule.Confirm, inputPaths(task.Assign, tool), nil)
 		}
 		if len(rule.Say) > 0 {
-			built["say"] = rewriteLines(rule.Say, nil, fromResult)
+			built["say"] = rewriteLines(rule.Say, nil, mergePaths(resultPaths(tool.Assign), fromResult))
 		}
 		finish = append(finish, built)
 	}
@@ -357,6 +366,7 @@ func corePrefetch(agent *ir.Agent) ([]any, error) {
 			if entry.Background {
 				built["background"] = true
 			}
+			putString(built, "refuse_call", stateLine(entry.RefuseCall))
 			out = append(out, built)
 		}
 	}

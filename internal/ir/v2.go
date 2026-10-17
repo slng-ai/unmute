@@ -121,6 +121,20 @@ func buildV2(pkg *packagespec.Package, out *Agent) error {
 		group.Arguments, group.NonBlocking = raw.Arguments, raw.NonBlocking
 		out.TaskGroups[name] = group
 	}
+	if entry := pkg.Agent.EntryBy; entry != nil {
+		if _, ok := out.Variables[entry.Value]; !ok {
+			return fmt.Errorf("%s: entry_by reads %q, which State in state.py does not declare", pkg.KeyLocation("agent.yaml", "entry_by"), entry.Value)
+		}
+		agents := map[string]string{}
+		for _, pair := range entry.Agents {
+			agent, _ := pair.Value.(string)
+			if _, ok := out.Agents[agent]; !ok {
+				return fmt.Errorf("%s: entry_by starts %s on %q, which is not an agent of this package", pkg.KeyLocation("agent.yaml", "entry_by"), pair.Key, agent)
+			}
+			agents[pair.Key] = agent
+		}
+		out.EntryBy = &EntryBy{Value: entry.Value, Agents: agents}
+	}
 	for _, name := range sortedKeys(pkg.Agent.Handoffs) {
 		if err := buildV2Handoff(pkg, out, name); err != nil {
 			return fmt.Errorf("%s: handoff %q: %w", pkg.Location("agent.yaml", name), name, err)
@@ -149,6 +163,15 @@ func checkV2Variables(pkg *packagespec.Package, out *Agent) error {
 	for _, entry := range pkg.Agent.Prefetch {
 		if err := stateNames(out, "needs_confirmed", entry.NeedsConfirmed); err != nil {
 			return fmt.Errorf("%s: prefetch %q: %w", pkg.Location("agent.yaml", "needs_confirmed:"), entry.Name, err)
+		}
+		if entry.RefuseCall == "" {
+			continue
+		}
+		if entry.Tool == "" {
+			return fmt.Errorf("%s: prefetch %q: refuse_call refuses a call whose lookup finds nothing, so it goes on a tool: entry", pkg.Location("agent.yaml", "refuse_call:"), entry.Name)
+		}
+		if err := checkLine(pkg, out, "agent.yaml", "refuse_call:", "prefetch refuse_call", entry.RefuseCall, lineHint{}); err != nil {
+			return err
 		}
 	}
 	return nil

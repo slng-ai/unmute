@@ -60,6 +60,8 @@ FARO_DB=:memory: python -I -m unmute_core.testing converse livekit agent --patch
 
 ## Gaps
 
+The call starts on the agent of the caller's own language, as in core, through `entry_by:` on `explanation`.
+
 What core does that v2 cannot say yet, and what is written instead.
 
 - **Agent language and timezone.** Core sets `language` and `timezone` on each

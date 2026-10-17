@@ -22,19 +22,36 @@ var coreLiveKitAgentPy string
 //go:embed templates/core/livekit/pyproject.toml
 var coreLiveKitPyproject string
 
-// coreLiveKitReport is compile-report.json for a project on unmute-core: what
-// the project needs set before it runs.
-type coreLiveKitReport struct {
+//go:embed templates/core/pipecat/bot.py
+var corePipecatBotPy string
+
+//go:embed templates/core/pipecat/pyproject.toml
+var corePipecatPyproject string
+
+// coreEntrypoints are the two files each framework's project differs by: its
+// entrypoint module and its pyproject. Everything else is shared.
+var coreEntrypoints = map[ir.Provider][2]struct{ path, source string }{
+	ir.ProviderLiveKit: {{"agent.py", coreLiveKitAgentPy}, {"pyproject.toml", coreLiveKitPyproject}},
+	ir.ProviderPipecat: {{"bot.py", corePipecatBotPy}, {"pyproject.toml", corePipecatPyproject}},
+}
+
+// coreReport is compile-report.json for a project on unmute-core: what the
+// project needs set before it runs.
+type coreReport struct {
 	Target      string   `json:"target"`
 	Runtime     string   `json:"runtime"`
 	RequiredEnv []string `json:"required_env"`
 }
 
-// GenerateCoreLiveKit emits a version 2 package as a LiveKit project on
-// unmute-core: agent.json holds the package's data, and spec.py and agent.py
-// are the same in every project. The author's state.py and tool handlers are
-// copied as written.
-func GenerateCoreLiveKit(agent *ir.Agent, resolved ir.Target) ([]File, error) {
+// GenerateCore emits a version 2 package as a LiveKit or Pipecat project on
+// unmute-core: agent.json holds the package's data, and spec.py and the
+// framework's entrypoint are the same in every project. The author's state.py
+// and tool handlers are copied as written.
+func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
+	entrypoints, ok := coreEntrypoints[resolved.Provider]
+	if !ok {
+		return nil, fmt.Errorf("version 2 compiles for livekit and pipecat, not %s", resolved.Provider)
+	}
 	spec, err := coreSpec(agent)
 	if err != nil {
 		return nil, err
@@ -47,10 +64,9 @@ func GenerateCoreLiveKit(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 		return nil, err
 	}
 	fill := map[string]string{"CorePin": target.CorePin, "Name": agent.Name}
-	files := []File{{Path: "agent.json", Content: append(data, '\n')}}
-	for _, item := range []struct{ path, source string }{
-		{"spec.py", coreSpecPy}, {"agent.py", coreLiveKitAgentPy}, {"pyproject.toml", coreLiveKitPyproject},
-	} {
+	// .python-version holds uv to the Python unmute-core is developed and tested on.
+	files := []File{{Path: "agent.json", Content: append(data, '\n')}, {Path: ".python-version", Content: []byte("3.12\n")}}
+	for _, item := range append([]struct{ path, source string }{{"spec.py", coreSpecPy}}, entrypoints[:]...) {
 		content, err := fillTemplate(item.source, fill)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", item.path, err)
@@ -78,7 +94,7 @@ func GenerateCoreLiveKit(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 		fmt.Fprintf(&example, "%s=\n", name)
 	}
 	files = append(files, File{Path: ".env.example", Content: []byte(example.String())})
-	report, err := json.MarshalIndent(coreLiveKitReport{Target: resolved.Name, Runtime: "unmute-core==" + target.CorePin, RequiredEnv: env}, "", "  ")
+	report, err := json.MarshalIndent(coreReport{Target: resolved.Name, Runtime: "unmute-core==" + target.CorePin, RequiredEnv: env}, "", "  ")
 	if err != nil {
 		return nil, err
 	}

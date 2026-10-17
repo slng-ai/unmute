@@ -8,7 +8,6 @@ interruption: continue
 precheck: tools/ledger.py:outside_window
 assign:
   - when_said: result.when
-  - outcome: result.status
 replies:
   - when:
       - status:

@@ -138,11 +138,14 @@ agents:
               - "Shall I note a call back for {{state.day}} at {{state.at}}?"
             say:
               - "That's noted: we'll call back {{state.when_said}}. Thank you for your time. Goodbye."
+        # Each closing tool takes some of these inputs. A row is saved when the tool
+        # that ends the step took it.
         assign:
-          - day: input.day
-          - at: input.at
-          - concern: input.kind
-          - concern_note: input.note
+          - day: input.day?
+          - at: input.at?
+          - concern: input.kind?
+          - concern_note: input.note?
+          - outcome: result.status
 
       - name: take_callback
         instructions: tasks/callback.md
@@ -166,6 +169,7 @@ agents:
         assign:
           - day: input.day
           - at: input.at
+          - outcome: result.status
 
       - name: take_off_list
         instructions: tasks/wrong-number.md
@@ -187,6 +191,8 @@ agents:
               - >-
                 Done. You won't get any more calls from us on this number. Sorry
                 for the trouble. Goodbye.
+        assign:
+          - outcome: result.status
 
 task_groups:
   account:
@@ -226,6 +232,9 @@ prefetch:
   - name: account
     tool: open_account
     writes: false
+    # An id the ledger does not hold: the call never starts, so nobody is rung
+    # about nothing.
+    refuse_call: "call_start: account_id: no account {{state.account_id}}"
     assign:
       - first_name: result.first_name
       - last_name: result.last_name

@@ -122,14 +122,14 @@ def slng_host(binding: dict[str, Any]) -> str:
     return f"{binding.get('params', {}).get('world_part', 'eu-north')}.api.slng.ai"
 
 
-def build_session(state: CallState, vad: silero.VAD) -> AgentSession:
+def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession:
     """Return the call's session: the speech and the model agent.yaml names, at its pace.
 
     Interruption is set, not left to LiveKit, so a deployed worker treats the caller
     speaking over the agent the same way as a local one. ``keep`` lets a "yes" said over a
     question answer it.
     """
-    entry = spec.SPEC["agents"][spec.ENTRY]
+    entry = spec.SPEC["agents"][first]
     listen, voice = MODELS["listen"], MODELS["speak"][entry["voice"]]
     key = required("SLNG_API_KEY")
     ids = tracking_ids(state.call)
@@ -235,12 +235,13 @@ async def entrypoint(ctx: JobContext) -> None:
         telemetry = Telemetry(
             Langfuse.from_env(), agent=spec.AGENT_ID, call_id=state.call.session_id
         )
-    session = build_session(state, ctx.proc.userdata["vad"])
+    first = spec.entry(state)
+    session = build_session(state, ctx.proc.userdata["vad"], first)
     if spec.IDLE is not None:
         idle_nudges(session, spec.IDLE)
     with use_phone_region(lambda: call_phone_region(state.call)):
         await session.start(
-            agent=unmute_agent(spec.ENTRY, state, telemetry),
+            agent=unmute_agent(first, state, telemetry),
             room=ctx.room,
             room_options=room_io.RoomOptions(delete_room_on_close=True),
         )

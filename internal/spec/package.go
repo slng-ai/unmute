@@ -142,6 +142,9 @@ type AgentFile struct {
 	// caller confirmed per step. unmute-core's TasksSpec.mode.
 	Mode       string        `json:"mode,omitempty" yaml:"mode,omitempty" since:"2"`
 	EntryAgent string        `json:"entry_agent" yaml:"entry_agent"`
+	// EntryBy picks the agent a call starts with from a State value, read once the
+	// prefetch has run. entry_agent is the one a value it does not list starts with.
+	EntryBy *EntryBy `json:"entry_by,omitempty" yaml:"entry_by,omitempty" since:"2"`
 	Models     ModelSections `json:"models" yaml:"models"`
 	// Listen/Turn select one entry of the matching models section by name.
 	// Optional when the section has at most one entry (the sole entry selects
@@ -433,6 +436,9 @@ type Prefetch struct {
 	// NeedsConfirmed names State values the caller must have agreed to before
 	// the entry runs.
 	NeedsConfirmed []string `json:"needs_confirmed,omitempty" yaml:"needs_confirmed,omitempty" since:"2"`
+	// RefuseCall is the line logged when a tool: entry saves nothing, and the
+	// call does not start, like "no account {{state.account_id}}".
+	RefuseCall string `json:"refuse_call,omitempty" yaml:"refuse_call,omitempty" since:"2"`
 }
 
 // Secret declares one runtime environment value the package needs. The map key
@@ -547,6 +553,13 @@ type Reply struct {
 	Tool string        `json:"tool,omitempty" yaml:"tool,omitempty"`
 	When []SuccessPair `json:"when,omitempty" yaml:"when,omitempty"`
 	Say  []string      `json:"say" yaml:"say"`
+}
+
+// EntryBy is `entry_by:`: the State value that picks the first agent, and the
+// agent each of its values starts with, as `- ES: faro_es`.
+type EntryBy struct {
+	Value  string `json:"value" yaml:"value"`
+	Agents []Pair `json:"agents" yaml:"agents"`
 }
 
 // OpensWith is a tool code runs as a step opens. Arguments map a tool

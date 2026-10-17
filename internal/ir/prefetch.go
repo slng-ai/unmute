@@ -87,7 +87,7 @@ func buildPrefetch(pkg *packagespec.Package, agent *Agent) error {
 		if err := deriveConfirmation(pkg, agent, &entry, where); err != nil {
 			return err
 		}
-		entry.Background, entry.NeedsConfirmed = raw.Background, raw.NeedsConfirmed
+		entry.Background, entry.NeedsConfirmed, entry.RefuseCall = raw.Background, raw.NeedsConfirmed, FlattenPaths(raw.RefuseCall)
 		agent.Prefetch = append(agent.Prefetch, entry)
 	}
 	return nil

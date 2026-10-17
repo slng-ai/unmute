@@ -9,13 +9,14 @@ again rather than this file.
 
 import importlib
 import json
+import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 import unmute_core
 from unmute_core.agent import AgentSpec
-from unmute_core.call import save_call_start
+from unmute_core.call import CallStartError, save_call_start
 from unmute_core.greeting import Greeting
 from unmute_core.handoff import HandoffContext
 from unmute_core.idle import IdleNudges
@@ -31,6 +32,7 @@ unmute_core.require("{{.CorePin}}")
 SPEC: dict[str, Any] = json.loads((Path(__file__).parent / "agent.json").read_text())
 AGENT_ID: str = SPEC["agent_id"]
 ENTRY: str = SPEC["entry"]
+PLACEHOLDER = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 
 
 def function(ref: str) -> Callable[..., Any]:
@@ -114,7 +116,8 @@ async def new_call(
         call_start: The dispatch's ``call_start`` values, when there are some.
 
     Raises:
-        CallStartError: A required start value is missing, or one does not fit.
+        CallStartError: A required start value is missing, or one does not fit, or a
+            lookup with ``refuse_call`` found nothing.
     """
     rules = SPEC["state"]
     state = CallState(
@@ -126,7 +129,19 @@ async def new_call(
     )
     save_call_start(state, call_start)
     await PREFETCH.run(state)
+    for entry in SPEC["prefetch"]:
+        line = entry.get("refuse_call")
+        if line and all(state.plain(name) in (None, "", []) for name in entry["assign"]):
+            raise CallStartError(PLACEHOLDER.sub(lambda match: str(state.plain(match[1])), line))
     return state
+
+
+def entry(state: CallState) -> str:
+    """Return the agent the call starts with: by ``entry_by``'s State value, else the entry."""
+    rule = SPEC.get("entry_by")
+    if rule is None:
+        return ENTRY
+    return rule["agents"].get(str(state.plain(rule["value"])), ENTRY)
 
 
 def agent_spec(name: str) -> AgentSpec:

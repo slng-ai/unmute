@@ -1,0 +1,23 @@
+[project]
+name = "{{.Name}}-pipecat"
+version = "0.1.0"
+description = "{{.Name}} on Pipecat, on unmute-core. Written by unmute compile."
+requires-python = ">=3.12"
+dependencies = [
+    "unmute-core[pipecat]=={{.CorePin}}",
+    "pipecat-ai[google,runner,silero,webrtc]>=1.12.0,<1.13",
+    "pipecat-slng>=0.7.0,<0.8",
+    "python-dotenv>=1.0",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["ruff==0.15.7", "ty"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ty.environment]
+python-version = "3.12"

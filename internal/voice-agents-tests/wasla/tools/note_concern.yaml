@@ -5,5 +5,4 @@ inject:
   - call: "{{call.session_id}}"
 interruption: continue
 assign:
-  - outcome: result.status
   - said: result.said

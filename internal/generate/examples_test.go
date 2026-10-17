@@ -1539,10 +1539,6 @@ func TestVoiceAgentTestPackagesValidateAndGenerate(t *testing.T) {
 						t.Errorf("%s: %v", name, row.Errors)
 					}
 				}
-				// ponytail: version 2 emits livekit only so far; pipecat joins with its templates.
-				if pkg.Agent.Version == spec.Version2 && resolved.Provider != ir.ProviderLiveKit {
-					continue
-				}
 				if reason, ok := coreNotYet[entry.Name()]; ok {
 					if _, err := Generate(agent, resolved, target.Default()); err == nil || !strings.Contains(err.Error(), reason) {
 						t.Errorf("generate %s: want the refusal naming %q, got %v; drop it from coreNotYet once it compiles", name, reason, err)
