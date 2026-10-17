@@ -3,7 +3,7 @@
 targets:
   livekit:
     provider: livekit
-    version: "1.8.1"
+    version: "1.8.8"
     sdk_language: python
     models:
       # LiveKit runs its own turn model rather than Silero.
@@ -14,4 +14,4 @@ targets:
 
   pipecat:
     provider: pipecat
-    version: "1.10.0"
+    version: "1.12.0"
