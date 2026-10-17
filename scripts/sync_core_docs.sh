@@ -35,7 +35,7 @@ echo "$sha" >"$site/core/.source-sha"
 
 held_json="$(printf '%s\n' $held_back | jq -R '"core/" + .' | jq -s .)"
 jq --indent 2 --slurpfile core "$tmp/docs/docs.json" --argjson held "$held_json" '
-  def drop_held: if type == "object" then .pages |= map(select(. as $p | $held | index($p) | not) | drop_held) else . end;
+  def drop_held: if type == "object" then del(.icon) | .pages |= map(select(. as $p | $held | index($p) | not) | drop_held) else . end;
   .navigation.tabs |= (map(select(.tab != "Unmute Core")) + [
     $core[0].navigation.tabs[0] | .tab = "Unmute Core" | .groups |= map(drop_held)
   ])

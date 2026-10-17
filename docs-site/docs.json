@@ -119,7 +119,6 @@
           {
             "group": "Get started",
             "public": true,
-            "icon": "rocket",
             "pages": [
               "index",
               "start/installation",
@@ -131,7 +130,6 @@
           {
             "group": "Build the agent",
             "public": true,
-            "icon": "bot",
             "pages": [
               "build/your-first-agent",
               "build/how-a-package-fits-together",
@@ -140,7 +138,6 @@
               "build/prefetch",
               {
                 "group": "Tools",
-                "icon": "wrench",
                 "root": "build/tools/overview",
                 "pages": [
                   "build/tools/webhook",
@@ -153,7 +150,6 @@
               },
               {
                 "group": "Orchestration",
-                "icon": "git-branch",
                 "root": "build/orchestration/overview",
                 "pages": [
                   "build/orchestration/first-task",
@@ -165,7 +161,6 @@
               },
               {
                 "group": "Architecture",
-                "icon": "network",
                 "root": "build/architecture/overview",
                 "pages": [
                   "build/architecture/cascade",
@@ -178,7 +173,6 @@
           {
             "group": "Best practices",
             "public": true,
-            "icon": "award",
             "pages": [
               "best-practices/state-design",
               "best-practices/context-scope",
@@ -190,7 +184,6 @@
           {
             "group": "Run and observe",
             "public": true,
-            "icon": "terminal",
             "pages": [
               "dev/overview",
               "tracing/overview",
@@ -202,7 +195,6 @@
           {
             "group": "Optimization",
             "public": true,
-            "icon": "gauge",
             "pages": [
               "optimization/overview",
               "optimization/context-router",
@@ -216,7 +208,6 @@
           {
             "group": "Deploy",
             "public": true,
-            "icon": "cloud-upload",
             "pages": [
               "deploy/going-live",
               "deploy/slng",
@@ -227,7 +218,6 @@
           {
             "group": "Phone calls",
             "public": true,
-            "icon": "phone",
             "pages": [
               "telephony/overview",
               "telephony/outbound-calls",
@@ -238,7 +228,6 @@
               "telephony/twilio-conversation-relay",
               {
                 "group": "Transfers",
-                "icon": "phone-forwarded",
                 "root": "transfers/overview",
                 "pages": [
                   "transfers/livekit",
@@ -250,11 +239,9 @@
           {
             "group": "Targets and models",
             "public": true,
-            "icon": "boxes",
             "pages": [
               {
                 "group": "Targets",
-                "icon": "boxes",
                 "root": "targets/overview",
                 "pages": [
                   "targets/slng",
@@ -265,7 +252,6 @@
               },
               {
                 "group": "Models",
-                "icon": "brain",
                 "pages": [
                   "models/stt",
                   "models/tts",
@@ -279,7 +265,6 @@
           {
             "group": "Configuration files",
             "public": true,
-            "icon": "file-code",
             "pages": [
               "reference/agent-yaml",
               "reference/manifest",
@@ -292,7 +277,6 @@
           {
             "group": "CLI",
             "public": true,
-            "icon": "terminal",
             "pages": [
               "reference/cli/overview",
               "reference/cli/init",
@@ -309,7 +293,6 @@
           {
             "group": "Community",
             "public": true,
-            "icon": "users",
             "pages": [
               "community/overview",
               "community/contributing"
@@ -318,7 +301,6 @@
           {
             "group": "Releases",
             "public": true,
-            "icon": "tag",
             "pages": [
               "changelog"
             ]
