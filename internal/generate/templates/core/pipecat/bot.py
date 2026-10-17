@@ -62,12 +62,13 @@ from unmute_core.pipecat import (
     vad_params,
 )
 from unmute_core.settings import env_value
-from unmute_core.slng import tracking_ids
+from unmute_core.slng import TrackingIds, tracking_ids
 from unmute_core.state import CallInfo, CallState, call_phone_region, use_phone_region
 from unmute_core.telemetry import Langfuse, Telemetry
 from unmute_core.turn import turn_window
 
 import spec
+import speech
 
 load_dotenv()
 spec.start_knowledge()
@@ -183,6 +184,36 @@ def dispatched(runner_args: RunnerArguments) -> dict[str, Any] | None:
     return None
 
 
+def build_stt(ids: TrackingIds) -> Any:
+    """Return the speech-to-text service: SLNG's with the call's tracking ids, else speech.py's."""
+    if speech.LISTEN is not None:
+        return speech.LISTEN()
+    listen = MODELS["listen"]
+    return SlngSTTService(
+        api_key=required("SLNG_API_KEY"),
+        model=listen["model"],
+        language=Language(listen.get("language", "en")),
+        world_part=listen.get("params", {}).get("world_part", "eu-north"),
+        **ids,
+    )
+
+
+def build_tts(name: str, ids: TrackingIds) -> Any:
+    """Return one voice's service: SLNG's with the call's tracking ids, else speech.py's."""
+    if (make := speech.SPEAK.get(name)) is not None:
+        return make()
+    voice = MODELS["speak"][name]
+    return SlngTTSService(
+        api_key=required("SLNG_API_KEY"),
+        model=voice["model"],
+        voice=voice.get("voice", ""),
+        language=Language(voice.get("language", "en")),
+        warm_standby_enabled=True,
+        world_part=voice.get("params", {}).get("world_part", "eu-north"),
+        **ids,
+    )
+
+
 def build_pipeline(
     state: CallState, transport: BaseTransport, telemetry: Telemetry | None
 ) -> tuple[PipelineWorker, UnmuteFlows]:
@@ -205,30 +236,14 @@ def build_pipeline(
     )
     llm = build_llm(first, state)
     entry = spec.SPEC["agents"][first]
-    listen, voice = MODELS["listen"], MODELS["speak"][entry["voice"]]
-    key = required("SLNG_API_KEY")
     ids = tracking_ids(state.call)
     pipeline = Pipeline(
         [
             transport.input(),
-            SlngSTTService(
-                api_key=key,
-                model=listen["model"],
-                language=Language(listen.get("language", "en")),
-                world_part=listen.get("params", {}).get("world_part", "eu-north"),
-                **ids,
-            ),
+            build_stt(ids),
             aggregators.user(),
             llm,
-            SlngTTSService(
-                api_key=key,
-                model=voice["model"],
-                voice=voice.get("voice", ""),
-                language=Language(voice.get("language", "en")),
-                warm_standby_enabled=True,
-                world_part=voice.get("params", {}).get("world_part", "eu-north"),
-                **ids,
-            ),
+            build_tts(entry["voice"], ids),
             transport.output(),
             aggregators.assistant(),
         ]

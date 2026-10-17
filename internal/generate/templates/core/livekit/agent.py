@@ -54,12 +54,13 @@ from unmute_core.livekit import (
     yield_to_caller,
 )
 from unmute_core.settings import env_value
-from unmute_core.slng import tracking_ids
+from unmute_core.slng import TrackingIds, tracking_ids
 from unmute_core.state import CallState, call_phone_region, use_phone_region
 from unmute_core.telemetry import Langfuse, Telemetry
 from unmute_core.turn import turn_window
 
 import spec
+import speech
 
 load_dotenv()
 logger = logging.getLogger("agent")
@@ -135,6 +136,36 @@ def slng_host(binding: dict[str, Any]) -> str:
     return f"{binding.get('params', {}).get('world_part', 'eu-north')}.api.slng.ai"
 
 
+def build_stt(ids: TrackingIds) -> Any:
+    """Return the speech-to-text model: SLNG's with the call's tracking ids, else speech.py's."""
+    if speech.LISTEN is not None:
+        return speech.LISTEN()
+    listen = MODELS["listen"]
+    return slng.STT(
+        api_key=required("SLNG_API_KEY"),
+        slng_base_url=slng_host(listen),
+        model=listen["model"],
+        language=listen.get("language", "en"),
+        **ids,
+    )
+
+
+def build_tts(name: str, ids: TrackingIds) -> Any:
+    """Return one voice: SLNG's with the call's tracking ids, else speech.py's."""
+    if (make := speech.SPEAK.get(name)) is not None:
+        return make()
+    voice = MODELS["speak"][name]
+    return slng.TTS(
+        api_key=required("SLNG_API_KEY"),
+        slng_base_url=slng_host(voice),
+        model=voice["model"],
+        voice=voice.get("voice", ""),
+        language=voice.get("language", "en"),
+        warm_standby_enabled=True,
+        **ids,
+    )
+
+
 def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession:
     """Return the call's session: the speech and the model agent.yaml names, at its pace.
 
@@ -143,29 +174,13 @@ def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession
     question answer it.
     """
     entry = spec.SPEC["agents"][first]
-    listen, voice = MODELS["listen"], MODELS["speak"][entry["voice"]]
-    key = required("SLNG_API_KEY")
     ids = tracking_ids(state.call)
-    stt = slng.STT(
-        api_key=key,
-        slng_base_url=slng_host(listen),
-        model=listen["model"],
-        language=listen.get("language", "en"),
-        **ids,
-    )
+    stt = build_stt(ids)
     session = AgentSession(
         conn_options=SessionConnectOptions(llm_conn_options=APIConnectOptions(max_retry=1)),
         stt=stt,
         llm=build_llm(MODELS["think"][entry["model"]], state),
-        tts=slng.TTS(
-            api_key=key,
-            slng_base_url=slng_host(voice),
-            model=voice["model"],
-            voice=voice.get("voice", ""),
-            language=voice.get("language", "en"),
-            warm_standby_enabled=True,
-            **ids,
-        ),
+        tts=build_tts(entry["voice"], ids),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),
             endpointing=endpointing(WINDOW),
@@ -174,7 +189,8 @@ def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession
         vad=vad,
         user_away_timeout=None,
     )
-    stt.attach_to_session(session)
+    if isinstance(stt, slng.STT):
+        stt.attach_to_session(session)
     yield_to_caller(session)
     return session
 
