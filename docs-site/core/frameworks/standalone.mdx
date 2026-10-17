@@ -1,0 +1,153 @@
+---
+title: "Add one piece to your agent"
+sidebarTitle: "Add one piece"
+description: "Use one part of unmute-core on a plain LiveKit Agent or a plain Pipecat pipeline."
+---
+
+You can use each part of unmute-core on its own. Your agent stays a plain LiveKit `Agent` or a plain Pipecat pipeline. You add only what you need.
+
+On this page:
+
+- [Quickstart](#quickstart) - one tool on a plain agent
+- [What works where](#what-works-where) - each piece, and its page
+- [What still needs UnmuteAgent or UnmuteFlows](#what-still-needs-unmuteagent-or-unmuteflows) - the short list
+- [Where to go next](#where-to-go-next)
+
+## Quickstart
+
+```python agent.py
+import os
+
+from livekit.agents import Agent, AgentSession, JobContext
+from livekit.plugins import openai, silero, slng
+
+from pydantic import BaseModel
+
+from unmute_core.livekit import function_tools
+from unmute_core.tools import ToolRegistry, local_tool
+
+
+class Order(BaseModel):
+    status: str
+
+
+def lookup_order(order_id: str) -> Order:
+    """Look up an order by its id."""
+    return Order(status="shipped")
+
+
+registry = ToolRegistry([local_tool(lookup_order, announce="One moment.")])
+SLNG_KEY = os.environ["SLNG_API_KEY"]
+SLNG_HOST = f"{os.environ['SLNG_WORLD_PART']}.api.slng.ai"
+VOICE = "8d8aec63a56c460cb7def795bdf754fa"
+
+
+
+async def entrypoint(ctx: JobContext) -> None:
+    agent = Agent(instructions="You help with orders.", tools=function_tools(registry))
+    stt = slng.STT(
+        api_key=SLNG_KEY, slng_base_url=SLNG_HOST, model="soniox/speech-ai:rt-v5", language="en"
+    )
+    session = AgentSession(
+        stt=stt,
+        llm=openai.LLM(model="gpt-5.6-terra"),
+        tts=slng.TTS(
+            api_key=SLNG_KEY,
+            slng_base_url=SLNG_HOST,
+            model="slng/fish/tts:s2.1-pro",
+            voice=VOICE,
+            language="en",
+        ),
+        vad=silero.VAD.load(),
+    )
+    stt.attach_to_session(session)
+    await session.start(agent=agent, room=ctx.room)
+```
+
+The agent keeps its own LLM plugin, its own speech to text and text to speech, and its own pipeline. Here speech runs on SLNG: Soniox hears the caller and Fish Audio speaks. See [SLNG](/core/models/slng). The library adds the tool, with its announce line.
+
+Working files for every piece are in `examples/minimal/livekit/` and `examples/minimal/pipecat/`:
+
+| File | Piece |
+|---|---|
+| `tools.py` | Tools and the announce line |
+| `router.py` | The Context Router |
+| `telemetry.py` | Spans |
+| `greeting.py` | The greeting |
+| `idle.py` | Idle nudges |
+| `handoff.py` | Handoff |
+| `tasks.py` | Tasks |
+
+## What works where
+
+Each row links to the page that holds the recipe.
+
+| Piece | LiveKit | Pipecat | What it needs |
+|---|---|---|---|
+| [Your own LLM](/core/models/model-call) | Yes | Yes | Nothing. The plugin keeps its client and retries. |
+| [Any other model call](/core/models/model-call) | `ModelCallLLM` | `ModelCallLLMService` | A `ModelCall`, like `OpenAIModelCall` |
+| [SLNG Context Router](/core/models/slng) | `ModelCallLLM` | `ModelCallLLMService` | The `slng` extra |
+| [Tools](/core/build/tools) | `function_tools` | `tools_schema` | A `ToolRegistry` |
+| [A line said by a tool](/core/build/tools) | Yes | Yes | `announce` on the tool |
+| [Built-in tools](/core/build/tools) | `function_tools` | `tools_schema` | `current_datetime_tool`, `user_phone_number_tool` |
+| [Save tool for values](/core/build/state) | `function_tools`, `filled_llm(save_values=True)` | `tools_schema`, `fill_prompt(save_values=True)` | `values_tool` |
+| [`llm` span for a native LLM](/core/reference/telemetry#on-a-plain-agent) | `traced_llm` | `TelemetryObserver` | A `Telemetry` with a sink |
+| [One agent description](/core/reference/agent-spec) | `UnmuteAgent(spec)` | `UnmuteFlows(spec, ...)` | An `AgentSpec`, the same on both |
+| [Tasks and groups](/core/build/tasks) | `UnmuteAgent` | `UnmuteFlows` | An `AgentSpec` with a `TaskPlan` |
+| [Handoff](/core/build/handoffs) | `agent.hand_off`, or `shape_chat_ctx` on a plain agent | `flows.hand_off` | The next agent's `AgentSpec`. See below |
+| [Typed state and prompt filling](/core/build/state) | `filled_llm` | `fill_prompt` | A `CallState` |
+| [Model hooks](/core/build/hooks#where-the-model-hooks-run) | `filled_llm(call=call)` | `attach_call(llm=llm)` | A `CallHooks` |
+| [Greeting](/core/build/call-lifecycle) | `greet` | `greeting_frames` | A `Greeting` |
+| [Call start values, prefetch, events, failure, end](/core/build/call-lifecycle) | `open_call`, `attach_call` | `open_call`, `attach_call` | A `CallHooks` |
+| [Idle nudges](/core/build/turn-taking) | `idle_nudges` | `IdleNudgeObserver` | An `IdleNudges` config |
+| [Turn pace](/core/build/turn-taking) | `endpointing` | `vad_params`, `smart_turn_params` | `turn_window(pace, framework)` |
+| [Interruption](/core/build/turn-taking) | `interruption`, `yield_to_caller` | `interruption`, `user_mute_strategies` | Nothing |
+| [Telemetry](/core/observe/telemetry) | `trace_session` | `TelemetryObserver` | A `Telemetry` with a sink |
+| [Prefetch](/core/build/prefetch) | `Prefetch.run`. `filled_llm(call=call)` waits for the background lookups. | `Prefetch.run`. `attach_call(llm=llm)` waits for them. | A `CallState`, and a `CallHooks` to wait |
+| [Knowledge](/core/build/knowledge) | `KnowledgeBase` as a tool | `KnowledgeBase` as a tool | The `knowledge` extra |
+| [End call](/core/build/tools) | A tool with `effect="ends_conversation"` | The same, or [`end_call_tool`](/core/frameworks/pipecat) | A tool |
+
+On Pipecat, pass `transport=` to `attach_call` or `open_call`, so the transport's hang-up makes the call's end read `caller_hung_up`. Pass `call=` to `max_duration`, `idle_nudges`, `IdleNudgeObserver`, `SipLine`, `end_call_tool`, `voicemail_tool` and `dial_out` so the end reads the right reason. See [Why the call ended](/core/build/call-lifecycle#why-the-call-ended).
+
+`max_duration` and the call info builders (`sip_call_info`, `telephony_call_info`) also work on a plain agent. See [LiveKit](/core/frameworks/livekit) and [Pipecat](/core/frameworks/pipecat).
+
+### A handoff on a plain agent
+
+On Pipecat, `UnmuteFlows` works without tasks. Give each agent a spec with only its prompt. The next agent runs on the same `CallState`:
+
+```python
+flows = UnmuteFlows(AgentSpec(PROMPT), llm=llm, context=context, aggregators=aggregators)
+flows.install()
+
+# inside the handoff tool's handler
+await flows.hand_off(params, AgentSpec(NEXT_PROMPT, name="next"), announce="One moment.")
+```
+
+On LiveKit, a plain `Agent` hands off the LiveKit way, by returning a new agent from a tool. Build it with `Agent(chat_ctx=shape_chat_ctx(self.chat_ctx, HandoffContext(...)))` to keep the library's history rules. See [Handoffs](/core/build/handoffs).
+
+## What still needs UnmuteAgent or UnmuteFlows
+
+- **Tasks and groups on LiveKit** need `UnmuteAgent`. It runs each step as its own agent.
+- **Tasks and groups on Pipecat** need `UnmuteFlows`, with the plan in the spec's `tasks`.
+- **A full handoff on LiveKit** (announce line, model and voice switch, summary) needs `UnmuteAgent.hand_off`. The history rules work on a plain agent through `shape_chat_ctx`.
+- **Model hooks** run only where the library sends the model request. A plain agent keeps them by calling `filled_llm` or `traced_llm` in its `llm_node` on LiveKit, or by passing `llm=` to `attach_call` on Pipecat. Without that, the adapter logs one warning. See [Hooks](/core/build/hooks#where-the-model-hooks-run).
+- **A held save at the end of a call** is settled by `call.end`, or by `UnmuteAgent` on LiveKit and `flows.settle()` on Pipecat.
+
+Everything else works on a plain agent.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="LiveKit" icon="boxes" href="/core/frameworks/livekit">
+    The full agent on LiveKit.
+  </Card>
+  <Card title="Pipecat" icon="boxes" href="/core/frameworks/pipecat">
+    The full flow on Pipecat.
+  </Card>
+  <Card title="Tools" icon="wrench" href="/core/build/tools">
+    The tool registry that both frameworks share.
+  </Card>
+  <Card title="Turn taking" icon="timer" href="/core/build/turn-taking">
+    Turn pace, interruption and idle nudges.
+  </Card>
+</CardGroup>

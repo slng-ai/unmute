@@ -1,0 +1,100 @@
+---
+title: "What you built"
+sidebarTitle: "What you built"
+description: "Map your salon agent to the full example in the repository, run it on LiveKit and Pipecat, and find the guide for each piece."
+---
+
+You have: Robin with state, a diary tool, a booking task, a handoff, prefetch, quiet-caller settings and a trace, from [See every call](/core/tutorial/see-every-call).
+
+You built a phone agent that keeps a typed state, books only what the caller agreed to, hands off a complaint, knows the date, and shows up in Langfuse. The same `salon/` package runs on LiveKit and Pipecat.
+
+## Your code and the example
+
+The full example is `examples/salon-concierge-unmute/`. Its names are the ones you used, so you can read it next to your files. Its `salon/` package keeps its code in `salon/src/salon/`.
+
+| You wrote | In the example |
+|---|---|
+| `State` | `salon/src/salon/state.py` |
+| `GREETING`, `CONCIERGE_PROMPT` | `salon/src/salon/agent.py`, and the prompts in `salon/src/salon/prompts/` |
+| `tools()` and the diary | `salon/src/salon/agent.py` and `salon/src/salon/store.py` |
+| `VERIFY_CUSTOMER`, `CONCIERGE_TASKS`, `agents()` | `salon/src/salon/agent.py` |
+| `Concierge` and `ComplaintSpecialist` on LiveKit | `livekit/agent.py` |
+| `salon_flows()` on Pipecat | `pipecat/bot.py` |
+| `PREFETCH`, `new_call()` | `salon/src/salon/agent.py` |
+| `PACE`, `IDLE`, `MAX_DURATION_S`, `END_CALL` | `salon/src/salon/agent.py` |
+| `Telemetry` with `Langfuse` | `livekit/agent.py`, `pipecat/bot.py` |
+
+## What the example adds
+
+1. **Knowledge.** `look_up_salon_info` and `look_up_refund_policy` search the salon's own documents, so Robin quotes the guide instead of guessing a price.
+2. **Receipts and confirmations for every write.** Booking, moving and cancelling each ask a question first and say a fixed line after. Most turns cost one model request.
+3. **Held saves.** A save made before the caller answered is held, and the call's end settles it. Pipecat calls `UnmuteFlows.settle`. LiveKit does it on its own.
+4. **A locked phone number.** `customer_phone` is locked to the state on every diary tool, so the model never types it.
+5. **Phone calls.** `sip_call_info` and `telephony_call_info` read what a phone call carries into `state.call`. On a browser or console call, `UNMUTE_CALL_START` simulates a caller.
+6. **A complaint mid-booking.** `manage_booking` offers `to_complaints` too, so a complaint in the middle of a booking goes straight to the specialist.
+
+## Run the full example
+
+Copy the `.env.example` in each project to `.env`, and fill the keys it lists. Langfuse keys are optional.
+
+<CodeGroup>
+
+```bash LiveKit
+cd examples/salon-concierge-unmute/livekit
+cp .env.example .env              # fill in the keys
+uv sync
+lk agent console agent.py         # talk through your microphone
+lk agent console --text agent.py  # or type
+```
+
+```bash Pipecat
+cd examples/salon-concierge-unmute/pipecat
+cp .env.example .env              # fill in the keys
+uv sync
+uv run bot.py -t webrtc           # then open http://localhost:7860
+```
+
+</CodeGroup>
+
+A call to try:
+
+1. "I'd like to book a haircut on Friday." The agent checks your number, offers times, confirms and books.
+2. "How much is a full head colour?" It answers from the salon guide.
+3. "My last colour went wrong, I want to complain." It hands you to the complaint specialist.
+4. "Can I also move my haircut to Saturday?" It hands you back to the concierge, who moves it.
+5. "That's all, bye." It says goodbye and hangs up.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="State" icon="brain" href="/core/build/state">
+    Types, confirmation and prompt placeholders.
+  </Card>
+  <Card title="Tools" icon="wrench" href="/core/build/tools">
+    Typed tools, locked arguments and announce lines.
+  </Card>
+  <Card title="Tasks" icon="list-check" href="/core/build/tasks">
+    Steps, groups and finish checks.
+  </Card>
+  <Card title="Handoffs" icon="headset" href="/core/build/handoffs">
+    Pass the call between agents.
+  </Card>
+  <Card title="Prefetch" icon="clock" href="/core/build/prefetch">
+    Read values before the greeting.
+  </Card>
+  <Card title="Turn taking" icon="hourglass" href="/core/build/turn-taking">
+    Pace, interruptions and quiet callers.
+  </Card>
+  <Card title="Knowledge" icon="book-open" href="/core/build/knowledge">
+    Answer from your own documents.
+  </Card>
+  <Card title="Telemetry" icon="chart-line" href="/core/observe/telemetry">
+    Langfuse, Logfire, Coval and more.
+  </Card>
+  <Card title="On LiveKit" icon="boxes" href="/core/frameworks/livekit">
+    How the library plugs into LiveKit Agents.
+  </Card>
+  <Card title="On Pipecat" icon="boxes" href="/core/frameworks/pipecat">
+    How the library plugs into a Pipecat pipeline.
+  </Card>
+</CardGroup>

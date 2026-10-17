@@ -1,0 +1,199 @@
+---
+title: "Hand off complaints"
+sidebarTitle: "Hand off complaints"
+description: "Add a complaint specialist agent, and a handoff tool that moves the caller to it and back."
+---
+
+You have: a booking task and group, from [Book step by step](/core/tutorial/book-step-by-step).
+
+The caller says a colour went wrong, and a specialist takes the complaint down.
+
+## What you add
+
+Two agents share one call. The concierge books. The complaint specialist records complaints. Both read and write the same `CallState`.
+
+In the shared package, add the specialist's tool, prompt and plan. Robin stays the name the caller hears.
+
+```python salon/agent.py
+SPECIALIST_PROMPT = """\
+You are still Robin, the same person the caller was talking to. Listen to the
+complaint, say sorry for the trouble, and write down the useful facts.
+Everything you write is read aloud, so write plain sentences.
+Verification so far: {{customer_verified}}.
+"""
+TO_COMPLAINTS = "The caller has a complaint or service problem."
+TO_COMPLAINTS_LINE = "I'm sorry to hear that. Let me take this down properly."
+TO_CONCIERGE = "The caller changes to a request owned by another specialist."
+```
+
+Add `record_complaint` to the registry in `tools()`. It uses the same locked number and an announce line. `ComplaintRecord` is its answer's model, in `salon/store.py`.
+
+```python salon/agent.py
+local_tool(
+    salon.record_complaint,
+    output=ComplaintRecord,
+    locked=LOCKED_PHONE,
+    announce="Let me get that written down.",
+    description="Record the verified customer's complaint after enough facts are known.",
+),
+```
+
+Then replace `concierge_plan` with `agents`. It returns both agents as `AgentSpec`s, the same on LiveKit and Pipecat. Their plans share one set of tools, and `registry.only(...)` gives each agent the tools it may use. Each agent names itself, so a `handoff` event shows which one holds the call.
+
+```python salon/agent.py
+from typing import NamedTuple
+
+from unmute_core.agent import AgentSpec
+
+from salon.store import TIMEZONE
+
+SPECIALIST_TASKS = TasksSpec.model_validate(
+    {
+        "mode": "record",
+        "tasks": [VERIFY_CUSTOMER],
+        "task_only_tools": ["find_or_create_customer"],
+    }
+)
+CONCIERGE_TOOLS = ("find_or_create_customer", "find_slots", "book_appointment")
+SPECIALIST_TOOLS = ("record_complaint", "find_or_create_customer")
+
+
+class Agents(NamedTuple):
+    """The call's two main agents, the same on LiveKit and Pipecat."""
+
+    concierge: AgentSpec
+    specialist: AgentSpec
+
+
+def agents(salon: Salon) -> Agents:
+    """Return both agents, on one diary. Build them once per process."""
+    registry = tools(salon)
+    concierge = TaskPlan(
+        CONCIERGE_TASKS, state=State, confirm=CONFIRM, tools=registry.only(CONCIERGE_TOOLS)
+    )
+    specialist = TaskPlan(
+        SPECIALIST_TASKS, state=State, confirm=CONFIRM, tools=registry.only(SPECIALIST_TOOLS)
+    )
+    return Agents(
+        concierge=AgentSpec(CONCIERGE_PROMPT, name="concierge", tasks=concierge, timezone=TIMEZONE),
+        specialist=AgentSpec(
+            SPECIALIST_PROMPT, name="complaint_specialist", tasks=specialist, timezone=TIMEZONE
+        ),
+    )
+```
+
+The specialist reuses `VERIFY_CUSTOMER`, so a complaint is written down only for a verified customer.
+
+Both agents answer on the framework's own LLM, so neither spec has a model. They hold nothing of one call, so you build them once. A spec whose model reads the call, like the SLNG router, is built per call, after the state.
+
+Now run the two agents. A handoff is a tool the model calls. It returns the next agent.
+
+<CodeGroup>
+
+```python livekit/agent.py
+from livekit.agents import function_tool
+
+CONCIERGE, SPECIALIST = salon.agents(Salon())
+
+
+class Concierge(UnmuteAgent):
+    """Books appointments."""
+
+    def __init__(self, state: CallState[State]) -> None:
+        """Build the concierge for one call."""
+        super().__init__(CONCIERGE, state=state)
+
+    @function_tool
+    async def to_complaints(self) -> UnmuteAgent | str:
+        """The caller has a complaint or service problem."""
+        return await self.hand_off(
+            ComplaintSpecialist(self.state), announce=salon.TO_COMPLAINTS_LINE
+        )
+
+
+class ComplaintSpecialist(UnmuteAgent):
+    """Takes a complaint down."""
+
+    def __init__(self, state: CallState[State]) -> None:
+        """Build the complaint specialist. It records into the concierge's spans."""
+        super().__init__(SPECIALIST, state=state)
+
+    @function_tool
+    async def to_concierge(self) -> UnmuteAgent | str:
+        """The caller changes to a request owned by another specialist."""
+        return await self.hand_off(Concierge(self.state))
+```
+
+```python pipecat/bot.py
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.services.llm_service import FunctionCallParams
+
+CONCIERGE, SPECIALIST = salon.agents(Salon())
+
+
+def salon_flows(state, llm, context, aggregators) -> UnmuteFlows:
+    """Return the call's agents: the concierge first, the specialist a handoff away."""
+
+    def handoff(name, description, to, tools, announce=None) -> FunctionSchema:
+        """Return a tool that hands the call to ``to``, with the Pipecat tools ``tools()`` gives."""
+
+        async def handler(params: FunctionCallParams) -> None:
+            """Give the call to the other agent."""
+            await flows.hand_off(params, to, native_tools=tools(), announce=announce)
+
+        return FunctionSchema(name, description, {}, [], handler=handler)
+
+    concierge_tools = [
+        handoff(
+            "to_complaints",
+            salon.TO_COMPLAINTS,
+            SPECIALIST,
+            lambda: specialist_tools,
+            salon.TO_COMPLAINTS_LINE,
+        )
+    ]
+    specialist_tools = [
+        handoff("to_concierge", salon.TO_CONCIERGE, CONCIERGE, lambda: concierge_tools)
+    ]
+    flows = UnmuteFlows(
+        CONCIERGE,
+        llm=llm,
+        context=context,
+        aggregators=aggregators,
+        state=state,
+        native_tools=concierge_tools,
+    )
+    flows.install()
+    return flows
+```
+
+</CodeGroup>
+
+In `entrypoint()` and `bot()`, start `Concierge(state)` or `salon_flows(...)` in place of the single agent. Add to the concierge prompt: "A complaint or a refund goes to `to_complaints`."
+
+## Try it
+
+Start the agent as before and book a haircut. Then say "My last colour went wrong, I want to complain."
+
+1. Robin says "I'm sorry to hear that. Let me take this down properly." The caller cannot cut that line off.
+2. The specialist speaks next. It is still Robin to the caller.
+3. Describe the problem. The specialist verifies your number if needed, says "Let me get that written down", and records it.
+
+## Why it works this way
+
+Each agent is its own `AgentSpec`, with its own prompt and its own tools. The specialist cannot book, and the concierge cannot write a complaint. Both share one call state, so the number the caller confirmed is not asked for again.
+
+A plain handoff often lets the next agent hand the call straight back, or lets it start before the caller heard the line. Here the line plays first, and the next agent speaks first.
+
+## What you have now
+
+| Piece | File |
+|---|---|
+| The specialist's prompt, tool and plan, and `agents()` | `salon/agent.py` |
+| Agents and handoff tools | `livekit/agent.py`, `pipecat/bot.py` |
+
+<Card title="Next: Know the time" icon="clock" href="/core/tutorial/know-the-time">
+  Read today's date and the caller's number before the greeting.
+</Card>
+
+Go deeper: [Handoffs](/core/build/handoffs).

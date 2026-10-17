@@ -1,0 +1,169 @@
+---
+title: "SLNG speech and the Context Router"
+sidebarTitle: "SLNG"
+description: "Use SLNG speech-to-text, text-to-speech and the Context Router with a native LiveKit or Pipecat agent."
+---
+
+SLNG gives you speech to text, text to speech and the Context Router. You can use each one alone, or all three together. The library does not wrap the speech plugins. It only reads their metrics for [telemetry](/core/observe/telemetry).
+
+## Install
+
+Add the `slng` extra beside your framework extra:
+
+```bash
+uv add "unmute-core[livekit,slng]"
+```
+
+The speech plugins are separate packages: `livekit-plugins-slng` for LiveKit and `pipecat-slng` for Pipecat. The [installation page](/core/start/installation) lists every extra.
+
+## Speech only
+
+Use SLNG speech to text and text to speech with any LLM. This example uses Soniox to hear the caller and Fish Audio to speak.
+
+<CodeGroup>
+
+```python LiveKit
+import os
+
+from livekit.plugins import slng
+
+from unmute_core.slng import tracking_ids
+
+world_part = os.environ["SLNG_WORLD_PART"]  # your SLNG project's region, like eu-north
+
+stt = slng.STT(
+    api_key=os.environ["SLNG_API_KEY"],
+    slng_base_url=f"{world_part}.api.slng.ai",
+    model="soniox/speech-ai:rt-v5",
+    language="en",
+    **tracking_ids(state.call),
+)
+tts = slng.TTS(
+    api_key=os.environ["SLNG_API_KEY"],
+    slng_base_url=f"{world_part}.api.slng.ai",
+    voice="8d8aec63a56c460cb7def795bdf754fa",
+    model="slng/fish/tts:s2.1-pro",
+    language="en",
+    **tracking_ids(state.call),
+)
+```
+
+```python Pipecat
+import os
+
+from pipecat.transcriptions.language import Language
+from pipecat_slng import SlngSTTService, SlngTTSService
+
+from unmute_core.slng import tracking_ids
+
+world_part = os.environ["SLNG_WORLD_PART"]  # your SLNG project's region, like eu-north
+
+stt = SlngSTTService(
+    api_key=os.environ["SLNG_API_KEY"],
+    model="soniox/speech-ai:rt-v5",
+    language=Language("en"),
+    world_part=world_part,
+    **tracking_ids(state.call),
+)
+tts = SlngTTSService(
+    api_key=os.environ["SLNG_API_KEY"],
+    voice="8d8aec63a56c460cb7def795bdf754fa",
+    model="slng/fish/tts:s2.1-pro",
+    language=Language("en"),
+    world_part=world_part,
+    **tracking_ids(state.call),
+)
+```
+
+</CodeGroup>
+
+1. `tracking_ids(state.call)` gives both plugins the agent's id and the call's session id. SLNG groups usage by them. Build the call state first, so the ids exist.
+2. Put both services in the session or the pipeline. On LiveKit, also call `stt.attach_to_session(session)` after you build the session.
+3. `SLNG_WORLD_PART` must be your SLNG project's region. A key used in another region gets 401 from the router.
+
+## Use the Context Router
+
+`RouterModelCall` sends each model request to the SLNG Context Router. Give it to your framework through a small adapter.
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.livekit import ModelCallLLM
+from unmute_core.slng import RouterModelCall
+
+router = RouterModelCall(
+    state.call,
+    model="gpt-5.6-luna",
+    config=config,
+    body={"reasoning_effort": "none"},
+)
+session = AgentSession(llm=ModelCallLLM(router, state=state), ...)
+```
+
+```python Pipecat
+from unmute_core.pipecat import ModelCallLLMService
+from unmute_core.slng import RouterModelCall
+
+router = RouterModelCall(
+    state.call,
+    model="gpt-5.6-luna",
+    config=config,
+    body={"reasoning_effort": "none"},
+)
+llm = ModelCallLLMService(router, state=state)
+```
+
+</CodeGroup>
+
+1. The adapter sends the prompt with its `{{placeholders}}` still in it, and the values from `state` beside it. The router fills the prompt, so the model sees the same text it would see on a native LLM.
+2. The router retries and fails over by its own rules. `config` names the models and your keys: see the next section.
+3. OpenAI refuses function tools with reasoning on, so an agent with tools sends `reasoning_effort` `"none"`. An agent with no tools may leave it out.
+
+With `UnmuteAgent`, give the router to the agent's spec instead: `AgentSpec(PROMPT, model=router)`. Build the router per call, after the state, because it reads `state.call`. Arguments you leave out are read from the `SLNG_*` [settings](/core/reference/settings).
+
+## Bring your own model key
+
+Send your own router config with every request. It names the model the router uses and holds your own provider key.
+
+```python
+import os
+
+from unmute_core.slng import OpenAIEndpoint, RouterConfig
+
+config = RouterConfig.single(
+    "gpt-5.6-luna",
+    OpenAIEndpoint(
+        url="https://api.openai.com/v1",
+        api_key=os.environ["OPENAI_API_KEY"],
+    ),
+)
+```
+
+1. `RouterConfig.single` puts one model on your OpenAI key. `RouterModelCall(config=config)` sends it with every request.
+2. Always pass a config. Without one, the router uses a stored config that may not select your model, and answers 400.
+3. Only an SLNG key from a project on the Execution Layer may send a config. Any other key gets 403 `project_mode_forbidden`.
+
+For weights, fallbacks and other providers, see [Your router config](/core/reference/slng#your-router-config).
+
+## Without the router
+
+`OpenAIModelCall` is a native call for any OpenAI-compatible endpoint. It sends nothing to SLNG, and the library fills the prompt. See [Use any OpenAI-compatible model](/core/models/model-call#use-any-openai-compatible-model).
+
+The complete files with speech and the router together are `examples/parcel-desk/livekit/agent.py` and `examples/parcel-desk/pipecat/bot.py`.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="SLNG reference" icon="book" href="/core/reference/slng">
+    Every RouterModelCall argument, header, config field, error and Gemini detail.
+  </Card>
+  <Card title="The model call" icon="brain" href="/core/models/model-call">
+    The interface the router implements, and FallbackModelCall.
+  </Card>
+  <Card title="Settings" icon="settings" href="/core/reference/settings">
+    The `SLNG_*` variables and how to check them at startup.
+  </Card>
+  <Card title="Context Router on Unmute" icon="zap" href="/optimization/context-router">
+    The `agent.yaml` side of the router.
+  </Card>
+</CardGroup>

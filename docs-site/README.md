@@ -144,6 +144,23 @@ a nested group root in `docs.json`. `snippets/` is the one exception: Mintlify
 never renders a file there as a standalone page, so a snippet has no navigation
 entry and the structure test skips that directory.
 
+## The Unmute Core tab
+
+The site has two tabs. The Unmute tab is everything above. The Unmute Core tab
+documents the `unmute-core` Python library, and its pages live in
+`slng-ai/unmute-core` under `docs/core/`.
+
+`docs-site/core/` is a copy. Do not edit it here. Fix the page upstream, then:
+
+```sh
+scripts/sync_core_docs.sh            # or pass a tag or commit
+```
+
+The script copies the pages, replaces the Unmute Core tab in `docs.json`, and
+writes the source commit to `core/.source-sha`. A page upstream that describes
+Unmute behaviour `main` does not have yet is listed in the script's
+`held_back` and gets a redirect in `docs.json` until it is true.
+
 ## Tests hold the parts that can be held
 
 Prose rots. These facts cannot:

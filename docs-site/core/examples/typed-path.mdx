@@ -1,0 +1,192 @@
+---
+title: "Type the agent's path"
+sidebarTitle: "Type the path"
+description: "Let the model understand the caller, and let typed tools and code decide, save and speak. Fewer tokens, the same call every time."
+---
+
+A typed path is an agent where every step that changes the call is a typed
+tool call, and code says what comes next. The model reads what the caller
+meant. Code checks it, saves it and speaks the next line.
+
+```python grade.py
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
+from unmute_core.tools import Assign, ToolRegistry, ToolReply, local_tool
+
+
+class Graded(BaseModel):
+    said: str
+    waiting: str | None
+
+
+def grade_answer(
+    answer: Annotated[str, Field(min_length=1, max_length=600)],
+    grade: Literal["correct", "partly", "wrong", "unclear"],
+    waiting: str,
+) -> Graded:
+    """Grade the learner's answer to the exercise waiting."""
+    ...
+
+
+registry = ToolRegistry(
+    [local_tool(grade_answer, locked={"waiting": "{{waiting}}"})],
+    state=State,
+    assign={"grade_answer": [Assign(variable="waiting", path=("waiting",))]},
+    replies=[ToolReply(tool="grade_answer", say=["{{result.said}}"])],
+)
+```
+
+The model sends one value it must choose, a grade of four. Code knows which
+exercise is waiting, records the result, picks the next exercise and says it.
+The caller hears the next line with no second model request.
+
+## Why type the path
+
+1. **Fewer tokens.** A tool result with a `ToolReply` asks the model for no reply. Most caller turns cost one model request: the one that reads the caller.
+2. **The same call every time.** A receipt, a read-back or a question said by code has the same words on every call, and on both frameworks.
+3. **The model cannot invent an outcome.** A booking, a claim or a promise exists only when a tool returned it. The model can only ask for it.
+4. **An open standard.** The path is data: Pydantic types, task rows and reply rows. Another runner, a test or a tool can read it without a model.
+
+## Who decides what
+
+| Decision | Who makes it | With |
+|---|---|---|
+| What the caller meant | the model | its tool call |
+| A value from a closed set | the model, typed | `Literal`, `Enum` |
+| Whether a value is valid | code | Pydantic constraints and validators |
+| Values the call starts with | the dispatch, typed | `call_start` values marked `required` |
+| Values the caller never says | code | [locked arguments](/core/build/tools#locked-arguments) |
+| What a result saves | code | `Assign` rows |
+| The next line | code | `ToolReply`, `OpeningTool`, `announce` |
+| Whether an effect happens | the caller | a `FinishRule` `confirm` line and their yes |
+| A short answer to a side question | the model | its own words |
+
+## The rules the examples follow
+
+**Require what the call cannot run without.** Values the call starts with, like
+an account id or a customer's name, are `call_start` values marked `required`,
+with a type. A dispatch that lacks one, or sends a wrong one, never reaches the
+greeting. See [Start values](/core/build/call-lifecycle#start-values).
+
+**Type every argument.** A tool's parameters are Pydantic types with a
+description the model reads. A wrong value is refused before the tool runs, and
+the reason goes back to the model so it can ask again.
+
+```python state.py
+PolicyNumber = Annotated[
+    Spelled,
+    AfterValidator(policy_number),
+    Field(description="The policy number: KP and six digits, like KP482913. Never guess a digit."),
+]
+```
+
+A type also says how code speaks a value. `Spelled` is said a character at a
+time, `BirthDate` with its year, `Phone` in its groups, a `date` from today. See
+[Value types](/core/build/state#value-types).
+
+Kestrel types the policy number's spelling. Faro types a grade, a level and a
+learning goal as `Literal`s. A rule about the request, like Wasla's payment
+window, is not a type: it is the tool's, as below.
+
+**Let the result speak.** Give each result a `ToolReply`. The line can read
+`{{result.<field>}}` and State values. A value is said by its JSON Schema
+`format`, so a date reads as a day. See [Save a result and speak it](/core/build/tools#save-a-result-and-speak-it).
+
+Hide the words a reply says from the model with `hidden=("said",)` on the tool.
+A model that reads a line may say it again in its own words.
+
+**Let the result save.** An `Assign` row saves a result field into the State.
+The next tool reads it as a locked argument, so the model never carries it.
+Nosh saves the places it offered, and `place_details` refuses any id that was
+not offered.
+
+**Lock what the caller does not choose.** Account ids, the call's id, the
+report so far and the exercise waiting are `locked`. The model never sees them
+and cannot change them.
+
+**Read back before an effect.** A tool that changes something has a
+`FinishRule` with a `confirm` line. Code says it, and the tool runs only on the
+caller's yes to the same input. See [Ask before a closing tool runs](/core/build/tasks/confirm-in-code#ask-before-a-closing-tool-runs).
+
+**Open each step in code.** A step that opens with an `OpeningTool`, or with
+`opening: listen` and an `announce` line, says its first line with no model
+request. A group's `arguments` carry what the caller already said into the
+first step, so its read-back can play at once.
+
+**Decide in the tool, say it in code.** An argument type says what the caller
+meant: a date, a phone number, a spelled id. A rule about the request, like
+"not in the future", belongs to the tool. The tool returns a typed outcome, a
+`Literal` field, and a reply on the tool turns each outcome into a line. Code
+says it, and the turn costs one model request: the call. A validator that
+raises would cost two more: one for the model to say the error, and a finish
+check after it. See [Replies on the tool itself](/core/reference/tools#replies-on-the-tool-itself).
+A tool that reads its input back for a yes checks the rule in a `precheck`, so
+it answers before the read-back. See [Check a rule before the tool runs](/core/reference/tools#check-a-rule-before-the-tool-runs).
+
+```python claims.py
+future = incident_day is not None and incident_day > today()
+...
+if future:
+    noted.status = "future_day"
+```
+
+**Refuse in code when the model must decide.** Raise `ToolError` with a
+message that names what to do next. The model reads it and chooses what to ask.
+
+```python finder.py
+if picked is None:
+    ids = ", ".join(f"{p.id} ({p.name})" for p in offer.places)
+    raise ToolError(f"{place} was never offered. The offer is: {ids}.")
+```
+
+## What it costs
+
+Each example's scenarios count the model requests of every caller turn. These
+are the whole scripted calls, typed by the caller, on the real model.
+
+| Example | Calls | Caller turns | Model requests, LiveKit | Model requests, Pipecat |
+|---|---|---|---|---|
+| Nosh | 3 | 15 | 15 | 15 |
+| Kestrel | 3 | 24 | 29 | 28 |
+| Wasla | 5 | 26 | 28 | 27 |
+| Faro | 4 | 21 | 22 | 22 |
+
+A request above one per turn is a turn where the model asked for a tool, read
+the refusal, and asked again, or where a step opened with a model reply.
+
+## Where the model still talks
+
+1. A question off the path, like "Do you take cards?" Keep these short in the prompt.
+2. A goodbye. Or give the end tool an `announce` line with `announce_wait=True`, and the model says nothing.
+3. A step whose first line depends on what was said. Prefer an `OpeningTool` when a tool can compute it.
+
+## Troubleshooting
+
+### The model says the line code already said
+
+The prompt tells the model to say something a reply also says. **Fix:** tell
+the model in the tool's docstring that the application says the result. The
+model reads the docstring as the tool's description.
+
+```python
+def find_places(...) -> FoundPlaces:
+    """Search places at the location the caller agreed to. The application says them."""
+```
+
+### A turn makes two requests where you expected one
+
+The tool was refused, or no `ToolReply` matched its result. **Fix:** give every
+result shape a reply, including the "not found" one. Read the refusal from the
+`tool.refused` event. See [Watch tool calls](/core/build/tools#watch-tool-calls).
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Nosh: a tools-only finder" icon="utensils" href="/core/examples/nosh">
+    The smallest typed path: three tools and their replies.
+  </Card>
+  <Card title="Reply and confirm in code" icon="message-square" href="/core/build/tasks/confirm-in-code">
+    Every rule of `ToolReply`, `FinishRule` and `OpeningTool`.
+  </Card>
+</CardGroup>

@@ -1,0 +1,204 @@
+---
+title: "The call's life"
+description: "What happens around a call: start values, the greeting, checks, tools on events, a failure and the end."
+---
+
+The library runs what happens around a call. It saves the values the call starts with, greets the caller, runs tools on events, handles a failure and closes the call. It works the same on LiveKit and Pipecat.
+
+In the salon tutorial, [Quiet callers and long calls](/core/tutorial/quiet-callers) builds this step by step.
+
+## Open a call
+
+Build one `CallHooks` per call. Give it to the agent, then open the call with a greeting.
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.call import CallHooks
+from unmute_core.greeting import Greeting
+from unmute_core.livekit import UnmuteAgent, open_call
+
+
+async def entrypoint(ctx: JobContext) -> None:
+    state = CallState(State)
+    call = CallHooks(state, hooks=hooks, prefetch=prefetch)
+    session = AgentSession(...)  # your STT, LLM, TTS and VAD
+    agent = UnmuteAgent(AgentSpec(PROMPT), state=state, call=call)
+    await session.start(agent=agent, room=ctx.room)
+    await open_call(session, Greeting(text="Hi, thanks for calling."), call)
+```
+
+```python Pipecat
+from unmute_core.call import CallHooks
+from unmute_core.greeting import Greeting
+from unmute_core.pipecat import GreetingHold, fill_prompt, open_call
+
+state = CallState(State)
+call = CallHooks(state, hooks=hooks, prefetch=prefetch)
+hold = GreetingHold()  # also give it to the user aggregator: user_mute_strategies=[hold]
+await fill_prompt(llm, worker, PROMPT, state)
+
+
+@transport.event_handler("on_client_connected")
+async def on_connected(transport, client):
+    greeting = Greeting(text="Hi, thanks for calling.")
+    await open_call(worker, greeting, call, context=context, llm=llm, hold=hold, transport=transport)
+
+
+await runner.run()
+end = await call.end("ended")
+```
+
+</CodeGroup>
+
+1. `open_call` holds the caller's audio, so the greeting is not talked over.
+2. It runs your checks and the [prefetch](/core/build/prefetch), then greets.
+3. On LiveKit the session's close ends the call. On Pipecat, call `await call.end(...)` after `runner.run()`.
+
+On a plain agent, with no `UnmuteAgent` or `UnmuteFlows`, each piece still works on its own. See [Add one piece to your agent](/core/frameworks/standalone).
+
+## Start values
+
+Name the values a dispatch must send, then save them before the session starts.
+
+```python
+from unmute_core.call import CallStartError, save_call_start
+
+state = CallState(State, call_start={"customer_id": "required", "plan": "optional"})
+try:
+    saved = save_call_start(state, dispatched)
+except CallStartError as error:
+    ...
+```
+
+1. `dispatched` is the dispatch's `call_start` object. On LiveKit it is `json.loads(ctx.job.metadata or "{}").get("call_start")`. On Pipecat it is `runner_args.body.get("call_start")`.
+2. A missing required value, or one of the wrong type, raises `CallStartError`. Nothing is saved.
+3. For a local run, set `UNMUTE_CALL_START` to a JSON object. The dispatch's values win over it.
+
+## Greet the caller
+
+A `Greeting` says how the call opens.
+
+```python
+from unmute_core.greeting import Greeting
+
+Greeting(text="Hello {{customer.name}}, how can I help?")  # a fixed line
+Greeting()  # the model words a greeting
+Greeting(speaks_first="user")  # the agent waits for the caller
+```
+
+1. A fixed line may name State values that prefetch or `call_start` fills before the greeting.
+2. If a named value is still empty when the call opens, the model words the greeting instead.
+3. `Greeting(interruptible=False)` keeps the caller from cutting the greeting off.
+
+## Check services before the greeting
+
+Add a `before_call` hook for each service the call needs.
+
+```python
+hooks.before_call(check_crm)
+hooks.before_call(check_calendar)
+call = CallHooks(state, hooks=hooks, ready_timeout_s=10)
+```
+
+1. The checks run in order, before the prefetch. They share `ready_timeout_s`.
+2. A check that raises or runs out of time plays the failure line and hangs up.
+
+## Tools on events
+
+An `EventTool` runs a tool without the model. This one sends the call to a CRM when it ends.
+
+```python
+from unmute_core.call import EventTool
+from unmute_core.hooks import Hooks
+from unmute_core.tools import Transcript, webhook_tool
+
+log_call = webhook_tool(
+    "log_call",
+    "Send the call to the CRM.",
+    "https://crm.example.com/calls",
+    input=CallLog,
+    output=Done,
+    locked={"customer_id": "{{customer_id}}", "transcript": Transcript(max_messages=50)},
+)
+hooks = Hooks(EventTool(log_call, on=["call_end"]))
+```
+
+1. The events are `first_user_message`, `call_end`, `tool_succeeded:<tool>` and `tool_failed:<tool>`.
+2. Every required argument must be locked. The model never fills one.
+3. `assign={"booking_ref": "ref"}` saves a key of the result into the State. `note=True` shows the result to the model.
+
+## Handle a failure
+
+When the model or the speech to text fails for good, the call says a short line and hangs up.
+
+```python
+@hooks.wrap_failure
+async def page_then_hang_up(component: str, error: BaseException, handler) -> None:
+    await pager.notify(component, error)
+    await handler()
+
+
+call = CallHooks(state, hooks=hooks, failure_line="Sorry, we have a problem. Goodbye.")
+```
+
+1. `handler()` says `failure_line` and hangs up. A hook that never calls it keeps the call going.
+2. A voice failure alone only logs a warning. The call stays open.
+3. On Pipecat, keep the worker's `processor_unusable_policy` at `CONTINUE`, so the line can play.
+
+## Act when the call ends
+
+Watch `call.ended` to save what happened.
+
+```python
+@hooks.on("call.ended")
+async def save_summary(event: str, ended: CallEnd) -> None:
+    await crm.save(ended.reason, ended.values, ended.transcript)
+
+
+call = CallHooks(state, hooks=hooks, end_timeout_s=5)
+```
+
+1. The end runs once. It settles held saves and runs the `call_end` tools first.
+2. Then it tells the `call.ended` observers and waits for each.
+3. `CallEnd` holds `reason`, `values`, `confirmed`, `transcript` and `duration_s`.
+
+## Why the call ended
+
+`CallEnd.reason` and `{{call.end_reason}}` hold one word. It is the same on LiveKit and Pipecat.
+
+| Cause | Reason |
+|---|---|
+| The caller hung up | `caller_hung_up` |
+| An end tool, a tool with `ends_conversation`, a voicemail tool or a group with `then: end` | `agent_ended` |
+| A cold or warm transfer that went through | `transferred` |
+| `max_duration` ran out | `max_duration` |
+| `idle_nudges` hung up | `idle` |
+| A part failed for good | `error` |
+| Anything else | `ended` |
+
+When your own code ends the call, say why first. The first reason wins.
+
+```python
+call.caller_left()  # your own transport code
+call.end_requested("agent_ended")  # your own code, before it ends the call
+```
+
+Pass `call=` to `max_duration`, `idle_nudges`, `end_call_tool` and the other helpers. Without it, the end reads `ended`.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Call lifecycle reference" icon="book" href="/core/reference/call-lifecycle">
+    Every argument, the order of a call, and each rule in detail.
+  </Card>
+  <Card title="Prefetch" icon="zap" href="/core/build/prefetch">
+    The work at call start, before and beside the greeting.
+  </Card>
+  <Card title="Hooks" icon="webhook" href="/core/build/hooks">
+    Your code around prompts, model requests and tools.
+  </Card>
+  <Card title="The conversation key" icon="message-circle" href="/reference/agent-yaml">
+    How `agent.yaml` declares the greeting and idle nudges.
+  </Card>
+</CardGroup>

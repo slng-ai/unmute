@@ -104,215 +104,360 @@
     {
       "source": "/optimization/context-scope",
       "destination": "/best-practices/context-scope"
+    },
+    {
+      "source": "/core/start/unmute-and-core",
+      "destination": "/core/start/why-unmute-core"
     }
   ],
   "navigation": {
-    "groups": [
+    "tabs": [
       {
-        "group": "Get started",
-        "public": true,
-        "icon": "rocket",
-        "pages": [
-          "index",
-          "start/installation",
-          "start/quickstart",
-          "start/coding-agents",
-          "start/how-unmute-works"
-        ]
-      },
-      {
-        "group": "Build the agent",
-        "public": true,
-        "icon": "bot",
-        "pages": [
-          "build/your-first-agent",
-          "build/how-a-package-fits-together",
-          "build/variables",
-          "build/credentials",
-          "build/prefetch",
+        "tab": "Unmute",
+        "icon": "audio-lines",
+        "groups": [
           {
-            "group": "Tools",
-            "icon": "wrench",
-            "root": "build/tools/overview",
+            "group": "Get started",
+            "public": true,
+            "icon": "rocket",
             "pages": [
-              "build/tools/webhook",
-              "build/tools/python",
-              "build/tools/mcp",
-              "build/tools/prebuilt",
-              "build/tools/hosted",
-              "build/tools/knowledge"
+              "index",
+              "start/installation",
+              "start/quickstart",
+              "start/coding-agents",
+              "start/how-unmute-works"
             ]
           },
           {
-            "group": "Orchestration",
-            "icon": "git-branch",
-            "root": "build/orchestration/overview",
+            "group": "Build the agent",
+            "public": true,
+            "icon": "bot",
             "pages": [
-              "build/orchestration/first-task",
-              "build/orchestration/tasks",
-              "build/orchestration/task-groups",
-              "build/orchestration/handoffs",
-              "build/orchestration/choosing-a-structure"
+              "build/your-first-agent",
+              "build/how-a-package-fits-together",
+              "build/variables",
+              "build/credentials",
+              "build/prefetch",
+              {
+                "group": "Tools",
+                "icon": "wrench",
+                "root": "build/tools/overview",
+                "pages": [
+                  "build/tools/webhook",
+                  "build/tools/python",
+                  "build/tools/mcp",
+                  "build/tools/prebuilt",
+                  "build/tools/hosted",
+                  "build/tools/knowledge"
+                ]
+              },
+              {
+                "group": "Orchestration",
+                "icon": "git-branch",
+                "root": "build/orchestration/overview",
+                "pages": [
+                  "build/orchestration/first-task",
+                  "build/orchestration/tasks",
+                  "build/orchestration/task-groups",
+                  "build/orchestration/handoffs",
+                  "build/orchestration/choosing-a-structure"
+                ]
+              },
+              {
+                "group": "Architecture",
+                "icon": "network",
+                "root": "build/architecture/overview",
+                "pages": [
+                  "build/architecture/cascade",
+                  "build/architecture/realtime",
+                  "build/architecture/live"
+                ]
+              }
             ]
           },
           {
-            "group": "Architecture",
-            "icon": "network",
-            "root": "build/architecture/overview",
+            "group": "Best practices",
+            "public": true,
+            "icon": "award",
             "pages": [
-              "build/architecture/cascade",
-              "build/architecture/realtime",
-              "build/architecture/live"
+              "best-practices/state-design",
+              "best-practices/context-scope",
+              "best-practices/step-scoping",
+              "best-practices/prompt-writing",
+              "best-practices/verifying-behaviour"
             ]
-          }
-        ]
-      },
-      {
-        "group": "Best practices",
-        "public": true,
-        "icon": "award",
-        "pages": [
-          "best-practices/state-design",
-          "best-practices/context-scope",
-          "best-practices/step-scoping",
-          "best-practices/prompt-writing",
-          "best-practices/verifying-behaviour"
-        ]
-      },
-      {
-        "group": "Run and observe",
-        "public": true,
-        "icon": "terminal",
-        "pages": [
-          "dev/overview",
-          "tracing/overview",
-          "tracing/coval",
-          "tracing/langfuse",
-          "tracing/logfire"
-        ]
-      },
-      {
-        "group": "Optimization",
-        "public": true,
-        "icon": "gauge",
-        "pages": [
-          "optimization/overview",
-          "optimization/context-router",
-          "optimization/execution-layer",
-          "optimization/latency",
-          "optimization/prefetch",
-          "optimization/turn-taking",
-          "optimization/regional-infrastructure"
-        ]
-      },
-      {
-        "group": "Deploy",
-        "public": true,
-        "icon": "cloud-upload",
-        "pages": [
-          "deploy/going-live",
-          "deploy/slng",
-          "deploy/livekit-cloud",
-          "deploy/pipecat-cloud"
-        ]
-      },
-      {
-        "group": "Phone calls",
-        "public": true,
-        "icon": "phone",
-        "pages": [
-          "telephony/overview",
-          "telephony/outbound-calls",
-          "telephony/inbound-calls",
-          "telephony/twilio",
-          "telephony/livekit-twilio",
-          "telephony/pipecat-twilio",
-          "telephony/twilio-conversation-relay",
+          },
           {
-            "group": "Transfers",
-            "icon": "phone-forwarded",
-            "root": "transfers/overview",
+            "group": "Run and observe",
+            "public": true,
+            "icon": "terminal",
             "pages": [
-              "transfers/livekit",
-              "transfers/pipecat-twilio"
+              "dev/overview",
+              "tracing/overview",
+              "tracing/coval",
+              "tracing/langfuse",
+              "tracing/logfire"
             ]
-          }
-        ]
-      },
-      {
-        "group": "Targets and models",
-        "public": true,
-        "icon": "boxes",
-        "pages": [
+          },
           {
-            "group": "Targets",
+            "group": "Optimization",
+            "public": true,
+            "icon": "gauge",
+            "pages": [
+              "optimization/overview",
+              "optimization/context-router",
+              "optimization/execution-layer",
+              "optimization/latency",
+              "optimization/prefetch",
+              "optimization/turn-taking",
+              "optimization/regional-infrastructure"
+            ]
+          },
+          {
+            "group": "Deploy",
+            "public": true,
+            "icon": "cloud-upload",
+            "pages": [
+              "deploy/going-live",
+              "deploy/slng",
+              "deploy/livekit-cloud",
+              "deploy/pipecat-cloud"
+            ]
+          },
+          {
+            "group": "Phone calls",
+            "public": true,
+            "icon": "phone",
+            "pages": [
+              "telephony/overview",
+              "telephony/outbound-calls",
+              "telephony/inbound-calls",
+              "telephony/twilio",
+              "telephony/livekit-twilio",
+              "telephony/pipecat-twilio",
+              "telephony/twilio-conversation-relay",
+              {
+                "group": "Transfers",
+                "icon": "phone-forwarded",
+                "root": "transfers/overview",
+                "pages": [
+                  "transfers/livekit",
+                  "transfers/pipecat-twilio"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Targets and models",
+            "public": true,
             "icon": "boxes",
-            "root": "targets/overview",
             "pages": [
-              "targets/slng",
-              "targets/livekit",
-              "targets/pipecat",
-              "targets/twilio"
+              {
+                "group": "Targets",
+                "icon": "boxes",
+                "root": "targets/overview",
+                "pages": [
+                  "targets/slng",
+                  "targets/livekit",
+                  "targets/pipecat",
+                  "targets/twilio"
+                ]
+              },
+              {
+                "group": "Models",
+                "icon": "brain",
+                "pages": [
+                  "models/stt",
+                  "models/tts",
+                  "models/llm",
+                  "models/live",
+                  "models/turn-detection"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Configuration files",
+            "public": true,
+            "icon": "file-code",
+            "pages": [
+              "reference/agent-yaml",
+              "reference/manifest",
+              "reference/targets-yaml",
+              "reference/connections-yaml",
+              "reference/variables",
+              "reference/secrets"
+            ]
+          },
+          {
+            "group": "CLI",
+            "public": true,
+            "icon": "terminal",
+            "pages": [
+              "reference/cli/overview",
+              "reference/cli/init",
+              "reference/cli/manifest",
+              "reference/cli/validate",
+              "reference/cli/pull",
+              "reference/cli/compile",
+              "reference/cli/deploy",
+              "reference/cli/dev",
+              "reference/cli/resources",
+              "reference/cli/skill"
+            ]
+          },
+          {
+            "group": "Community",
+            "public": true,
+            "icon": "users",
+            "pages": [
+              "community/overview",
+              "community/contributing"
+            ]
+          },
+          {
+            "group": "Releases",
+            "public": true,
+            "icon": "tag",
+            "pages": [
+              "changelog"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Unmute Core",
+        "icon": "package",
+        "groups": [
+          {
+            "group": "Get started",
+            "public": true,
+            "pages": [
+              "core/index",
+              "core/start/why-unmute-core",
+              "core/start/installation",
+              "core/start/quickstart"
+            ]
+          },
+          {
+            "group": "Build a salon agent",
+            "public": true,
+            "pages": [
+              "core/tutorial/overview",
+              "core/tutorial/answer-the-phone",
+              "core/tutorial/remember-the-caller",
+              "core/tutorial/check-the-diary",
+              "core/tutorial/book-step-by-step",
+              "core/tutorial/hand-off-complaints",
+              "core/tutorial/know-the-time",
+              "core/tutorial/quiet-callers",
+              "core/tutorial/see-every-call",
+              "core/tutorial/what-you-built"
+            ]
+          },
+          {
+            "group": "On your framework",
+            "public": true,
+            "pages": [
+              "core/frameworks/standalone",
+              "core/frameworks/livekit",
+              "core/frameworks/pipecat"
+            ]
+          },
+          {
+            "group": "Guides",
+            "public": true,
+            "pages": [
+              "core/build/state",
+              {
+                "group": "Tools",
+                "root": "core/build/tools",
+                "pages": [
+                  "core/build/knowledge"
+                ]
+              },
+              {
+                "group": "Tasks",
+                "root": "core/build/tasks",
+                "pages": [
+                  "core/build/tasks/first-task",
+                  "core/build/tasks/groups",
+                  "core/build/tasks/how-a-step-ends",
+                  "core/build/tasks/held-saves",
+                  "core/build/tasks/confirm-in-code",
+                  "core/build/tasks/what-the-model-reads"
+                ]
+              },
+              {
+                "group": "The call",
+                "pages": [
+                  "core/build/call-lifecycle",
+                  "core/build/prefetch",
+                  "core/build/turn-taking"
+                ]
+              },
+              "core/build/handoffs",
+              "core/build/hooks"
+            ]
+          },
+          {
+            "group": "Example agents",
+            "public": true,
+            "pages": [
+              "core/examples/overview",
+              "core/examples/typed-path",
+              "core/examples/nosh",
+              "core/examples/kestrel",
+              "core/examples/wasla",
+              "core/examples/faro"
             ]
           },
           {
             "group": "Models",
-            "icon": "brain",
+            "public": true,
             "pages": [
-              "models/stt",
-              "models/tts",
-              "models/llm",
-              "models/live",
-              "models/turn-detection"
+              "core/models/model-call",
+              "core/models/slng",
+              "core/models/realtime"
+            ]
+          },
+          {
+            "group": "Phone calls",
+            "public": true,
+            "pages": [
+              "core/telephony"
+            ]
+          },
+          {
+            "group": "Run and observe",
+            "public": true,
+            "pages": [
+              "core/observe/telemetry"
+            ]
+          },
+          {
+            "group": "Reference",
+            "public": true,
+            "pages": [
+              "core/reference/agent-spec",
+              "core/reference/livekit",
+              "core/reference/model-call",
+              "core/reference/slng",
+              "core/reference/call-lifecycle",
+              "core/reference/handoffs",
+              "core/reference/hooks",
+              "core/reference/pipecat",
+              "core/reference/prefetch",
+              "core/reference/settings",
+              "core/reference/state",
+              "core/reference/turn-taking",
+              "core/reference/telemetry",
+              "core/reference/dev-records",
+              "core/reference/telephony",
+              "core/reference/tools",
+              "core/reference/tasks"
             ]
           }
-        ]
-      },
-      {
-        "group": "Configuration files",
-        "public": true,
-        "icon": "file-code",
-        "pages": [
-          "reference/agent-yaml",
-          "reference/manifest",
-          "reference/targets-yaml",
-          "reference/connections-yaml",
-          "reference/variables",
-          "reference/secrets"
-        ]
-      },
-      {
-        "group": "CLI",
-        "public": true,
-        "icon": "terminal",
-        "pages": [
-          "reference/cli/overview",
-          "reference/cli/init",
-          "reference/cli/manifest",
-          "reference/cli/validate",
-          "reference/cli/pull",
-          "reference/cli/compile",
-          "reference/cli/deploy",
-          "reference/cli/dev",
-          "reference/cli/resources",
-          "reference/cli/skill"
-        ]
-      },
-      {
-        "group": "Community",
-        "public": true,
-        "icon": "users",
-        "pages": [
-          "community/overview",
-          "community/contributing"
-        ]
-      },
-      {
-        "group": "Releases",
-        "public": true,
-        "icon": "tag",
-        "pages": [
-          "changelog"
         ]
       }
     ]

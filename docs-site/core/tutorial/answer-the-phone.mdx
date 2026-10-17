@@ -1,0 +1,209 @@
+---
+title: "Answer the phone"
+sidebarTitle: "Answer the phone"
+description: "Build the smallest salon agent: a prompt, a greeting and a call you can talk to."
+---
+
+The caller phones the salon, and Robin says hello.
+
+## What you add
+
+The prompt and the greeting go in the shared package. Both frameworks read them.
+
+```python salon/agent.py
+from unmute_core.greeting import Greeting
+
+GREETING = Greeting(
+    text="Hi, you've reached Sage and Stone. Robin speaking, what can I do for you?"
+)
+CONCIERGE_PROMPT = """\
+You are Robin, on the front desk at Sage and Stone, a hair salon.
+Speak only in English. Everything you write is read aloud, so write plain
+sentences with no lists and no symbols. Keep every reply short.
+Help the caller book a haircut, a hair colour or a blowout.
+"""
+```
+
+`Greeting(text=...)` is a fixed line. Code says it at once, so the caller does not wait for a model request.
+
+Now build the pipeline around it. This is the base you will grow.
+
+<CodeGroup>
+
+```python livekit/agent.py
+import os
+
+from livekit.agents import AgentServer, AgentSession, JobContext
+from livekit.plugins import openai, silero, slng
+from salon import agent as salon
+from unmute_core.agent import AgentSpec
+from unmute_core.livekit import UnmuteAgent, greet
+
+SLNG_KEY = os.environ["SLNG_API_KEY"]
+SLNG_HOST = f"{os.environ['SLNG_WORLD_PART']}.api.slng.ai"
+VOICE = "8d8aec63a56c460cb7def795bdf754fa"
+
+server = AgentServer()
+
+
+@server.rtc_session()
+async def entrypoint(ctx: JobContext) -> None:
+    """Run one call: start Robin, then say the greeting."""
+    stt = slng.STT(
+        api_key=SLNG_KEY, slng_base_url=SLNG_HOST, model="soniox/speech-ai:rt-v5", language="en"
+    )
+    session = AgentSession(
+        stt=stt,
+        llm=openai.LLM(model="gpt-5.6-terra"),
+        tts=slng.TTS(
+            api_key=SLNG_KEY,
+            slng_base_url=SLNG_HOST,
+            model="slng/fish/tts:s2.1-pro",
+            voice=VOICE,
+            language="en",
+        ),
+        vad=silero.VAD.load(),
+    )
+    stt.attach_to_session(session)
+    spec = AgentSpec(salon.CONCIERGE_PROMPT)
+    agent = UnmuteAgent(spec)
+    await session.start(agent=agent, room=ctx.room)
+    greet(session, salon.GREETING, None)
+```
+
+```python pipecat/bot.py
+import os
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMUpdateSettingsFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import LLMSettings
+from pipecat.transcriptions.language import Language
+from pipecat.transports.base_transport import TransportParams
+from pipecat.workers.runner import WorkerRunner
+from pipecat_slng import SlngSTTService, SlngTTSService
+from salon import agent as salon
+from unmute_core.agent import AgentSpec
+from unmute_core.pipecat import UnmuteFlows, greeting_frames
+
+SLNG_KEY = os.environ["SLNG_API_KEY"]
+WORLD_PART = os.environ["SLNG_WORLD_PART"]
+VOICE = "8d8aec63a56c460cb7def795bdf754fa"
+transport_params = {
+    "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+}
+
+
+async def bot(runner_args: RunnerArguments) -> None:
+    """Run one call: start Robin, then say the greeting."""
+    transport = await create_transport(runner_args, transport_params)
+    llm = OpenAILLMService(settings=OpenAILLMService.Settings(model="gpt-5.6-terra"))
+    context = LLMContext()
+    aggregators = LLMContextAggregatorPair(
+        context, user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer())
+    )
+    spec = AgentSpec(salon.CONCIERGE_PROMPT)
+    flows = UnmuteFlows(spec, llm=llm, context=context, aggregators=aggregators)
+    flows.install()
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            SlngSTTService(
+                api_key=SLNG_KEY,
+                world_part=WORLD_PART,
+                model="soniox/speech-ai:rt-v5",
+                language=Language.EN,
+            ),
+            aggregators.user(),
+            llm,
+            SlngTTSService(
+                api_key=SLNG_KEY,
+                world_part=WORLD_PART,
+                model="slng/fish/tts:s2.1-pro",
+                voice=VOICE,
+                language=Language.EN,
+            ),
+            transport.output(),
+            aggregators.assistant(),
+        ]
+    )
+    worker = PipelineWorker(pipeline)
+
+    @transport.event_handler("on_client_connected")
+    async def greet(transport, client) -> None:
+        """Set the prompt, then say the greeting."""
+        await worker.queue_frames(
+            [
+                LLMUpdateSettingsFrame(
+                    delta=LLMSettings(system_instruction=flows.main_instruction())
+                ),
+                *greeting_frames(salon.GREETING, None),
+            ]
+        )
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+    await runner.add_workers(worker)
+    await runner.run()
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()
+```
+
+</CodeGroup>
+
+The agent hears the caller through SLNG's Soniox speech to text and speaks with SLNG's Fish Audio text to speech. `VOICE` is a Fish Audio voice id. On LiveKit, `stt.attach_to_session(session)` lets speech to text close each caller turn as soon as the caller stops.
+
+`AgentSpec` describes the agent, the same way on both frameworks. For now it holds only the prompt, as plain text. `UnmuteAgent` runs it as a LiveKit `Agent`. `UnmuteFlows` runs it in a normal Pipecat pipeline. The `None` is the call state, which you add on the next page.
+
+## Try it
+
+Set your keys, then start the agent. `SLNG_WORLD_PART` is your SLNG project's region.
+
+<CodeGroup>
+
+```bash LiveKit
+export SLNG_API_KEY=... SLNG_WORLD_PART=eu-north OPENAI_API_KEY=...
+lk agent console agent.py         # talk through your microphone
+lk agent console --text agent.py  # or type
+```
+
+```bash Pipecat
+export SLNG_API_KEY=... SLNG_WORLD_PART=eu-north OPENAI_API_KEY=...
+uv run bot.py -t webrtc           # then open http://localhost:7860
+```
+
+</CodeGroup>
+
+You should hear the greeting at once. Say "I'd like a haircut on Friday." Robin answers in one or two short sentences and asks what it needs. It cannot check a diary yet.
+
+## Why it works this way
+
+A plain agent usually asks the model to word the first line, and the caller waits for that request. The greeting here is code, so it plays at once.
+
+You still own the session, the pipeline and every plugin. `UnmuteAgent` and `UnmuteFlows` add the call behaviour on top. The next pages use them for state, tools, tasks and handoffs.
+
+## What you have now
+
+| Piece | File |
+|---|---|
+| Prompt and greeting | `salon/agent.py` |
+| LiveKit pipeline | `livekit/agent.py` |
+| Pipecat pipeline | `pipecat/bot.py` |
+
+<Card title="Next: Remember the caller" icon="brain" href="/core/tutorial/remember-the-caller">
+  Keep the caller's number, and refuse a number that cannot be right.
+</Card>
+
+Go deeper: [Call lifecycle](/core/build/call-lifecycle), [LiveKit](/core/frameworks/livekit) and [Pipecat](/core/frameworks/pipecat).

@@ -1,0 +1,152 @@
+---
+title: "Remember the caller"
+sidebarTitle: "Remember the caller"
+description: "Give the salon agent a typed call state, so it keeps the caller's number and refuses one that cannot be right."
+---
+
+You have: Robin answering and greeting, from [Answer the phone](/core/tutorial/answer-the-phone).
+
+The caller gives their number, and the agent keeps it.
+
+## What you add
+
+First, the state. It is a Pydantic model. Every field has a default, because every value starts the call empty.
+
+```python salon/state.py
+from typing import Literal
+
+from pydantic import BaseModel, Field
+from unmute_core.state import Phone
+
+
+class State(BaseModel):
+    """What one call knows."""
+
+    customer_phone: Phone | None = Field(
+        None, description="The caller's phone number in E.164."
+    )
+    requested_service: Literal["haircut", "hair-color", "blowout"] | None = Field(
+        None, description="The service the caller asked for. Leave it out if they did not say."
+    )
+```
+
+`Phone` is a type the library ships. It cleans a number and saves it with a plus and a country code. A number that cannot be right is refused.
+
+Next, let the prompt read the state. A `{{name}}` placeholder is filled from the state before each model request.
+
+```python salon/agent.py
+CONCIERGE_PROMPT = """\
+You are Robin, on the front desk at Sage and Stone, a hair salon.
+Speak only in English. Everything you write is read aloud, so write plain
+sentences with no lists and no symbols. Keep every reply short.
+Help the caller book a haircut, a hair colour or a blowout.
+
+The caller's phone number: {{customer_phone}}.
+When the caller gives a number or a service, save it with save_values.
+"""
+```
+
+Last, build a `CallState` for each call and give it to the agent. `save_values=True` on the spec adds a tool the model calls to save these values.
+
+<CodeGroup>
+
+```python livekit/agent.py
+from salon.state import State
+from unmute_core.state import CallState
+
+
+@server.rtc_session()
+async def entrypoint(ctx: JobContext) -> None:
+    """Run one call: start Robin with a state, then say the greeting."""
+    stt = slng.STT(
+        api_key=SLNG_KEY, slng_base_url=SLNG_HOST, model="soniox/speech-ai:rt-v5", language="en"
+    )
+    session = AgentSession(
+        stt=stt,
+        llm=openai.LLM(model="gpt-5.6-terra"),
+        tts=slng.TTS(
+            api_key=SLNG_KEY,
+            slng_base_url=SLNG_HOST,
+            model="slng/fish/tts:s2.1-pro",
+            voice=VOICE,
+            language="en",
+        ),
+        vad=silero.VAD.load(),
+    )
+    stt.attach_to_session(session)
+    state = CallState(State)
+    spec = AgentSpec(salon.CONCIERGE_PROMPT, save_values=True)
+    agent = UnmuteAgent(spec, state=state)
+    await session.start(agent=agent, room=ctx.room)
+    greet(session, salon.GREETING, state)
+```
+
+```python pipecat/bot.py
+from salon.state import State
+from unmute_core.state import CallState
+
+# In bot(), build the state and give it to the flows.
+state = CallState(State)
+spec = AgentSpec(salon.CONCIERGE_PROMPT, save_values=True)
+flows = UnmuteFlows(spec, llm=llm, context=context, aggregators=aggregators, state=state)
+
+# In the greet handler, give the greeting the state.
+frames = greeting_frames(salon.GREETING, state)
+```
+
+</CodeGroup>
+
+## See a refusal
+
+You can check the state without a call. This is the same check the model's save goes through.
+
+```python
+from unmute_core.state import CallState, StateRefused
+
+from salon.state import State
+
+state = CallState(State, confirm={"customer_phone": "verify_customer"})
+
+try:
+    state.save({"customer_phone": "612345"})
+except StateRefused as refused:
+    print(refused.message)  # customer_phone: expected a phone number with its country code ...
+
+state.save({"customer_phone": "+34 612 345 678"}, step="verify_customer")
+state.plain("customer_phone")  # "+34612345678"
+state.is_confirmed("customer_phone")  # True
+```
+
+`612345` is not a phone number, so nothing is saved. The refusal says what to fix, and the model reads it.
+
+The `confirm` map says which task step must hear the caller agree to the number. Only that step can confirm it. You add the step in [Book step by step](/core/tutorial/book-step-by-step), so the agent itself does not use `confirm` yet.
+
+## Try it
+
+Start the agent as before. Then say these two lines.
+
+1. "My number is six one two three four five." Robin should ask again, and ask for the country code.
+2. "Sorry. Plus three four, six one two, three four five, six seven eight." Robin saves it.
+
+Robin has the number now. The prompt shows it in `{{customer_phone}}` on the next turn.
+
+## Why it works this way
+
+A plain agent lets the model write any text into its memory. Here every save passes the type first, and the whole batch is refused if one value is wrong. The model gets a refusal worded for it, so it asks the caller instead of guessing.
+
+The state is a normal Pydantic model. The same `State` class works on LiveKit and Pipecat.
+
+## What you have now
+
+| Piece | File |
+|---|---|
+| Prompt and greeting | `salon/agent.py` |
+| Call state: `State` | `salon/state.py` |
+| LiveKit pipeline, with state | `livekit/agent.py` |
+| Pipecat pipeline, with state | `pipecat/bot.py` |
+
+<Card title="Next: Check the diary" icon="calendar" href="/core/tutorial/check-the-diary">
+  Give Robin a tool that reads the salon's diary.
+</Card>
+
+Go deeper: [State](/core/build/state).

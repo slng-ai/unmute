@@ -1726,6 +1726,11 @@ func TestExampleAndDocLinksIntoExamplesResolve(t *testing.T) {
 				strings.HasPrefix(target, "https://") || strings.HasPrefix(target, "mailto:") {
 				continue
 			}
+			// A site path such as /core/examples/nosh is a docs page, not a
+			// repository path, and internal/docsite/links_test.go checks those.
+			if onlyExamples && strings.HasPrefix(target, "/") {
+				continue
+			}
 			if onlyExamples && !strings.Contains(target, "examples/") {
 				continue
 			}

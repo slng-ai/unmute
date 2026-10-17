@@ -1,0 +1,83 @@
+---
+title: "What the model reads in a task"
+sidebarTitle: "What the model reads"
+description: "What a step hears of the call, the small results a task sends to the model, and the limits on placeholder names."
+---
+
+A task answers the model with a few small results, and a step opens on a chosen part of the call so far. This page lists both.
+
+## Quickstart
+
+```python agent.py
+from unmute_core.tasks import REFUSED_BUSY, Refused, ToolDeclaration, ToolStatus
+
+Refused(refused="Run take_order first.").model_dump()  # {"refused": "Run take_order first."}
+ToolStatus(status="completed").model_dump()  # {"status": "completed"}
+```
+
+## Why use unmute for this
+
+The results are small and frozen, and `unmute_core.tasks` names them. Your code can build the same JSON the adapters send, so a test or a custom host reads what the model reads.
+
+## What the model reads when a task runs
+
+| Name | What it is |
+|---|---|
+| `Refused` | The result of a refused call: one sentence that says why and what to do. |
+| `ToolStatus` | A result that says how a call stands, like `completed` or `not_run_yet`. |
+| `ToolDeclaration` | A tool as the model reads it: `name`, `description` and `parameters`. `to_dict()` gives the dict a model call takes. Its parameters are a copy, so editing one declaration never changes another. |
+| `REFUSED_BUSY` | The result the model reads when it starts a task while another one runs. It is a `Refused` as a dict. |
+
+All of them are frozen. An unknown field raises a `ValidationError`.
+
+## What a step hears of the call
+
+`TaskSpec.history` sets what a step opens on: `messages` (default), `full`,
+`last_n`, `summary` or `reset`. A handoff takes the same values. [Handoffs](/core/build/handoffs#what-the-next-agent-hears)
+explains each one.
+
+- `include_tool_calls: false` leaves tool calls and results out of `full` and `last_n`.
+- `last_n` needs `max_messages`, from 1 to 200, and any other history refuses it.
+- A `summary` step asks for its summary as it opens. A summary that fails gives the step `messages`.
+- In an `isolated` group, every step starts fresh, whatever its `history`.
+
+```python
+TaskSpec(name="confirm_order", instructions="...", history="last_n", max_messages=6)
+```
+
+## Placeholder names
+
+A plan or a spec that does not fit raises `ValueError` when it is built.
+
+A native model call has no limit on a placeholder name. A model call that fills the prompt on its own side can name a limit in `variable_key_max`. The SLNG Context Router names 64. The check runs at build, against the call's model.
+
+1. A placeholder name becomes a template-variable key. `a.b` is `a__b`.
+2. When the model call names a limit, a key over it is refused, with a message that names the placeholder.
+3. The check covers a task's instructions, and the agent's main prompt when the adapter builds the agent.
+4. A model call with no `variable_key_max`, like a framework's own LLM plugin, checks nothing.
+
+## Troubleshooting
+
+### A placeholder name is refused when the agent is built
+
+The model call names a `variable_key_max`, and the key of a placeholder is longer.
+
+**Fix:** shorten the State value name that the placeholder reads. `a.b` counts as `a__b`.
+
+In the salon tutorial: [Book step by step](/core/tutorial/book-step-by-step).
+
+Every argument: [Tasks reference](/core/reference/tasks#taskspec).
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Handoffs" icon="git-branch" href="/core/build/handoffs">
+    What the next agent hears when a step hands off.
+  </Card>
+  <Card title="Your first task" icon="list-checks" href="/core/build/tasks/first-task">
+    Define a task and check it with TaskPlan.
+  </Card>
+  <Card title="Router model call" icon="route" href="/core/models/slng">
+    The model call that names a placeholder limit.
+  </Card>
+</CardGroup>

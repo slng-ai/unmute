@@ -1,0 +1,132 @@
+---
+title: "The model call"
+sidebarTitle: "Model call"
+description: "ModelCall, the one interface every model request goes through, and the classes that implement it."
+---
+
+Every model request goes through one small interface, `ModelCall`. Pick a class that implements it, give it to your framework's adapter, and the library fills the prompt, streams the answer and records the tokens. The model sees the same final prompt whichever class you pick.
+
+## Use any OpenAI-compatible model
+
+`OpenAIModelCall` sends each request to any OpenAI-compatible chat endpoint. Give it to the adapter for your framework.
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.livekit import ModelCallLLM
+from unmute_core.model import OpenAIModelCall
+
+model = OpenAIModelCall("gpt-5.6-terra")  # reads OPENAI_API_KEY
+session = AgentSession(llm=ModelCallLLM(model, state=state), ...)
+```
+
+```python Pipecat
+from unmute_core.model import OpenAIModelCall
+from unmute_core.pipecat import ModelCallLLMService
+
+model = OpenAIModelCall("gpt-5.6-terra")  # reads OPENAI_API_KEY
+llm = ModelCallLLMService(model, state=state)
+```
+
+</CodeGroup>
+
+1. The library fills the prompt's `{{placeholders}}` from `state`, then sends it.
+2. Pass `base_url=` and `api_key=` to reach another OpenAI-compatible endpoint.
+3. It needs the `openai` package, which comes with the `slng` extra and with Pipecat.
+
+With `UnmuteAgent`, give the call to the agent's spec instead: `AgentSpec(PROMPT, model=model)`. Build it per call: the agent closes it when the call ends.
+
+## Use your own framework LLM
+
+On LiveKit, `LiveKitModel` wraps any LLM plugin. The library fills the prompt, and the plugin keeps its own client, settings and retries.
+
+```python
+from livekit.plugins import openai
+from unmute_core.livekit import LiveKitModel
+
+model = LiveKitModel(openai.LLM(model="gpt-5.6-terra"))
+```
+
+Give it to an `AgentSpec` as its `model`, or to a `FallbackModelCall`. On Pipecat, pass a native LLM service, like `OpenAILLMService`, to `UnmuteFlows` as it is. `UnmuteFlows` fills its prompts. See [LiveKit](/core/frameworks/livekit) and [Pipecat](/core/frameworks/pipecat).
+
+## Use the Context Router
+
+`RouterModelCall` sends the prompt unfilled to the SLNG Context Router, which fills it and picks the model. See [Use the Context Router](/core/models/slng#use-the-context-router).
+
+## Fall back to another model
+
+`FallbackModelCall` tries several calls in order. It is a `ModelCall` too, so the adapter takes it as it is.
+
+```python
+from unmute_core.model import FallbackModelCall, OpenAIModelCall
+
+model = FallbackModelCall(
+    [OpenAIModelCall("gpt-5.6-terra"), OpenAIModelCall("gpt-5.6-luna")],
+    first_event_timeout_s=10,
+)
+```
+
+1. It moves to the next call when one fails before it answers. It never moves on once the caller has part of the answer, so no sentence is said twice.
+2. Errors every model would give, like 400, 401 or 422, stop the chain at once.
+3. A rate limit with a short `Retry-After` waits on the same model, then fails over.
+
+Build one per call of the agent, since it remembers which call answered last.
+
+## Write your own ModelCall
+
+Any class with an async `stream(request)` method is a `ModelCall`. This one answers from the last user message:
+
+```python
+from collections.abc import AsyncIterator
+
+from unmute_core.model import ModelEvent, ModelRequest, TextDelta, fill_messages
+
+
+class Echo:
+    """A model call that repeats the last user message."""
+
+    model = "echo"
+    provider = "local"
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelEvent]:
+        """Fill the prompt, then say the last user message back."""
+        messages = fill_messages(request.messages, request.variables)
+        last = next(m["content"] for m in reversed(messages) if m["role"] == "user")
+        yield TextDelta(f"You said: {last}")
+```
+
+Give it to an adapter the way you give it any call: `ModelCallLLM(Echo())` on LiveKit or `ModelCallLLMService(Echo())` on Pipecat.
+
+1. Call `fill_messages` with `request.variables`, as above, unless a router fills the prompt for you.
+2. Yield `TextDelta` and `ToolCall` events. Yield a `Usage` last when you know the token counts.
+3. Raise the error of a failed request. `FallbackModelCall` reads its status and code from it.
+
+## Read a whole answer
+
+For a side request, like a summary, read the whole answer at once with `collect`:
+
+```python
+from unmute_core.model import collect
+
+answer = await collect(model.stream(request))
+answer.text  # every text piece, joined
+answer.calls  # the ToolCall events, in order
+answer.usage  # the Usage event, or None
+```
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Model call reference" icon="book" href="/core/reference/model-call">
+    ModelRequest, events, placeholders, every FallbackModelCall argument and Gemini.
+  </Card>
+  <Card title="SLNG and the Context Router" icon="router" href="/core/models/slng">
+    RouterModelCall, SLNG speech and your own router config.
+  </Card>
+  <Card title="Hooks" icon="webhook" href="/core/build/hooks">
+    Change or wrap a model request with your own code.
+  </Card>
+  <Card title="Realtime models" icon="audio-lines" href="/core/models/realtime">
+    Models that hear and speak over one connection.
+  </Card>
+</CardGroup>

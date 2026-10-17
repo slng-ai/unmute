@@ -1,0 +1,194 @@
+---
+title: "Turn taking"
+sidebarTitle: "Turn taking"
+description: "Set how fast the agent takes its turn, what speech over a line does, and what happens when the caller goes quiet."
+---
+
+Turn taking is when the agent speaks, when it stops, and when it checks the caller is still there. You set it with a few small helpers. The same names work on LiveKit and Pipecat.
+
+In the salon tutorial, [Quiet callers and long calls](/core/tutorial/quiet-callers) builds this step by step.
+
+## Set the turn pace
+
+A caller pauses mid-sentence. The pace says how long the agent waits before it decides the turn is over.
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.livekit import endpointing
+from unmute_core.turn import turn_window
+
+window = turn_window("balanced", "livekit")
+vad = silero.VAD.load(min_silence_duration=window.vad_silence)
+turns = TurnHandlingOptions(endpointing=endpointing(window))
+```
+
+```python Pipecat
+from unmute_core.pipecat import smart_turn_params, vad_params
+from unmute_core.turn import turn_window
+
+window = turn_window("balanced", "pipecat")
+vad = SileroVADAnalyzer(params=vad_params(window))
+turn = LocalSmartTurnAnalyzerV3(params=smart_turn_params(window))
+```
+
+</CodeGroup>
+
+1. Pick `snappy`, `balanced` or `patient`. `balanced` is the default.
+2. `turn_window` returns the wait that framework uses for that pace.
+3. The framework's helper turns the window into its own options.
+
+## Drop a reply the caller spoke over
+
+A caller says "Hi.", pauses, then says "I'd like to book a haircut". LiveKit ends their turn at the pause, and plays the reply over them. `yield_to_caller` drops that reply.
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.livekit import yield_to_caller
+
+yield_to_caller(session)
+```
+
+```python Pipecat
+# Nothing to call. A new caller turn interrupts
+# whatever the bot is thinking, saying or running.
+```
+
+</CodeGroup>
+
+1. Call it once, after you build the session.
+2. The next reply answers everything the caller said.
+3. A reply with a tool running is kept, because dropping it would cancel the tool.
+
+## Choose what speech over a line does
+
+A "mm-hm" or a "yes" over the agent can mean "go on" or "that is my answer". The `interruption` rule picks which.
+
+| Value | The agent | The caller's words |
+|---|---|---|
+| `keep` | Finishes the line | Answered once it ends. A "yes" over a question is the answer. |
+| `drop` | Finishes the line | Dropped. Right for an agent that reads long text. |
+| `stop` | Stops on speech | Answered. No detector. |
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.livekit import interruption
+
+AgentSession(..., turn_handling=TurnHandlingOptions(..., interruption=interruption("keep")))
+```
+
+```python Pipecat
+from unmute_core.pipecat import interruption
+
+LLMUserAggregatorParams(
+    user_turn_strategies=interruption("keep", stop=[TurnAnalyzerUserTurnStopStrategy(...)]),
+)
+```
+
+</CodeGroup>
+
+1. On LiveKit, `keep` and `drop` use LiveKit's detector. It needs `LIVEKIT_API_KEY` or `LIVEKIT_INFERENCE_API_KEY`. Without one, the agent stops on any speech, as with `stop`.
+2. On Pipecat, `keep` counts words. Fewer than 3 words wait for the line to end. 3 or more stop the agent.
+
+## Turn off interruption or protect a line
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.livekit import interruption
+
+interruption("keep", enabled=False)  # the agent finishes every line
+interruption("keep", min_words=2)  # two words before speech counts
+```
+
+```python Pipecat
+from unmute_core.pipecat import interruption, user_mute_strategies
+
+LLMUserAggregatorParams(
+    user_turn_strategies=interruption("drop", stop=[...], min_words=2),
+    user_mute_strategies=user_mute_strategies(protect=["greeting", "tool_calls"]),
+)
+```
+
+</CodeGroup>
+
+1. On Pipecat, `protect` names what the caller cannot cut off: the greeting, or a running tool.
+2. `user_mute_strategies(enabled=False)` mutes the caller while the agent speaks, so no line is cut off.
+3. On LiveKit, a greeting nobody may cut off is `Greeting(interruptible=False)`. A tool call that runs always finishes.
+
+## Nudge a quiet caller
+
+`IdleNudges` holds up to two nudges and a final line. After the last one, the call ends.
+
+```python
+from unmute_core.idle import IdleNudges
+
+IDLE = IdleNudges(
+    first_nudge_delay_seconds=20,
+    first_nudge_text="Are you still there?",
+    second_nudge_delay_seconds=15,
+    second_nudge_text="I'm still here whenever you're ready.",
+    hangup_delay_seconds=10,
+    final_hangup_text="I'll let you go for now. Call us back any time. Goodbye.",
+)
+```
+
+<CodeGroup>
+
+```python LiveKit
+from livekit.agents.voice import room_io
+from unmute_core.livekit import idle_nudges
+
+session = AgentSession(..., user_away_timeout=None)
+idle_nudges(session, IDLE)
+await session.start(
+    agent, room=ctx.room, room_options=room_io.RoomOptions(delete_room_on_close=True)
+)
+```
+
+```python Pipecat
+from unmute_core.pipecat import IdleNudgeObserver
+
+worker.add_observer(IdleNudgeObserver(IDLE, worker))
+```
+
+</CodeGroup>
+
+1. The timer runs only while the agent listens. Any word from the caller, or any reply from the agent, starts it again from the first nudge.
+2. The lines are spoken by code, with no model request. A nudge with no text is worded by the model.
+3. On LiveKit, leave `user_away_timeout` at `None`, and set `delete_room_on_close=True` so a phone caller is hung up. On Pipecat, leave the user aggregator's `user_idle_timeout` unset.
+
+## Cap the call length
+
+```python
+from unmute_core.idle import CallLimit
+
+limit = CallLimit(20 * 60, session.shutdown)
+limit.start()
+```
+
+1. `CallLimit` ends the call after the longest allowed length, with no closing line.
+2. `cancel()` stops the count.
+3. The adapters also take it as `max_duration`, on [LiveKit](/core/frameworks/livekit) and on [Pipecat](/core/frameworks/pipecat).
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Turn taking reference" icon="book" href="/core/reference/turn-taking">
+    Every argument, pace window, rule and error.
+  </Card>
+  <Card title="LiveKit" icon="boxes" href="/core/frameworks/livekit">
+    The session, the greeting and the call limit on LiveKit.
+  </Card>
+  <Card title="Pipecat" icon="boxes" href="/core/frameworks/pipecat">
+    The pipeline, the greeting hold and the call limit on Pipecat.
+  </Card>
+  <Card title="The call's life" icon="phone-call" href="/core/build/call-lifecycle">
+    The greeting, the failure line and the end of the call.
+  </Card>
+  <Card title="Telemetry" icon="activity" href="/core/observe/telemetry">
+    Where the idle nudge and interruption events show.
+  </Card>
+</CardGroup>

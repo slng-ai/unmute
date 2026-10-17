@@ -1767,6 +1767,12 @@ func TestNoReaderFacingSurfaceTeachesARetiredKindName(t *testing.T) {
 		if filepath.Base(path) == "changelog.mdx" {
 			return nil
 		}
+		// docs-site/core documents the unmute-core Python library, whose real
+		// method names include CallTasks.delegate_tools(). The authoring words
+		// this test holds are agent.yaml words, and the library's names win.
+		if strings.Contains(filepath.ToSlash(path), "docs-site/core/") {
+			return nil
+		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err

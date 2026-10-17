@@ -1,0 +1,149 @@
+---
+title: "Prefetch"
+description: "Fill the call state before the greeting: the clock, the call's numbers, and lookups."
+---
+
+`unmute_core.prefetch` fills the call state before the greeting. It reads the clock, the call's numbers and the result of a lookup. If you already have what a lookup needs, the model should not spend the call doing it.
+
+In the salon tutorial, [Know the time before hello](/core/tutorial/know-the-time) builds this step by step.
+
+## Fill values before the greeting
+
+List the entries. Each one saves values into the call state.
+
+```python agent.py
+from unmute_core.prefetch import CallValue, Clock, Lookup, Prefetch
+from unmute_core.state import CallState
+
+prefetch = Prefetch(
+    [
+        Clock("today", "Europe/Madrid", {"booking_date": "date", "weekday": "day_of_week"}),
+        CallValue("caller", "calling_number", ["caller_phone"]),
+        Lookup(
+            "customer", find_customer, assign={"customer_name": "name"}, inputs=["caller_phone"]
+        ),
+    ],
+    state=State,
+)
+
+state = CallState(State)
+await prefetch.run(state)
+```
+
+1. `Clock` reads the time in the zone you name. `CallValue` copies a value the call carries. `Lookup` runs your function, which takes the call state and returns a mapping, like `{"name": "Ana Ruiz"}`.
+2. All entries share one budget, 2 seconds by default. A late or failed entry keeps its default, and the call greets on time.
+3. With `state=State`, a mistake in an entry raises `ValueError` when you build it, not during a call.
+
+## Look up with a tool
+
+A lookup may run a tool instead of a function. Lock every argument the tool needs.
+
+```python
+find = local_tool(find_customer, locked={"phone": "{{caller_phone}}"})
+Lookup("customer", find, {"customer_name": "name"})
+```
+
+1. The model never fills an argument. An open required one raises `ValueError` when you build the entry.
+2. A tool that is refused or fails keeps the values at their defaults.
+
+## Run a slow lookup beside the greeting
+
+Mark a slow lookup `background=True`, so it does not delay the greeting.
+
+```python
+Lookup("hours", local_tool(store_hours), {"closes_at": "close"}, background=True)
+```
+
+1. `prefetch.run` skips it. `CallHooks` runs it beside the greeting.
+2. Every model request waits for it, up to `first_request_timeout_s` (10 seconds). A fixed greeting plays at once.
+3. A greeting line may not name a value that only a background lookup fills.
+
+## Use it in a call
+
+Give the prefetch to `CallHooks`. `open_call` runs it for you.
+
+<CodeGroup>
+
+```python LiveKit
+info = sip_call_info(participant, json.loads(ctx.job.metadata or "{}"))
+state = CallState(State, call=info)
+call = CallHooks(state, prefetch=prefetch)
+spec = AgentSpec(PROMPT, tasks=plan)
+agent = UnmuteAgent(spec, call=call)
+await session.start(agent=agent, room=ctx.room)
+await open_call(session, greeting, call)
+```
+
+```python Pipecat
+info = telephony_call_info(runner_args.call_data)
+state = CallState(State, call=info)
+call = CallHooks(state, prefetch=prefetch)
+spec = AgentSpec(PROMPT, tasks=plan)
+flows = UnmuteFlows(spec, llm=llm, context=context, aggregators=aggregators, call=call)
+# on client connected
+await open_call(worker, greeting, call, context=context, hold=hold)
+```
+
+```python Plain agent
+state = CallState(State)
+await prefetch.run(state)  # before the session starts, so the first reply sees the values
+instructions = render_prompt(PROMPT, state)
+```
+
+</CodeGroup>
+
+1. `open_call` runs your checks first, then `prefetch.run`, then the background lookups and the greeting.
+2. Each lookup's result goes to `call.results`, so a task step can read it.
+3. On a plain agent, run `await prefetch.run(state)` yourself before the session starts. `render_prompt` comes from `unmute_core.model`.
+
+## What a call carries
+
+A phone number with no plus is read in the call's country. Enter `use_phone_region` around the call, so the state can read a national number.
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.state import call_phone_region, use_phone_region
+
+with use_phone_region(lambda: call_phone_region(state.call)):
+    await session.start(agent=agent, room=ctx.room)
+```
+
+```python Pipecat
+from unmute_core.state import call_phone_region, use_phone_region
+
+with use_phone_region(lambda: call_phone_region(state.call)):
+    await runner.run()
+```
+
+</CodeGroup>
+
+1. `call_phone_region(state.call)` gives the call's country, like `"ES"`, or `None` for a call without numbers.
+2. `sip_call_info` (LiveKit) and `telephony_call_info` (Pipecat) build what the call carries. See [Telephony](/core/telephony).
+
+## Try a phone call locally
+
+A web session has no phone line. To try a phone call, simulate one with `UNMUTE_CALL_START`:
+
+```bash
+UNMUTE_CALL_START='{"call": {"direction": "inbound", "calling_number": "+34612345678"}}' uv run python agent.py
+```
+
+`CallValue` then copies the simulated number, as it would copy a real one. See [State](/core/build/state#values-the-call-carries-state-call) for the rules.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Prefetch reference" icon="book" href="/core/reference/prefetch">
+    Every entry, argument, check and rule.
+  </Card>
+  <Card title="State" icon="database" href="/core/build/state">
+    How saved values read in a prompt, and when the caller confirms them.
+  </Card>
+  <Card title="The call's life" icon="phone-call" href="/core/build/call-lifecycle">
+    The order of a whole call, and the greeting.
+  </Card>
+  <Card title="Prefetch on Unmute" icon="zap" href="/build/prefetch">
+    The same entries, declared in `agent.yaml`.
+  </Card>
+</CardGroup>

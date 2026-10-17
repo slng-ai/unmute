@@ -1,0 +1,177 @@
+---
+title: "LiveKit"
+sidebarTitle: "LiveKit"
+description: "UnmuteAgent runs tools, tasks, the model call and telemetry on a LiveKit AgentSession."
+---
+
+`unmute_core.livekit` puts the library's tools, tasks, model call and telemetry on LiveKit Agents. Its main class, `UnmuteAgent`, is a LiveKit `Agent`, so you start it on your own `AgentSession`. You keep your room, your speech and your model.
+
+Install the library and the plugins the quickstart uses:
+
+```bash
+uv add "unmute-core[livekit]" livekit-plugins-google livekit-plugins-silero livekit-plugins-slng
+```
+
+## Quickstart
+
+```python agent.py
+import os
+
+from livekit.agents import AgentServer, AgentSession, JobContext, cli
+from livekit.plugins import google, silero, slng
+from pydantic import BaseModel
+
+from unmute_core.agent import AgentSpec
+from unmute_core.livekit import UnmuteAgent
+from unmute_core.state import CallState
+from unmute_core.tasks import TaskPlan, TasksSpec
+from unmute_core.telemetry import Langfuse, Telemetry
+from unmute_core.tools import ToolRegistry
+
+
+SLNG_KEY = os.environ["SLNG_API_KEY"]
+SLNG_HOST = f"{os.environ['SLNG_WORLD_PART']}.api.slng.ai"
+VOICE = "8d8aec63a56c460cb7def795bdf754fa"
+
+
+class State(BaseModel):
+    note: str | None = None
+
+
+tasks_spec = TasksSpec.model_validate(
+    {
+        "mode": "record",
+        "tasks": [
+            {
+                "name": "take_note",
+                "when": "The caller wants to leave a note.",
+                "instructions": "Ask what the note says, then save it.",
+                "assign": [{"variable": "note", "path": ["note"]}],
+            }
+        ],
+    }
+)
+plan = TaskPlan(tasks_spec, state=State, tools=ToolRegistry([]))
+server = AgentServer()
+
+
+@server.rtc_session()
+async def entrypoint(ctx: JobContext) -> None:
+    state = CallState(State)
+    spec = AgentSpec("You are the receptionist of a hair salon.", tasks=plan)
+    agent = UnmuteAgent(
+        spec,
+        state=state,
+        telemetry=Telemetry(Langfuse.from_env(), agent="salon", call_id=state.call.session_id),
+    )
+    stt = slng.STT(
+        api_key=SLNG_KEY, slng_base_url=SLNG_HOST, model="soniox/speech-ai:rt-v5", language="en"
+    )
+    session = AgentSession(
+        stt=stt,
+        llm=google.LLM(model="gemini-3.1-flash-lite"),
+        tts=slng.TTS(
+            api_key=SLNG_KEY,
+            slng_base_url=SLNG_HOST,
+            model="slng/fish/tts:s2.1-pro",
+            voice=VOICE,
+            language="en",
+        ),
+        vad=silero.VAD.load(),
+    )
+    stt.attach_to_session(session)
+    await session.start(agent=agent, room=ctx.room)
+
+
+if __name__ == "__main__":
+    cli.run_app(server)
+```
+
+1. The `AgentSpec` says what the agent is, the same way on LiveKit and Pipecat. See [AgentSpec](/core/reference/agent-spec).
+2. `UnmuteAgent` adds the call's state, hooks and telemetry. It takes LiveKit's own `Agent` options too.
+3. The library builds no part of the pipeline. You choose the speech to text, the text to speech and the model. Here speech runs on SLNG: Soniox hears the caller and Fish Audio speaks. See [SLNG](/core/models/slng).
+
+For a realtime model, see [Realtime](/core/models/realtime).
+
+## Use your own model call
+
+With no `model` in the spec, the agent runs on the session's LLM. To use another provider, give the spec a `ModelCall` and leave `llm` out of the session. This is the SLNG Context Router:
+
+```python
+from unmute_core.slng import OpenAIEndpoint, RouterConfig, RouterModelCall
+
+config = RouterConfig.single(
+    "gpt-5.6-luna",
+    OpenAIEndpoint(url="https://api.openai.com/v1", api_key=os.environ["OPENAI_API_KEY"]),
+)
+model = RouterModelCall(state.call, model="gpt-5.6-luna", config=config)
+agent = UnmuteAgent(AgentSpec("...", tasks=plan, model=model), state=state)
+```
+
+1. Each request carries your own router config, so the model runs on your own OpenAI key.
+2. The session retries the model call as it retries its own LLM. The agent closes it when the session closes.
+3. To keep a LiveKit plugin instead, pass `AgentSpec(model=LiveKitModel(plugin))`.
+
+See [Model call](/core/models/model-call) for the interface and [SLNG](/core/models/slng) for the router.
+
+## Open and end the call
+
+```python
+from unmute_core.call import CallHooks
+from unmute_core.greeting import Greeting
+from unmute_core.livekit import max_duration, open_call
+
+call = CallHooks(state, hooks=hooks, prefetch=prefetch)
+agent = UnmuteAgent(AgentSpec(PROMPT, tasks=plan), call=call)
+await session.start(agent=agent, room=ctx.room)
+await open_call(session, Greeting(text="Hi, thanks for calling.", interruptible=False), call)
+max_duration(session, 20 * 60, call=call)
+```
+
+1. `open_call` turns the caller's audio off, runs the `before_call` hooks and the prefetch, then greets. A failed check says the failure line and hangs up instead.
+2. The caller's audio comes back when the agent starts to speak, or when the greeting ends with `interruptible=False`.
+3. The session's close ends the call. The job's shutdown waits for the held saves, the models and the telemetry to close. The end reads `caller_hung_up`, `agent_ended` or `max_duration`.
+
+On a phone call, read the caller's number with `sip_call_info`. See [Phone calls](/core/telephony). The events and the failure line are in [The call's life](/core/build/call-lifecycle).
+
+## Add LiveKit tools and MCP
+
+`native_tools` gives the main agent LiveKit tools as they are. A LiveKit MCP toolset is one:
+
+```python
+from livekit.agents import mcp
+
+crm = mcp.MCPToolset(id="crm", mcp_server=mcp.MCPServerHTTP(url="https://crm.example.com/mcp"))
+agent = UnmuteAgent(spec, state=state, native_tools=[crm])
+```
+
+1. The main agent gets every tool you pass.
+2. A step gets only the toolsets its task lists, by id: `TaskSpec(native_tools=("crm",), ...)`.
+
+## Before you ship
+
+1. Build one `AgentSpec`, one `UnmuteAgent`, one `Telemetry` and one `ModelCall` per call. A model call shared across calls is closed under the others.
+2. A subclass that overrides `on_enter` or `tts_node` calls `super()`, or the spans stop.
+3. Give the spec `tools` or `tasks`, not both. The task plan holds every tool.
+
+Every other rule is in [Rules to know](/core/reference/livekit#rules-to-know).
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="LiveKit adapter reference" icon="book" href="/core/reference/livekit">
+    Every argument, how a call runs inside, and every rule.
+  </Card>
+  <Card title="Turn taking" icon="timer" href="/core/build/turn-taking">
+    Turn pace, interruption and idle nudges on LiveKit.
+  </Card>
+  <Card title="Handoffs" icon="git-branch" href="/core/build/handoffs">
+    Move the call between agents, each with its own model and voice.
+  </Card>
+  <Card title="The call's life" icon="phone-call" href="/core/build/call-lifecycle">
+    Call start values, events, the failure line and the end.
+  </Card>
+  <Card title="Add one piece to your agent" icon="puzzle" href="/core/frameworks/standalone">
+    Use one piece on a plain Agent.
+  </Card>
+</CardGroup>

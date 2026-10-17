@@ -1,0 +1,174 @@
+---
+title: "Quiet callers and long calls"
+sidebarTitle: "Quiet callers"
+description: "Set the turn pace, nudge a caller who goes quiet, end a long call, and let the agent hang up when the caller says goodbye."
+---
+
+You have: Robin that knows the date and the caller's number, from [Know the time](/core/tutorial/know-the-time).
+
+The caller goes quiet, and the agent checks they are still there, then lets them go.
+
+## What you add
+
+All the settings live in the shared package, so both frameworks use the same ones.
+
+```python salon/agent.py
+from unmute_core.idle import IdleNudges
+
+PACE = "balanced"
+IDLE = IdleNudges(
+    first_nudge_delay_seconds=20,
+    first_nudge_text="Are you still there?",
+    second_nudge_delay_seconds=15,
+    second_nudge_text="I'm still here whenever you're ready.",
+    hangup_delay_seconds=10,
+    final_hangup_text="I'll let you go for now. Call us back any time. Goodbye.",
+)
+MAX_DURATION_S = 900
+END_CALL = (
+    'End the call once the caller\'s own words say the call is over: "no, that\'s all", '
+    '"I\'m good, thanks", "goodbye". A question is never one of those. Answer what they '
+    "asked and wait for them to say they are done."
+)
+SAY_GOODBYE_WITH_THE_CALL = (
+    "In the same reply as this call, and before it, say one short goodbye in your own words."
+)
+GOODBYE_LINE = "Thanks for calling. Goodbye."
+```
+
+1. `PACE` is one of `snappy`, `balanced` or `patient`. It says how long the agent waits after the caller pauses.
+2. `IdleNudges` is a quiet caller's script: a nudge after 20 seconds, a second after 15 more, and a hang-up after 10 more. Code says these lines. The model is not asked.
+3. `MAX_DURATION_S` is the longest a call may run. Here it is 15 minutes.
+4. `END_CALL` is what the model reads about when to hang up. The example's text names a real failure: a tired question must not end the call.
+
+Now wire them into each framework. The turn window turns the pace into that framework's own timing.
+
+<CodeGroup>
+
+```python livekit/agent.py
+from livekit.agents import TurnHandlingOptions
+from livekit.agents.beta.tools import EndCallTool
+from livekit.agents.voice import room_io
+from unmute_core.livekit import endpointing, idle_nudges, interruption, max_duration
+from unmute_core.turn import turn_window
+
+WINDOW = turn_window(salon.PACE, "livekit")
+VAD = silero.VAD.load(min_silence_duration=WINDOW.vad_silence)
+
+
+def end_call() -> EndCallTool:
+    """Return LiveKit's end-call tool, with the salon's wording."""
+    return EndCallTool(
+        extra_description=f"{salon.END_CALL}\n{salon.SAY_GOODBYE_WITH_THE_CALL}",
+        end_instructions=None,
+        delete_room=False,
+    )
+
+
+# In entrypoint(): build the session with the window, nudge a quiet caller,
+# hang up by closing the room, and start the call timer after the greeting.
+stt = slng.STT(
+    api_key=SLNG_KEY, slng_base_url=SLNG_HOST, model="soniox/speech-ai:rt-v5", language="en"
+)
+session = AgentSession(
+    stt=stt,
+    llm=openai.LLM(model="gpt-5.6-terra"),
+    tts=slng.TTS(
+        api_key=SLNG_KEY,
+        slng_base_url=SLNG_HOST,
+        model="slng/fish/tts:s2.1-pro",
+        voice=VOICE,
+        language="en",
+    ),
+    vad=VAD,
+    turn_handling=TurnHandlingOptions(
+        endpointing=endpointing(WINDOW), interruption=interruption("keep")
+    ),
+    user_away_timeout=None,
+)
+stt.attach_to_session(session)
+idle_nudges(session, salon.IDLE)
+await session.start(
+    agent=agent, room=ctx.room, room_options=room_io.RoomOptions(delete_room_on_close=True)
+)
+greet(session, salon.GREETING, state)
+max_duration(session, salon.MAX_DURATION_S)
+
+# In both agents, add the tool: super().__init__(..., native_tools=[end_call()]).
+```
+
+```python pipecat/bot.py
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from unmute_core.pipecat import (
+    IdleNudgeObserver,
+    end_call_tool,
+    interruption,
+    max_duration,
+    smart_turn_params,
+    vad_params,
+)
+from unmute_core.turn import turn_window
+
+WINDOW = turn_window(salon.PACE, "pipecat")
+
+# In bot(): build the user aggregator with the window.
+aggregators = LLMContextAggregatorPair(
+    context,
+    user_params=LLMUserAggregatorParams(
+        vad_analyzer=SileroVADAnalyzer(params=vad_params(WINDOW)),
+        user_turn_strategies=interruption(
+            "keep",
+            stop=[
+                TurnAnalyzerUserTurnStopStrategy(
+                    turn_analyzer=LocalSmartTurnAnalyzerV3(params=smart_turn_params(WINDOW))
+                )
+            ],
+        ),
+    ),
+)
+
+# In salon_flows(): the end-call tool goes in both agents' native_tools lists.
+ending = end_call_tool(
+    f"{salon.END_CALL}\n{salon.SAY_GOODBYE_WITH_THE_CALL}",
+    salon.GOODBYE_LINE,
+    lambda: flows.reply_text,
+)
+
+# In bot(): nudge a quiet caller, and start the call timer in the greet handler.
+worker.add_observer(IdleNudgeObserver(salon.IDLE, worker))
+max_duration(worker, salon.MAX_DURATION_S)
+```
+
+</CodeGroup>
+
+The model says its goodbye in the same reply as the end-call tool. The call then ends after one model request.
+
+## Try it
+
+Start the agent as before.
+
+1. Say "Hello" and then stay silent. After about 20 seconds you should hear "Are you still there?"
+2. Stay silent again. You should hear the second line, then the goodbye line, and the call ends.
+3. On a new call, ask "Can you tell me my appointment time?" Robin answers, and the call does not end.
+4. Say "No, that's all, goodbye." Robin says goodbye and hangs up.
+
+## Why it works this way
+
+LiveKit and Pipecat time a caller's pause in different ways. One pace name gives each framework its own matching settings, so a caller is paused the same way on both.
+
+The idle timer runs only while the agent listens, so it never asks "are you there?" during its own slow tool. A call limit stops a call that would run for hours.
+
+## What you have now
+
+| Piece | File |
+|---|---|
+| `PACE`, `IDLE`, `MAX_DURATION_S`, `END_CALL` | `salon/agent.py` |
+| Turn window, nudges, end-call tool on LiveKit | `livekit/agent.py` |
+| Turn window, nudges, end-call tool on Pipecat | `pipecat/bot.py` |
+
+<Card title="Next: See every call" icon="chart-line" href="/core/tutorial/see-every-call">
+  Send one Langfuse trace for each call.
+</Card>
+
+Go deeper: [Turn taking](/core/build/turn-taking) and [Call lifecycle](/core/build/call-lifecycle).
