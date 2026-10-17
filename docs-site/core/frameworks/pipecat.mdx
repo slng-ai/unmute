@@ -1,0 +1,222 @@
+---
+title: "Pipecat"
+sidebarTitle: "Pipecat"
+description: "UnmuteFlows runs tools, tasks, the model call and telemetry in a Pipecat pipeline."
+---
+
+`unmute_core.pipecat` puts the library's tools, tasks, model call and telemetry in a Pipecat pipeline. Its main class, `UnmuteFlows`, runs the tasks of one call. You keep your transport, your speech and your model.
+
+Install the library and the plugins the quickstart uses:
+
+```bash
+uv add "unmute-core[pipecat]" "pipecat-ai[openai,runner,silero,webrtc]" pipecat-slng
+```
+
+## Quickstart
+
+```python agent.py
+import os
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMUpdateSettingsFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import LLMSettings
+from pipecat.transcriptions.language import Language
+from pipecat.transports.base_transport import TransportParams
+from pipecat.workers.runner import WorkerRunner
+from pipecat_slng import SlngSTTService, SlngTTSService
+from pydantic import BaseModel
+
+from unmute_core.agent import AgentSpec
+from unmute_core.pipecat import UnmuteFlows
+from unmute_core.state import CallState
+from unmute_core.tasks import TaskPlan, TasksSpec
+from unmute_core.tools import ToolRegistry
+
+SLNG_KEY = os.environ["SLNG_API_KEY"]
+WORLD_PART = os.getenv("SLNG_WORLD_PART", "eu-north")
+
+
+class State(BaseModel):
+    note: str | None = None
+
+
+tasks_spec = TasksSpec.model_validate(
+    {
+        "mode": "record",
+        "tasks": [
+            {
+                "name": "take_note",
+                "when": "The caller wants to leave a note.",
+                "instructions": "Ask what the note says, then save it.",
+                "assign": [{"variable": "note", "path": ["note"]}],
+            }
+        ],
+    }
+)
+plan = TaskPlan(tasks_spec, state=State, tools=ToolRegistry([]))
+
+
+async def bot(runner_args: RunnerArguments) -> None:
+    params = TransportParams(audio_in_enabled=True, audio_out_enabled=True)
+    transport = await create_transport(runner_args, {"webrtc": lambda: params})
+    state = CallState(State)
+    settings = OpenAILLMService.Settings(model="gpt-5.6-terra", system_instruction="")
+    llm = OpenAILLMService(settings=settings)
+    context = LLMContext()
+    aggregators = LLMContextAggregatorPair(
+        context, user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer())
+    )
+    spec = AgentSpec("You are the receptionist of a hair salon.", tasks=plan)
+    flows = UnmuteFlows(spec, llm=llm, context=context, aggregators=aggregators, state=state)
+    flows.install()
+
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            SlngSTTService(
+                api_key=SLNG_KEY,
+                world_part=WORLD_PART,
+                model="soniox/speech-ai:rt-v5",
+                language=Language.EN,
+            ),
+            aggregators.user(),
+            llm,
+            SlngTTSService(
+                api_key=SLNG_KEY,
+                world_part=WORLD_PART,
+                model="slng/fish/tts:s2.1-pro",
+                voice="8d8aec63a56c460cb7def795bdf754fa",
+                language=Language.EN,
+            ),
+            transport.output(),
+            aggregators.assistant(),
+        ]
+    )
+    worker = PipelineWorker(pipeline)
+
+    @transport.event_handler("on_client_connected")
+    async def on_connected(transport, client):
+        delta = LLMSettings(system_instruction=flows.main_instruction())
+        await worker.queue_frame(LLMUpdateSettingsFrame(delta=delta))
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+    await runner.add_workers(worker)
+    await runner.run()
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()
+```
+
+1. The `AgentSpec` says what the agent is, the same way on Pipecat and LiveKit. See [AgentSpec](/core/reference/agent-spec).
+2. `UnmuteFlows` adds the call's state, hooks and telemetry. `install()` puts its tools on the context, and `main_instruction()` is the prompt the LLM starts with.
+3. The library builds no part of the pipeline. Here speech runs on SLNG: Soniox hears the caller and Fish Audio speaks. See [SLNG](/core/models/slng).
+
+To trace the call, add `telemetry=` and a `TelemetryObserver`, as [Telemetry](/core/observe/telemetry) shows. For OpenAI's realtime or live service, see [Realtime](/core/models/realtime).
+
+## Use your own model call
+
+A native Pipecat LLM service gets its prompts filled by `UnmuteFlows`. To send each request through a `ModelCall`, like the SLNG Context Router, use `ModelCallLLMService` as the LLM:
+
+```python
+from unmute_core.pipecat import ModelCallLLMService
+
+llm = ModelCallLLMService(router, state=state)
+```
+
+1. The service gets the prompts unfilled, with the prompt site of each request. The `ModelCall` decides who fills them.
+2. A model error after the reply began does not fail the call. The reply ends as it stands.
+3. The service closes each model call it was given when the pipeline ends.
+
+See [Model call](/core/models/model-call) for the interface and [SLNG](/core/models/slng) for the router.
+
+## Open and end the call
+
+```python
+from unmute_core.call import CallHooks
+from unmute_core.greeting import Greeting
+from unmute_core.pipecat import max_duration, open_call
+
+call = CallHooks(state, prefetch=prefetch)
+flows = UnmuteFlows(spec, llm=llm, context=context, aggregators=aggregators, call=call)
+
+
+@transport.event_handler("on_client_connected")
+async def on_connected(transport, client):
+    greeting = Greeting(text="Hi, thanks for calling.")
+    await open_call(worker, greeting, call, context=context, transport=transport)
+    max_duration(worker, 20 * 60, call=call)
+
+
+await runner.run()
+end = await call.end("ended")
+await telemetry.close(state=state, reason=end.reason)
+```
+
+1. `open_call` runs the `ready` checks and the prefetch, then queues the greeting. A failed check says the failure line and ends the call.
+2. `transport=` notes the caller hanging up, so the end reads `caller_hung_up`. Your own `on_client_disconnected` handler still ends the pipeline.
+3. `call.end` settles the steps' held saves. Call it after `runner.run()` and before the telemetry closes.
+
+To hold the caller until the greeting plays, add a `GreetingHold`. On a phone call, read the caller's number with `telephony_call_info`. See [Phone calls](/core/telephony) and [The call's life](/core/build/call-lifecycle).
+
+## Add Pipecat tools, MCP and an end-call tool
+
+`native_tools` are Pipecat `FunctionSchema`s with their own handlers. A Pipecat MCP client needs no new class:
+
+```python
+from pipecat.services.mcp_service import MCPClient
+from unmute_core.pipecat import end_call_tool
+
+tools = await MCPClient(...).tools()
+ending = end_call_tool(
+    "End the call once the caller says they are done. In the same reply as this call, "
+    "and before it, say one short goodbye in your own words.",
+    "Thanks for calling. Goodbye.",
+    lambda: flows.reply_text,
+)
+flows = UnmuteFlows(..., native_tools=[*tools.standard_tools, ending])
+```
+
+1. The main agent gets every tool you pass, like a handoff tool. A step gets only the names its task lists: `TaskSpec(native_tools=("get_customer",), ...)`.
+2. The end-call tool ends the call after one model request. The goodbye rides in the reply that calls it.
+3. When that reply has no words, the tool says the goodbye you give it.
+
+## Before you ship
+
+1. Build one `UnmuteFlows`, one `Telemetry` and one `ModelCall` per call. A model call shared across calls is closed under the others.
+2. With telemetry, set `PipelineParams(enable_metrics=True, enable_usage_metrics=True)` and keep Pipecat's own `enable_tracing` off.
+3. On a phone call over a carrier line, set the pipeline's audio in and out sample rates to 8000.
+
+Every other rule is in [Rules to know](/core/reference/pipecat#rules-to-know).
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Pipecat adapter reference" icon="book" href="/core/reference/pipecat">
+    Every argument, how a call runs inside, and every rule.
+  </Card>
+  <Card title="Turn taking" icon="timer" href="/core/build/turn-taking">
+    Turn pace, interruption and idle nudges on Pipecat.
+  </Card>
+  <Card title="Handoffs" icon="git-branch" href="/core/build/handoffs">
+    Move the call between agents, each with its own model and voice.
+  </Card>
+  <Card title="The call's life" icon="phone-call" href="/core/build/call-lifecycle">
+    Call start values, events, the failure line and the end.
+  </Card>
+  <Card title="Add one piece to your agent" icon="puzzle" href="/core/frameworks/standalone">
+    Use one piece on a plain pipeline.
+  </Card>
+</CardGroup>

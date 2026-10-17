@@ -1,0 +1,194 @@
+---
+title: "State"
+description: "Typed call values, confirmation, prompt placeholders and the save_values tool, on any Pydantic model."
+---
+
+`CallState` holds what one call knows. It keeps typed values, tracks which ones the caller confirmed, and fills them into your prompts. It works on any Pydantic model, on LiveKit and on Pipecat.
+
+In the salon tutorial, [Remember the caller](/core/tutorial/remember-the-caller) builds this step by step.
+
+## Define what the call remembers
+
+```python state.py
+from pydantic import BaseModel
+
+from unmute_core.state import CallState, Phone
+
+
+class State(BaseModel):
+    caller_phone: Phone | None = None
+    note: str | None = None
+
+
+state = CallState(State, confirm={"caller_phone": "verify_phone"})
+```
+
+1. Every field needs a default, because every value starts the call empty. A field with no default raises `TypeError`.
+2. `confirm` maps a value to the task step that must hear the caller agree to it.
+3. Every call needs an agent id. Set `UNMUTE_AGENT_ID`, or pass `call=` with an `agent_id`. With neither, `CallState` raises `SettingsError`.
+
+## Save a value
+
+```python
+from unmute_core.state import StateRefused
+
+try:
+    state.save({"caller_phone": "+34 612 345 678", "note": "call back"})
+except StateRefused as refused:
+    print(refused.message)  # worded for the model, so it can ask the caller again
+```
+
+1. `save` checks the whole batch first. One bad value refuses all of it, and nothing is saved.
+2. A good value is saved in its clean form. The phone number above is saved as `+34612345678`.
+3. `save` is the one way in. Read `state.values` or `state.plain("note")`, but never write to them.
+
+Task steps, [prefetch](/core/build/prefetch) and the `save_values` tool all save through the same `save`.
+
+## Ask the caller to confirm a value
+
+```python
+state.save({"caller_phone": "+34 612 345 678"}, step="verify_phone")
+state.is_confirmed("caller_phone")  # True, the confirming step saved it
+
+state.save({"caller_phone": "+34 612 345 679"})
+state.is_confirmed("caller_phone")  # False, the caller must agree again
+state.render("caller_phone")  # "none recorded yet."
+```
+
+1. A value in `confirm` is confirmed only when its own step saves it.
+2. Any other save makes it unconfirmed again.
+3. Until it is confirmed, prompts show `none recorded yet.`, so the model never reads a misheard value back as fact. The confirming step still sees it, so it can read it back.
+
+## Filling a prompt
+
+```python
+from unmute_core.model import render_prompt
+
+prompt = render_prompt("Help the caller on {{caller_phone}}.", state)
+```
+
+1. `{{name}}` names a value. `{{customer.status}}` reads a path into a shape.
+2. A name the state does not hold raises `MissingVariablesError`.
+3. Call it again after a save, so the prompt shows the new values.
+
+With `UnmuteAgent`, `UnmuteFlows` or a `ModelCall`, you do not call it. The library fills the prompt on every request.
+
+## Values the call starts with
+
+```python
+from unmute_core.call import save_call_start
+
+state = CallState(State, call_start={"customer_id": "required", "brand": "optional"})
+save_call_start(state, dispatched)
+render_prompt("Welcome to {{brand}}.", state)  # "Welcome to Salon Sol." or "Welcome to ."
+```
+
+1. `call_start` names the values the dispatch sets. A `required` one must be there, or `save_call_start` raises `CallStartError`.
+2. `dispatched` is the `call_start` object of the dispatch. For a local run, set `UNMUTE_CALL_START` to the same JSON.
+3. The caller is never asked for these values, and the model cannot change them.
+
+[The call's life](/core/build/call-lifecycle#start-values) shows where `save_call_start` runs.
+
+## Values the call carries: `state.call`
+
+```python
+state.call.session_id  # one id for the whole call
+state.call.calling_number  # "+34612345678", or None
+render_prompt("The caller is {{call.calling_number}}.", state)
+```
+
+The library fills `state.call` from the line. Your State class does not declare it, and only the library writes it.
+
+| Field | What it holds |
+| --- | --- |
+| `agent_id` | One id per agent. Your code or the dispatch sets it. |
+| `session_id` | One id per call. It is the same on every turn, task and handoff. |
+| `channel` | `phone` or `web`. The default is `web`. |
+| `direction` | `inbound` or `outbound`. It is `None` on a web call. |
+| `calling_number` | The party that placed the call. |
+| `called_number` | The party that was dialled. |
+| `remote_number` | The other party. The library works it out from `direction`. |
+| `carrier_call_id` | The carrier's id for the call, like the SIP Call-ID or the Twilio CallSid. |
+| `first_user_message` | What the caller said first. |
+| `end_reason` | Why the call ended. |
+
+The inbound, outbound and web cases, a test phone call from a web session and the read-only rules are in the [State reference](/core/reference/state#values-the-call-carries-state-call).
+
+## Saving values no task saves
+
+Some values belong to no task. The model learns them in free talk. Turn on `save_values` to give it a tool for them.
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.agent import AgentSpec
+from unmute_core.livekit import UnmuteAgent
+
+spec = AgentSpec(PROMPT, tasks=plan, save_values=True)
+agent = UnmuteAgent(spec, state=state)
+```
+
+```python Pipecat
+from unmute_core.agent import AgentSpec
+from unmute_core.pipecat import UnmuteFlows
+
+spec = AgentSpec(PROMPT, tasks=plan, save_values=True)
+flows = UnmuteFlows(spec, llm=llm, context=context, aggregators=aggregators, state=state)
+```
+
+</CodeGroup>
+
+1. Each request ends with a short block that lists every value and what it holds now.
+2. The model saves with the `save_values` tool. `null` puts a value back to its default.
+3. A value a task saves, or a call-start value, is refused with a reason the model can act on.
+
+## Listen to changes
+
+```python
+def show(event) -> None:
+    for change in event.changes:
+        print(change.field, change.value, change.confirmed, change.by.kind)
+
+
+stop = state.listen(show)
+```
+
+1. A listener gets one event per save that changed something.
+2. `listen(show, replay=True)` first sends the values already set.
+3. Call `stop()` to stop listening. A listener that raises is logged and removed.
+
+## Value types
+
+Use these classes from `unmute_core.state` as field types. Each one cleans and checks the value, and refuses a bad one with a reason the model can act on.
+
+| Type | Saved as |
+|---|---|
+| `Phone` | E.164 text, like `+34612345678` |
+| `Date` | `YYYY-MM-DD` text |
+| `BirthDate` | `YYYY-MM-DD` text |
+| `Time` | `HH:MM` text on the 24-hour clock |
+| `Id` | Text of letters, digits, and `. _ : -` |
+| `Spelled` | The code as given, trimmed |
+| `NameEmail` | A shape with `name` and `email` |
+
+Every rule of each type is in the [State reference](/core/reference/state#value-types).
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="State reference" icon="book" href="/core/reference/state">
+    Every argument, rule and error, and State from type text.
+  </Card>
+  <Card title="Tasks" icon="list-checks" href="/core/build/tasks">
+    Steps that save values, and the held save at the end of a call.
+  </Card>
+  <Card title="Prefetch" icon="zap" href="/core/build/prefetch">
+    Fill values before the greeting.
+  </Card>
+  <Card title="The call's life" icon="phone-call" href="/core/build/call-lifecycle">
+    Where call-start values are saved.
+  </Card>
+  <Card title="Variables on Unmute" icon="braces" href="/build/variables">
+    How `agent.yaml` declares the same values.
+  </Card>
+</CardGroup>

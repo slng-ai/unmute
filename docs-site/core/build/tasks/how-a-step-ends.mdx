@@ -1,0 +1,117 @@
+---
+title: "How a task step ends"
+sidebarTitle: "How a step ends"
+description: "The finish check, the held finish, going back to an earlier step and the retry after an empty reply."
+---
+
+A step ends when the model calls its `finish` tool with the values, or when a
+closing tool's result matches a `FinishRule`. Weak models sometimes skip that.
+
+## Quickstart
+
+```python agent.py
+from unmute_core.tasks import Assign, TaskSpec
+
+TaskSpec(
+    name="choose_service",
+    when="The caller wants to book an appointment.",
+    instructions="Ask which service they want, then save it.",
+    assign=[Assign(variable="requested_service", path=("requested_service",))],
+)
+```
+
+When the model has the service, it calls `finish` with `{"requested_service": "haircut"}`. When it only says "Noted, thank you", the finish check steps in. The sections below explain both cases.
+
+## Why use unmute for this
+
+A weak model often says "Noted, thank you" and never finishes. The library asks the model one narrow question after such a reply, so the step does not wait forever.
+
+## The finish check
+
+Weak models often say "Noted, thank you" and stop, without calling `finish`.
+The step then waits for a save that never comes.
+
+After a step's reply that spoke and called nothing, once the caller has said
+something new in the step, the runtime asks the model one narrow question:
+`finish` with the values, or `not_yet`. The request offers only those two tools,
+and a tool call is required.
+
+1. A `finish` is sent as that reply's own call. The step ends as if the model had called it.
+2. `not_yet` changes nothing. The step goes on.
+3. The check runs at most once per caller turn, and waits at most 8 seconds.
+4. A step with tools of its own is checked only after one of them succeeded, because its values come from that result.
+
+**On each framework.** On Pipecat, the check goes to the call's LLM when it can be asked: a `ModelCallLLMService`, an OpenAI-compatible service or a `GoogleLLMService`. For any other LLM, the spec's `AgentSpec(summarizer=...)` answers the check. With no summarizer, there is no check.
+
+**Why it works this way.** The check offers only `finish` and `not_yet`, so a weak model cannot wander off. It runs once per caller turn and has a time limit, so it never holds up the call.
+
+**Best practice.**
+
+1. On Pipecat with a custom LLM, give the spec a `summarizer`, or the check does not run.
+
+## The held finish
+
+A finish is refused when the caller has not heard a tool's result yet. The model
+reads "tell them what it means first". That finish is held. When the next reply
+says the result and calls nothing, the runtime sends the held finish for it.
+
+**Why it works this way.** The caller hears a result before the step ends on it.
+
+## Going back to an earlier step
+
+While a step runs, the caller may change an earlier answer. The model then calls
+`go_back_to_step` with the names in `steps`. A name the run cannot go back to is
+refused as `{"refused": ...}`. The text lists the steps it can go back to:
+
+```text
+cannot go back to 'take_card'. Go back to one of: confirm_amount
+```
+
+When no step ran before the current one, the list reads `none, no step ran
+before this one`. A call with an empty list is refused with `name at least one
+earlier step`.
+
+## When the reply is empty
+
+A model sometimes returns nothing: no words and no tool call. On LiveKit, a step then asks again, up to `EMPTY_REPLY_ATTEMPTS` times, which is 3. Each retry adds a different note to the step's prompt.
+
+1. The note says the previous response was empty and asks for the step's next valid response. It tells the model to use what the caller already said and never to ask again for it.
+2. Each retry reads a different note, because the Responses API reuses an earlier answer when the request has not changed.
+3. When the empty reply followed a step tool's result, the retry offers only `finish`, and the note says to use the tool result already in context.
+4. When all tries are empty, a step its group can do without fails and the group carries on. Any other step stays open and says a short apology: `gave_up_line`, or `gave_up_after_tool_line` after a tool result.
+
+Set both lines on `CallTasks`, in the call's language. Each adapter builds its own `CallTasks` from the spec, as `agent.tasks` on LiveKit and `flows.tasks` on Pipecat. So set `agent.tasks.gave_up_line` after you build the agent.
+
+```python
+agent = UnmuteAgent(AgentSpec(PROMPT, tasks=plan, language="es-ES"), state=state)
+agent.tasks.gave_up_line = "Lo siento, no pude completarlo. Inténtalo otra vez."
+```
+
+## Troubleshooting
+
+### The step says it could not complete and the caller must try again
+
+Every retry after an empty reply came back empty, and the step said its `gave_up_line`.
+
+**Fix:** set `gave_up_line` and `gave_up_after_tool_line` to lines in the call's language. Then check the step's `instructions`, so the model knows what to reply.
+
+### The caller changed an answer, and the step cannot go back
+
+The model asked for a name the run cannot go back to. The refusal lists the steps it can.
+
+**Fix:** put the earlier step in the same group, and read the refusal text for the names it allows.
+
+In the salon tutorial: [Book step by step](/core/tutorial/book-step-by-step).
+
+Every argument: [Tasks reference](/core/reference/tasks#steprun).
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Held saves" icon="clock" href="/core/build/tasks/held-saves">
+    What happens to a save made before the caller spoke.
+  </Card>
+  <Card title="Task groups" icon="list-ordered" href="/core/build/tasks/groups">
+    Run several tasks in order.
+  </Card>
+</CardGroup>

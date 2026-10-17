@@ -1,0 +1,206 @@
+---
+title: "Unmute Core quickstart"
+sidebarTitle: "Quickstart"
+description: "Run the smallest unmute-core agent on LiveKit or Pipecat: a salon receptionist that keeps the caller's phone number."
+---
+
+This agent answers the phone for a salon. It asks for the caller's number and keeps it in typed call state. If the number is not valid, the library refuses it and the agent asks again.
+
+You need the library with a framework extra. See [Installation](/core/start/installation). The agent hears and speaks through SLNG: Soniox for speech to text and Fish Audio for text to speech. It uses OpenAI for the model. Set `SLNG_API_KEY`, `SLNG_WORLD_PART` (your SLNG project's region, like `eu-north`) and `OPENAI_API_KEY`.
+
+## The agent
+
+<CodeGroup>
+
+```python livekit_agent.py
+import os
+
+from livekit.agents import AgentServer, AgentSession, JobContext, cli
+from livekit.plugins import openai, silero, slng
+from pydantic import BaseModel
+from unmute_core.agent import AgentSpec
+from unmute_core.livekit import UnmuteAgent
+from unmute_core.state import CallState, Phone
+
+PROMPT = "You answer the phone for a hair salon. Ask for the caller's phone number. Keep replies short."
+SLNG_HOST = f"{os.environ['SLNG_WORLD_PART']}.api.slng.ai"
+VOICE = "8d8aec63a56c460cb7def795bdf754fa"
+
+
+class State(BaseModel):
+    customer_phone: Phone | None = None
+
+
+server = AgentServer()
+
+
+@server.rtc_session()
+async def entrypoint(ctx: JobContext) -> None:
+    stt = slng.STT(
+        api_key=os.environ["SLNG_API_KEY"],
+        slng_base_url=SLNG_HOST,
+        model="soniox/speech-ai:rt-v5",
+        language="en",
+    )
+    session = AgentSession(
+        stt=stt,
+        llm=openai.LLM(model="gpt-5.6-luna"),
+        tts=slng.TTS(
+            api_key=os.environ["SLNG_API_KEY"],
+            slng_base_url=SLNG_HOST,
+            model="slng/fish/tts:s2.1-pro",
+            voice=VOICE,
+            language="en",
+        ),
+        vad=silero.VAD.load(),
+    )
+    stt.attach_to_session(session)
+    state = CallState(State)
+    spec = AgentSpec(PROMPT, save_values=True)
+    agent = UnmuteAgent(spec, state=state)
+    await session.start(agent=agent, room=ctx.room)
+
+
+if __name__ == "__main__":
+    cli.run_app(server)
+```
+
+```python pipecat_bot.py
+import os
+from collections.abc import Callable
+from typing import Any
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMUpdateSettingsFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import LLMSettings
+from pipecat.transcriptions.language import Language
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.workers.runner import WorkerRunner
+from pipecat_slng import SlngSTTService, SlngTTSService
+from pydantic import BaseModel
+from unmute_core.agent import AgentSpec
+from unmute_core.pipecat import UnmuteFlows
+from unmute_core.state import CallState, Phone
+
+PROMPT = "You answer the phone for a hair salon. Ask for the caller's phone number. Keep replies short."
+VOICE = "8d8aec63a56c460cb7def795bdf754fa"
+TRANSPORTS: dict[str, Callable[..., Any]] = {
+    "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True)
+}
+
+
+class State(BaseModel):
+    customer_phone: Phone | None = None
+
+
+async def bot(runner_args: RunnerArguments) -> None:
+    transport = await create_transport(runner_args, TRANSPORTS)
+    state = CallState(State)
+    llm = OpenAILLMService(
+        settings=OpenAILLMService.Settings(model="gpt-5.6-luna", system_instruction="")
+    )
+    context = LLMContext()
+    aggregators = LLMContextAggregatorPair(
+        context, user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer())
+    )
+    spec = AgentSpec(PROMPT, save_values=True)
+    flows = UnmuteFlows(spec, llm=llm, context=context, aggregators=aggregators, state=state)
+    flows.install()
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            SlngSTTService(
+                api_key=os.environ["SLNG_API_KEY"],
+                world_part=os.environ["SLNG_WORLD_PART"],
+                model="soniox/speech-ai:rt-v5",
+                language=Language.EN,
+            ),
+            aggregators.user(),
+            llm,
+            SlngTTSService(
+                api_key=os.environ["SLNG_API_KEY"],
+                world_part=os.environ["SLNG_WORLD_PART"],
+                model="slng/fish/tts:s2.1-pro",
+                voice=VOICE,
+                language=Language.EN,
+            ),
+            transport.output(),
+            aggregators.assistant(),
+        ]
+    )
+    worker = PipelineWorker(pipeline)
+
+    @transport.event_handler("on_client_connected")
+    async def prompt(transport: BaseTransport, client: Any) -> None:
+        delta = LLMSettings(system_instruction=flows.main_instruction())
+        await worker.queue_frame(LLMUpdateSettingsFrame(delta=delta))
+
+    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+    await runner.add_workers(worker)
+    await runner.run()
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()
+```
+
+</CodeGroup>
+
+## Run it
+
+Install the plugins your framework needs next to the library:
+
+<CodeGroup>
+
+```bash LiveKit
+uv add livekit-plugins-openai livekit-plugins-silero livekit-plugins-slng
+export SLNG_API_KEY=... SLNG_WORLD_PART=eu-north OPENAI_API_KEY=...
+uv run python livekit_agent.py console
+```
+
+```bash Pipecat
+uv add "pipecat-ai[openai,runner,silero,webrtc]" pipecat-slng
+export SLNG_API_KEY=... SLNG_WORLD_PART=eu-north OPENAI_API_KEY=...
+uv run python pipecat_bot.py -t webrtc
+```
+
+</CodeGroup>
+
+LiveKit `console` talks to your microphone. Use `dev` in its place to connect to a LiveKit server. For Pipecat, open `http://localhost:7860` and talk.
+
+## Try it
+
+Say "My number is six one two, three four five." That is not a full number. The save is refused, and the agent asks for the number again. Then give a full number with its country code. The agent keeps it.
+
+## What the code does
+
+1. `State` is a Pydantic model. It holds what the call remembers. `Phone` is a value type from the library. It checks the number and stores it in E.164.
+2. `CallState(State)` keeps one live copy of that model for the call.
+3. `AgentSpec` describes the agent: its prompt, and here `save_values=True`. It reads the same on both frameworks. `save_values=True` gives the model a `save_values` tool. Each save is checked against `State`. A wrong value comes back to the model with a reason it can act on.
+4. On LiveKit, `UnmuteAgent` runs the spec as a normal LiveKit `Agent`. On Pipecat, `UnmuteFlows` runs it in your pipeline. Each takes the call's state beside the spec.
+5. Speech to text, the model, text to speech and turn detection stay framework plugins. SLNG's plugins carry Soniox and Fish Audio. `VOICE` is a Fish Audio voice id. On LiveKit, `stt.attach_to_session(session)` lets speech to text close each caller turn as soon as the caller stops. See [SLNG](/core/models/slng).
+
+## Where to go next
+
+Pick one path.
+
+<CardGroup cols={2}>
+  <Card title="Build a salon agent" icon="scissors" href="/core/tutorial/overview">
+    Grow this agent one piece per page: a greeting, a tool, task steps, a handoff and traces.
+  </Card>
+  <Card title="Add one piece to your agent" icon="puzzle" href="/core/frameworks/standalone">
+    Keep your own LiveKit or Pipecat agent, and add only the parts you need.
+  </Card>
+</CardGroup>

@@ -22,8 +22,14 @@ func skipSnippets(path string, entry fs.DirEntry) bool {
 	return entry.IsDir() && entry.Name() == snippetsDir && filepath.Dir(path) == siteRoot
 }
 
+// navigation is a list of tabs, each with its own groups. The Unmute tab is
+// written here; the Unmute Core tab is copied from slng-ai/unmute-core by
+// scripts/sync_core_docs.sh.
 type navigation struct {
-	Groups []group `json:"groups"`
+	Tabs []struct {
+		Name   string  `json:"tab"`
+		Groups []group `json:"groups"`
+	} `json:"tabs"`
 }
 
 type group struct {
@@ -45,11 +51,16 @@ func TestNavigationMatchesPages(t *testing.T) {
 	}
 
 	listed := map[string]int{}
-	for _, top := range config.Navigation.Groups {
-		if top.Root != "" {
-			t.Errorf("top-level group %q uses root %q; it will look like a nested link", top.Name, top.Root)
+	if len(config.Navigation.Tabs) == 0 {
+		t.Fatal("docs.json navigation has no tabs")
+	}
+	for _, tab := range config.Navigation.Tabs {
+		for _, top := range tab.Groups {
+			if top.Root != "" {
+				t.Errorf("tab %q: top-level group %q uses root %q; it will look like a nested link", tab.Name, top.Name, top.Root)
+			}
+			collectPages(t, top, listed)
 		}
-		collectPages(t, top, listed)
 	}
 
 	err = filepath.WalkDir(siteRoot, func(path string, entry fs.DirEntry, err error) error {

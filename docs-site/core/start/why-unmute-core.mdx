@@ -1,0 +1,73 @@
+---
+title: "Why Unmute Core"
+sidebarTitle: "Why Unmute Core"
+description: "What the library adds to a LiveKit or Pipecat agent, and when you need it."
+---
+
+LiveKit and Pipecat move audio, run the models and call your tools. They do not
+decide how a good phone call behaves. Every team learns that from its first real
+calls. unmute-core holds what we learned, so your agent starts from it.
+
+You keep your framework, your plugins and your pipeline. The library adds one
+piece or all of them.
+
+## One call, two ways
+
+A caller phones a salon to book a haircut. Here is what goes wrong on a plain
+agent, and what the library does instead.
+
+| The call | A plain agent | With unmute-core |
+|---|---|---|
+| The caller dials in and talks while the agent sets up. | That audio mixes into the first turn. | Caller audio waits until the greeting starts. |
+| "My number is six one two, three four five..." | The model saves `612345` and books with it. | The save is refused because the number is not valid. The model asks again. |
+| The caller pauses, then goes on. | The reply plays over them. | The reply is dropped. The next one answers everything they said. |
+| "Yes" while the agent reads the times. | The agent stops mid-sentence. | The agent finishes, then answers the "yes". |
+| The model says "Noted, thank you." | The step waits for a finish that never comes. | The library asks the model directly: finished, or not yet? |
+| The booking tool takes 3 seconds. | Silence. | "One moment, let me check." |
+| The model calls the booking tool. | It books what the model guessed. | Code asks "Shall I book Friday, October 16?" and books only what the caller heard. |
+| The booking API answers with half a record. | The model tells the caller it is booked. | The answer is checked against the tool's model. The model reads which field is missing and does not claim success. |
+| The caller is handed to billing. | Billing hands the call straight back. | Billing speaks first. Handoff tools wait for the caller. |
+| The model provider fails. | Silence, then the line drops. | The next model answers. If none can, a short apology plays. |
+| The call ends. | Each framework gives a different reason, and its own trace shape. | One reason and one trace on both frameworks. |
+
+Each row is a few lines of code to fix, once you know it happens. Most teams
+find out on a live call, one row at a time.
+
+## Three reasons to use it
+
+1. **One agent on both frameworks.** State, tasks, tools, prompts and traces
+   behave the same on LiveKit and Pipecat. 90 shared test scenarios check it on
+   every change. You can switch frameworks without rewriting the agent.
+2. **The model cannot break your data.** Each value has a type. A save that does
+   not fit is refused with a reason the model can act on. Values the caller has
+   not confirmed stay out of the prompt.
+3. **What real calls taught us, built in.** Pauses, interruptions, idle callers,
+   slow tools, failing providers, transfers and handoffs. Each feature page
+   starts with what it fixes.
+
+## Where each part helps
+
+| You want to | Read |
+|---|---|
+| Collect values the caller gives, and trust them | [State](/core/build/state) |
+| Walk the caller through steps that cannot get stuck | [Tasks](/core/build/tasks) |
+| Call your code and APIs safely during a call | [Tools](/core/build/tools) |
+| Pass the call between agents | [Handoffs](/core/build/handoffs) |
+| Open, fail and end a call well | [Call lifecycle](/core/build/call-lifecycle) |
+| Know the caller before the first word | [Prefetch](/core/build/prefetch) |
+| Get pauses, interruptions and quiet callers right | [Turn taking](/core/build/turn-taking) |
+| Change prompts, requests and tool calls in one place | [Hooks](/core/build/hooks) |
+| Answer from your documents | [Knowledge](/core/build/knowledge) |
+| Keep answering when a model fails | [Model call](/core/models/model-call) |
+| Transfer to a person, dial out, handle voicemail | [Telephony](/core/telephony) |
+| See every call in Langfuse, Coval, Logfire or Datadog | [Telemetry](/core/observe/telemetry) |
+| Spend fewer tokens, and say the same words on every call | [Type the path](/core/examples/typed-path) |
+| See whole agents built this way | [Example agents](/core/examples/overview) |
+
+## When you don't need it
+
+- One agent on one framework, with a few tools and no values to collect.
+- You already built and tested your own answers to the rows above.
+
+Even then, you can take one piece, like [tools](/core/build/tools) or
+[telemetry](/core/observe/telemetry), and add more when a call shows you need it.

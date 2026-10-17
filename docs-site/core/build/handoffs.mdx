@@ -1,0 +1,271 @@
+---
+title: "Handoffs in code"
+sidebarTitle: "Handoffs"
+description: "Give the call to another main agent, with a line said first and a choice of what the next agent hears."
+---
+
+A handoff gives the call to another main agent. You choose a line said first, and what the next agent hears of the call so far. Each agent is its own [`AgentSpec`](/core/reference/agent-spec), with its own prompt, tools, tasks, model and voice, and all of them share one `CallState`.
+
+In the salon tutorial, [Hand off complaints](/core/tutorial/hand-off-complaints) builds this step by step.
+
+## Hand the call to another agent
+
+Give the model a handoff tool. Its handler calls `hand_off`.
+
+<CodeGroup>
+
+```python LiveKit
+from livekit.agents import function_tool
+
+from unmute_core.agent import AgentSpec
+from unmute_core.handoff import HandoffContext
+from unmute_core.livekit import UnmuteAgent
+
+concierge = AgentSpec(
+    "You book appointments.", name="concierge", tasks=concierge_plan, handoffs=("to_complaints",)
+)
+specialist = AgentSpec("You take complaints down.", name="complaints", tasks=specialist_plan)
+
+
+class Concierge(UnmuteAgent):
+    @function_tool
+    async def to_complaints(self) -> UnmuteAgent | str:
+        """The caller has a complaint."""
+        return await self.hand_off(
+            UnmuteAgent(specialist, state=self.state),
+            announce="Putting you through to our complaints desk.",
+            context=HandoffContext(history="last_n", max_messages=6),
+        )
+
+
+agent = Concierge(concierge, state=state, telemetry=telemetry)
+```
+
+```python Pipecat
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.services.llm_service import FunctionCallParams
+
+from unmute_core.agent import AgentSpec
+from unmute_core.handoff import HandoffContext
+from unmute_core.pipecat import UnmuteFlows
+
+concierge = AgentSpec(
+    "You book appointments.", name="concierge", tasks=concierge_plan, handoffs=("to_complaints",)
+)
+specialist = AgentSpec("You take complaints down.", name="complaints", tasks=specialist_plan)
+
+
+async def to_complaints(params: FunctionCallParams) -> None:
+    await flows.hand_off(
+        params,
+        specialist,
+        announce="Putting you through to our complaints desk.",
+        context=HandoffContext(history="last_n", max_messages=6),
+    )
+
+
+handoff = FunctionSchema("to_complaints", "The caller has a complaint.", {}, [], handler=to_complaints)
+flows = UnmuteFlows(
+    concierge, llm=llm, context=context, aggregators=aggregators,
+    state=state, telemetry=telemetry, native_tools=[handoff],
+)
+```
+
+</CodeGroup>
+
+1. The `announce` line plays first, and the handoff waits for it. The caller cannot cut it off.
+2. On LiveKit, build the next agent on `self.state` and without `telemetry`. On Pipecat, pass its spec, and `UnmuteFlows` swaps the prompt, tools, tasks and model.
+3. The next agent replies first. Name each agent's handoff tools in its spec's `handoffs`, so that first reply cannot hand the call straight back.
+
+## What the next agent hears
+
+Pass a `HandoffContext` as `context`. With none, the next agent hears what was said, without tool calls.
+
+```python
+HandoffContext(history="last_n", max_messages=6)
+```
+
+| `history` | What the next agent hears |
+|---|---|
+| `messages` (default) | What the caller and the agent said. No tool calls, no prompts. |
+| `full` | Everything, with tool calls and their results. No prompts. |
+| `last_n` | The newest `max_messages` items. A call and its result stay together. |
+| `summary` | One message: "Summary of the conversation so far: ..." |
+| `reset` | Nothing. The next agent answers on its prompt alone. |
+
+1. Calls to tools the next agent does not have are dropped, with their results.
+2. The `announce` line is the last thing the next agent hears, except with `summary` and `reset`.
+3. On a realtime model, only `full` works. See [Realtime models](/core/models/realtime).
+
+## Summarize the call for the next agent
+
+```python
+HandoffContext(history="summary", summarizer=my_model_call)
+```
+
+1. The summary is asked for while the `announce` line plays, so it does not hold up the handoff.
+2. `summarizer` is any `ModelCall`. Without one, the spec's `summarizer` answers, else the model of the agent that hands off.
+3. A summary that fails, comes back empty, or takes longer than 8 seconds is dropped. The next agent then hears `messages`.
+
+## Give the next agent its own model and voice
+
+Give the spec a `model`, and pass the agent its own voice.
+
+<CodeGroup>
+
+```python LiveKit
+from livekit.agents import function_tool
+from livekit.plugins import openai, slng
+
+from unmute_core.agent import AgentSpec
+from unmute_core.livekit import LiveKitModel, UnmuteAgent
+
+billing_model = LiveKitModel(openai.LLM(model="gpt-5.6-terra"))
+billing = AgentSpec(
+    "You answer billing questions.",
+    name="billing",
+    tasks=billing_plan,
+    model=billing_model,
+    handoffs=("to_front_desk",),
+)
+
+
+class FrontDesk(UnmuteAgent):
+    @function_tool
+    async def to_billing(self) -> UnmuteAgent | str:
+        """The caller has a billing question."""
+        voice = slng.TTS(
+            api_key=SLNG_KEY, slng_base_url=SLNG_HOST, model="slng/fish/tts:s2.1-pro", voice=BILLING_VOICE
+        )
+        return await self.hand_off(Billing(billing, state=self.state, tts=voice))
+```
+
+```python Pipecat
+from pipecat_slng import SlngTTSService
+
+from unmute_core.agent import AgentSpec
+from unmute_core.model import OpenAIModelCall
+from unmute_core.pipecat import ModelCallLLMService, UnmuteFlows, VoiceSwitcher
+
+billing_model = OpenAIModelCall("gpt-5.6-terra")
+billing = AgentSpec(
+    "You answer billing questions.",
+    name="billing",
+    tasks=billing_plan,
+    model=billing_model,
+    handoffs=("to_front_desk",),
+)
+
+front_voice = SlngTTSService(
+    api_key=SLNG_KEY, world_part=WORLD_PART, model="slng/fish/tts:s2.1-pro", voice=FRONT_VOICE
+)
+billing_voice = SlngTTSService(
+    api_key=SLNG_KEY, world_part=WORLD_PART, model="slng/fish/tts:s2.1-pro", voice=BILLING_VOICE
+)
+voices = VoiceSwitcher([front_voice, billing_voice])
+llm = ModelCallLLMService(front_model, settings=...)
+
+flows = UnmuteFlows(front_desk, llm=llm, context=context, aggregators=aggregators, tts=voices)
+pipeline = Pipeline(
+    [transport.input(), stt, aggregators.user(), llm, voices, transport.output(), aggregators.assistant()]
+)
+
+
+async def to_billing(params: FunctionCallParams) -> None:
+    await flows.hand_off(params, billing, tts=billing_voice, native_tools=[to_front_desk_tool])
+```
+
+</CodeGroup>
+
+`FRONT_VOICE` and `BILLING_VOICE` are two Fish Audio voice ids on SLNG. `SLNG_KEY`, `SLNG_HOST` and `WORLD_PART` come from your environment, as in the [quickstart](/core/start/quickstart).
+
+1. The `announce` line plays in the old voice. Then the new model and voice take over.
+2. An agent whose spec has no `model` runs on the call's first model. The same holds for the voice.
+3. On Pipecat, a spec with a `model` needs a `ModelCallLLMService`, and the voices go through a `VoiceSwitcher`.
+
+## Open the next agent on a tool
+
+The next agent's first reply comes from the model. When it must start with something code
+already knows, run a tool in code instead. Pass `opens_with`:
+
+```python
+from unmute_core.tasks import OpeningTool
+
+await self.hand_off(tutor, opens_with=OpeningTool(tool="continue_lesson"))  # LiveKit
+await flows.hand_off(params, tutor_spec, opens_with=OpeningTool(tool="continue_lesson"))  # Pipecat
+```
+
+1. The tool runs through the next agent's `ToolRegistry`, so its `assign` rows save values.
+2. Its line is the first of the opening's `say` lines that fills, else the registry's `ToolReply` for the result.
+3. When a line fills, it is the agent's first reply. The tool call and its result join the history, and no model request is made.
+4. When no line fills, or the tool is refused or fails, the model replies first as before.
+5. `arguments` maps tool parameters to State values, as on a [task step's opening](/core/reference/tasks#openingtool). The tool does not run while one of them is unset.
+6. A realtime model refuses `opens_with`: it keeps the history on its server.
+
+## A handoff from a task step
+
+A task can offer the agent's handoff tools to its steps:
+
+```json
+{"name": "find_order", "tools": ["lookup_order"], "handoffs": ["to_notes"], "...": "..."}
+```
+
+1. The handoff tool must be one of the agent's own tools: a `native_tools` entry, or a LiveKit `@function_tool` method.
+2. When the step's model calls it, the step ends with `task.handed_off`, and nothing is saved.
+3. The next agent hears the step's own chat, shaped by the handoff's `context`.
+
+A task group can hand the call off too, once it finishes. See [Group transfer rules](/core/reference/handoffs#group-transfer-rules).
+
+## Hand off from a plain agent
+
+You can hand off without `UnmuteAgent` or tasks.
+
+<CodeGroup>
+
+```python LiveKit
+from livekit.agents import Agent, function_tool
+
+from unmute_core.handoff import HandoffContext
+from unmute_core.livekit import shape_chat_ctx
+
+
+class Front(Agent):
+    @function_tool
+    async def to_billing(self) -> Agent:
+        """Hand the call to billing."""
+        context = HandoffContext(history="last_n", max_messages=6)
+        return Billing(chat_ctx=shape_chat_ctx(self.chat_ctx, context))
+```
+
+```python Pipecat
+flows = UnmuteFlows(AgentSpec(PROMPT), llm=llm, context=context, aggregators=aggregators)
+flows.install()
+
+# inside the handoff tool's handler
+await flows.hand_off(params, AgentSpec(NEXT_PROMPT, name="next"), announce="One moment.")
+```
+
+</CodeGroup>
+
+1. On LiveKit, `shape_chat_ctx` gives the next agent the history the library keeps. It does not say a line or write a summary.
+2. On Pipecat, a spec with only a prompt is enough for a full handoff.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Handoffs reference" icon="book" href="/core/reference/handoffs">
+    Every argument, history rule, helper and error.
+  </Card>
+  <Card title="Tasks" icon="list-checks" href="/core/build/tasks">
+    Steps and groups that offer or run a handoff.
+  </Card>
+  <Card title="LiveKit" icon="boxes" href="/core/frameworks/livekit">
+    What `UnmuteAgent` does on a LiveKit session.
+  </Card>
+  <Card title="Pipecat" icon="boxes" href="/core/frameworks/pipecat">
+    What `UnmuteFlows` does in a Pipecat pipeline.
+  </Card>
+  <Card title="Unmute handoffs" icon="git-branch" href="/build/orchestration/handoffs">
+    How `agent.yaml` declares a handoff.
+  </Card>
+</CardGroup>

@@ -1,0 +1,254 @@
+---
+title: "Knowledge"
+description: "Search a folder of documents from a tool, so the agent answers from your own text."
+---
+
+`KnowledgeBase` searches a folder of documents. The agent calls it as a tool and
+answers from the passages it gets back. It works the same on LiveKit and Pipecat.
+
+On this page:
+
+- [What it gives you](#what-it-gives-you) - what goes wrong without it
+- [Quickstart](#quickstart) - a base, a tool and `start()`
+- [How it works](#how-it-works) - bake, start, look up
+- [What a lookup returns](#what-a-lookup-returns) - three shapes
+- [Every argument KnowledgeBase takes](#every-argument-knowledgebase-takes) - modes and limits
+- [Use it in an agent](#use-it-in-an-agent) - the tool description and both frameworks
+- [Advanced](#advanced) - keyword mode and your own code
+- [Troubleshooting](#troubleshooting) - the errors you may see
+
+It needs the `[knowledge]` extra. See [Install](/core/start/installation) for the
+install line and the one setting Linux needs.
+
+## What it gives you
+
+| On a call without it | What the library does |
+|---|---|
+| Every process embeds the documents again at startup. | `bake()` builds the index once. Startup only loads it. [How it works](#how-it-works) |
+| The index was built with other settings and returns the wrong passages. | A mismatch fails at load. |
+| Meaning search misses exact names and codes. | Hybrid search mixes meaning and keywords. |
+| Long passages are slow to say and to send. | Passages are about 65 words, 3 per lookup. [Every argument KnowledgeBase takes](#every-argument-knowledgebase-takes) |
+| The model offers the closest passage as if it answered. | The tool tells the model results may not answer the question. [Use it in an agent](#use-it-in-an-agent) |
+
+## Quickstart
+
+```python agent.py
+from pathlib import Path
+
+from llama_index.embeddings.openai import OpenAIEmbedding
+
+from unmute_core.knowledge import KnowledgeBase
+from unmute_core.tools import ToolRegistry
+
+REFUNDS = KnowledgeBase(
+    "refunds",
+    Path("knowledge/refunds"),
+    index_dir=Path("knowledge/.index/refunds"),
+    embed=lambda: OpenAIEmbedding(model="text-embedding-3-small"),
+    credential_env="OPENAI_API_KEY",
+)
+
+
+registry = ToolRegistry(
+    [
+        REFUNDS.tool(
+            "look_up_refund_policy",
+            "Look up the refund and complaints policy. Use it before you state any refund "
+            "or timescale.",
+        )
+    ]
+)
+
+REFUNDS.start()  # once per process, before the first call
+```
+
+The embedder package, here `llama-index-embeddings-openai`, is yours to install.
+Keyword mode needs none.
+
+## How it works
+
+```mermaid
+flowchart LR
+    B[bake at image build] --> I[(Index folder)]
+    I --> S[start at process start]
+    S --> L[look_up in a call]
+    L --> R[Passages]
+```
+
+1. The folder holds `.txt`, `.md` and `.pdf` files.
+2. `bake()` reads them, splits them into passages, and writes the index to `index_dir`. Run it when you build the image.
+3. `start()` loads the index when the process starts. It never runs during a call.
+4. `await look_up(query)` searches the index and returns at most `top_k` passages.
+5. The content is fixed at start. A lookup never reads a file and never builds the index again.
+
+Without a baked index, `start()` reads and embeds the documents in memory. That
+works. But every worker process pays the full cost, and the log warns about it.
+So call `bake()` at build time:
+
+```bash
+python -c "from agent import REFUNDS; REFUNDS.bake()"
+```
+
+## What a lookup returns
+
+`look_up` never raises. It returns one of three shapes, so the model can tell
+them apart.
+
+| Result | Meaning |
+|---|---|
+| `{"results": [{"text": ..., "source": ..., "score": ...}]}` | It found passages |
+| `{"results": []}` | It found nothing |
+| `{"error": "lookup unavailable"}` | It could not search. It was called before `start()`, or the search failed. |
+
+1. `source` is the file name, never the path. The agent may say it aloud.
+2. `score` is a similarity from the meaning search. Keyword hits have no score.
+3. The query and the passages never go to the log.
+
+## Every argument KnowledgeBase takes
+
+### KnowledgeBase
+
+<ParamField path="name" type="str" required>
+  The base name. It appears in log lines and errors.
+</ParamField>
+<ParamField path="documents" type="Path" required>
+  The folder that holds the documents.
+</ParamField>
+<ParamField path="index_dir" type="Path | None" default="None">
+  Where `bake()` writes the index and `start()` looks for it. `None` never bakes.
+</ParamField>
+<ParamField path="mode" type="meaning | keyword | hybrid" default="hybrid">
+  `meaning` uses embeddings. `keyword` uses BM25. `hybrid` runs both and interleaves the hits.
+</ParamField>
+<ParamField path="chunk_size" type="int" default="90">
+  Passage size in tokens. 90 tokens is about 65 words. From 1 to 2048.
+</ParamField>
+<ParamField path="chunk_overlap" type="int" default="20">
+  Tokens that neighbouring passages share. From 0 to `chunk_size`.
+</ParamField>
+<ParamField path="top_k" type="int" default="3">
+  How many passages a lookup returns. From 1 to 20.
+</ParamField>
+<ParamField path="min_score" type="float" default="0.0">
+  Drop meaning hits below this score. From 0 to 1. Keyword hits are always kept.
+</ParamField>
+<ParamField path="embed" type="Callable[[], BaseEmbedding] | None" default="None">
+  A function that builds the llama-index embedder. Needed for `meaning` and `hybrid`.
+</ParamField>
+<ParamField path="credential_env" type="str | None" default="None">
+  The environment variable the embedder needs.
+</ParamField>
+
+1. `embed` is a function, not an embedder. It runs at `start()` or `bake()`.
+2. A `keyword` base takes no `embed` and needs `min_score` at 0. A base that embeds needs `embed`. A wrong mix, a bad `mode`, `chunk_size`, `top_k` or `min_score`, or a `chunk_overlap` above `chunk_size` raises a Pydantic `ValidationError` when you build it. It is a `ValueError`. It names the field and the allowed values.
+3. `credential_env` is checked at `start()` and `bake()`. A missing key stops the process at once and names the variable.
+4. A baked index remembers the settings it was built with. `start()` refuses an index built with other settings. Bake it again.
+5. `start()` and `bake()` raise `KnowledgeError` for a missing folder, a folder with no text, or a PDF with no text layer.
+
+Let the process stop on a `KnowledgeError`. An agent that knows nothing should
+not take calls.
+
+## Use it in an agent
+
+`KnowledgeBase.tool(name, description)` builds the tool for you. The model reads its description, so say when to use it. The library adds a note on weak results, so you need not write one.
+
+1. `description` is up to you. It says when to look up.
+2. The tool ends the description with: "The results may not answer the question. They are ordered best first, and each carries a relevance score where a higher number means a closer match. If nothing returned actually answers what was asked, say you do not have that information rather than offering the closest result."
+3. The tool has one parameter, `query`. The model reads it as "What to look up. Use the caller's own words."
+4. `name` defaults to `look_up`. With no `description`, the description is the note alone.
+5. The tool is a `ToolSpec`. Pass it to `ToolRegistry`.
+
+For a task step, list the tool in the step's `tools`. See
+[Tasks](/core/build/tasks) and [Tools](/core/build/tools).
+
+<CodeGroup>
+
+```python LiveKit
+# An agent without tasks takes the registry. With tasks, the TaskPlan holds it.
+spec = AgentSpec(PROMPT, tools=registry)
+agent = UnmuteAgent(spec, state=state)
+```
+
+```python Pipecat
+# An agent without tasks takes the registry. With tasks, the TaskPlan holds it.
+spec = AgentSpec(PROMPT, tools=registry)
+flows = UnmuteFlows(spec, llm=llm, context=context, aggregators=aggregators, state=state)
+```
+
+</CodeGroup>
+
+## Advanced
+
+### Keyword mode
+
+Keyword mode needs no embedder and no API key.
+
+```python
+from pathlib import Path
+
+from unmute_core.knowledge import KnowledgeBase
+from unmute_core.tools import ToolRegistry
+
+kb = KnowledgeBase("faq", Path("knowledge/faq"), mode="keyword")
+kb.start()
+
+registry = ToolRegistry([kb.tool("look_up_faq", "Search the FAQ.")])
+```
+
+### Use a lookup in your own code
+
+You can call `await REFUNDS.look_up(question)` in your own code. Put the
+passages in a prompt you write yourself.
+
+## Troubleshooting
+
+### `PermissionError: Security Violation [pathsec.open]` on the first lookup
+
+llama-index reads NLTK data files. NLTK refuses a file with more than one
+hardlink, and uv makes hardlinks on Linux by default.
+
+**Fix:** install with copies. [Install](/core/start/installation) has the
+details, also for a Dockerfile.
+
+```bash
+UV_LINK_MODE=copy uv sync
+```
+
+### The log warns that every worker embeds the documents
+
+There is no baked index, so each process embeds the folder at start.
+
+**Fix:** run `bake()` when you build the image and set `index_dir`.
+
+### `start()` refuses the index
+
+The index was built with other settings.
+
+**Fix:** bake it again.
+
+```bash
+python -c "from agent import REFUNDS; REFUNDS.bake()"
+```
+
+### The model gets `{"error": "lookup unavailable"}`
+
+`look_up` ran before `start()`, or the search failed.
+
+**Fix:** call `start()` once at process start, before the first call.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Tools" icon="wrench" href="/core/build/tools">
+    The tool that wraps a lookup, and its announce line.
+  </Card>
+  <Card title="Tasks" icon="list-checks" href="/core/build/tasks">
+    Offer a lookup to one step of a task.
+  </Card>
+  <Card title="Install it" icon="download" href="/core/start/installation">
+    The `[knowledge]` extra and `UV_LINK_MODE`.
+  </Card>
+  <Card title="Unmute knowledge" icon="book-open" href="/build/tools/knowledge">
+    How `agent.yaml` declares a knowledge base.
+  </Card>
+</CardGroup>

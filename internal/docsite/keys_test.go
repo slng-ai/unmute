@@ -49,6 +49,9 @@ var keyExempt = map[string]string{
 	"best-practices/step-scoping.mdx":   "advises on a choice, links to the mechanics",
 	"optimization/prefetch.mdx":         "argues when to pre-fetch; build/prefetch owns the keys",
 	"optimization/execution-layer.mdx":  "restates a binding models/stt and models/tts own",
+
+	// Unmute Core, copied from slng-ai/unmute-core.
+	"core/observe/telemetry.mdx": "an OpenTelemetry Collector config, not an Unmute file",
 }
 
 func TestPagesThatShowAKeyStateIt(t *testing.T) {

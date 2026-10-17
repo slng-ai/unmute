@@ -1,0 +1,832 @@
+---
+title: "Tools reference"
+sidebarTitle: "Tools"
+description: "Every tool option, rule and edge case: inputs and outputs, announce lines, saved results, locked arguments, webhooks, built-ins and your own kind of tool."
+---
+
+This page is the full detail behind [Tools](/core/build/tools). Start there to add a tool to your agent. Come here for every option, rule and edge case.
+
+## Use it in your agent
+
+The code for each kind of agent is in [Use it in your agent](/core/build/tools#use-it-in-your-agent).
+
+1. Build the tools once per call. They read that call's state, and what the call carries from `state.call`.
+2. Every option on this page works in all four kinds of agent: `UnmuteAgent`, a plain LiveKit `Agent`, `UnmuteFlows` and a plain Pipecat pipeline. The sections below say where one kind of agent needs one more line.
+3. `call` is the call's `CallHooks`. It runs your [tool hooks](/core/build/hooks) and lets background webhooks finish when the call ends. `state` and `call` are needed only when a tool reads them. On a plain agent, without `state`, the tools take the state of `call`.
+4. A [reply line](#save-a-result-and-speak-it) says dates and times in the call's language. `function_tools` and `tools_schema` take `language=` and `timezone=` for it. On `UnmuteAgent` and `UnmuteFlows`, the spec's `AgentSpec(language=, timezone=)` sets them.
+
+## What it handles for you
+
+You write a typed Python function. The library turns it into a tool that
+LiveKit and Pipecat call the same way. It checks every argument before your code
+runs and every result after it, says a line while a slow tool works, and tells
+the model plainly when a tool failed. It can save a result to State and speak a
+line from it, in the call's language. You keep your framework, and you add only
+the tools.
+
+| On a call without it | What the library does |
+|---|---|
+| The model sends a bad date or a number out of range, and your code breaks. | Arguments are checked with Pydantic and arrive as real Python types. A bad one goes back to the model with what to fix. [Inputs and outputs](#inputs-and-outputs) |
+| A slow tool leaves the caller in silence. | `announce=` says a line as the tool starts. [What a tool does around its call](#what-a-tool-does-around-its-call) |
+| The caller speaks, the tool is cancelled, and its result lands in a later reply. | A running tool keeps running on both frameworks. [A tool the caller talks over](#a-tool-the-caller-talks-over) |
+| The model claims a failed tool worked. | Every failure reaches the model as words it can act on, ending with "Do not claim success". [A call that is refused](#a-call-that-is-refused) |
+| A tool returns the wrong shape, and the model reads half a result as a success. | Every tool names its output model. A result that does not fit fails the call, and the model reads which field is wrong. [Outputs](#outputs) |
+| The model reads out "2026-10-16", or words the booking slightly differently each time. | A reply line is spoken by code, with the date said as "tomorrow, October 16". [Save a result and speak it](#save-a-result-and-speak-it) |
+| The model sends or forges a `customer_id`. | Locked arguments are hidden from the model and filled from the call. [Locked arguments](#locked-arguments) |
+| A webhook reaches `localhost` or a cloud metadata address. | Each address must be public, and the connection is pinned to it. [Private addresses](#private-addresses) |
+| A slow or huge response stalls the call. | One deadline covers the whole request. Bodies are capped at 64 KiB. [Time and size limits](#time-and-size-limits) |
+
+## Inputs and outputs
+
+Tool inputs and outputs are Pydantic. Write a function with type hints, and
+`local_tool` does the rest.
+
+```python
+from datetime import date
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
+
+from unmute_core.state import Phone
+from unmute_core.tools import local_tool
+
+
+class Booking(BaseModel):
+    reference: str
+    day: date
+
+
+def book_table(
+    day: Annotated[date, Field(description="The day the caller wants.")],
+    party: Annotated[int, Field(ge=1, le=12)] = 2,
+    seating: Literal["inside", "terrace"] = "inside",
+    phone: Phone | None = None,
+) -> Booking:
+    """Book a table."""
+    return Booking(reference="B-12", day=day)
+
+
+tool = local_tool(book_table)
+```
+
+1. `local_tool` builds a Pydantic model from the type hints. Its JSON Schema is what the model reads.
+2. `Field(description=...)` tells the model what an argument is. Limits like `ge` and `le` go into the schema too.
+3. Each call is checked before your function runs. Your function gets real Python types: a `date`, an `int`, a clean `Phone`.
+4. A bad argument goes back to the model with what to fix, like "party: 40 is greater than the maximum of 12". The model asks the caller or calls again.
+5. Every parameter needs a type. A parameter with none raises `TypeError` that names it. `*args` and `**kwargs` are refused too.
+6. The tool name is the function name, and the description is the docstring up to its `Args:` section. `name=` and `description=` change them.
+
+### Outputs
+
+Every tool names the Pydantic model of its result. A tool without one is refused
+when it is built.
+
+```python
+def find_order(order_id: str) -> Order:  # the return annotation is the output
+    ...
+
+
+def find_raw(order_id: str) -> dict:  # a function that returns a dict names it
+    ...
+
+
+local_tool(find_raw, output=Order)
+```
+
+1. `local_tool` reads the output from the return annotation. A function that returns a dict passes `output=`. With neither, `local_tool` raises `TypeError`: "name its output".
+2. A result that succeeded is checked against the output when the tool returns. The model then reads the checked result, `output.model_dump(mode="json")`. Defaults are filled, and a field the model does not declare is dropped, unless the model sets `extra="allow"`.
+3. A result that does not fit fails the call. The model reads "find_order returned a result that does not fit Order: status: ... Do not claim success." The log names the tool and the field, never a value.
+4. A result that reports an error is never checked: an `error` or a `refused` with text in it, or `"ok": false`. For a failure in your own function, raise `ToolError`.
+5. `Done` is the output of a tool that only runs: `{"ok": true}`. A webhook that answers with an empty body returns it. `Accepted` is the output of a webhook that does not wait for its answer. Both come from `unmute_core.tools`.
+6. The `wrap_tool` and `after_tool` hooks see the checked result. What a hook puts in its place is not checked again.
+7. The rule covers every library tool. A framework tool passed as `native_tools=` is the framework's own object, and the library does not check it.
+
+### One input model
+
+When the inputs are a model you already have, make it the function's only
+parameter. The function gets one value of the model.
+
+```python
+class OrderQuery(BaseModel):
+    order_id: Annotated[str, Field(description="The order id the caller reads out.")]
+
+
+async def lookup_order(query: OrderQuery) -> Order:
+    return await orders.get(query.order_id)
+
+
+tool = local_tool(lookup_order)
+```
+
+### Inputs and outputs of a webhook
+
+`webhook_tool` takes both models.
+
+```python
+webhook_tool("lookup_order", "Look up an order by its id.", URL, input=OrderQuery, output=Order)
+```
+
+**Why it works this way.** One Pydantic model tells the model what to send,
+checks what it sent, and converts it for your code. A second one checks what the
+tool sent back. The schema the model reads cannot drift from the code that runs,
+and a result of the wrong shape never reaches the model as a success.
+
+**Best practice.**
+1. Use precise types: `date`, `Literal`, `Phone`, and `Field` limits. Each one is a check you do not write.
+2. Give every argument a `description`. It is the only place the model learns what the argument means.
+3. Type the result's dates and choices too: `date`, `time`, `Literal`. A reply line then says them as a person does.
+4. Raise `ToolError` for a failure the model should read. Do not return an error dict from a function typed to return a model.
+
+## What a tool does around its call
+
+Every tool builder takes the same options: `local_tool` and `webhook_tool`.
+
+| Option | Values | What happens |
+|---|---|---|
+| `announce` | one line, or a list of lines | The agent says one of them as the tool starts. A slow tool is then not silence. A refused call says nothing. |
+| `announce_wait` | `False` (default), `True` | `True` runs the tool only after the line has played. |
+| `show_result` | `True` (default), `False` | `False` gives the model `{"ok": true}` for a result that succeeded. |
+| `result_instructions` | text | Tells the model how to use the result. |
+| `effect` | `returns_data` (default), `ends_conversation` | `ends_conversation` ends the call once the tool succeeds. |
+| `interruption` | `provider_default` (default), `cancel`, `continue` | What the caller's speech does to a running call. |
+
+1. With several announce lines, the agent never says the same one twice in a row.
+2. A failed tool never ends the call. The model reads the error and goes on.
+3. `interruption` matters on Pipecat, where `cancel` is the default. `continue` lets the tool finish. The library keeps Pipecat's own guidance about background tools out of the prompt, so the model reads the same prompt as on LiveKit. That holds only while the library's tools are the only background tools. Register your own tool with `cancel_on_interruption=False` and Pipecat's guidance comes back for all of them. LiveKit never cancels a running tool. When the reply that called it is cut off, the model reads that the tool is still running, and its result comes in a later reply.
+4. A value that is not one of the listed words raises a Pydantic `ValidationError`. It names the field and the allowed words. An unknown argument raises `TypeError`.
+
+### A tool the caller talks over
+
+**Why it works this way.** A cancelled tool may have half done its work, and
+its result comes late or never. The model then cannot tell the caller what
+happened. LiveKit never cancels a running tool, and Pipecat cancels one by
+default. `continue` gives Pipecat the LiveKit behaviour, with the same prompt on
+both.
+
+**Best practice.**
+1. Use `interruption="continue"` for a tool that changes something: a booking, a payment, a transfer.
+2. Leave `provider_default` for a lookup the model can simply ask again.
+
+**On each kind of agent.**
+- `UnmuteFlows` keeps Pipecat's background-tool text out of the prompt by itself.
+- A plain Pipecat pipeline needs `attach_call(..., llm=llm)` for that. Without it, Pipecat adds its own text about background tools to the prompt.
+- On LiveKit, both kinds of agent need nothing more.
+
+### Announce lines with values
+
+```python
+local_tool(
+    check_day,
+    announce="Let me check {{day}} for {{brand}}. Call {{call.session_id}}.",
+    announce_wait=True,
+)
+```
+
+1. `{{value}}` reads a State value or an argument of this call. `{{call.name}}` reads what the call carries, like `{{call.session_id}}`.
+2. The line is filled as it is said.
+3. If a line reads a value that is not set, the call is refused. Nothing is said and the tool does not run.
+4. With `announce_wait=True`, LiveKit waits for the speech to end, and the caller cannot cut the line off. Pipecat waits for the bot to stop speaking, at most 30 seconds. On Pipecat, `user_mute_strategies(protect=["tool_calls"])` keeps the caller from cutting the line.
+5. A realtime model that speaks itself skips the line and words its own. See [Realtime models](/core/models/realtime).
+
+**Why it works this way.** On a phone call, silence sounds like a dropped line.
+The line is said only once the call is checked, so a refused call makes no
+promise. The tool's answer is spoken after the line, so a long line delays the
+answer. Several lines rotate, so the agent does not sound like a recording.
+
+**Best practice.**
+1. Announce only a tool the caller would notice waiting for. A fast lookup needs no line.
+2. Keep each line short, and give two or three for a tool the agent calls often.
+3. Use `announce_wait=True` only when the line must come before the action, like "Putting you through now."
+
+### A result the model does not read
+
+```python
+local_tool(
+    save_order,
+    show_result=False,
+    result_instructions="Tell the caller the order is saved. Do not read out the number.",
+)
+```
+
+1. With `show_result=False`, the model reads `{"ok": true}` for a result that succeeded.
+2. A failure or a refusal is always shown. The model never claims a success. A result is a failure when it has an `error` with text in it, a `refused` with text in it, or `"ok": false`. `{"error": null}` and an empty `error` are a success.
+3. Task code still reads the full result. Finish rules and `ToolReply` lines work as before.
+4. `result_instructions` is added to the description as `"<description>\n\nUse the result like this: <instructions>"`.
+5. `ToolRegistry.for_model(name, result)` gives what the model reads. The adapters call it.
+6. `hidden=("read_back",)` leaves only those fields out of a result that succeeded. Use it for a line code speaks from the result, like a read-back: a model that can see the words may say them itself. `assign` rows and spoken lines still read the field. A field the output model does not have fails when the tool is built.
+
+### End the call
+
+A tool with `effect="ends_conversation"` ends the call once it succeeds, on both
+frameworks. The model is not asked for another reply, even when another tool is
+called in the same reply, and on a realtime model too. So the goodbye goes in the
+reply that calls the tool.
+
+```python
+hang_up = local_tool(hang_up_handler, effect="ends_conversation")
+```
+
+On Pipecat, `end_call_tool` ends the call with no second model request:
+
+```python
+from unmute_core.pipecat import end_call_tool, reply_text
+
+tool = end_call_tool("Call it when the caller is done.", "Goodbye!", reply_text(llm))
+```
+
+Give the tool to `UnmuteFlows(native_tools=[tool])`. The goodbye line is spoken
+only when the reply that called the tool had no words. Write it in the call's
+language. Pass `None` to say `GOODBYE_LINE` from `unmute_core.call`, in English.
+
+On Pipecat, `voicemail_tool` gives the model a tool that ends an outbound call at a
+voicemail. See [Phone calls](/core/telephony#voicemail).
+
+## A call that is refused
+
+```python
+{"refused": "day not set yet. Get it from the caller, then call this tool again."}
+```
+
+A call that reads a value not set yet gets this result. The value may sit in a
+locked argument, a webhook URL or an announce line.
+
+1. The tool does not run, and nothing is said. The model reads the message and acts on its hint.
+2. If a step must still confirm the value, the hint is "Run {task} first: it confirms {value} with the caller".
+3. Else, if a task saves the value, the hint is "Run {task} first: it saves {value}". The first task that saves it wins.
+4. Else the hint is "Get it from the caller", with the value's description from the State model in brackets when it has one.
+5. Every announce line of the tool is filled before one is picked. So every line's values must be set, even when another line needs none.
+6. A refused call counts as a failure. `ends_conversation` never fires on it.
+7. In code, `ToolRefused` is a `ToolError`. LiveKit and Pipecat send the same JSON.
+
+**Why it works this way.** A model that reads a bare error, or nothing, often
+tells the caller the action worked. So every failure reaches the model as words
+it can act on, and ends with "Do not claim success". A refusal is a result, not
+a raised error. Each framework words a raised error its own way, and a result
+reads the same on both.
+
+**Best practice.**
+1. In your own tool, raise `ToolError` with the words the model should read, like "No table is free that day. Offer another day."
+2. Let any other error raise. The model reads that the tool failed, and the log keeps the details.
+3. Use `show_result=False` for a result the caller must not hear. See [A result the model does not read](#a-result-the-model-does-not-read).
+
+## The schema the model reads
+
+The model reads a plainer copy of each tool's parameters. The tool still checks what the model sent against the full schema.
+
+1. An optional value whose default is `null` loses its `null` branch and that default. Leaving it out means the same thing. A value without that default keeps `null`, because there `null` means something, like "clear this value".
+2. `format` and `pattern` become words in the description. Some providers refuse them, and a format only this library knows, like `spelled`, tells a model nothing.
+3. Local `$ref`s are inlined.
+
+**Why it works this way.** Voice agents run small, fast models. Each extra branch or unknown keyword in a schema is one more thing such a model can get wrong:
+1. A `null` branch on every optional value makes the model choose between leaving a value out, sending `null` and guessing. Small models often guess.
+2. A keyword the provider does not support can make it refuse the call, or return no call at all. The caller then hears silence.
+3. A format name the model has never seen, like `spelled`, tells it nothing. Plain words do.
+
+The full schema still checks every call, so nothing the model could send before is refused now.
+
+## A required argument left out or empty
+
+```python
+{"refused": "birth_date is missing. Ask the caller for it, then call lookup_policy again.",
+ "missing": ["birth_date"]}
+```
+
+Small models often call a tool before they ask, with `""` for what they do not know.
+
+1. A required argument that is absent, or text that is blank, is missing. The tool does not run. It raises `ArgumentsMissing`, a `ToolRefused`.
+2. The model reads this refusal, not a format error like "expected a day written year-month-day".
+3. When the reply that made the call already said something, no model reply follows. That reply asked the caller, so the caller answers next. `replies_to(result, spoke=...)` from `unmute_core.tools` holds this rule.
+4. When the reply said nothing, the model replies to the refusal and asks.
+5. A step's closing tool with `confirm` lines refuses the same way, before it asks anything.
+6. On Pipecat, `tools_schema` cannot tell whether the reply spoke, so the model always replies there. So does OpenAI's live service, which cannot take a result without replying.
+
+## Save a result and speak it
+
+A task step lists the values a result saves (`Assign`) and the lines code speaks
+for it (`ToolReply`) on its `TaskSpec`. See [Confirm in code](/core/build/tasks/confirm-in-code).
+An agent without tasks lists the same rows on its `ToolRegistry`.
+
+```python
+from unmute_core.tools import Assign, ToolRegistry, ToolReply
+
+registry = ToolRegistry(
+    [local_tool(find_order)],
+    state=State,
+    assign={
+        "find_order": [
+            Assign(variable="order", path=()),
+            Assign(variable="order_number", path=("order_id",)),
+        ]
+    },
+    replies=[
+        ToolReply(tool="find_order", when={"status": ["held"]}, say=["{{result.order_id}} is held."]),
+        ToolReply(tool="find_order", state={"vip": [True]}, say=["{{name}}, it arrives {{result.arrives}}."]),
+        ToolReply(tool="find_order", say=["Your order arrives {{result.arrives}}."]),
+    ],
+)
+```
+
+1. `assign` maps a tool to the State values its result saves. `path` walks the result by field names. `path=()` saves the whole result into a State value typed as the output model, like `order: Order | None = None`.
+2. The values of one result are saved in one batch, or not at all. A save the State refuses is logged and told to the sinks as `tool.save_refused`. The model still reads the result, because the tool ran. A tool's save never confirms a value.
+3. `replies` are tried in order. The first one that matches the result and fills is spoken. The model reads the result and is asked for no reply.
+4. `when` maps a result field to the values that call for the line. `state` maps a State value to its values the same way. A reply with neither is the fixed reply. A line whose value is missing does not play, and the next reply is tried.
+5. A line reads `{{result.<field>}}`, nested like `{{result.order.id}}`, and `{{variable}}` from the State, nested like `{{account.amount_words}}`. Several lines are alternatives, said in turn.
+6. A value is said by its output field's JSON Schema `format`, in the call's language. A `date` reads "tomorrow, October 16" with a timezone and "Friday, October 16, 2026" without one. A `date-time` adds the time, a `time` reads "9:00 AM", a `phone` is grouped, and a `Literal` or `Enum` value is said as words. Any other value is said as it is.
+7. The registry checks every row when it is built. A tool, a result field or a State value that does not exist, or a result value whose type cannot fill the State value, fails with a message that names the fix.
+8. A reply on a tool that ends the call is refused: the call is over before the line could play. Say a goodbye with the tool's `announce` and `announce_wait=True`.
+9. A result that reports an error saves nothing and speaks nothing. Inside a task step, a tool that does not end the step still saves its registry `assign` rows at once, so a step that asks several questions keeps each answer as it comes. The step's own `replies` are spoken, then the tool's own, and the step's own `assign` saves when the step ends.
+10. A `when` value on a `Literal`, `bool` or `Enum` field must be one the field can hold. A typo like `"shiped"` fails when the registry is built, with the values the field holds.
+11. Each line code speaks is told to the sinks as `tool.replied`, so a trace shows which turns cost no model reply.
+
+### Replies on the tool itself
+
+A tool can carry its own replies. They play wherever the tool runs: on the main
+agent, as a step's tool, and as a step's closing tool.
+
+```python
+class Noted(BaseModel):
+    status: Literal["noted", "future_day"] = "noted"
+    complete: bool
+    next_question: str = ""
+
+
+local_tool(
+    note_facts,
+    replies=[
+        ToolReply(when={"status": ["future_day"]}, say=["That day hasn't happened yet. On which day did it happen?"]),
+        ToolReply(when={"complete": [False]}, say=["{{result.next_question}}"]),
+    ],
+)
+```
+
+1. A tool's own reply leaves out `tool`. One that names another tool is refused.
+2. The place's replies are tried first: the registry's on the main agent, the `TaskSpec`'s in a step. Then the tool's own, in order.
+3. A reply on a `ToolRegistry` or a `TaskSpec` still names its tool.
+
+### Check a rule before the tool runs
+
+A closing tool with `confirm` reads its input back before it runs. A rule about
+the request, like "a day within ten days", must answer before that read-back.
+Give the tool a `precheck`:
+
+```python
+def outside_window(day: date) -> Recorded | None:
+    if day < today():
+        return Recorded(status="past_day")
+    return None
+
+
+local_tool(
+    ledger.record_promise,
+    precheck=outside_window,
+    replies=[ToolReply(when={"status": ["past_day"]}, say=["That day has already gone. Which other day would suit you?"])],
+)
+```
+
+1. The precheck is a plain function, not async. It takes some of the tool's parameters by name, with the same types, or the whole input model when the tool takes one. Locked values are filled.
+2. It returns an instance of the tool's output model, the outcome, or None to go ahead. An outcome is the tool's result: the tool does not run, and no announce plays.
+3. The tool's replies say the outcome, like any result. A `when` value is checked against the output's `Literal` at build time.
+4. On a closing tool with `confirm`, the precheck runs before the read-back. A wrong value is never read back, and the turn costs one model request: the call. It runs again on the caller's yes, since the state may have changed.
+5. An outcome must not match the tool's `finish` rule. It is a refusal, not a success.
+
+**Why it works this way.** A model that reads a booking back to the caller
+words it a little differently each time, and sometimes gets the day wrong. A
+line spoken by code says the same words every time, from the checked result. The
+same `Assign` and `ToolReply` rows serve a task step and a plain agent, so a
+value is saved and spoken one way across the whole library.
+
+**Best practice.**
+1. Use a reply for a line that must come out word for word, like a booking's day and time.
+2. Save the whole output with `path=()` when later prompts read several of its fields, like `{{order.status}}`.
+3. Set `language=` and `timezone=` on the spec, or on `function_tools` and `tools_schema`, so "tomorrow" means the business's tomorrow.
+
+**On each kind of agent.** All four say the line. On Pipecat, a realtime model
+words its own reply from the result instead. See [Realtime models](/core/models/realtime).
+
+## Locked arguments
+
+```python
+webhook_tool(..., locked={"customer_id": "{{customer.id}}", "call": "{{call.session_id}}"})
+```
+
+1. The model never sees a locked argument. A value it sends is replaced.
+2. `{{name}}` and `{{name.field}}` read the call state. The tool is refused, with a hint, while the value is unset.
+3. `{{call.name}}` reads what the call carries, like `{{call.remote_number}}` or `{{call.carrier_call_id}}`. It reads `state.call`, so every adapter has it.
+4. A tool that locks an empty call value is refused: `this tool reads call.carrier_call_id, which this call does not carry`.
+5. `{{@name}}` no longer exists. A tool that uses it fails when it is built, and the message names the new spelling. `{{@call_id}}` is now `{{call.carrier_call_id}}` or `{{call.session_id}}`. `{{@phone_number}}` is `{{call.remote_number}}`. `{{@transcript}}` is `Transcript()`.
+6. A `ToolRegistry` built with `state=` checks each locked path when the registry is built. The path must exist, and its type must fit the parameter.
+7. A path may name a whole shape or a list, like `"{{customer}}"`. Lock it as the only text, to a parameter that is an `object`, an `array` or has no type. The tool then gets the object or the list.
+8. A shape or a list inside a longer text, like `"Customer: {{customer}}"`, fails at build.
+
+**Why it works this way.** The model fills arguments from what it heard, so it
+can mishear a value or invent one. An id the caller never says must come from
+the call, not from the model. The filled call is checked against the whole
+schema, so a value of the wrong type fails before any request leaves.
+
+**Best practice.**
+1. Lock every value the caller does not choose: customer ids, account numbers, the call id, the brand.
+2. Build the `ToolRegistry` with `state=`. A typo in a path then stops the agent at startup, not in the middle of a call.
+
+### Send the transcript
+
+`Transcript` is a locked argument that reads the call's transcript so far.
+
+A tool the model calls reads it from the call's `CallHooks`, the same as a tool on an event. On a plain agent with no `CallHooks`, it is an empty list.
+
+```python
+from unmute_core.tools import Transcript
+
+webhook_tool(
+    ..., locked={"transcript": Transcript(max_messages=50), "reason": "{{call.end_reason}}"}
+)
+```
+
+<ParamField path="max_messages" type="int" default="200">
+  The newest messages to send. It must be 1 or more. A smaller number raises a Pydantic `ValidationError`. Whatever the number, the result stays within `TRANSCRIPT_MAX_BYTES` (32 KiB): the oldest messages go first, and the newest is always kept.
+</ParamField>
+<ParamField path="text" type="bool" default="False">
+  `False` sends a list of `{"role", "content"}` messages. `True` sends one text with a `role: content` line per message.
+</ParamField>
+
+## Webhooks
+
+```python
+webhook_tool(
+    "notify_crm",
+    "Tell the CRM about the booking.",
+    "https://crm.example.com/hooks/booking",
+    input=BookingNote,
+    output=Accepted,
+    auth=WebhookAuth.api_key("CRM_KEY", header="X-API-Key"),
+    body="envelope",
+    wait_for_response=False,
+)
+```
+
+### webhook_tool
+
+<ParamField path="name" type="str" required>
+  The tool name. Letters, digits, `_` and `-`, at most 64.
+</ParamField>
+<ParamField path="description" type="str" required>
+  What the tool does and when to call it. The model reads it. A blank description falls back to the tool name.
+</ParamField>
+<ParamField path="url" type="str" required>
+  The endpoint. `{{name}}` placeholders may fill the path and query values from the call state, never the scheme or host.
+</ParamField>
+<ParamField path="input" type="type[BaseModel]" required>
+  The Pydantic model of the arguments. Its JSON Schema is what the model sees. See [Inputs and outputs](#inputs-and-outputs).
+</ParamField>
+<ParamField path="output" type="type[BaseModel]" required>
+  The Pydantic model of the answer. See [Outputs](#outputs). Use `Done` for a webhook that answers with an empty body.
+</ParamField>
+<ParamField path="locked" type="Mapping[str, object] | None" default="None">
+  Arguments filled from the call state and hidden from the model.
+</ParamField>
+<ParamField path="announce" type="str | Sequence[str]" default="()">
+  A line said as the tool starts.
+</ParamField>
+<ParamField path="effect" type="returns_data | ends_conversation" default="returns_data">
+  `ends_conversation` ends the call once the tool succeeds.
+</ParamField>
+<ParamField path="interruption" type="provider_default | cancel | continue" default="provider_default">
+  What the caller's speech does to a running call.
+</ParamField>
+<ParamField path="announce_wait" type="bool" default="False">
+  Run the tool only after the announce line has played.
+</ParamField>
+<ParamField path="show_result" type="bool" default="True">
+  `False` hides a result that succeeded from the model.
+</ParamField>
+<ParamField path="result_instructions" type="str" default="">
+  How the model should use the result.
+</ParamField>
+<ParamField path="auth" type="WebhookAuth | None" default="None">
+  The credential, read at each call.
+</ParamField>
+<ParamField path="body" type="raw | envelope" default="raw">
+  `raw` sends the arguments as the JSON object. `envelope` sends `tool_name`, `description`, `arguments`, a `timestamp` and `context`. The `context` holds what the call carries (`state.call`, without empty fields). An event tool adds `trigger_event` and `transcript`. So the receiver knows which tool called it.
+</ParamField>
+<ParamField path="wait_for_response" type="bool" default="True">
+  `False` answers the model `{"ok": true, "accepted": true}` at once and sends the request in the background. A failed send is only logged. Call `await webhook.drain()` when the call ends. The tool's `output` must then be `Accepted`, or it fails at build.
+</ParamField>
+<ParamField path="hmac_secret" type="str | None" default="None">
+  Signs the body. `X-Signature-256` is its HMAC-SHA256 in hex. A GET webhook has no body to sign.
+</ParamField>
+<ParamField path="method" type="str" default="POST">
+  GET puts the arguments in the query. The others send them as JSON.
+</ParamField>
+<ParamField path="headers" type="Mapping[str, str] | None" default="None">
+  Fixed headers. Put a secret in `auth` instead.
+</ParamField>
+<ParamField path="timeout" type="float" default="10.0">
+  Seconds for the whole call: DNS, connect, redirects and the answer. From 1 to 60.
+</ParamField>
+<ParamField path="allow_private_network" type="bool" default="False">
+  Allow private, loopback and link-local addresses, and plain `http`.
+</ParamField>
+
+`webhook_tool` takes these options as keywords after its fixed arguments. The
+`WebhookOptions` type, from `unmute_core.tools`, names them all for a type checker:
+`method`, `headers`, `hmac_secret`, `timeout`, `allow_private_network`, `auth`,
+`body`, `tool_name` and `wait_for_response`. A value out of range raises a Pydantic
+`ValidationError`, like a `timeout` of 0 or a `body` that is not `raw` or
+`envelope`. An unknown option raises `TypeError`.
+
+```python
+from unmute_core.tools import WebhookOptions
+
+options: WebhookOptions = {"timeout": 5, "wait_for_response": False}
+webhook_tool("notify_crm", "Tell the CRM.", URL, input=BookingNote, output=Accepted, **options)
+```
+
+Redirects stay on the same origin, at most three.
+
+1. The URL is checked when the tool is built. The scheme must be `https`, or `http` with `allow_private_network`. The host must be there. User info, a fragment and a port outside 1 to 65535 are refused.
+2. When the webhook answers with an error, the model reads the status and a short excerpt of the body. The excerpt is the `error`, `message` and `code` of a JSON body, or the first 300 characters of the text.
+3. The tool events keep only the status. They never carry text that another service sent. In code, `ToolError(message, event_text=...)` sets the two apart.
+
+A GET webhook sends the arguments as the query, beside the query values already
+in its URL. Three rules keep them apart:
+
+1. A GET tool whose input or `locked` names a query value of the URL fails at build. Rename the argument or drop the value from the URL.
+2. A call whose argument clashes with a URL query value is refused with an error that names the argument.
+3. With `auth`, a fixed `Authorization` header fails at build, in any letter case. `auth` sends the credential.
+
+### WebhookAuth
+
+`WebhookAuth.bearer(token_env)` sends `Authorization: Bearer <token>`.
+`WebhookAuth.api_key(token_env, header)` sends the token as it is, in `header`.
+The library reads the token at each call, so a new token works without a restart.
+
+<ParamField path="token_env" type="str" default="''">
+  The environment variable that holds the token, in UPPER_SNAKE case. The name is read exactly, and case matters. An unset variable refuses the call, and the log names the variable.
+</ParamField>
+<ParamField path="header" type="str" default="X-API-Key">
+  The header `api_key` sends. `bearer` always sends `Authorization`. `WebhookAuth.api_key` defaults it to `X-API-Key`.
+</ParamField>
+<ParamField path="token" type="Callable[[], str | Awaitable[str]] | None" default="None">
+  A function that returns the token. It may be `async`. It runs at each call. Use it in place of `token_env`.
+</ParamField>
+
+Give exactly one of `token_env` and `token`.
+
+```python
+async def fetch_token() -> str:
+    return await vault.read("crm-token")
+
+
+auth = WebhookAuth.bearer(token=fetch_token)
+auth = WebhookAuth.api_key(header="X-Key", token=fetch_token)
+```
+
+A provider that fails or returns an empty text refuses the call with "the
+webhook could not authenticate". The log says why.
+
+### Time and size limits
+
+```python
+webhook_tool(..., timeout=5)
+webhook_tool(..., wait_for_response=False)
+```
+
+1. `timeout` is one deadline for the whole request: DNS, the connection, every redirect and the answer. It is 10 seconds by default.
+2. The request and the answer may each be 64 KiB at most. A larger one fails the tool call, and the model reads the error.
+3. With `wait_for_response=False`, the model reads `{"ok": true, "accepted": true}` at once. The request goes on in the background. The tool's `output` is then `Accepted`.
+
+**Why it works this way.** The caller waits through every second a webhook
+takes. A separate limit for each step can add up to far more than any one of
+them. One deadline puts a firm ceiling on the wait. The size cap keeps one
+large answer from slowing the call.
+
+**Best practice.**
+1. Keep the 10 second default. Lower it for a lookup the caller waits on.
+2. Use `wait_for_response=False` for a notification nobody waits for, like telling a CRM about a booking.
+
+**On each kind of agent.** A background request finishes when the call ends
+only when the tools have the call's hooks. `UnmuteAgent` and `UnmuteFlows` get
+them from `call=`. A plain agent gets them from `hooks=call`. See
+[Use it in your agent](#use-it-in-your-agent).
+
+### Private addresses
+
+```python
+webhook_tool(..., "http://localhost:8000/hooks/booking", allow_private_network=True)
+```
+
+1. `allow_private_network` is off by default.
+2. Off, the webhook refuses private, loopback and link-local addresses. It refuses plain `http` too.
+3. On, it accepts them.
+
+**Why it works this way.** A webhook URL often comes from config, and sometimes
+from someone else. Pointed at `localhost` or a cloud metadata address, a tool
+could reach services inside your network. So every address must be public. The
+host name is looked up once, and the connection goes to the address that was
+checked. A second lookup cannot send it somewhere else.
+
+**Best practice.**
+1. Keep it off in production.
+2. Turn it on only for your own internal service, or for `localhost` while you develop.
+3. Never turn it on when someone else writes the URL.
+
+## Built-in tools
+
+```python
+from unmute_core.tools import current_datetime_tool, user_phone_number_tool
+
+registry = ToolRegistry([current_datetime_tool("Europe/Madrid"), user_phone_number_tool()])
+```
+
+Neither tool takes arguments.
+
+| Tool | The result |
+|---|---|
+| `current_datetime_tool(timezone="UTC")` | `timezone`, `local_datetime`, `local_date`, `local_time`, `day_of_week`, `utc_offset` and `is_dst` |
+| `user_phone_number_tool()` | `{"available": true, "phone_number": "+34...", "call_type": "inbound", "reason": null}`, read from `state.call.remote_number` and `state.call.direction` |
+
+1. Give `current_datetime_tool` an IANA zone, like `Europe/Madrid`. Another name raises `ValueError`.
+2. `call_type` is `inbound` or `outbound`, and `null` when the call has no `direction`.
+3. When the call has no phone number, `user_phone_number_tool` returns `{"available": false, "phone_number": null, "call_type": null, "reason": ...}`.
+4. Both take `name=` and `description=` to change what the model reads. The defaults are `current_datetime` and `user_phone_number`.
+5. The tool reads `state.call`, so the adapter needs nothing more.
+
+To let the model save State values with a tool, see
+[State](/core/build/state).
+
+## Watch tool calls
+
+```python
+def show(stage: str, data: dict) -> None:
+    print(stage, data)
+
+
+registry.listen(show)
+```
+
+| Stage | Data |
+|---|---|
+| `tool.started` | `name`, `source` |
+| `tool.succeeded` | `name`, `source`, `ms` |
+| `tool.failed` | `name`, `source`, `ms`, `error` |
+| `tool.refused` | `name`, `source`, `error` |
+| `tool.save_refused` | `name`, `source`, `error` |
+
+1. The sink gets names and timing only. It never gets argument values. `source` is `model`, or `event` for a tool on an event.
+2. `ms` is the time the tool ran. A wait for the announce line is not in it. A cancelled call ends with `tool.failed` and the error `cancelled`.
+3. A sink that raises is logged. It never breaks the call. A sink the registry already holds is not added again.
+4. `only()` and `with_tools(*tools)` keep the sinks.
+5. In a call, use the call's hooks instead. See [Hooks](/core/build/hooks).
+
+A tool can also run on its own, with no model choice, when the call starts or
+ends. That is a tool on an event. See [The call's life](/core/build/call-lifecycle).
+Code that runs before, around or after each tool call is a hook. See
+[Hooks](/core/build/hooks).
+
+## Advanced
+
+### Rules for a hand-written schema
+
+A custom `ToolSpec` takes the JSON Schema of its arguments as `parameters`. See
+[Your own kind of tool](#your-own-kind-of-tool). A schema built with
+`model_json_schema()` already follows these rules, so `local_tool` and
+`webhook_tool` always do.
+
+The schema is JSON Schema 2020-12 with a fixed list of keywords. Anything else fails when the tool is built, and the message names the keyword.
+
+| Group | Keywords |
+|---|---|
+| Structure | `$schema`, `$defs`, `$ref`, `type`, `properties`, `required`, `additionalProperties`, `items`, `prefixItems`, `contains`, `minContains`, `maxContains`, `patternProperties`, `propertyNames`, `minProperties`, `maxProperties` |
+| Limits | `minItems`, `maxItems`, `uniqueItems`, `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `enum`, `const` |
+| Choices | `anyOf`, `oneOf`, `allOf`, `not`, `discriminator` |
+| Notes | `description`, `title`, `default`, `examples`, `example`, `deprecated`, `readOnly`, `writeOnly`, `format`, `$comment`, and any key that starts with `x-` |
+
+In that schema:
+
+1. `definitions` and `$id` are refused. Use `$defs` and local `#/$defs/...` references.
+2. `format` and the notes are hints. Nothing checks them.
+3. `nullable` is not JSON Schema, so it is refused. Write `"type": ["<type>", "null"]` instead.
+4. The root of the parameters is a plain object schema. It may hold only `$schema`, `$defs`, `type` (`"object"`), `properties`, `required`, `additionalProperties`, `description`, `title`, `$comment` and `x-` keys. Frameworks send only the root `properties` and `required`, so another root keyword, like `oneOf`, `anyOf`, `allOf`, `not`, `patternProperties`, `propertyNames`, `minProperties`, `maxProperties` or `if`, would be lost on one of them. It fails when the tool is built. Move it into a property, or wrap the choice in one property. Nested schemas may use every keyword in the table.
+
+**Why it works this way.** Each framework turns a schema into a model request
+its own way. A keyword one of them drops would make the same tool behave
+differently on LiveKit and Pipecat. So one list of keywords is checked when the
+tool is built, and a schema either works on both or fails at startup.
+
+**Best practice.**
+1. Build the schema from a Pydantic model with `model_json_schema()`, so it cannot drift from your code.
+2. Keep the root a plain object of named properties. Put a choice, like `oneOf`, inside one property.
+
+### Arguments the schema does not name
+
+1. The model may send an argument the schema does not list. The call is refused with a message that names it: "bogus is not an argument of lookup. Call lookup again without it." The model reads this and calls again.
+2. A schema stays open when it sets `additionalProperties` to `true` or to a schema, or when it has no `properties`. It then keeps the extra arguments.
+3. A custom `ToolExecutor` with `checks_extra_arguments = True` gets the extra arguments. It then refuses them in its own words.
+
+### Ask the registry
+
+```python
+"lookup_order" in registry  # True when the registry has a tool of this name
+registry.keeps_running("lookup_order")  # True when its interruption is "continue"
+```
+
+1. `name in registry` tests for a tool by name.
+2. `keeps_running(name)` says whether the caller's speech must leave a running call of the tool alone. An unknown name gives `False`, so the call is cancelled.
+3. The adapters use both. You need them only when you write your own adapter.
+
+### Your own kind of tool
+
+`ToolExecutor` is the plug point for every way to run a tool. The library ships
+`Webhook` and `LocalHandler`. You can add a third, for example one that runs your
+tools through your own service.
+
+```python
+from typing import Any
+
+from unmute_core.state import CallState
+from unmute_core.tools import ToolError, ToolSpec
+
+
+class ServiceTool:
+    """Runs a tool through your own tool service."""
+
+    def __init__(self, client: ServiceClient, tool_id: str) -> None:
+        self._client = client
+        self._tool_id = tool_id
+
+    async def run(
+        self,
+        arguments: dict[str, Any],
+        state: CallState | None,
+        *,
+        context: dict[str, object] | None = None,
+    ) -> object:
+        result = await self._client.invoke(self._tool_id, arguments, context=context)
+        if not result.ok:
+            raise ToolError(result.message_for_the_model)
+        return result.data
+
+
+spec = ToolSpec("book", "Book a table.", PARAMETERS, Booking, ServiceTool(client, "book"))
+```
+
+1. `run` gets the model's arguments, with the locked values filled and checked against the schema. It must be an `async` method. A `ToolSpec` refuses an executor with no async `run`.
+2. Raise `ToolError` with the words the model should read. Any other error becomes "failed before completing. Do not claim success."
+3. Add a `context` keyword to `run` to get the event context. Without it, `run` gets only the arguments and the state.
+4. Add `validate(arguments) -> dict` to refuse bad input before a step asks the caller to confirm it.
+5. Set `checks_extra_arguments = True` on the class to get arguments the schema does not name. Without it, the registry refuses them first.
+6. The executor never changes what the model sees. The output model, the announce line, the effect and the interruption rule stay on the `ToolSpec`, the same for every kind of tool. `PARAMETERS` is the JSON Schema of the arguments, and `Booking` the output model.
+
+## Troubleshooting
+
+### A tool call fails with "does not fit"
+
+The tool returned a result that its output model does not take. The message
+names the first field that is wrong.
+
+**Fix:** return what the output model declares, or change the model. A failure the
+model should read is a raised `ToolError`, not a returned dict.
+
+### A tool call returns `refused` and nothing is said
+
+The call reads a value that is not set yet. The result is `{"refused": ...}`
+and holds a hint.
+
+**Fix:** set the value first, or start the task the hint names. Check every
+announce line too, because all of them must fill.
+
+### A webhook call fails with "could not authenticate"
+
+The token variable is unset, or the token provider failed.
+
+**Fix:** set the variable named in the log, or fix the provider.
+
+```bash
+export ORDERS_TOKEN="..."
+```
+
+### A webhook to localhost is refused
+
+Private and loopback addresses are off by default.
+
+**Fix:** turn on `allow_private_network` for the tool, for development only.
+
+```python
+webhook_tool(..., "http://localhost:8000/hooks/booking", allow_private_network=True)
+```
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Tools" icon="wrench" href="/core/build/tools">
+    Add a tool to your agent, step by step.
+  </Card>
+  <Card title="Hooks" icon="webhook" href="/core/build/hooks">
+    Run your code around each tool call.
+  </Card>
+  <Card title="Tasks" icon="list-checks" href="/core/build/tasks">
+    Offer tools to a step that saves values.
+  </Card>
+  <Card title="Unmute tools" icon="wrench" href="/build/tools/overview">
+    How `agent.yaml` declares the same tools.
+  </Card>
+</CardGroup>

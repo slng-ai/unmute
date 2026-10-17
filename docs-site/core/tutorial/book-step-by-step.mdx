@@ -1,0 +1,206 @@
+---
+title: "Book step by step"
+sidebarTitle: "Book step by step"
+description: "Turn booking into a task and a group, so the agent verifies the caller and asks before it writes to the diary."
+---
+
+You have: a typed diary tool, from [Check the diary](/core/tutorial/check-the-diary).
+
+The caller picks a time, the agent asks "Shall I book it?", and the diary changes only after a yes.
+
+## What you add
+
+A task is a step with its own prompt, its own tools and a finish check. The model does not have to remember the order. Code runs it.
+
+First, the state needs the values the steps save. Add these fields to `State`.
+
+```python salon/state.py
+from datetime import date, time
+
+from unmute_core.state import Id
+
+
+class Appointment(BaseModel):
+    """The latest booking that was created, moved or cancelled."""
+
+    booking_id: Id
+    service: Literal["haircut", "hair-color", "blowout"]
+    date: date
+    time: time
+
+
+class State(BaseModel):
+    # customer_phone and requested_service stay as they were. Add:
+    appointment: Appointment | None = None
+    customer_verified: str = ""
+    requested_day: date | None = None
+    requested_intent: Literal["book", "move", "cancel"] | None = None
+```
+
+Next, add the other two diary methods to the registry from the last page.
+
+```python salon/agent.py
+local_tool(
+    salon.find_or_create_customer,
+    output=Customer,
+    description="Look up or create the customer.",
+),
+local_tool(
+    salon.book_appointment,
+    output=BookingAction,
+    locked=LOCKED_PHONE,
+    description="Book a free time.",
+),
+```
+
+`Customer` and `BookingAction` are the answers' models, in `salon/store.py`. A
+booking's answer holds its `appointment`, typed as the `Appointment` above.
+
+### One task: verify the caller
+
+`verify_customer` reads the number from the state, asks the caller to confirm it, and saves the result.
+
+```python salon/agent.py
+CONFIRM = {"customer_phone": "verify_customer"}
+
+VERIFY_CUSTOMER = {
+    "name": "verify_customer",
+    "when": "Run this when the caller gives or corrects their phone number.",
+    "instructions": "Ask for the number if none is saved. Read it back and wait for a yes.",
+    "opening": "listen",
+    "announce": ["Sure, what's the best number to reach you on?"],
+    "opens_with": {"tool": "find_or_create_customer", "arguments": {"phone": "customer_phone"}},
+    "tools": ["find_or_create_customer"],
+    "finish": [
+        {
+            "tool": "find_or_create_customer",
+            "success": {"status": ["existing", "created"]},
+            "confirm": ["Is the best number to reach you {{input.phone}}?"],
+        }
+    ],
+    "assign": [
+        {"variable": "customer_phone", "path": ["customer_phone"]},
+        {"variable": "customer_verified", "path": ["status"]},
+    ],
+}
+```
+
+1. `when` tells the model when to start the task. The library turns the task into a tool, `verify_customer`.
+2. With `opening` set to `listen`, a step with no saved number says its `announce` line and waits for the caller.
+3. When a number is saved, `opens_with` and `confirm` work together. Code asks the `confirm` line. The tool runs only when the model calls it again after the caller heard the question and said yes.
+4. `assign` copies fields from the tool result into the state. This is the step that confirms `customer_phone`, as `CONFIRM` says.
+
+### A group: verify, then book
+
+`manage_booking` finds a time and books it. The `book` group runs both steps in order.
+
+```python salon/agent.py
+from unmute_core.tasks import TaskPlan, TasksSpec
+
+MANAGE_BOOKING = {
+    "name": "manage_booking",
+    "instructions": "Offer free times with find_slots, then book the one the caller picks.",
+    "announce": ["Let me have a look."],
+    "tools": ["find_slots", "book_appointment"],
+    "finish": [
+        {
+            "tool": "book_appointment",
+            "success": {"status": ["booked"]},
+            "confirm": ["Shall I book your {{input.service}} for {{input.date}} at {{input.time}}?"],
+            "say": [
+                "Lovely, your {{result.appointment.service}} is booked for "
+                "{{result.appointment.date}} at {{result.appointment.time}}. Anything else?"
+            ],
+        }
+    ],
+    "assign": [{"variable": "appointment", "path": ["appointment"]}],
+    "history": "messages",
+}
+CONCIERGE_TASKS = TasksSpec.model_validate(
+    {
+        "mode": "record",
+        "tasks": [VERIFY_CUSTOMER, MANAGE_BOOKING],
+        "groups": [
+            {
+                "name": "book",
+                "when": "The caller wants to book a time.",
+                "steps": ["verify_customer", "manage_booking"],
+                "context_scope": "shared",
+                "skip_when_confirmed": {"verify_customer": "customer_phone"},
+                "arguments": ["requested_service", "requested_day", "requested_intent"],
+            }
+        ],
+        "task_only_tools": ["find_or_create_customer", "find_slots", "book_appointment"],
+    }
+)
+
+
+def concierge_plan(registry: ToolRegistry) -> TaskPlan:
+    """Return the concierge's checked plan, on the diary's tools."""
+    return TaskPlan(CONCIERGE_TASKS, state=State, confirm=CONFIRM, tools=registry)
+```
+
+1. `skip_when_confirmed` skips `verify_customer` when the number is already confirmed.
+2. `arguments` are values the model passes when it starts the group. They are saved into the state.
+3. `task_only_tools` hides the diary tools from the main agent. Only the steps call them.
+4. `say` is a line code speaks after the save. The model makes no request to confirm it. Its values are said by their type in `Appointment`: the service as words, the day from today, the time on the clock. The caller hears "Lovely, your hair color is booked for tomorrow, October 16 at 9:00 AM."
+5. `TasksSpec` and `TaskPlan` check everything at startup. A wrong tool name stops the agent before any call.
+
+Add to the prompt: "Every booking request goes to `book`. Never ask for the number yourself."
+
+Last, give the spec the plan instead of the tools, and the salon's timezone. Build the `CallState` with `confirm=CONFIRM`.
+
+<CodeGroup>
+
+```python livekit/agent.py
+from salon.store import TIMEZONE
+
+PLAN = salon.concierge_plan(salon.tools(Salon()))
+
+# In entrypoint(), use the plan in place of tools.
+state = CallState(State, confirm=salon.CONFIRM)
+spec = AgentSpec(salon.CONCIERGE_PROMPT, tasks=PLAN, timezone=TIMEZONE)
+agent = UnmuteAgent(spec, state=state)
+```
+
+```python pipecat/bot.py
+from salon.store import TIMEZONE
+
+PLAN = salon.concierge_plan(salon.tools(Salon()))
+
+# In bot(), use the plan in place of tools.
+state = CallState(State, confirm=salon.CONFIRM)
+spec = AgentSpec(salon.CONCIERGE_PROMPT, tasks=PLAN, timezone=TIMEZONE)
+flows = UnmuteFlows(spec, llm=llm, context=context, aggregators=aggregators, state=state)
+```
+
+</CodeGroup>
+
+## Try it
+
+Start the agent as before.
+
+1. "I'd like a haircut on Friday." Robin starts `book`.
+2. Robin asks for your number, then reads it back. Say yes.
+3. Robin offers free times. Pick one.
+4. Robin asks "Shall I book your haircut for ...?" Say yes. Robin says the booking line and asks what else.
+
+## Why it works this way
+
+On a plain agent the model decides the order, so it can skip a check or write to the diary on a guess. Here the order is code. A write waits for the caller's yes, and the saved number is confirmed by the step that asked.
+
+The step also cannot get stuck. When the model says "Noted" and no finish check passes, the library asks it directly: finished, or not yet?
+
+## What you have now
+
+| Piece | File |
+|---|---|
+| State with booking values | `salon/state.py` |
+| Tools, `VERIFY_CUSTOMER`, `CONCIERGE_TASKS` | `salon/agent.py` |
+| Pipelines, with the plan | `livekit/agent.py`, `pipecat/bot.py` |
+
+<Card title="Next: Hand off complaints" icon="headset" href="/core/tutorial/hand-off-complaints">
+  Add a second agent for complaints, and a handoff to it.
+</Card>
+
+Go deeper: [Tasks](/core/build/tasks).

@@ -1,0 +1,157 @@
+---
+title: "Phone calls in code"
+sidebarTitle: "Phone calls"
+description: "Take calls in, place calls out, and transfer a caller to a person, the same way on LiveKit and Pipecat."
+---
+
+The library reads who is calling, places outbound calls, and gives the model a tool that transfers the caller to a person. Your SIP trunk or carrier stays yours.
+
+## Take a call in
+
+Read the caller's number into the call's state once the call starts.
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.livekit import sip_call_info
+
+participant = await ctx.wait_for_participant()
+metadata = json.loads(ctx.job.metadata or "{}")
+state = CallState(State, call=sip_call_info(participant, metadata))
+```
+
+```python Pipecat
+from unmute_core.pipecat import telephony_call_info
+
+state = CallState(State, call=telephony_call_info(runner_args.call_data))
+```
+
+</CodeGroup>
+
+`state.call.calling_number` is the caller, and `state.call.called_number` is your number. On Pipecat, set the pipeline's sample rates to 8000, because a phone line carries 8 kHz audio.
+
+## Call someone
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.livekit import DialError, SipLine, greet
+
+line = SipLine(session, trunk=trunk, caller_id=os.environ["FROM_NUMBER"])
+try:
+    answered = await line.dial(metadata["phone_number"])
+except DialError:
+    ctx.shutdown("nobody answered")
+    return
+if not answered.ended:  # ended is True when a voicemail picked up and the call is over
+    greet(session, GREETING, state)
+```
+
+```xml Pipecat with Twilio
+<Response><Connect><Stream url="wss://your-bot/ws">
+  <Parameter name="direction" value="outbound"/>
+  <Parameter name="to_number" value="+34910000000"/>
+</Stream></Connect></Response>
+```
+
+</CodeGroup>
+
+On LiveKit, dispatch the job with `phone_number` in its metadata. `dial` waits until someone answers, and hangs up on a voicemail. On Pipecat, your app asks the carrier to place a call that streams to the bot. With a Daily room, call `dial_out(transport, worker, "sip:+34910000000@trunk.example")`.
+
+## Transfer to a person
+
+Describe where the caller goes, then give the model a tool for it. The model calls the tool with no arguments, so it never sees the number.
+
+```python agent.py
+from unmute_core.telephony import Transfer, transfer_tool
+
+BILLING = Transfer(
+    "send_to_billing",
+    "+34910000000",
+    description="Transfer the caller to billing when they ask about an invoice.",
+)
+tools = ToolRegistry([*my_tools, transfer_tool(BILLING, line)])
+```
+
+`line` is the call's phone line. Build one per call:
+
+<CodeGroup>
+
+```python LiveKit
+line = SipLine(session, trunk=trunk, caller_id=os.environ["FROM_NUMBER"])
+```
+
+```python Pipecat with Twilio
+line = TwilioLine(
+    state.call.carrier_call_id,
+    account_sid=os.environ["TWILIO_ACCOUNT_SID"],
+    auth_token=os.environ["TWILIO_AUTH_TOKEN"],
+    worker=worker,
+    serializer=serializer,  # the TwilioFrameSerializer of the transport
+)
+```
+
+```python Pipecat with Telnyx
+line = TelnyxLine(
+    state.call.carrier_call_id,
+    api_key=os.environ["TELNYX_API_KEY"],
+    worker=worker,
+    serializer=serializer,
+)
+```
+
+</CodeGroup>
+
+1. The tool says "Putting you through now, one moment." The caller cannot cut the transfer off.
+2. On success, the call ends with the reason `transferred`.
+3. When nobody answers, the model hears why and keeps helping the caller. Pass `on_unavailable="hangup"` to end the call instead.
+
+On LiveKit Cloud, `Transfer(..., mode="warm")` calls the person first and briefs them while the caller hears hold music.
+
+## Voicemail
+
+<CodeGroup>
+
+```python LiveKit
+answered = await line.dial(number, on_voicemail="leave_message")
+```
+
+```python Pipecat
+from unmute_core.pipecat import voicemail_tool
+
+tool = voicemail_tool(on_voicemail="leave_message", call=call)
+flows = UnmuteFlows(..., native_tools=[tool])
+```
+
+</CodeGroup>
+
+`hangup`, the default, ends the call at once. `leave_message` has the model say a short message first.
+
+## What each route supports
+
+| Route | Line | Transfer | Warm transfer | Outbound call | Voicemail |
+|---|---|---|---|---|---|
+| LiveKit SIP, any trunk | `SipLine` | yes | yes, on LiveKit Cloud | `SipLine.dial` | `dial(on_voicemail=)` |
+| Pipecat, Twilio | `TwilioLine` | yes | no | your app asks Twilio | `voicemail_tool` |
+| Pipecat, Telnyx | `TelnyxLine` | yes | no | your app asks Telnyx | `voicemail_tool` |
+| Pipecat, Plivo or Exotel | none | no | no | your app asks the carrier | `voicemail_tool` |
+| Pipecat, Daily room over SIP | `DailySipLine` | yes | no | `dial_out` | `voicemail_tool` |
+
+For DTMF and IVR, use the framework's own tools: `GetDtmfTask` on LiveKit, `IVRNavigator` on Pipecat.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Phone calls reference" icon="book" href="/core/reference/telephony">
+    Every argument, each route in detail, and warm transfers.
+  </Card>
+  <Card title="The call's life" icon="phone-call" href="/core/build/call-lifecycle">
+    Opening, greeting and ending the call.
+  </Card>
+  <Card title="Handoffs" icon="git-branch" href="/core/build/handoffs">
+    Give the call to another agent instead of a person.
+  </Card>
+  <Card title="Phone calls on Unmute" icon="phone" href="/telephony/overview">
+    The `agent.yaml` side of transfers and escalations.
+  </Card>
+</CardGroup>

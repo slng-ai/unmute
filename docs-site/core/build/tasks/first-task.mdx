@@ -1,0 +1,226 @@
+---
+title: "Your first task in code"
+sidebarTitle: "First task"
+description: "Define one task, check it with TaskPlan and run it on LiveKit and Pipecat."
+---
+
+A task is a step that saves values to the call state, on its own prompt. The rules live in the core, so LiveKit and Pipecat behave the same.
+
+## Quickstart
+
+```python agent.py
+from typing import Literal
+
+from pydantic import BaseModel
+
+from unmute_core.state import CallState
+from unmute_core.tasks import TaskPlan, TasksSpec
+from unmute_core.tools import ToolRegistry
+
+
+class State(BaseModel):
+    requested_service: Literal["haircut", "hair-color", "blowout"] | None = None
+
+
+spec = TasksSpec.model_validate(
+    {
+        "mode": "record",
+        "tasks": [
+            {
+                "name": "choose_service",
+                "when": "The caller wants to book an appointment.",
+                "instructions": "Ask which service they want: a haircut, hair color or a blowout. Then save it.",
+                "assign": [{"variable": "requested_service", "path": ["requested_service"]}],
+            }
+        ],
+    }
+)
+plan = TaskPlan(spec, state=State, tools=ToolRegistry([]))
+```
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.agent import AgentSpec
+from unmute_core.livekit import UnmuteAgent
+
+state = CallState(State)
+spec = AgentSpec(PROMPT, tasks=plan)
+agent = UnmuteAgent(spec, state=state)
+```
+
+```python Pipecat
+from unmute_core.agent import AgentSpec
+from unmute_core.pipecat import UnmuteFlows
+
+state = CallState(State)
+spec = AgentSpec(PROMPT, tasks=plan)
+flows = UnmuteFlows(spec, llm=llm, context=context, aggregators=aggregators, state=state)
+flows.install()
+```
+
+</CodeGroup>
+
+The main agent now has a `choose_service` tool. When the model calls it, a step
+runs on its own prompt. The step saves `requested_service` and hands the call
+back. A value outside the three services is refused, and the model asks again.
+
+## Why use unmute for this
+
+A task is data. You describe the step, and the library checks it at startup, runs it the same way on both frameworks and saves the values it collects. A broken flow fails the deploy, not the call.
+
+## Name a task
+
+A task or group name is lower snake case. It becomes the prompt site
+`task:<name>`. A prompt site is the place in the agent where a prompt is used: the
+main prompt, or the prompt of one task step. Three names are taken:
+
+- `finish` and `go_back_to_step`, the step's own tools.
+- `summary`, because a handoff summary uses the prompt site `task:summary`.
+
+A task is also a tool of the main agent. A task with the same name as another tool
+of the agent, like `end_call`, is refused when the agent is built. This is the same
+on LiveKit and Pipecat.
+
+## Define a task
+
+Every spec class is immutable and refuses keys it does not know. They are
+Pydantic models, so you can build them as literals or from JSON with
+`model_validate`. Import them from `unmute_core.tasks`. A step that checks the caller's phone number looks like this:
+
+```python agent.py
+from unmute_core.tasks import TasksSpec
+
+CONCIERGE_TASKS = TasksSpec.model_validate(
+    {
+        "mode": "record",
+        "tasks": [
+            {
+                "name": "verify_customer",
+                "when": "Run this when the caller corrects their phone number.",
+                "instructions": "Confirm the number, then save it.",
+                "tools": ["find_or_create_customer"],
+                "assign": [
+                    {"variable": "customer_phone", "path": ["customer_phone"]},
+                    {"variable": "customer_verified", "path": ["status"]},
+                ],
+            }
+        ],
+        "task_only_tools": ["find_or_create_customer"],
+    }
+)
+```
+
+The main fields of a `TaskSpec` are:
+
+1. `name`: lower snake case.
+2. `instructions`: the step's prompt.
+3. `when`: when the main agent starts it.
+4. `tools`: the tools the step may call.
+5. `assign`: the values it saves.
+
+[Tasks reference](/core/reference/tasks#taskspec) lists the rest.
+
+### Instructions
+
+A step's `instructions` may hold `{{name}}` placeholders and plain text, including JSON.
+
+1. A lone `}}` is plain text. `{"a": {"b": 1}}` passes.
+2. A `{{...}}` that is not a valid placeholder is refused, and so is a `{{` that never closes.
+3. Blank instructions are refused.
+4. Spoken lines, announce lines, locked arguments and the greeting keep a stricter rule: they take only placeholders.
+
+### Assign
+
+One value a step saves. An `Assign` has a `variable` and a `path`. The `path` says where the value sits in the step's result, like `("order", "id")`.
+
+```python
+from unmute_core.tasks import Assign
+
+Assign(variable="appointment", path=("appointment",))
+```
+
+An empty `path`, `()`, saves the whole result, into a State value typed as the
+tool's output model. The finish parameter is the field itself for a one-part path.
+For a longer or an empty path it is the variable name. Two assignments may not share a finish parameter. `append` adds one entry onto a list instead of replacing it. This is Unmute's `+`. `optional` lets the step finish without the value. This is Unmute's `?`. Otherwise a served finish must carry it, unless it appends.
+
+### Modes
+
+`TasksSpec.mode` is `status` or `record`. Everything on these pages describes `record` mode. `status` mode keeps Unmute's older behaviour: a run hands the main agent a status, and a hand-back saves nothing.
+
+## Run the tasks
+
+### TaskPlan
+
+`TaskPlan` holds the tasks and groups of one agent, checked once and read by every call.
+It checks the spec against the State and the tools. It raises
+`ValueError` and names the first task, group or value that does not fit.
+
+`TaskPlan.check_then_targets(known)` refuses a group that transfers to an agent
+the adapter was not given. The adapters call it when they are built.
+
+```python
+plan.check_native_tools(["crm"])
+plan.check_handoff_tools(["to_notes"], fix="Add it to native_tools.")
+```
+
+1. `check_native_tools(names)` refuses a task that lists a native tool the agent does not have. It raises `ValueError` and names the first task and the missing tool.
+2. `check_handoff_tools(names, fix=)` refuses a task whose `handoffs` names a tool the agent has no handoff for. `fix` is the end of the message. Say how to add the tool.
+3. Both take `task=` to check one task. Without it, they check every task.
+4. The adapters call them when the agent is built. Call them yourself when you write your own host.
+
+### CallTasks
+
+`CallTasks` holds the tasks of one call: the main agent's task tools, and every run they start.
+Both adapters build their own from the spec, once per call: read it as `agent.tasks` on LiveKit and `flows.tasks` on Pipecat. Build one yourself only when you write your own host.
+
+`CallTasks.empty(state, tools=...)` gives the tasks of an agent
+that has none. Use it in your own host when it needs a stack and you have no tasks.
+
+`TasksSpec.owners()` returns each State value that a task saves, with the first
+task that saves it. The save tool for values no task saves uses it. See
+[State](/core/build/state).
+
+## Troubleshooting
+
+### `ValueError` names a task, group or value when the plan is built
+
+`TaskPlan` checks every name a task reads against the State and the tools.
+
+**Fix:** read the message. It names the first thing that does not fit, like a
+`{{name}}` the State does not have, a tool the task does not list, or a group
+that transfers to a target `then_targets` does not hold.
+
+```python
+agent = UnmuteAgent(AgentSpec(PROMPT, tasks=plan), state=state, then_targets={"billing": to_billing})
+```
+
+### A task has no `when`, and nothing can start it
+
+A task with no `when` must be a step of a group, or be entered by a `via` tool.
+
+**Fix:** add a `when`, put the task in a group, or add a `via` tool.
+
+### A task name is refused
+
+`finish`, `go_back_to_step`, the built-in tool names and `summary` are taken.
+
+**Fix:** rename the task or group.
+
+In the salon tutorial: [Book step by step](/core/tutorial/book-step-by-step).
+
+Every argument: [Tasks reference](/core/reference/tasks#taskspec).
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Task groups" icon="list-ordered" href="/core/build/tasks/groups">
+    Run several tasks in order, and decide what follows.
+  </Card>
+  <Card title="Tasks reference" icon="book-open" href="/core/reference/tasks">
+    Every argument of every task class.
+  </Card>
+  <Card title="Tools" icon="wrench" href="/core/build/tools">
+    The tools a step lists in `tools`.
+  </Card>
+</CardGroup>

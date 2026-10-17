@@ -1,0 +1,106 @@
+---
+title: "Task groups in code"
+sidebarTitle: "Groups"
+description: "Run several tasks in order as one flow, and decide what happens when the flow finishes."
+---
+
+A task group runs several tasks in order, as one flow the main agent starts.
+
+## Quickstart
+
+```python agent.py
+from unmute_core.tasks import TaskGroupSpec
+
+TaskGroupSpec(
+    name="book",
+    when="The caller wants to create, move or cancel a booking.",
+    steps=("verify_customer", "manage_booking"),
+    context_scope="shared",
+    skip_when_confirmed={"verify_customer": "customer_phone"},
+    arguments=("requested_service", "requested_day", "requested_intent"),
+)
+```
+
+This is the salon's `book` group. It runs `verify_customer`, then `manage_booking`. The group names its steps in order. Each step is a task of the same `TasksSpec`. The main agent gets one tool for the whole group, and a step runs when the one before it ends. When the caller's phone is already confirmed, the group skips `verify_customer`.
+
+## Why use unmute for this
+
+You list the steps and the library runs them in order. It carries what each step saved to the next one, skips a step whose value is already confirmed, and always hands the caller back to the main agent when a step fails.
+
+## Group fields
+
+`name` is lower snake case, and a task and a group may not share a name. `steps` are the task names, in order. There must be at least one. Each runs at most once in the group.
+
+`context_scope` is required:
+
+- `shared`: each step hears the steps before it.
+- `isolated`: each step starts fresh.
+
+Other fields:
+
+1. `when` says when the main agent starts the group.
+2. `announce` holds lines spoken as it starts.
+3. `non_blocking` names steps whose failure the group records and carries on past. Each must be one of its steps.
+4. `skip_when_confirmed` maps a step to the State value whose confirmation lets the group skip it. The step must be the one that confirms that value.
+5. `inputs` is what every step reads at the end of its prompt, before its own inputs.
+6. `arguments` are State values the main agent passes when it starts the group. Each call saves all of them.
+
+[Tasks reference](/core/reference/tasks#taskgroupspec) lists every argument.
+
+## What a group does when it finishes
+
+`then` sets what follows a group that completes.
+
+| `then` | When the group completes |
+|---|---|
+| `return` (default) | The main agent gets the result and replies. |
+| `end` | The call ends once the last step's words have played. The main agent is not asked for a reply. |
+| `transfer` | The call goes to the agent `then_target` names, once the last step's words have played. The main agent is not asked for a reply. |
+
+1. `then_target` is required with `transfer`, and refused with `return` or `end`.
+2. The adapter's `then_targets` maps each target to the handoff that gives it the call. A target it does not name is refused when the agent is built. See [Handoffs](/core/build/handoffs).
+3. A group that hands the caller back, or fails, always returns to the main agent. So the caller is never dropped mid-request.
+4. The main agent's tool description says that the flow ends the call, or hands the caller on.
+
+**Why it works this way.** A group that fails or hands back must never leave the caller in silence, so it always returns to the main agent.
+
+**Best practice.**
+
+1. Use `shared` when a later step needs what an earlier one heard.
+2. Use `transfer` only with a `then_target` the adapter's `then_targets` holds.
+
+```python
+agent = UnmuteAgent(AgentSpec(PROMPT, tasks=plan), state=state, then_targets={"billing": to_billing})
+```
+
+## Troubleshooting
+
+### A group that transfers is refused when the agent is built
+
+The group's `then_target` is not a key of `then_targets`.
+
+**Fix:** add the target to the adapter's `then_targets`, as shown above.
+
+### A step of a group never starts by itself
+
+A task with no `when` must be a step of a group, or be entered by a `via` tool.
+
+**Fix:** put the task in a group's `steps`.
+
+In the salon tutorial: [Book step by step](/core/tutorial/book-step-by-step).
+
+Every argument: [Tasks reference](/core/reference/tasks#taskgroupspec).
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="How a step ends" icon="flag" href="/core/build/tasks/how-a-step-ends">
+    The finish check, a held finish and going back.
+  </Card>
+  <Card title="Handoffs" icon="git-branch" href="/core/build/handoffs">
+    Give the call to another agent from a step or a group.
+  </Card>
+  <Card title="Your first task" icon="list-checks" href="/core/build/tasks/first-task">
+    Define a task and check it with TaskPlan.
+  </Card>
+</CardGroup>

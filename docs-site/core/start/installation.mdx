@@ -1,0 +1,109 @@
+---
+title: "Install Unmute Core"
+sidebarTitle: "Installation"
+description: "Add unmute-core and a framework extra to a project from PyPI."
+---
+
+unmute-core is on [PyPI](https://pypi.org/project/unmute-core/). It needs Python 3.12 or newer.
+
+```bash
+uv add "unmute-core[livekit]"   # or [pipecat]
+```
+
+On this page:
+
+- [Add it to a project](#add-it-to-a-project) - the extras and the version range
+- [Check the version at import](#check-the-version-at-import) - `require()`
+- [With the knowledge extra](#with-the-knowledge-extra) - copy, do not hardlink
+
+## Add it to a project
+
+```toml pyproject.toml
+[project]
+dependencies = ["unmute-core[livekit]~=X.Y.Z"]   # or [pipecat]
+```
+
+Write the newest version from the [changelog](https://github.com/slng-ai/unmute-core/blob/main/CHANGELOG.md) in place of `X.Y.Z`.
+`~=X.Y.Z` allows `X.Y.Z` and later patches, never the next minor version. Before 1.0, a new minor version can break your code.
+
+| Extra | What it installs |
+|---|---|
+| `livekit` | the supported LiveKit Agents range, and `unmute_core.livekit` |
+| `pipecat` | the supported Pipecat range, and `unmute_core.pipecat` |
+| `slng` | the `openai` package, which `OpenAIModelCall` and the SLNG Context Router use |
+| `knowledge` | llama-index, for [knowledge](/core/build/knowledge) search |
+
+The library needs these versions:
+
+| Package | Version |
+|---|---|
+| `pydantic` | 2.11 or newer |
+| `pydantic-settings` | 2.8 or newer |
+| OpenTelemetry (`opentelemetry-sdk` and the OTLP exporter) | 1.40 or newer |
+| `phonenumbers` | 8.13 up to, not including, 10 |
+| `openai`, with the `slng` extra | 1.109 up to, not including, 4 |
+
+LiveKit 1.8.7 itself needs `openai` 3. A Pipecat app may keep `openai` 1 or 2.
+
+Extras combine: `unmute-core[livekit,slng]`.
+
+With pip:
+
+```bash
+pip install "unmute-core[livekit]"
+```
+
+To move to a new release, change the range and run:
+
+```bash
+uv lock --upgrade-package unmute-core
+uv sync
+```
+
+Check the environment at startup too. `check_settings(LangfuseSettings)` names every missing variable in one error. [Settings](/core/reference/settings) lists them.
+
+## Check the version at import
+
+Generated code states the library version it was built for:
+
+```python agent.py
+import unmute_core
+
+unmute_core.require("X.Y.Z")
+```
+
+Write the real version in place of `X.Y.Z`. `require()` fails at import, so a wrong version fails the deploy and never a call.
+
+1. It fails when the installed library is older than the required version.
+2. It fails when the installed library has another major version.
+3. While the version is 0.x, `0.MINOR` counts as the major.
+
+The error names both versions, the range to require in `pyproject.toml`, and the command that fixes it. A version that is not three numbers raises `ValueError`.
+
+## With the knowledge extra
+
+`unmute-core[knowledge]` brings llama-index, which reads NLTK data files.
+NLTK refuses a file with more than one hardlink.
+On Linux, uv installs packages as hardlinks by default.
+So install with copies wherever the `[knowledge]` extra is used:
+
+```bash
+UV_LINK_MODE=copy uv sync                  # local, CI
+uv pip install --link-mode=copy ...        # Dockerfile
+```
+
+Without it, the first knowledge lookup fails with
+`PermissionError: Security Violation [pathsec.open]: refusing multiply-linked file`.
+
+`import unmute_core.knowledge` without the extra raises an `ImportError` that names the extra and the command to install it.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/core/start/quickstart">
+    Run the smallest agent on LiveKit or Pipecat.
+  </Card>
+  <Card title="Settings" icon="file-code" href="/core/reference/settings">
+    Every environment variable, and how to check them at startup.
+  </Card>
+</CardGroup>

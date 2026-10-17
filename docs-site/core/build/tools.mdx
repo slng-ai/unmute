@@ -1,0 +1,216 @@
+---
+title: "Tools in code"
+sidebarTitle: "Tools"
+description: "Give the model tools to call: Python functions, webhooks and built-ins that work the same on LiveKit and Pipecat."
+---
+
+A tool is something the model can call during a call: a Python function, a
+webhook or a built-in. You write a typed function. The library checks every
+argument before your code runs and every result after it, the same way on
+LiveKit and Pipecat.
+
+In the salon tutorial, [Check the diary](/core/tutorial/check-the-diary) builds this step by step.
+
+## Add a tool
+
+```python tools.py
+from datetime import date
+from typing import Annotated
+
+from pydantic import BaseModel, Field
+
+from unmute_core.tools import ToolRegistry, local_tool
+
+
+class Booking(BaseModel):
+    reference: str
+    day: date
+
+
+def book_table(
+    day: Annotated[date, Field(description="The day the caller wants.")],
+    party: Annotated[int, Field(ge=1, le=12)] = 2,
+) -> Booking:
+    """Book a table."""
+    return Booking(reference="B-12", day=day)
+
+
+registry = ToolRegistry([local_tool(book_table, announce="One moment, let me book that.")])
+```
+
+1. `local_tool` turns a typed Python function into a tool. The docstring tells the model what it does, and `Field` limits go into its schema.
+2. A bad argument goes back to the model with what to fix. Your function gets real Python types.
+3. The return annotation, `Booking`, is the output. A result that does not fit fails the call, and the model reads which field is wrong.
+
+## Use it in your agent
+
+The same registry works in a full agent and in a plain one.
+
+<CodeGroup>
+
+```python LiveKit
+from livekit.agents import Agent
+
+from unmute_core.agent import AgentSpec
+from unmute_core.livekit import UnmuteAgent, function_tools
+
+agent = UnmuteAgent(AgentSpec(PROMPT, tools=registry), state=state, call=call)
+
+# Or on a plain LiveKit Agent:
+agent = Agent(instructions=PROMPT, tools=function_tools(registry, state, hooks=call))
+```
+
+```python Pipecat
+from pipecat.processors.aggregators.llm_context import LLMContext
+
+from unmute_core.agent import AgentSpec
+from unmute_core.pipecat import UnmuteFlows, tools_schema
+
+spec = AgentSpec(PROMPT, tools=registry)
+flows = UnmuteFlows(spec, llm=llm, context=context, aggregators=aggregators, state=state, call=call)
+flows.install()
+
+# Or on a plain Pipecat pipeline:
+context = LLMContext(tools=tools_schema(registry, state, hooks=call))
+```
+
+</CodeGroup>
+
+1. Build the tools once per call. They read that call's state.
+2. `call` is the call's `CallHooks`. It runs your [tool hooks](/core/build/hooks) and lets background webhooks finish when the call ends.
+3. Set `language=` and `timezone=` on `AgentSpec`, or on `function_tools` and `tools_schema`, so spoken dates follow the call.
+
+## Say a line while it works
+
+```python
+local_tool(check_day, announce=["One moment, let me check {{day}}.", "Let me look at {{day}}."])
+```
+
+1. The agent says one line as the tool starts, never the same one twice in a row. A refused call says nothing.
+2. `{{day}}` reads an argument or a State value. `{{call.session_id}}` reads what the call carries.
+3. `announce_wait=True` runs the tool only after the line has played, for a line like "Putting you through now."
+
+## Keep a tool running when the caller talks
+
+```python
+local_tool(book_table, interruption="continue")
+```
+
+1. Pipecat cancels a running tool when the caller speaks. `continue` lets it finish, as LiveKit always does.
+2. Use it for a tool that changes something, like a booking or a payment. A lookup can keep the default.
+3. A plain Pipecat pipeline also needs `attach_call(..., llm=llm)`, so the prompt stays the same as on LiveKit.
+
+## Tell the model a tool failed
+
+```python
+def book_table(day: date) -> Booking:
+    """Book a table."""
+    if day.weekday() == 0:
+        raise ToolError("We are closed on Mondays. Offer another day.")
+    return Booking(reference="B-12", day=day)
+```
+
+1. `ToolError` comes from `unmute_core.tools`. The model reads your words and acts on them.
+2. Any other error tells the model the tool failed and not to claim success. The log keeps the details.
+3. A call that reads a value not set yet does not run. The model gets a hint instead. See [A call that is refused](/core/reference/tools#a-call-that-is-refused).
+
+## Save a result and speak it
+
+```python
+from unmute_core.tools import Assign, ToolRegistry, ToolReply, local_tool
+
+registry = ToolRegistry(
+    [local_tool(find_order)],
+    state=State,
+    assign={"find_order": [Assign(variable="order", path=())]},
+    replies=[
+        ToolReply(tool="find_order", when={"status": ["held"]}, say=["{{result.order_id}} is held."]),
+        ToolReply(tool="find_order", say=["Your order arrives {{result.arrives}}."]),
+    ],
+)
+```
+
+1. `assign` saves the result into State values. `path=()` saves the whole result, and `path=("order_id",)` one field.
+2. `replies` are tried in order. Code speaks the first one that matches and fills, and the model is asked for no reply.
+3. A date reads "tomorrow, October 16" in the call's language. A task step lists the same rows on its `TaskSpec`. See [Confirm in code](/core/build/tasks/confirm-in-code).
+
+## Locked arguments
+
+```python
+webhook_tool(..., locked={"customer_id": "{{customer.id}}", "call": "{{call.session_id}}"})
+```
+
+1. The model never sees a locked argument. A value it sends is replaced.
+2. `{{customer.id}}` reads the call state, and `{{call.session_id}}` what the call carries. The tool is refused, with a hint, while a value is unset.
+3. `Transcript()` sends the call's transcript so far. See [Send the transcript](/core/reference/tools#send-the-transcript).
+
+## Call a webhook
+
+```python
+from unmute_core.tools import Accepted, WebhookAuth, webhook_tool
+
+webhook_tool(
+    "notify_crm",
+    "Tell the CRM about the booking.",
+    "https://crm.example.com/hooks/booking",
+    input=BookingNote,
+    output=Accepted,
+    auth=WebhookAuth.api_key("CRM_KEY", header="X-API-Key"),
+    wait_for_response=False,
+)
+```
+
+1. `input` is the model of what the model sends, and `output` the model of the answer. With `wait_for_response=False`, the output is `Accepted`, and the request runs in the background.
+2. The token is read from `CRM_KEY` at each call. One 10 second deadline covers the whole request, and each body is capped at 64 KiB.
+3. Each address must be public. Set `allow_private_network=True` only for your own service, or for `localhost` while you develop.
+
+## End the call
+
+```python
+hang_up = local_tool(hang_up_handler, effect="ends_conversation")
+```
+
+1. The call ends once the tool succeeds. The model is not asked for another reply, so the goodbye goes in the reply that calls the tool.
+2. A failed tool never ends the call.
+3. On Pipecat, `end_call_tool` ends the call with no second model request. See [End the call](/core/reference/tools#end-the-call).
+
+## Add the date or the caller number
+
+```python
+from unmute_core.tools import ToolRegistry, current_datetime_tool, user_phone_number_tool
+
+registry = ToolRegistry([current_datetime_tool("Europe/Madrid"), user_phone_number_tool()])
+```
+
+1. `current_datetime_tool` takes an IANA zone and returns the local date, time and day of the week.
+2. `user_phone_number_tool` reads the number from `state.call`. On a call with no number, it returns `"available": false`.
+
+## Watch tool calls
+
+```python
+def show(stage: str, data: dict) -> None:
+    print(stage, data)
+
+
+registry.listen(show)
+```
+
+1. The sink hears each stage, like `tool.started`, `tool.failed` or `tool.refused`, with names and timing only. It never gets argument values.
+2. In a call, use the call's hooks instead. See [Hooks](/core/build/hooks).
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Tools reference" icon="book" href="/core/reference/tools">
+    Every option, webhook argument, rule and edge case.
+  </Card>
+  <Card title="Knowledge" icon="book-open" href="/core/build/knowledge">
+    Search a folder of documents from a tool.
+  </Card>
+  <Card title="Hooks" icon="webhook" href="/core/build/hooks">
+    Run your code around each tool call.
+  </Card>
+  <Card title="Unmute tools" icon="wrench" href="/build/tools/overview">
+    How `agent.yaml` declares the same tools.
+  </Card>
+</CardGroup>

@@ -1,0 +1,120 @@
+---
+title: "See every call"
+sidebarTitle: "See every call"
+description: "Send one trace for each salon call to Langfuse, with the same shape on LiveKit and Pipecat."
+---
+
+You have: Robin with turn pace, idle nudges and an end-call tool, from [Quiet callers](/core/tutorial/quiet-callers).
+
+After the call, you can open it in Langfuse and see what happened.
+
+## What you add
+
+A `Telemetry` object records one trace for one call. A sink, here `Langfuse`, says where the trace goes. The sink reads its keys from the environment, so no key is in your code.
+
+```bash
+export LANGFUSE_PUBLIC_KEY=pk-...
+export LANGFUSE_SECRET_KEY=sk-...
+export LANGFUSE_BASE_URL=https://cloud.langfuse.com
+```
+
+Build it for each call. The example builds it only when the keys are set, so the same file runs with or without Langfuse.
+
+<CodeGroup>
+
+```python livekit/agent.py
+import os
+
+from unmute_core.telemetry import Langfuse, Telemetry
+
+
+class Concierge(UnmuteAgent):
+    """Books appointments."""
+
+    def __init__(self, state: CallState[State], telemetry: Telemetry | None = None) -> None:
+        """Build the concierge for one call."""
+        super().__init__(
+            CONCIERGE, state=state, telemetry=telemetry, native_tools=[end_call()]
+        )
+
+
+# In entrypoint(), after the state is built.
+telemetry = None
+if os.getenv("LANGFUSE_PUBLIC_KEY"):
+    telemetry = Telemetry(
+        Langfuse.from_env(),
+        agent="salon-concierge",
+        call_id=ctx.job.id,
+        resource={"deployment.environment.name": os.getenv("ENVIRONMENT", "development")},
+    )
+agent = Concierge(state, telemetry)
+```
+
+```python pipecat/bot.py
+import uuid
+
+from unmute_core.pipecat import TelemetryObserver
+from unmute_core.telemetry import Langfuse, Telemetry
+
+# In bot(), after the state is built.
+telemetry = None
+if os.getenv("LANGFUSE_PUBLIC_KEY"):
+    telemetry = Telemetry(
+        Langfuse.from_env(),
+        agent="salon-concierge",
+        call_id=runner_args.session_id or uuid.uuid4().hex,
+        resource={"deployment.environment.name": os.getenv("ENVIRONMENT", "development")},
+    )
+
+# Give it to the flows with telemetry=telemetry, and watch the pipeline.
+observers = []
+if telemetry is not None:
+    observers.append(
+        TelemetryObserver(telemetry, model="gpt-5.6-terra", provider="openai", flows=flows)
+    )
+worker = PipelineWorker(pipeline, observers=observers)
+
+# Start the trace before the runner, and close it when the call is over.
+if telemetry is not None:
+    telemetry.start_call()
+try:
+    await runner.run()
+finally:
+    await flows.settle()
+    if telemetry is not None:
+        await telemetry.close(state=state, reason="ended")
+```
+
+</CodeGroup>
+
+On LiveKit, the adapter starts and closes the trace with the session. On Pipecat, you start it and close it, because you own the runner.
+
+The complaint specialist is built without `telemetry`. It records into the concierge's spans, so one call is one trace even after a handoff.
+
+## Try it
+
+Run a call as before, with the three keys set. Book a haircut, then hang up.
+
+1. Open your project in Langfuse. A trace for your call should appear.
+2. Open it. You should see the turns, the transcript, the model requests and the tool calls.
+3. Run a call again with no keys. The agent works the same and sends nothing.
+
+## Why it works this way
+
+Each framework gives its own events in its own shape. The adapters turn them into one trace shape, so a LiveKit call and a Pipecat call look the same in Langfuse. The call ends with one reason on both.
+
+`Langfuse` is one sink. `Telemetry` takes others too, and the page on telemetry lists them. Your agent code does not change when the sink does.
+
+## What you have now
+
+| Piece | File |
+|---|---|
+| `Telemetry` and `Langfuse`, built per call | `livekit/agent.py`, `pipecat/bot.py` |
+| The agent, with `telemetry=` | `livekit/agent.py` |
+| `TelemetryObserver` and the trace's start and close | `pipecat/bot.py` |
+
+<Card title="Next: What you built" icon="flag-checkered" href="/core/tutorial/what-you-built">
+  Compare your agent with the full example, and run it.
+</Card>
+
+Go deeper: [Telemetry](/core/observe/telemetry).

@@ -1,0 +1,112 @@
+---
+title: "AgentSpec reference"
+sidebarTitle: "AgentSpec"
+description: "Every field of AgentSpec, the one description of an agent that runs the same on LiveKit and Pipecat."
+---
+
+`AgentSpec` says what one agent of a call is: its prompt, its tools or tasks, its models, its language and its handoff tools. You write it once. `UnmuteAgent(spec)` runs it on LiveKit, and `UnmuteFlows(spec, ...)` runs it on Pipecat. A handoff takes the next agent's spec on both.
+
+The adapter adds only two kinds of thing:
+
+1. What every agent of the call shares: `state`, `call` and `telemetry`.
+2. The framework's own objects: `native_tools`, `then_targets`, `tts`, LiveKit's `Agent` options, and Pipecat's `llm`, `context` and `aggregators`.
+
+These have the same names on both frameworks. See [LiveKit](/core/reference/livekit#unmuteagent) and [Pipecat](/core/reference/pipecat#unmuteflows) for them.
+
+<CodeGroup>
+
+```python LiveKit
+from unmute_core.agent import AgentSpec
+from unmute_core.livekit import UnmuteAgent
+
+state = CallState(State)
+spec = AgentSpec(PROMPT, tasks=plan, language="es-ES", timezone="Europe/Madrid")
+agent = UnmuteAgent(spec, state=state, call=call, telemetry=telemetry)
+```
+
+```python Pipecat
+from unmute_core.agent import AgentSpec
+from unmute_core.pipecat import UnmuteFlows
+
+state = CallState(State)
+spec = AgentSpec(PROMPT, tasks=plan, language="es-ES", timezone="Europe/Madrid")
+flows = UnmuteFlows(
+    spec,
+    llm=llm,
+    context=context,
+    aggregators=aggregators,
+    state=state,
+    call=call,
+    telemetry=telemetry,
+)
+```
+
+</CodeGroup>
+
+Build the spec per call, after the state. A model like `RouterModelCall(state.call, ...)` reads the call, so it cannot be built before it. The spec is frozen: it does not change once it is built.
+
+## AgentSpec
+
+```python
+from unmute_core.agent import AgentSpec
+```
+
+`instructions` is the only positional argument. Pass the others by keyword.
+
+<ParamField path="instructions" type="str" required>
+  The main prompt. It may hold `{{name}}` placeholders. See [State](/core/build/state).
+</ParamField>
+<ParamField path="name" type="str | None" default="None">
+  The agent's name, which a `handoff` event shows. One to 64 letters, digits, `_` or `-`. None uses the call's `agent_id`, from `state.call`. An agent the call is handed to sets its own name.
+</ParamField>
+<ParamField path="tasks" type="TaskPlan | None" default="None">
+  The checked tasks and groups. The plan holds every tool, task-only ones included. It needs a state on the adapter. See [Tasks](/core/build/tasks).
+</ParamField>
+<ParamField path="tools" type="ToolRegistry | None" default="None">
+  The agent's tools, for an agent without tasks. Pass `tools` or `tasks`, not both.
+</ParamField>
+<ParamField path="model" type="ModelCall | None" default="None">
+  The agent's model. Its steps run on it too. On LiveKit, a plugin goes in as `LiveKitModel(plugin)`. On Pipecat, it needs the call's `llm` to be a `ModelCallLLMService`. None uses the framework's own LLM. See [Model call](/core/models/model-call).
+</ParamField>
+<ParamField path="summarizer" type="ModelCall | None" default="None">
+  Writes the summary a `summary` history asks for, for a task step or a handoff without its own. None asks the agent's model. On Pipecat, it also answers each finish check when the call's LLM cannot be asked.
+</ParamField>
+<ParamField path="task_models" type="Mapping[str, ModelCall]" default="{}">
+  The models a task's `model` names, by name. A step of that task runs on it. Pipecat runs every task on the agent's LLM service, so it refuses a task with a `model`.
+</ParamField>
+<ParamField path="language" type="str" default='"en"'>
+  The call's language, a BCP-47 tag like `es-MX`. Confirm and reply lines say dates and times in it.
+</ParamField>
+<ParamField path="timezone" type="str | None" default="None">
+  Where the business is, an IANA name like `Europe/Madrid`. Confirm and reply lines then name a day from today, like "today, October 8". An unknown name raises `ValueError` when the adapter is built.
+</ParamField>
+<ParamField path="save_values" type="bool" default="False">
+  End each main agent request with the current text of the State values. The agent also gets the `save_values` tool, for the values no task saves and the call does not start with. It needs a state on the adapter. It belongs to this agent only. See [State](/core/build/state).
+</ParamField>
+<ParamField path="handoffs" type="tuple[str, ...]" default="()">
+  The names of the agent's handoff tools, among its framework tools. The first reply after a handoff leaves them out, so the agent cannot hand the call straight back. A greeting the model words leaves them out too. See [Handoffs](/core/build/handoffs).
+</ParamField>
+
+`AgentSpec` raises `ValueError` in these cases:
+
+- `tools` comes with `tasks`. The task plan holds the tools.
+- A task names a model that `task_models` does not name.
+- `name` is not 1 to 64 letters, digits, `_` or `-`.
+
+The adapter checks the rest when it is built, the same way on both frameworks. It raises `ValueError` in these cases:
+
+- The spec has `tasks` or `save_values`, and there is no state. Pass `state=CallState(...)` or `call=CallHooks(...)`.
+- A group transfers to an agent `then_targets` lacks.
+- With `call`, a task input reads a tool that no prefetch lookup of the call runs.
+- A placeholder makes a key longer than the model call takes. The router takes 64 characters. A native model has no limit.
+
+Each framework page lists the checks that only it makes.
+
+## Attributes on the adapter
+
+<ParamField path="spec" type="AgentSpec">
+  `agent.spec` on LiveKit: the spec the agent was built with. `flows.spec` on Pipecat: the spec of the agent that holds the call now. It changes on each handoff.
+</ParamField>
+<ParamField path="tasks" type="CallTasks | None">
+  The task runs the adapter built from the spec. `agent.tasks` on LiveKit is None for an agent without `tasks`. `flows.tasks` on Pipecat always holds one, for the agent that holds the call. See [Tasks reference](/core/reference/tasks#calltasks).
+</ParamField>

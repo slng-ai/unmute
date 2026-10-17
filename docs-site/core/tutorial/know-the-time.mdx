@@ -1,0 +1,128 @@
+---
+title: "Know the time before hello"
+sidebarTitle: "Know the time"
+description: "Read today's date on the salon's clock and the caller's number before the greeting, with Prefetch."
+---
+
+You have: Robin with a concierge and a complaint specialist, from [Hand off complaints](/core/tutorial/hand-off-complaints).
+
+The caller says "Friday", and the agent knows which Friday.
+
+## What you add
+
+A model does not know today's date, and a server clock may be in another time zone. `Prefetch` reads what the call needs before the greeting and saves it into the state.
+
+First, three more state fields for the clock.
+
+```python salon/state.py
+class State(BaseModel):
+    # The fields from the earlier pages stay. Add:
+    booking_date: date | None = Field(
+        None, description="Today's date in the salon's timezone, read once before the greeting."
+    )
+    booking_weekday: str = Field("", description="The weekday of booking_date, in English.")
+    salon_local_time: time | None = Field(
+        None, description="The salon's wall clock when the call began."
+    )
+```
+
+Next, the prefetch and the function that builds each call's state. These are the names the example uses.
+
+```python salon/agent.py
+from collections.abc import Mapping
+
+from unmute_core.call import save_call_start
+from unmute_core.prefetch import CallValue, Clock, Prefetch
+from unmute_core.state import CallInfo, CallState
+
+AGENT_ID = "salon-concierge"
+PREFETCH = Prefetch(
+    [
+        Clock(
+            "today",
+            "Europe/Madrid",
+            {"booking_date": "date", "booking_weekday": "day_of_week", "salon_local_time": "time"},
+        ),
+        CallValue("caller", "calling_number", ["customer_phone"]),
+    ]
+)
+
+GREETING.check(PREFETCH)
+
+
+async def new_call(
+    call: CallInfo | None = None, dispatched: Mapping[str, object] | None = None
+) -> CallState[State]:
+    """Return a fresh call state, with today's date and the caller's number read in.
+
+    Args:
+        call: What the line carries. A web call's when None.
+        dispatched: The dispatch's ``call_start`` object, when there is one.
+    """
+    state = CallState(State, confirm=CONFIRM, call=call or CallInfo(agent_id=AGENT_ID))
+    save_call_start(state, dispatched)
+    await PREFETCH.run(state)
+    return state
+```
+
+1. `Clock` reads one time zone, once. Its `assign` maps each state value to a clock field: `date`, `day_of_week` or `time`.
+2. `CallValue` copies a value the call carries, here the caller's number from `state.call.calling_number`, into `customer_phone`. A browser call has no number, so that value stays empty.
+3. `save_call_start` saves what the call was started with. It also reads `UNMUTE_CALL_START`, so a browser call can pretend to be a phone call.
+4. `GREETING.check(PREFETCH)` refuses, at import, a greeting that names a value prefetch does not fill.
+
+The number from caller ID is saved but not confirmed. It stays out of the prompts until `verify_customer` has read it back and the caller said yes.
+
+Then tell the concierge what day it is. Add this line to `CONCIERGE_PROMPT`.
+
+```text
+Today is {{booking_weekday}}, {{booking_date}}, so "Friday" is the coming Friday.
+```
+
+Last, build the state with `new_call` where you built it by hand before.
+
+<CodeGroup>
+
+```python livekit/agent.py
+# In entrypoint(), before the session starts.
+state = await salon.new_call()
+```
+
+```python pipecat/bot.py
+# In bot(), in place of CallState(State, confirm=salon.CONFIRM).
+state = await salon.new_call()
+```
+
+</CodeGroup>
+
+A console or browser call has no caller ID, so `state.call` has no number. On a phone call, `unmute_core.livekit.sip_call_info` and `unmute_core.pipecat.telephony_call_info` read it from the carrier. Pass the result as `call`. [Telephony](/core/telephony) shows how.
+
+## Try it
+
+To try the caller ID path, simulate a phone caller, then start the agent.
+
+```bash
+export UNMUTE_CALL_START='{"call": {"direction": "inbound", "calling_number": "+34612345678"}}'
+```
+
+1. Say "Can I book a haircut for Friday?" Robin should offer times on the coming Friday, with no question about today's date.
+2. When Robin asks for your number, it should read back the one from caller ID and wait for a yes.
+
+## Why it works this way
+
+The model reads today's date from the state, so a call that starts at 11 pm in Madrid still gets Madrid's date. The value is read once. A call that crosses midnight keeps the day it began on.
+
+Prefetch runs before the greeting. The first model request then has the date, and no tool call is spent to fetch it.
+
+## What you have now
+
+| Piece | File |
+|---|---|
+| State with the clock values | `salon/state.py` |
+| `PREFETCH` and `new_call` | `salon/agent.py` |
+| A call built with `new_call` | `livekit/agent.py`, `pipecat/bot.py` |
+
+<Card title="Next: Quiet callers" icon="hourglass" href="/core/tutorial/quiet-callers">
+  Set the turn pace, nudge a quiet caller and end a long call.
+</Card>
+
+Go deeper: [Prefetch](/core/build/prefetch).

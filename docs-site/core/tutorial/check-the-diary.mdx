@@ -1,0 +1,146 @@
+---
+title: "Check the diary"
+sidebarTitle: "Check the diary"
+description: "Give the salon agent a typed tool that reads the diary, and say a line while it runs."
+---
+
+You have: a call state that keeps the caller's number, from [Remember the caller](/core/tutorial/remember-the-caller).
+
+The caller asks for Friday, and the agent reads the diary.
+
+## What you add
+
+The diary is a plain Python class, `Salon`, in `salon/store.py`. It keeps customers and bookings in memory. Copy the file from the example. You do not write it here.
+
+Each method is typed, and each argument says what it means. Each answer has a
+Pydantic model too. This is the shape of `find_slots` and its answer, `Diary`.
+
+```python salon/store.py
+from datetime import date
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
+
+DayArgument = Annotated[
+    date | None,
+    Field(description="The day the caller named. Leave it out when they named none."),
+]
+ServiceArgument = Annotated[
+    Literal["any", "haircut", "hair-color", "blowout"],
+    Field(description="Narrow the free times to one service, or `any` to see all three."),
+]
+
+
+class Diary(BaseModel):
+    """What find_slots returns: the caller's bookings, the free times, and the offer."""
+
+    bookings: list[Held]
+    slots: list[Slot]
+    status: Literal["need_date", "ok", "invalid_service", "invalid_date", "full"]
+    offer: str = ""
+    offered: bool = False
+
+
+class Salon:
+    def find_slots(
+        self,
+        customer_phone: str,
+        date: DayArgument = None,
+        service: ServiceArgument = "any",
+    ) -> dict:
+        """Return the caller's bookings and the free slots on a date."""
+```
+
+Now turn the method into a tool. `local_tool` reads the types and the descriptions and builds the tool schema. A `ToolRegistry` holds the tools of one agent.
+
+```python salon/agent.py
+from salon.store import Diary, Salon
+from unmute_core.tools import ToolRegistry, local_tool
+
+LOCKED_PHONE = {"customer_phone": "{{customer_phone}}"}
+
+
+def tools(salon: Salon) -> ToolRegistry:
+    """Return the agent's tools, on one diary."""
+    return ToolRegistry(
+        [
+            local_tool(
+                salon.find_slots,
+                output=Diary,
+                locked=LOCKED_PHONE,
+                announce="Let me have a look.",
+                description=(
+                    "Read the diary: what the caller already has booked, and what times "
+                    "are free. Ask the caller which day they want before you call this, "
+                    "and never guess one."
+                ),
+            ),
+        ]
+    )
+```
+
+Three options matter here.
+
+1. `output` names the answer's model. The method returns a dict, so it names the model here. A method that returns a `Diary` needs no `output=`. Every answer is checked against it, and an answer of the wrong shape fails the call.
+2. `locked` fills `customer_phone` from the call state. The model never sees that argument, so it cannot invent a number. While no number is saved, the call is refused with a hint.
+3. `announce` is a line the agent says as the tool starts. A refused call says nothing.
+
+Last, give the registry to the agent. Build it once, not for each call.
+
+<CodeGroup>
+
+```python livekit/agent.py
+from salon import agent as salon
+from salon.store import Salon
+
+TOOLS = salon.tools(Salon())
+
+# In entrypoint(), add the tools to the spec.
+spec = AgentSpec(salon.CONCIERGE_PROMPT, tools=TOOLS, save_values=True)
+agent = UnmuteAgent(spec, state=state)
+```
+
+```python pipecat/bot.py
+from salon import agent as salon
+from salon.store import Salon
+
+TOOLS = salon.tools(Salon())
+
+# In bot(), add the tools to the spec.
+spec = AgentSpec(salon.CONCIERGE_PROMPT, tools=TOOLS, save_values=True)
+flows = UnmuteFlows(spec, llm=llm, context=context, aggregators=aggregators, state=state)
+```
+
+</CodeGroup>
+
+## Try it
+
+Start the agent as before.
+
+1. "I'd like a haircut on Friday." Robin has no number yet, so the tool is refused. Robin should ask for your number.
+2. Give a number with its country code. Then say "Friday" again.
+3. You should hear "Let me have a look." Then Robin should read out free times from the diary.
+
+The demo diary offers 9:00 AM, 11:30 AM and 3:00 PM for each service.
+
+## Why it works this way
+
+The model fills tool arguments from what it heard. It can mishear or invent a value. So the library checks every call against the schema before your code runs, and a bad one goes back to the model with what to fix.
+
+A value the caller never chooses, like the number of the person on the line, comes from the state instead. And a slow tool is not silence, because the announce line plays first.
+
+## What you have now
+
+| Piece | File |
+|---|---|
+| Prompt and greeting | `salon/agent.py` |
+| Call state: `State` | `salon/state.py` |
+| The diary: `Salon` | `salon/store.py` |
+| Tools: `tools()` | `salon/agent.py` |
+| LiveKit and Pipecat pipelines | `livekit/agent.py`, `pipecat/bot.py` |
+
+<Card title="Next: Book step by step" icon="list-check" href="/core/tutorial/book-step-by-step">
+  Turn booking into a task, so Robin confirms before it writes.
+</Card>
+
+Go deeper: [Tools](/core/build/tools).

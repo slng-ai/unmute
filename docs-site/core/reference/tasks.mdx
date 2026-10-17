@@ -1,0 +1,326 @@
+---
+title: "Tasks reference"
+sidebarTitle: "Tasks"
+description: "Every argument of the task spec classes, TaskPlan, CallTasks and StepRun."
+---
+
+Every class you import from `unmute_core.tasks` to define and run tasks. Each spec class is immutable and refuses keys it does not know. They are Pydantic models, so you can build them as literals or from JSON with `model_validate`.
+
+## TaskSpec
+
+One task: a prompt, its tools, and the values it saves when it finishes. Guide: [Your first task in code](/core/build/tasks/first-task).
+
+<ParamField path="name" type="str" required>
+  Lower snake case, at most 64 characters. The prompt site is `task:<name>`.
+</ParamField>
+<ParamField path="instructions" type="str" required>
+  The step's prompt, at least one character. `{{name}}` reads a State value. `{{customer.status}}` or `{{customer__status}}` reads a field inside one.
+</ParamField>
+<ParamField path="when" type="str | None" default="None">
+  When the main agent starts it, said to the model. Leave it out for a step that only a group or a `via` tool starts. At most 1000 characters, never blank.
+</ParamField>
+<ParamField path="tools" type="tuple[str, ...]" default="()">
+  Names of the tools the step may call.
+</ParamField>
+<ParamField path="assign" type="tuple[Assign, ...]" default="()">
+  The values it saves, from its finish call or a closing tool's result.
+</ParamField>
+<ParamField path="finish" type="tuple[FinishRule, ...]" default="()">
+  Tools whose result ends the step by itself.
+</ParamField>
+<ParamField path="announce" type="tuple[str, ...]" default="()">
+  Lines spoken as it starts. Several are alternatives, and one is picked each time. A line holds no placeholder.
+</ParamField>
+<ParamField path="opening" type="generate | listen" default="generate">
+  `generate` opens with a model reply. `listen` speaks the announce line and waits for the caller.
+</ParamField>
+<ParamField path="history" type="messages | full | last_n | summary | reset" default="messages">
+  What the step hears of the call so far. See [What a step hears of the call](/core/build/tasks/what-the-model-reads#what-a-step-hears-of-the-call).
+</ParamField>
+<ParamField path="max_messages" type="int | None" default="None">
+  How many items `last_n` keeps, from 1 to 200. Required with `last_n`, and refused with any other history.
+</ParamField>
+<ParamField path="include_tool_calls" type="bool" default="True">
+  `False` leaves tool calls and results out of `full` and `last_n`.
+</ParamField>
+<ParamField path="handoffs" type="tuple[str, ...]" default="()">
+  Handoff tools of the agent that the step offers too. Calling one ends the step and gives the call to another agent. See [Handoffs](/core/build/handoffs).
+</ParamField>
+<ParamField path="native_tools" type="tuple[str, ...]" default="()">
+  Framework tools of the agent that the step offers too, as they are. An MCP toolset is one example.
+</ParamField>
+<ParamField path="requires" type="tuple[str, ...]" default="()">
+  State values that must be set before it runs. Exactly one other task must save all of them. That task runs first when they are not set.
+</ParamField>
+<ParamField path="via" type="tuple[str, ...]" default="()">
+  Tools of its own that the main agent may call too. A success moves the caller into this task. Each must also be in `tools`.
+</ParamField>
+<ParamField path="inputs" type="tuple[TaskInput, ...]" default="()">
+  What it reads at the end of its prompt.
+</ParamField>
+<ParamField path="arguments" type="tuple[str, ...]" default="()">
+  State values the main agent passes when it starts the task. Each call saves all of them, so a value it leaves out is cleared. Needs a `when`.
+</ParamField>
+<ParamField path="opens_with" type="OpeningTool | None" default="None">
+  A tool it runs in code as it opens, before any model request.
+</ParamField>
+<ParamField path="replies" type="tuple[ToolReply, ...]" default="()">
+  Lines code speaks for a tool result, in place of a model reply. At most 16.
+</ParamField>
+<ParamField path="model" type="str | None" default="None">
+  The model its step runs on, by a name `AgentSpec(task_models=...)` maps to a model, like `fast`. `None` runs it on the agent's model. Pipecat refuses it.
+</ParamField>
+
+## Assign
+
+One value a step saves. Guide: [Your first task in code](/core/build/tasks/first-task#assign).
+
+<ParamField path="variable" type="str" required>
+  The State value it saves.
+</ParamField>
+<ParamField path="path" type="tuple[str, ...]" required>
+  Where the value sits in the step's result, like `("order", "id")`. At most 8 parts. `()` saves the whole result, into a State value typed as the tool's output model.
+</ParamField>
+<ParamField path="append" type="bool" default="False">
+  Add one entry onto a list instead of replacing it. This is Unmute's `+`.
+</ParamField>
+<ParamField path="optional" type="bool" default="False">
+  The step may finish without it. This is Unmute's `?`. Otherwise a served finish must carry it, unless it appends.
+</ParamField>
+
+The finish parameter is the field itself for a one-part path. For a longer or an
+empty path it is the variable name. Two assignments may not share a finish
+parameter. An agent without tasks uses the same rows on its `ToolRegistry`. See
+[Save a result and speak it](/core/build/tools#save-a-result-and-speak-it).
+
+## FinishRule
+
+A step ends by itself when this tool returns a result the rule calls a success. Guide: [Reply and confirm in code](/core/build/tasks/confirm-in-code).
+
+<ParamField path="tool" type="str" required>
+  The tool. It must be one of the step's own `tools`.
+</ParamField>
+<ParamField path="success" type="dict[str, tuple[str | int | bool, ...]]" required>
+  Result field to the values that count as success. Every field must hold one of its values. From 1 to 16 fields.
+</ParamField>
+<ParamField path="say" type="tuple[str, ...]" default="()">
+  Lines spoken from the result. They may use `{{result.<field>}}` and `{{variable}}`, nested like `{{account.amount_words}}`.
+</ParamField>
+<ParamField path="confirm" type="tuple[str, ...]" default="()">
+  Lines asked before the tool runs. They may use `{{input.<field>}}` and `{{variable}}`, nested like `{{account.amount_words}}`. See [Ask before a closing tool runs](/core/build/tasks/confirm-in-code#ask-before-a-closing-tool-runs).
+</ParamField>
+
+## ToolReply
+
+A line code speaks when one of the step's tools returns a matching result. Guide: [Reply and confirm in code](/core/build/tasks/confirm-in-code#say-a-fixed-reply-to-a-tool-result).
+
+<ParamField path="tool" type="str" required>
+  One of the step's own tools.
+</ParamField>
+<ParamField path="when" type="dict[str, tuple[str | int | bool, ...]]" default="{}">
+  Result field to the values that call for the line. Every field must hold one of its values. Empty matches every result.
+</ParamField>
+<ParamField path="state" type="dict[str, tuple[str | int | bool, ...]]" default="{}">
+  State value to the values that call for the line, read the same way.
+</ParamField>
+<ParamField path="say" type="tuple[str, ...]" required>
+  At least one line. They may use `{{result.<field>}}` and `{{variable}}`, nested like `{{account.amount_words}}`.
+</ParamField>
+
+The first reply that matches and fills is spoken. An agent without tasks uses the
+same rows on its `ToolRegistry`. See
+[Save a result and speak it](/core/build/tools#save-a-result-and-speak-it).
+
+## OpeningTool
+
+A tool a step runs in code as it opens, before any model request. Guide: [Reply and confirm in code](/core/build/tasks/confirm-in-code#open-a-step-with-a-tool).
+
+<ParamField path="tool" type="str" required>
+  One of the step's own tools. A tool the step ends on is allowed only with `confirm` lines.
+</ParamField>
+<ParamField path="arguments" type="dict[str, str]" default="{}">
+  Tool parameter to the State value it takes. The tool runs only when every value is set. A parameter the tool's schema declares and does not require is left out of the call when its value is not set.
+</ParamField>
+<ParamField path="say" type="tuple[str, ...]" default="()">
+  Lines spoken from the result. The first one that fills is spoken. Give none for a tool with `confirm` lines.
+</ParamField>
+
+## TaskInput
+
+Something a step reads at the end of its prompt. Guide: [What the model reads](/core/build/tasks/confirm-in-code#a-step-that-reads-a-prefetch-lookup).
+
+<ParamField path="kind" type="tool | memory | input" required>
+  `memory` reads a State value. `input` is a fixed text, in `value`. `tool` is what a prefetch lookup returned, recorded by name.
+</ParamField>
+<ParamField path="name" type="str" required>
+  The State value, the input's name, or the lookup's name.
+</ParamField>
+<ParamField path="value" type="str | None" default="None">
+  The text of an `input`, up to 4000 characters. Only that kind carries one.
+</ParamField>
+
+## TaskGroupSpec
+
+Tasks the main agent runs as one flow, step after step. Guide: [Task groups in code](/core/build/tasks/groups).
+
+<ParamField path="name" type="str" required>
+  Lower snake case. A task and a group may not share a name.
+</ParamField>
+<ParamField path="steps" type="tuple[str, ...]" required>
+  The task names, in order. There must be at least one. Each runs at most once in the group.
+</ParamField>
+<ParamField path="context_scope" type="shared | isolated" required>
+  `shared`: each step hears the steps before it. `isolated`: each step starts fresh.
+</ParamField>
+<ParamField path="when" type="str | None" default="None">
+  When the main agent starts it.
+</ParamField>
+<ParamField path="then" type="return | end | transfer" default="return">
+  What follows a group that completes. See [What a group does when it finishes](/core/build/tasks/groups#what-a-group-does-when-it-finishes).
+</ParamField>
+<ParamField path="then_target" type="str | None" default="None">
+  The agent a `transfer` hands the call to, by the name the adapter's `then_targets` gives it. Only `transfer` takes one, and `transfer` needs one.
+</ParamField>
+<ParamField path="announce" type="tuple[str, ...]" default="()">
+  Lines spoken as it starts.
+</ParamField>
+<ParamField path="non_blocking" type="tuple[str, ...]" default="()">
+  Steps whose failure the group records and carries on past. Each must be one of its steps.
+</ParamField>
+<ParamField path="skip_when_confirmed" type="dict[str, str]" default="{}">
+  Step to the State value whose confirmation lets the group skip it. The step must be the one that confirms that value.
+</ParamField>
+<ParamField path="inputs" type="tuple[TaskInput, ...]" default="()">
+  What every step reads at the end of its prompt, before its own inputs.
+</ParamField>
+<ParamField path="arguments" type="tuple[str, ...]" default="()">
+  State values the main agent passes when it starts the group. Each call saves all of them.
+</ParamField>
+
+## TasksSpec
+
+Every task and group of one agent. Guide: [Your first task in code](/core/build/tasks/first-task#run-the-tasks).
+
+<ParamField path="version" type="Literal[1]" default="1">
+  The format version.
+</ParamField>
+<ParamField path="mode" type="status | record" default="status">
+  `status`: a run hands the main agent a status, and a hand-back saves nothing, as Unmute's emitted agents do. `record`: a run hands back a record of each step, a hand-back keeps what the caller confirmed, steps can go back, and a step's finish is checked against what the caller said.
+</ParamField>
+<ParamField path="tasks" type="tuple[TaskSpec, ...]" default="()">
+  The tasks.
+</ParamField>
+<ParamField path="groups" type="tuple[TaskGroupSpec, ...]" default="()">
+  The task groups.
+</ParamField>
+<ParamField path="task_only_tools" type="tuple[str, ...]" default="()">
+  Tools only tasks may call. The main agent does not get them. A task must list each one.
+</ParamField>
+
+`TasksSpec.owners()` returns each State value that a task saves, with the first
+task that saves it. The save tool for values no task saves uses it. See
+[State](/core/build/state).
+
+## TaskPlan
+
+The tasks and groups of one agent, checked once and read by every call.
+`TaskPlan` checks the spec against the State and the tools. It raises
+`ValueError` and names the first task, group or value that does not fit. Guide: [Your first task in code](/core/build/tasks/first-task#taskplan).
+
+<ParamField path="spec" type="TasksSpec" required>
+  The tasks and groups.
+</ParamField>
+<ParamField path="state" type="type[BaseModel]" required>
+  The State model the call's `CallState` runs on.
+</ParamField>
+<ParamField path="confirm" type="Mapping[str, str] | None" default="None">
+  State value to the step that confirms it, as given to `CallState`.
+</ParamField>
+<ParamField path="tools" type="ToolRegistry" required>
+  Every tool of the agent, task-only ones included.
+</ParamField>
+
+`TaskPlan.check_then_targets(known)` refuses a group that transfers to an agent
+the adapter was not given. The adapters call it when they are built.
+
+```python
+plan.check_native_tools(["crm"])
+plan.check_handoff_tools(["to_notes"], fix="Add it to native_tools.")
+```
+
+1. `check_native_tools(names)` refuses a task that lists a native tool the agent does not have. It raises `ValueError` and names the first task and the missing tool.
+2. `check_handoff_tools(names, fix=)` refuses a task whose `handoffs` names a tool the agent has no handoff for. `fix` is the end of the message. Say how to add the tool.
+3. Both take `task=` to check one task. Without it, they check every task.
+4. The adapters call them when the agent is built. Call them yourself when you write your own host.
+
+## CallTasks
+
+The tasks of one call: the main agent's task tools, and every run they start.
+`UnmuteAgent` and `UnmuteFlows` build one per call from the [`AgentSpec`](/core/reference/agent-spec). Build one yourself only in your own host. Guide: [Your first task in code](/core/build/tasks/first-task#calltasks).
+
+<ParamField path="plan" type="TaskPlan" required>
+  The agent's checked tasks.
+</ParamField>
+<ParamField path="state" type="CallState" required>
+  The call state.
+</ParamField>
+<ParamField path="hooks" type="ToolHooks | None" default="None">
+  The call's hooks, like its `CallHooks`. They run around each tool a step calls, and hear each task event.
+</ParamField>
+<ParamField path="call_start" type="CallStartResults | None" default="None">
+  What the lookups that run at call start gave the main agent. Pass `call.results`.
+</ParamField>
+<ParamField path="language" type="str" default="en">
+  The call's language, a BCP-47 tag like `es-MX`. Confirm lines say dates and times in it.
+</ParamField>
+<ParamField path="timezone" type="str | None" default="None">
+  Where the business is, an IANA name like `Europe/Madrid`. Confirm lines then name a day from today, like "today, October 8". Without it they say the full date with its year. An unknown name raises `ValueError`.
+</ParamField>
+<ParamField path="gave_up_line" type="str" default="EMPTY_REPLY_GAVE_UP">
+  What a step says when the model's reply stays empty after every retry. Write it in the call's language. LiveKit says it. The constant is in `unmute_core.tasks`. Each adapter builds its own `CallTasks`, as `agent.tasks` on LiveKit and `flows.tasks` on Pipecat. So set `agent.tasks.gave_up_line` after you build the agent.
+</ParamField>
+<ParamField path="gave_up_after_tool_line" type="str" default="EMPTY_REPLY_GAVE_UP_AFTER_TOOL">
+  The same, when the last retry followed a step tool's result.
+</ParamField>
+
+`CallTasks.empty(state, tools=...)` gives the tasks of an agent
+that has none. Use it in your own host when it needs a stack and you have no tasks.
+
+## StepRun
+
+`StepRun` is what an adapter holds for the step that is running. Its values are
+read-only properties. Assigning to one raises `AttributeError`. Guide: [How a task step ends](/core/build/tasks/how-a-step-ends).
+
+<ParamField path="status" type="str">
+  How the step ended: the outcome's status, `went_back`, or empty text while it runs.
+</ParamField>
+<ParamField path="listens" type="bool">
+  The step opens by speaking `announce` and waiting, with no model request.
+</ParamField>
+<ParamField path="announce" type="str | None">
+  The line to say as it opens.
+</ParamField>
+<ParamField path="ends_call" type="bool">
+  The tool that just ran succeeded, and its effect ends the call.
+</ParamField>
+<ParamField path="receipt" type="str | None">
+  The spoken line the step ended on, from a closing tool's result.
+</ParamField>
+<ParamField path="reply" type="str | None">
+  The line code speaks for the tool call that just ran. It is a `replies` line, or a `confirm` line asked before the tool runs.
+</ParamField>
+<ParamField path="result" type="object">
+  The whole result of the tool call that just ran, for code.
+</ParamField>
+<ParamField path="refused_unheard" type="tuple[str, str] | None">
+  The step tool and result that the first refused finish answered with no words.
+</ParamField>
+<ParamField path="not_heard" type="str">
+  A tool's result the step finished on without telling the caller.
+</ParamField>
+<ParamField path="answer_refusal" type="bool">
+  Whether the model replies to the last refusal of `finish`. It is `False` when the reply that made the finish already spoke to the caller.
+</ParamField>
+<ParamField path="closing_result" type="Mapping[str, Any] | None">
+  What the closing tool that ended the step returned.
+</ParamField>

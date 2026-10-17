@@ -1,6 +1,7 @@
 package docsite
 
 import (
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -66,6 +67,26 @@ func TestEveryInternalLinkResolves(t *testing.T) {
 		t.Fatal("walked no pages, so this test would pass for the wrong reason")
 	}
 
+	// A redirect source resolves too, because Mintlify serves it. The Unmute
+	// Core pages link to a page scripts/sync_core_docs.sh holds back, and its
+	// redirect is what keeps those links working until the page ships.
+	raw, err := os.ReadFile(filepath.Join(siteRoot, "docs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Redirects []struct {
+			Source string `json:"source"`
+		} `json:"redirects"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	redirected := map[string]bool{}
+	for _, r := range config.Redirects {
+		redirected[strings.Trim(r.Source, "/")] = true
+	}
+
 	// A page's anchors are read once and reused, because a busy page is linked
 	// to from many others.
 	anchorsOf := map[string]map[string]bool{}
@@ -96,6 +117,9 @@ func TestEveryInternalLinkResolves(t *testing.T) {
 				target = self
 			}
 			checked++
+			if redirected[target] && fragment == "" {
+				continue
+			}
 			if !pages[target] {
 				t.Errorf("%s links to /%s, which is not a page", from, target)
 				continue
@@ -141,6 +165,9 @@ func readAnchors(t *testing.T, path string) map[string]bool {
 			continue
 		}
 		text := strings.ReplaceAll(match[1], "`", "")
+		// Mintlify turns a dot into a hyphen: "`state.call`" renders as
+		// #state-call, not #statecall.
+		text = strings.ReplaceAll(text, ".", " ")
 		text = punctuation.ReplaceAllString(text, "")
 		text = strings.ToLower(strings.TrimSpace(text))
 		found[strings.Join(strings.Fields(text), "-")] = true
