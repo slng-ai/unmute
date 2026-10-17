@@ -12,6 +12,7 @@ each call runs the same way:
 5. When the caller connects, the greeting plays and the call's longest length starts.
 
     uv run bot.py -t webrtc   # then open http://localhost:7860
+    uv run bot.py -t twilio   # a Twilio Media Streams phone call
 """
 
 import logging
@@ -24,7 +25,6 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMUpdateSettingsFrame
-from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -40,6 +40,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.workers.runner import WorkerRunner
 from pipecat_slng import SlngSTTService, SlngTTSService
@@ -49,7 +50,9 @@ from unmute_core.pipecat import (
     IdleNudgeObserver,
     ModelCallLLMService,
     TelemetryObserver,
+    TwilioLine,
     UnmuteFlows,
+    end_call_tool,
     greeting_frames,
     interruption,
     max_duration,
@@ -66,12 +69,14 @@ from unmute_core.turn import turn_window
 import spec
 
 load_dotenv()
+spec.start_knowledge()
 logger = logging.getLogger("bot")
 MODELS: dict[str, Any] = spec.SPEC["models"]
 WINDOW = turn_window(MODELS["turn"].get("pace", "balanced"), "pipecat")
 
 transport_params: dict[str, Callable[..., Any]] = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
 }
 """The transports ``uv run bot.py -t ...`` may pick."""
 
@@ -187,40 +192,6 @@ def build_pipeline(
         ),
     )
     llm = build_llm(first, state)
-
-    def tools_of(name: str) -> list[FunctionSchema]:
-        """Return the handoff tools one agent offers, as Pipecat tools."""
-        handoffs = spec.SPEC["agents"][name].get("handoffs", ())
-        return [handoff_tool(spec.HANDOFFS[handoff]) for handoff in handoffs]
-
-    def handoff_tool(handoff: spec.Handoff) -> FunctionSchema:
-        """Return one handoff as a Pipecat tool whose handler calls ``UnmuteFlows.hand_off``."""
-
-        async def handler(params: FunctionCallParams) -> None:
-            """Save what the handoff sets, then give the call to the next agent."""
-            if handoff.saves:
-                state.save(handoff.saves)
-            await flows.hand_off(
-                params,
-                spec.agent_spec(handoff.to),
-                native_tools=tools_of(handoff.to),
-                announce=handoff.announce,
-                context=handoff.context,
-                opens_with=handoff.opens_with,
-            )
-
-        return FunctionSchema(handoff.name, handoff.description, {}, [], handler=handler)
-
-    flows = UnmuteFlows(
-        spec.agent_spec(first),
-        llm=llm,
-        context=context,
-        aggregators=aggregators,
-        state=state,
-        telemetry=telemetry,
-        native_tools=tools_of(first),
-    )
-    flows.install()
     entry = spec.SPEC["agents"][first]
     listen, voice = MODELS["listen"], MODELS["speak"][entry["voice"]]
     key = required("SLNG_API_KEY")
@@ -250,19 +221,61 @@ def build_pipeline(
             aggregators.assistant(),
         ]
     )
-    observers: list[BaseObserver] = []
+    worker = PipelineWorker(
+        pipeline, params=PipelineParams(enable_metrics=True, enable_usage_metrics=True)
+    )
+    line = TwilioLine(
+        state.call.carrier_call_id,
+        account_sid=env_value("TWILIO_ACCOUNT_SID", str) or "",
+        auth_token=env_value("TWILIO_AUTH_TOKEN", str) or "",
+        worker=worker,
+        serializer=None,
+    )
+
+    def tools_of(name: str) -> list[FunctionSchema]:
+        """Return the handoff tools and the end-call tool one agent offers, as Pipecat tools."""
+        handoffs = spec.SPEC["agents"][name].get("handoffs", ())
+        tools = [handoff_tool(spec.HANDOFFS[handoff]) for handoff in handoffs]
+        if (ending := spec.SPEC["agents"][name].get("end_call")) is not None:
+            wording = "\n".join(part for part in (ending["description"], ending["instructions"]) if part)
+            tools.append(end_call_tool(wording, None, lambda: flows.reply_text))
+        return tools
+
+    def handoff_tool(handoff: spec.Handoff) -> FunctionSchema:
+        """Return one handoff as a Pipecat tool whose handler calls ``UnmuteFlows.hand_off``."""
+
+        async def handler(params: FunctionCallParams) -> None:
+            """Save what the handoff sets, then give the call to the next agent."""
+            if handoff.saves:
+                state.save(handoff.saves)
+            await flows.hand_off(
+                params,
+                spec.agent_spec(handoff.to, line),
+                native_tools=tools_of(handoff.to),
+                announce=handoff.announce,
+                context=handoff.context,
+                opens_with=handoff.opens_with,
+            )
+
+        return FunctionSchema(handoff.name, handoff.description, {}, [], handler=handler)
+
+    flows = UnmuteFlows(
+        spec.agent_spec(first, line),
+        llm=llm,
+        context=context,
+        aggregators=aggregators,
+        state=state,
+        telemetry=telemetry,
+        native_tools=tools_of(first),
+    )
+    flows.install()
     if telemetry is not None:
         binding = MODELS["think"][entry["model"]]
-        observers.append(
+        worker.add_observer(
             TelemetryObserver(
                 telemetry, model=binding["model"], provider=binding["provider"], flows=flows
             )
         )
-    worker = PipelineWorker(
-        pipeline,
-        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
-        observers=observers,
-    )
     if spec.IDLE is not None:
         worker.add_observer(IdleNudgeObserver(spec.IDLE, worker, llm=llm))
     return worker, flows

@@ -1,0 +1,8 @@
+{
+  "name": "A caller asks what a full head colour costs, answered from the salon guide",
+  "greeting": ["Sage and Stone"],
+  "turns": [
+    {"caller": "Hi, how much is a full head colour?", "expect": ["ninety euros"]},
+    {"caller": "Great, thanks. That's all, bye.", "max_requests": 1}
+  ]
+}

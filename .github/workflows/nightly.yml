@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [kestrel, wasla, nosh, faro, parcel-desk]
+        package: [kestrel, wasla, nosh, faro, parcel-desk, salon-concierge]
         framework: [livekit, pipecat]
     steps:
       - uses: actions/checkout@v4
@@ -36,6 +36,6 @@ jobs:
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           SLNG_API_KEY: ${{ secrets.SLNG_API_KEY }}
-          # parcel-desk's router sends requests to OpenAI with this key.
+          # parcel-desk's router answers with OpenAI, and the salon's knowledge embeds with it.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           FARO_DB: ":memory:"

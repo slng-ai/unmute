@@ -36,12 +36,14 @@ from livekit.agents import (
     function_tool,
     inference,
 )
+from livekit.agents.beta.tools import EndCallTool
 from livekit.agents.voice import room_io
 from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import google, silero, slng
 from unmute_core.call import CallStartError
 from unmute_core.livekit import (
     ModelCallLLM,
+    SipLine,
     UnmuteAgent,
     endpointing,
     greet,
@@ -172,22 +174,35 @@ def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession
     return session
 
 
-def unmute_agent(name: str, state: CallState, telemetry: Telemetry | None = None) -> UnmuteAgent:
-    """Return one agent as a LiveKit agent, with the handoff tools it offers.
+def end_call(name: str) -> list[EndCallTool]:
+    """Return LiveKit's end-call tool, with agent.yaml's wording, when the agent lists one.
+
+    The goodbye rides in the reply that calls the tool, so the call ends after one model
+    request. The session deletes the room as it closes, which hangs up a phone caller.
+    """
+    ending = spec.SPEC["agents"][name].get("end_call")
+    if ending is None:
+        return []
+    wording = "\n".join(part for part in (ending["description"], ending["instructions"]) if part)
+    return [EndCallTool(extra_description=wording, end_instructions=None, delete_room=False)]
+
+
+def unmute_agent(
+    name: str, state: CallState, line: SipLine, telemetry: Telemetry | None = None
+) -> UnmuteAgent:
+    """Return one agent as a LiveKit agent, with its handoff tools and its end-call tool.
 
     Only the first agent gets the telemetry: an agent the call is handed to records into
     the first one's spans.
     """
-    agent = spec.agent_spec(name)
+    agent = spec.agent_spec(name, line)
+    handoffs = [handoff_tool(spec.HANDOFFS[handoff], state, line) for handoff in agent.handoffs]
     return UnmuteAgent(
-        agent,
-        state=state,
-        telemetry=telemetry,
-        native_tools=[handoff_tool(spec.HANDOFFS[handoff], state) for handoff in agent.handoffs],
+        agent, state=state, telemetry=telemetry, native_tools=[*handoffs, *end_call(name)]
     )
 
 
-def handoff_tool(handoff: spec.Handoff, state: CallState) -> FunctionTool:
+def handoff_tool(handoff: spec.Handoff, state: CallState, line: SipLine) -> FunctionTool:
     """Return one handoff as a LiveKit function tool that calls ``UnmuteAgent.hand_off``."""
 
     async def hand_off(context: RunContext) -> object:
@@ -198,7 +213,7 @@ def handoff_tool(handoff: spec.Handoff, state: CallState) -> FunctionTool:
         if not isinstance(current, UnmuteAgent):
             raise TypeError("a handoff runs only from an UnmuteAgent")
         return await current.hand_off(
-            unmute_agent(handoff.to, state),
+            unmute_agent(handoff.to, state, line),
             announce=handoff.announce,
             context=handoff.context,
             opens_with=handoff.opens_with,
@@ -211,8 +226,9 @@ server = AgentServer()
 
 
 def prewarm(proc: JobProcess) -> None:
-    """Load the voice detector once per worker process, with the agent's turn pace."""
+    """Load the voice detector and the knowledge once per worker process."""
     proc.userdata["vad"] = silero.VAD.load(min_silence_duration=WINDOW.vad_silence)
+    spec.start_knowledge()
 
 
 server.setup_fnc = prewarm
@@ -247,7 +263,7 @@ async def entrypoint(ctx: JobContext) -> None:
         idle_nudges(session, spec.IDLE)
     with use_phone_region(lambda: call_phone_region(state.call)):
         await session.start(
-            agent=unmute_agent(first, state, telemetry),
+            agent=unmute_agent(first, state, SipLine(session), telemetry),
             room=ctx.room,
             room_options=room_io.RoomOptions(delete_room_on_close=True),
         )

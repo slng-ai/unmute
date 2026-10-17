@@ -1,0 +1,11 @@
+description: >-
+  Cancel the caller's booking: its booking_id, service, day and time exactly as
+  find_slots returned them. It first asks the caller to confirm the
+  cancellation, so never ask that yourself. Call it again with the same values
+  after their yes, and it cancels.
+
+local:
+  handler: tools/salon.py:cancel_appointment
+
+inject:
+  - customer_phone: "{{state.customer_phone}}"

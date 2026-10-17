@@ -1,0 +1,12 @@
+description: >-
+  Book a free time: the service, day and time exactly as find_slots returned
+  them. Call it as soon as the caller has picked a time. It first asks the
+  caller to confirm the booking, so never ask that yourself. Call it again with
+  the same values after their yes, and it books. Nothing is booked until it
+  runs and says so.
+
+local:
+  handler: tools/salon.py:book_appointment
+
+inject:
+  - customer_phone: "{{state.customer_phone}}"

@@ -9,6 +9,7 @@ again rather than this file.
 
 import importlib
 import json
+import logging
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -25,15 +26,18 @@ from unmute_core.settings import env_value
 from unmute_core.slng import RouterConfig, RouterModelCall
 from unmute_core.state import CallInfo, CallState
 from unmute_core.tasks import OpeningTool, TaskPlan, TasksSpec
-from unmute_core.tools import Assign, ToolRegistry, ToolReply, local_tool
+from unmute_core.telephony import PhoneLine, Transfer, transfer_tool
+from unmute_core.tools import Assign, ToolRegistry, ToolReply, ToolSpec, local_tool
 
 from state import State
 
 unmute_core.require("{{.CorePin}}")
 
-SPEC: dict[str, Any] = json.loads((Path(__file__).parent / "agent.json").read_text())
+HERE = Path(__file__).parent
+SPEC: dict[str, Any] = json.loads((HERE / "agent.json").read_text())
 AGENT_ID: str = SPEC["agent_id"]
 ENTRY: str = SPEC["entry"]
+logger = logging.getLogger("spec")
 PLACEHOLDER = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 
 
@@ -43,10 +47,60 @@ def function(ref: str) -> Callable[..., Any]:
     return getattr(importlib.import_module(file.removesuffix(".py").replace("/", ".")), name)
 
 
+def embedder(embed: Mapping[str, str]) -> Callable[[], Any]:
+    """Return what builds a knowledge base's embedder: the class agent.json names."""
+
+    def build() -> Any:
+        """Build the embedder once its package is imported."""
+        made = getattr(importlib.import_module(embed["module"]), embed["class"])
+        return made(**{embed["kwarg"]: embed["model"]})
+
+    return build
+
+
+def build_knowledge() -> dict[str, Any]:
+    """Return each knowledge base. ``start_knowledge`` reads and indexes them.
+
+    The library's knowledge needs its ``knowledge`` extra, which the project installs
+    only when agent.yaml declares a knowledge base, so it is imported only then.
+    """
+    if not SPEC.get("knowledge"):
+        return {}
+    from unmute_core.knowledge import KnowledgeBase
+
+    bases = {}
+    for name, base in SPEC["knowledge"].items():
+        embeds = base["mode"] != "keyword"
+        bases[name] = KnowledgeBase(
+            name,
+            HERE / base["documents"],
+            mode=base["mode"],
+            chunk_size=base["chunk_size"],
+            chunk_overlap=base["chunk_overlap"],
+            top_k=base["top_k"],
+            min_score=base["min_score"],
+            embed=embedder(base["embed"]) if embeds else None,
+            credential_env=(base["embed"]["credential_env"] or None) if embeds else None,
+        )
+    return bases
+
+
+KNOWLEDGE = build_knowledge()
+
+
+def start_knowledge() -> None:
+    """Read and index every knowledge base. Call it once per process, before a call."""
+    for base in KNOWLEDGE.values():
+        base.start()
+
+
 def build_tools() -> ToolRegistry:
     """Return every tool of the package, with what each result saves."""
     tools = []
     for tool in SPEC["tools"]:
+        if base := tool.get("knowledge"):
+            tools.append(KNOWLEDGE[base].tool(**tool["options"]))
+            continue
         options = dict(tool["options"])
         options["replies"] = [ToolReply(**reply) for reply in options.get("replies", ())]
         if precheck := tool.get("precheck"):
@@ -181,14 +235,47 @@ TIMEZONE: str | None = next(
 """Where the business is: the zone of the package's clock prefetch, or None."""
 
 
-def agent_spec(name: str) -> AgentSpec:
+def transfers(name: str, line: PhoneLine) -> list[ToolSpec]:
+    """Return one agent's transfers to a person, on this call's phone line.
+
+    On a call with no phone leg, like a browser call, the model reads that there is no
+    phone caller to transfer. A transfer whose number is not set is left out, with a
+    warning: a browser session needs no phone route to start.
+    """
+    built = []
+    for transfer in SPEC["agents"][name].get("transfers", ()):
+        rule = SPEC["transfers"][transfer]
+        destination = env_value(rule["destination_env"], str)
+        if not destination:
+            logger.warning("%s: set %s to offer it", transfer, rule["destination_env"])
+            continue
+        person = Transfer(
+            transfer,
+            destination,
+            description=rule["description"],
+            mode=rule["mode"],
+            briefing=rule.get("briefing", ""),
+            ring_timeout_s=rule.get("ring_timeout_s"),
+            on_unavailable=rule["on_unavailable"],
+        )
+        built.append(transfer_tool(person, line))
+    return built
+
+
+def agent_spec(name: str, line: PhoneLine | None = None) -> AgentSpec:
     """Return one agent's ``AgentSpec``: its prompt and its tasks, or its tools.
 
     Lines code speaks say dates in the language of the agent's voice, and name a day
-    from today on the clock prefetch's zone.
+    from today on the clock prefetch's zone. An agent with transfers gets them on
+    ``line``, so its tools are built for this call.
     """
     instructions, plan, tools = AGENTS[name]
     agent = SPEC["agents"][name]
+    if line is not None and (extra := transfers(name, line)):
+        tools = tools.with_tools(*extra)
+        if plan is not None:
+            tasks = TasksSpec.model_validate(agent["tasks"])
+            plan = TaskPlan(tasks, state=State, confirm=CONFIRM, tools=tools)
     common: dict[str, Any] = {
         "name": name,
         "handoffs": tuple(agent.get("handoffs", ())),

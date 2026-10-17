@@ -3295,7 +3295,7 @@ func livekitMethodBody(t *testing.T, agentpy, method string) string {
 // exactly this. That makes the private name load-bearing, so this test names it:
 // if upstream renames it, this fails here rather than in a live call.
 func TestLiveKitV1TaskDropsParentInFlightCall(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "salon-concierge-v1"))
 	if err != nil {
 		t.Fatal(err)
 	}

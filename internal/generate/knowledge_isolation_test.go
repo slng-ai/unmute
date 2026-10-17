@@ -14,7 +14,7 @@ import (
 // two-knowledge-base case this feature exists for.
 func salonAgent(t *testing.T) *ir.Agent {
 	t.Helper()
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "salon-concierge-v1"))
 	if err != nil {
 		t.Fatal(err)
 	}

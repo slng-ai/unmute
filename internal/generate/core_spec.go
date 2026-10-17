@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"slices"
@@ -58,6 +59,16 @@ func coreSpec(agent *ir.Agent) (map[string]any, error) {
 	if agent.EntryBy != nil {
 		spec["entry_by"] = agent.EntryBy
 	}
+	if agent.Tracing != nil && agent.Tracing.Provider != "langfuse" {
+		return nil, fmt.Errorf("tracing: version 2 traces to langfuse only so far, and this is %s", agent.Tracing.Provider)
+	}
+	if len(agent.Knowledge) > 0 {
+		knowledge, err := coreKnowledge(agent)
+		if err != nil {
+			return nil, err
+		}
+		spec["knowledge"] = knowledge
+	}
 	if conversation := agent.Conversation; conversation != nil {
 		if greeting := conversation.Greeting; greeting != nil {
 			built := map[string]any{"speaks_first": string(greeting.SpeaksFirst)}
@@ -90,6 +101,19 @@ func coreTools(agent *ir.Agent) ([]any, error) {
 	var out []any
 	for _, name := range sortedKeys(agent.Tools) {
 		tool := agent.Tools[name]
+		switch tool.Execution {
+		case ir.ToolBuiltin:
+			if tool.Builtin != "end_call" {
+				return nil, fmt.Errorf("tool %q: version 2 compiles the end_call builtin only so far, and this one is %s", name, tool.Builtin)
+			}
+			continue // the framework's own end-call tool, given to each agent that lists it
+		case ir.ToolKnowledge:
+			out = append(out, map[string]any{
+				"knowledge": tool.KnowledgeBase,
+				"options":   map[string]any{"name": name, "description": tool.Description},
+			})
+			continue
+		}
 		if tool.Execution != ir.ToolLocal {
 			return nil, fmt.Errorf("tool %q: version 2 compiles local tools only so far, and this one is %s", name, tool.Execution)
 		}
@@ -143,15 +167,22 @@ func coreTools(agent *ir.Agent) ([]any, error) {
 // it offers as one TasksSpec, and the handoffs it offers.
 func coreAgent(agent *ir.Agent, name string) (map[string]any, error) {
 	def := agent.Agents[name]
-	var own, handoffs []string
+	var own, handoffs, transfers []string
+	var endCall map[string]any
 	tasks, groups := []any{}, []any{}
 	steps := map[string]bool{}
 	for _, item := range def.Tools {
-		if _, ok := agent.Tools[item]; ok {
+		if tool, ok := agent.Tools[item]; ok {
+			if tool.Execution == ir.ToolBuiltin {
+				endCall = map[string]any{"name": item, "description": tool.Description, "instructions": tool.Instructions}
+				continue
+			}
 			own = append(own, item)
 			continue
 		}
 		switch control := agent.Controls[item].(type) {
+		case *ir.HumanTransfer:
+			transfers = append(transfers, item)
 		case *ir.AgentTransfer:
 			handoffs = append(handoffs, item)
 		case *ir.Delegate:
@@ -211,6 +242,12 @@ func coreAgent(agent *ir.Agent, name string) (map[string]any, error) {
 	if len(handoffs) > 0 {
 		out["handoffs"] = handoffs
 	}
+	if len(transfers) > 0 {
+		out["transfers"] = transfers
+	}
+	if endCall != nil {
+		out["end_call"] = endCall
+	}
 	if len(tasks) == 0 && len(groups) == 0 {
 		return out, nil
 	}
@@ -224,7 +261,7 @@ func coreAgent(agent *ir.Agent, name string) (map[string]any, error) {
 	}
 	slices.Sort(taskOnly)
 	out["tasks"] = map[string]any{
-		"version": 1, "mode": string(agent.Mode), "tasks": tasks, "groups": groups, "task_only_tools": taskOnly,
+		"version": 1, "mode": cmp.Or(string(agent.Mode), "status"), "tasks": tasks, "groups": groups, "task_only_tools": taskOnly,
 	}
 	return out, nil
 }
@@ -234,13 +271,20 @@ func coreAgent(agent *ir.Agent, name string) (map[string]any, error) {
 // gives it: see rewriteLines.
 func coreTask(agent *ir.Agent, name, when string, announce []string) (map[string]any, error) {
 	task := agent.Tasks[name]
-	tools := task.Tools
-	if tools == nil {
-		tools = []string{}
+	tools, handoffs := []string{}, []string{}
+	for _, item := range task.Tools {
+		if _, ok := agent.Controls[item].(*ir.AgentTransfer); ok {
+			handoffs = append(handoffs, item) // a handoff tool the step offers, as TaskSpec.handoffs
+			continue
+		}
+		tools = append(tools, item)
 	}
 	out := map[string]any{
 		"name": name, "instructions": task.Instructions, "tools": tools,
 		"history": string(task.Context.History), "assign": coreAssigns(task.Assign),
+	}
+	if len(handoffs) > 0 {
+		out["handoffs"] = handoffs
 	}
 	putString(out, "when", when)
 	putString(out, "opening", string(task.Opening))
@@ -638,4 +682,64 @@ func coreRouter(binding ir.Binding) (map[string]any, error) {
 		router["body"] = body
 	}
 	return router, nil
+}
+
+// coreKnowledge lowers each knowledge base to KnowledgeBase's arguments, and
+// the embedder spec.py imports to build its index: a module, a class and the
+// model it pins, from the same table version 1 reads.
+func coreKnowledge(agent *ir.Agent) (map[string]any, error) {
+	out := map[string]any{}
+	for _, name := range sortedKeys(agent.Knowledge) {
+		base := agent.Knowledge[name]
+		embed, ok := targetcap.LookupEmbeddingService(base.Embed)
+		if !ok {
+			return nil, fmt.Errorf("knowledge %q: no embedding service %q", name, base.Embed)
+		}
+		out[name] = map[string]any{
+			"documents":     "knowledge/" + name,
+			"mode":          string(base.Mode),
+			"chunk_size":    base.ChunkSize,
+			"chunk_overlap": base.ChunkOverlap,
+			"top_k":         base.TopK,
+			"min_score":     base.MinScore,
+			"embed": map[string]any{
+				"module": embed.PythonModule, "class": embed.PythonClass,
+				"kwarg": embed.ModelKwarg, "model": embed.Model, "credential_env": embed.CredentialEnv,
+			},
+		}
+	}
+	return out, nil
+}
+
+// coreTransfers lowers each escalation to core's Transfer: when the model
+// calls it, the variable that holds the number, and what happens when nobody
+// answers. The number stays in the environment, as version 1 keeps it.
+func coreTransfers(agent *ir.Agent, resolved ir.Target) (map[string]any, error) {
+	out := map[string]any{}
+	for _, name := range sortedKeys(agent.Controls) {
+		transfer, ok := agent.Controls[name].(*ir.HumanTransfer)
+		if !ok {
+			continue
+		}
+		env, ok := resolved.Destinations[transfer.Destination]
+		if !ok {
+			return nil, fmt.Errorf("escalation %q: destination %q is missing from target %s", name, transfer.Destination, resolved.Name)
+		}
+		built := map[string]any{
+			"description":     transfer.When,
+			"destination_env": env,
+			"mode":            string(transfer.Mode),
+			"on_unavailable":  string(transfer.OnUnavailable),
+		}
+		putString(built, "briefing", transfer.Briefing)
+		if transfer.RingTimeout != "" {
+			seconds, err := coreSeconds(transfer.RingTimeout)
+			if err != nil {
+				return nil, fmt.Errorf("escalation %q: ring_timeout: %w", name, err)
+			}
+			built["ring_timeout_s"] = seconds
+		}
+		out[name] = built
+	}
+	return out, nil
 }

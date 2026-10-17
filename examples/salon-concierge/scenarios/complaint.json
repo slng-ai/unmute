@@ -1,0 +1,13 @@
+{
+  "name": "A caller complains about a patchy colour, is handed to customer care, and the complaint is written down",
+  "greeting": ["Sage and Stone"],
+  "turns": [
+    {"caller": "Hi, my colour last week came out really patchy and I want to make a complaint.", "expect": ["I'm sorry to hear that. Let me take this down properly."]},
+    {"caller": "It was a full head colour last Tuesday. It's patchy at the back, and I'd like it redone, please."},
+    {"caller": "Yes, that's right."},
+    {"caller": "It's plus three four, six one one, two two two, three three three.", "expect": ["Is the best number to reach you"], "max_requests": 1},
+    {"caller": "Yes, that's right.", "expect": ["Let me get that written down."]},
+    {"caller": "No, that's everything. Thanks, bye.", "max_requests": 1}
+  ],
+  "state": {"customer_verified": "created"}
+}

@@ -158,7 +158,7 @@ func TestPipecatEmitsNoSpeechTimeoutUnlessAsked(t *testing.T) {
 // override, so a test that configures the resolved binding directly skips the
 // merge and cannot see this class of bug at all.
 func TestTurnFieldsSurviveAPerTargetOverride(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "salon-concierge-v1"))
 	if err != nil {
 		t.Fatal(err)
 	}
