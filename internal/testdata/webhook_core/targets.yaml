@@ -1,0 +1,16 @@
+# The same package compiles to both code targets.
+targets:
+  livekit:
+    provider: livekit
+    version: "1.8.8"
+    sdk_language: python
+    models:
+      # LiveKit runs its own turn model rather than Silero.
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+        pace: balanced
+
+  pipecat:
+    provider: pipecat
+    version: "1.12.0"

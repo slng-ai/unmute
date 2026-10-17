@@ -118,6 +118,14 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 	for _, binding := range resolved.Models.Reason {
 		needs = append(needs, slngBindingCredentialEnvs(binding)...)
 	}
+	for _, name := range sortedKeys(agent.Tools) {
+		if tool := agent.Tools[name]; tool.Execution == ir.ToolWebhook {
+			needs = append(needs, tool.URLEnv)
+			if tool.Auth != nil && tool.Auth.TokenEnv != "" {
+				needs = append(needs, tool.Auth.TokenEnv)
+			}
+		}
+	}
 	for _, name := range needs {
 		if !slices.Contains(env, name) {
 			env = append(env, name)
