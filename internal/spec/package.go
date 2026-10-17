@@ -74,7 +74,11 @@ type Package struct {
 	// State is what Pydantic says state.py declares, set by ReadState. Nil with
 	// a StateSource means nobody asked yet, which ir.Build refuses.
 	State *stateschema.Model `json:"-" yaml:"-"`
-	files map[string][]byte
+	// ToolTypes is what each version 2 local tool's handler declares, by tool
+	// name: its input from the signature and its output from the return type.
+	// Set by ReadState, like State.
+	ToolTypes map[string]stateschema.ToolTypes `json:"-" yaml:"-"`
+	files     map[string][]byte
 }
 
 // Location returns the first source line containing token in a package file.
@@ -132,9 +136,13 @@ type AgentFile struct {
 	// Declared here, above the models it governs, because it decides which of
 	// those sections are legal. See the Architecture type for why it is written
 	// rather than derived from whichever binding happens to be present.
-	Architecture Architecture  `json:"architecture,omitempty" yaml:"architecture,omitempty"`
-	EntryAgent   string        `json:"entry_agent" yaml:"entry_agent"`
-	Models       ModelSections `json:"models" yaml:"models"`
+	Architecture Architecture `json:"architecture,omitempty" yaml:"architecture,omitempty"`
+	// Mode is how a step hands back to its agent: `status` (the default) hands
+	// back a status and saves nothing on the way, `record` hands back what the
+	// caller confirmed per step. unmute-core's TasksSpec.mode.
+	Mode       string        `json:"mode,omitempty" yaml:"mode,omitempty" since:"2"`
+	EntryAgent string        `json:"entry_agent" yaml:"entry_agent"`
+	Models     ModelSections `json:"models" yaml:"models"`
 	// Listen/Turn select one entry of the matching models section by name.
 	// Optional when the section has at most one entry (the sole entry selects
 	// itself); required with 2+ entries (N15 palette).
@@ -420,6 +428,11 @@ type Prefetch struct {
 	Writes *bool  `json:"writes,omitempty" yaml:"writes,omitempty"`
 	Args   []Pair `json:"args,omitempty" yaml:"args,omitempty"`
 	Assign []Pair `json:"assign,omitempty" yaml:"assign,omitempty"`
+	// Background runs the entry beside the greeting rather than before it.
+	Background bool `json:"background,omitempty" yaml:"background,omitempty" since:"2"`
+	// NeedsConfirmed names State values the caller must have agreed to before
+	// the entry runs.
+	NeedsConfirmed []string `json:"needs_confirmed,omitempty" yaml:"needs_confirmed,omitempty" since:"2"`
 }
 
 // Secret declares one runtime environment value the package needs. The map key
@@ -477,6 +490,18 @@ type Task struct {
 	// the very start of the step, before anything else runs.
 	Announce Announce `json:"announce,omitempty" yaml:"announce,omitempty"`
 	Assign   []Pair   `json:"assign,omitempty" yaml:"assign,omitempty"`
+	// Replies are lines code speaks for a typed result of one of the step's
+	// tools, before that tool's own replies. Each names its tool.
+	Replies []Reply `json:"replies,omitempty" yaml:"replies,omitempty" since:"2"`
+	// OpensWith runs one tool in code as the step opens.
+	OpensWith *OpensWith `json:"opens_with,omitempty" yaml:"opens_with,omitempty" since:"2"`
+	// Inputs are what the step reads at the end of its prompt.
+	Inputs []TaskInput `json:"inputs,omitempty" yaml:"inputs,omitempty" since:"2"`
+	// Arguments are State values the agent passes when it starts the step.
+	Arguments []string `json:"arguments,omitempty" yaml:"arguments,omitempty" since:"2"`
+	// Via names step tools the agent may call too; a success moves the caller
+	// into the step.
+	Via []string `json:"via,omitempty" yaml:"via,omitempty" since:"2"`
 	// Finish names the tools this step ends on. When one of them returns a
 	// result meeting every `success:` pair, the step saves `assign:` from that
 	// result and ends, so the model is not asked to call `finish` for a decision
@@ -509,6 +534,37 @@ type TaskGroup struct {
 	Then         string     `json:"then" yaml:"then"`
 	ThenTarget   string     `json:"then_target,omitempty" yaml:"then_target,omitempty"`
 	Merge        string     `json:"merge,omitempty" yaml:"merge,omitempty"`
+	// Arguments are State values the agent passes when it starts the group.
+	Arguments []string `json:"arguments,omitempty" yaml:"arguments,omitempty" since:"2"`
+	// NonBlocking names steps whose failure is recorded and the group goes on.
+	NonBlocking []string `json:"non_blocking,omitempty" yaml:"non_blocking,omitempty" since:"2"`
+}
+
+// Reply is one line set code speaks for a typed tool result: every `when:`
+// field holds one of its values, and one `say:` line is spoken, rotating.
+// Tool is written on a step's reply and never on a tool's own.
+type Reply struct {
+	Tool string        `json:"tool,omitempty" yaml:"tool,omitempty"`
+	When []SuccessPair `json:"when,omitempty" yaml:"when,omitempty"`
+	Say  []string      `json:"say" yaml:"say"`
+}
+
+// OpensWith is a tool code runs as a step opens. Arguments map a tool
+// parameter to the State value it takes, as `- day: preferred_day`.
+type OpensWith struct {
+	Tool      string   `json:"tool" yaml:"tool"`
+	Arguments []Pair   `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+	Say       []string `json:"say,omitempty" yaml:"say,omitempty"`
+}
+
+// TaskInput is one thing a step reads at the end of its prompt. Exactly one
+// of the three keys: `memory:` a State value, `tool:` a prefetch entry's
+// result, `input:` a fixed text named by the key and written in `value:`.
+type TaskInput struct {
+	Memory string `json:"memory,omitempty" yaml:"memory,omitempty"`
+	Tool   string `json:"tool,omitempty" yaml:"tool,omitempty"`
+	Input  string `json:"input,omitempty" yaml:"input,omitempty"`
+	Value  string `json:"value,omitempty" yaml:"value,omitempty"`
 }
 
 type TaskContext struct {
@@ -628,6 +684,17 @@ type Tool struct {
 	// Legal on webhook and local only: an mcp server owns its own call shape,
 	// so there is nothing here to merge into (validate.go, SCHEMA N40).
 	Inject []Pair `json:"inject,omitempty" yaml:"inject,omitempty"`
+
+	// Assign saves result fields to State when the tool returns. Result only:
+	// a tool's own save never reads its input.
+	Assign []Pair `json:"assign,omitempty" yaml:"assign,omitempty" since:"2"`
+	// Replies are lines code speaks for a typed result.
+	Replies []Reply `json:"replies,omitempty" yaml:"replies,omitempty" since:"2"`
+	// Precheck names a Python function, as `file.py:function`, that returns an
+	// outcome or None before the tool runs.
+	Precheck string `json:"precheck,omitempty" yaml:"precheck,omitempty" since:"2"`
+	// Hidden names result fields the model never reads.
+	Hidden []string `json:"hidden,omitempty" yaml:"hidden,omitempty" since:"2"`
 
 	Webhook        *ToolWebhook   `json:"webhook,omitempty" yaml:"webhook,omitempty"`
 	Local          *ToolLocal     `json:"local,omitempty" yaml:"local,omitempty"`
@@ -827,6 +894,10 @@ type Conversation struct {
 type Greeting struct {
 	SpeaksFirst string `json:"speaks_first" yaml:"speaks_first"`
 	Text        string `json:"text,omitempty" yaml:"text,omitempty"`
+	// Instruction tells the model how to word a greeting with no text.
+	Instruction string `json:"instruction,omitempty" yaml:"instruction,omitempty" since:"2"`
+	// Interruptible false holds the caller's audio until the greeting played.
+	Interruptible *bool `json:"interruptible,omitempty" yaml:"interruptible,omitempty" since:"2"`
 }
 
 type Interruption struct {
@@ -843,6 +914,10 @@ type Interruption struct {
 type Inactivity struct {
 	NudgeAfter string `json:"nudge_after,omitempty" yaml:"nudge_after,omitempty"`
 	EndAfter   string `json:"end_after,omitempty" yaml:"end_after,omitempty"`
+	// NudgeText and EndText are the fixed lines spoken at nudge_after and
+	// before ending at end_after. Empty means the model words them.
+	NudgeText string `json:"nudge_text,omitempty" yaml:"nudge_text,omitempty" since:"2"`
+	EndText   string `json:"end_text,omitempty" yaml:"end_text,omitempty" since:"2"`
 }
 
 type Channel struct {

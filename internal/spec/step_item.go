@@ -21,6 +21,10 @@ import (
 type FinishEntry struct {
 	Tool    string        `json:"tool" yaml:"tool"`
 	Success []SuccessPair `json:"success" yaml:"success"`
+	// Confirm is read back by code before the tool runs; it runs on the yes.
+	Confirm []string `json:"confirm,omitempty" yaml:"confirm,omitempty" since:"2"`
+	// Say is spoken by code when the step ends on this tool.
+	Say []string `json:"say,omitempty" yaml:"say,omitempty" since:"2"`
 }
 
 // SuccessPair is one `field: value` or `field: [value, value]` item under

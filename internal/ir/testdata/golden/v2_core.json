@@ -1,0 +1,848 @@
+{
+  "version": 2,
+  "name": "v2-core",
+  "architecture": "cascade",
+  "entry_agent": "desk",
+  "mode": "record",
+  "models": {
+    "reasoning": {
+      "kind": "think",
+      "provider": "slng",
+      "model": "openai/gpt-4o-mini",
+      "placement": "api",
+      "agent_id": "v2-core-v1",
+      "upstream": {
+        "provider": "openai",
+        "key_env": "OPENAI_API_KEY"
+      },
+      "params": {
+        "reasoning_effort": "none",
+        "world_part": "eu-west"
+      }
+    },
+    "transcriber": {
+      "kind": "listen",
+      "provider": "deepgram",
+      "model": "nova-3",
+      "placement": "api"
+    },
+    "vad": {
+      "kind": "turn",
+      "provider": "local",
+      "model": "silero",
+      "placement": "local"
+    },
+    "voice": {
+      "kind": "speak",
+      "provider": "slng",
+      "model": "slng/deepgram/aura:2-en",
+      "voice": "aura-2-thalia-en",
+      "placement": "api",
+      "params": {
+        "world_part": "eu-north"
+      }
+    }
+  },
+  "listen": "transcriber",
+  "turn": "vad",
+  "state": {
+    "fields": [
+      {
+        "name": "caller_name",
+        "type": {
+          "kind": "string"
+        },
+        "default": ""
+      },
+      {
+        "name": "caller_phone",
+        "type": {
+          "kind": "string"
+        },
+        "default": ""
+      },
+      {
+        "name": "account_id",
+        "type": {
+          "kind": "string"
+        },
+        "default": ""
+      },
+      {
+        "name": "reason",
+        "type": {
+          "kind": "string"
+        },
+        "default": ""
+      },
+      {
+        "name": "preferred_day",
+        "type": {
+          "kind": "string",
+          "nullable": true,
+          "format": "date"
+        },
+        "default": null
+      },
+      {
+        "name": "offered_slots",
+        "type": {
+          "kind": "array",
+          "items": {
+            "kind": "string"
+          }
+        },
+        "default": []
+      },
+      {
+        "name": "booking",
+        "type": {
+          "kind": "object",
+          "nullable": true,
+          "model": "Booking",
+          "fields": [
+            {
+              "name": "service",
+              "type": {
+                "kind": "string",
+                "enum": [
+                  "cut",
+                  "colour"
+                ]
+              },
+              "required": true
+            },
+            {
+              "name": "day",
+              "type": {
+                "kind": "string",
+                "format": "date"
+              },
+              "required": true
+            },
+            {
+              "name": "time",
+              "type": {
+                "kind": "string",
+                "format": "time"
+              },
+              "required": true
+            }
+          ]
+        },
+        "default": null
+      },
+      {
+        "name": "appointment",
+        "type": {
+          "kind": "object",
+          "nullable": true,
+          "model": "Appointment",
+          "fields": [
+            {
+              "name": "reference",
+              "type": {
+                "kind": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "spoken",
+              "description": "The appointment as the agent says it aloud.",
+              "type": {
+                "kind": "string"
+              },
+              "required": true
+            }
+          ]
+        },
+        "default": null
+      }
+    ],
+    "digest": "c02d7143110ba4a18298537c48563819117ec7a84b52d66a2635f6cc08b51e26"
+  },
+  "variable_order": [
+    "caller_name",
+    "caller_phone",
+    "account_id",
+    "reason",
+    "preferred_day",
+    "offered_slots",
+    "booking",
+    "appointment"
+  ],
+  "variables": {
+    "account_id": {
+      "type": "string",
+      "schema": {
+        "kind": "string"
+      },
+      "default": "",
+      "dependencies": [
+        "caller_phone"
+      ]
+    },
+    "appointment": {
+      "type": "string",
+      "schema": {
+        "kind": "object",
+        "nullable": true,
+        "model": "Appointment",
+        "fields": [
+          {
+            "name": "reference",
+            "type": {
+              "kind": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "spoken",
+            "description": "The appointment as the agent says it aloud.",
+            "type": {
+              "kind": "string"
+            },
+            "required": true
+          }
+        ]
+      }
+    },
+    "booking": {
+      "type": "string",
+      "schema": {
+        "kind": "object",
+        "nullable": true,
+        "model": "Booking",
+        "fields": [
+          {
+            "name": "service",
+            "type": {
+              "kind": "string",
+              "enum": [
+                "cut",
+                "colour"
+              ]
+            },
+            "required": true
+          },
+          {
+            "name": "day",
+            "type": {
+              "kind": "string",
+              "format": "date"
+            },
+            "required": true
+          },
+          {
+            "name": "time",
+            "type": {
+              "kind": "string",
+              "format": "time"
+            },
+            "required": true
+          }
+        ]
+      }
+    },
+    "caller_name": {
+      "type": "string",
+      "schema": {
+        "kind": "string"
+      },
+      "default": "",
+      "source": "call_start",
+      "call_start": "required"
+    },
+    "caller_phone": {
+      "type": "string",
+      "schema": {
+        "kind": "string"
+      },
+      "default": "",
+      "source": "call_start",
+      "call_start": "optional"
+    },
+    "offered_slots": {
+      "type": "string",
+      "schema": {
+        "kind": "array",
+        "items": {
+          "kind": "string"
+        }
+      },
+      "default": []
+    },
+    "preferred_day": {
+      "type": "string",
+      "schema": {
+        "kind": "string",
+        "nullable": true,
+        "format": "date"
+      }
+    },
+    "reason": {
+      "type": "string",
+      "schema": {
+        "kind": "string"
+      },
+      "default": ""
+    }
+  },
+  "prefetch": [
+    {
+      "name": "account",
+      "tool": "lookup_account",
+      "assign": [
+        {
+          "key": "account_id",
+          "value": "result.account_id"
+        }
+      ],
+      "background": true,
+      "needs_confirmed": [
+        "caller_phone"
+      ],
+      "inputs": [
+        "caller_phone"
+      ]
+    }
+  ],
+  "secrets": [
+    "DEEPGRAM_API_KEY",
+    "OPENAI_API_KEY",
+    "SLNG_API_KEY"
+  ],
+  "agents": {
+    "desk": {
+      "instructions": "# Salon desk\n\nYou answer the phone for a small salon. Book appointments and help new callers check in.\n",
+      "model": "reasoning",
+      "voice": "voice",
+      "tools": [
+        "manage_booking",
+        "check_in"
+      ]
+    }
+  },
+  "tasks": {
+    "manage_booking": {
+      "assign": [
+        {
+          "var": "booking",
+          "field": "booking",
+          "from_input": true
+        },
+        {
+          "var": "appointment",
+          "field": "appointment"
+        }
+      ],
+      "instructions": "# Book an appointment\n\nFind a free time on the day the caller wants, then save the booking.\n",
+      "tools": [
+        "find_slots",
+        "save_booking"
+      ],
+      "result": {
+        "appointment": {
+          "var": "appointment",
+          "required": true,
+          "type": {
+            "kind": "object",
+            "nullable": true,
+            "model": "Appointment",
+            "fields": [
+              {
+                "name": "reference",
+                "type": {
+                  "kind": "string"
+                },
+                "required": true
+              },
+              {
+                "name": "spoken",
+                "description": "The appointment as the agent says it aloud.",
+                "type": {
+                  "kind": "string"
+                },
+                "required": true
+              }
+            ]
+          }
+        }
+      },
+      "context": {
+        "history": "messages"
+      },
+      "finish": [
+        {
+          "tool": "save_booking",
+          "success": {
+            "status": [
+              "booked"
+            ]
+          },
+          "confirm": [
+            "Shall I book your {{booking__service}} on {{booking__day}} at {{booking__time}}?"
+          ],
+          "say": [
+            "You're all set for {{appointment__spoken}}."
+          ]
+        }
+      ],
+      "opening": "generate",
+      "replies": [
+        {
+          "tool": "save_booking",
+          "when": {
+            "status": [
+              "slot_taken"
+            ]
+          },
+          "say": [
+            "That time has just gone. Shall I try another?"
+          ]
+        }
+      ],
+      "opens_with": {
+        "tool": "find_slots",
+        "arguments": {
+          "day": "preferred_day"
+        },
+        "say": [
+          "I have {{offered_slots}} free. Which suits you?"
+        ]
+      },
+      "inputs": [
+        {
+          "kind": "memory",
+          "name": "caller_name"
+        },
+        {
+          "kind": "tool",
+          "name": "account"
+        },
+        {
+          "kind": "input",
+          "name": "policy",
+          "value": "Bookings can be moved up to a day before."
+        }
+      ],
+      "arguments": [
+        "preferred_day"
+      ],
+      "via": [
+        "find_slots"
+      ]
+    },
+    "note_reason": {
+      "assign": [
+        {
+          "var": "reason",
+          "field": "reason"
+        }
+      ],
+      "instructions": "# Note why they called\n\nAsk what brings the caller to the salon and record it.\n",
+      "result": {
+        "reason": {
+          "var": "reason",
+          "required": true,
+          "type": {
+            "kind": "string"
+          }
+        }
+      },
+      "context": {
+        "history": "messages"
+      },
+      "opening": "generate"
+    },
+    "take_name": {
+      "assign": [
+        {
+          "var": "caller_name",
+          "field": "caller_name"
+        }
+      ],
+      "instructions": "# Take the caller's name\n\nAsk for the caller's name and record it.\n",
+      "result": {
+        "caller_name": {
+          "var": "caller_name",
+          "required": true,
+          "type": {
+            "kind": "string"
+          }
+        }
+      },
+      "context": {
+        "history": "messages"
+      },
+      "opening": "generate"
+    }
+  },
+  "task_groups": {
+    "check_in": {
+      "steps": [
+        {
+          "task": "take_name"
+        },
+        {
+          "task": "note_reason"
+        }
+      ],
+      "context_scope": "shared",
+      "then": "end",
+      "merge": "results",
+      "arguments": [
+        "caller_phone"
+      ],
+      "non_blocking": [
+        "note_reason"
+      ]
+    }
+  },
+  "controls": {
+    "check_in": {
+      "kind": "delegate",
+      "when": "The caller is new to the salon.",
+      "group": "check_in"
+    },
+    "manage_booking": {
+      "kind": "delegate",
+      "when": "The caller wants to book an appointment.",
+      "task": "manage_booking"
+    }
+  },
+  "tools": {
+    "find_slots": {
+      "description": "Find free times for a service on one day.",
+      "input": {
+        "properties": {
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "service": {
+            "default": "cut",
+            "enum": [
+              "cut",
+              "colour"
+            ],
+            "title": "Service",
+            "type": "string"
+          }
+        },
+        "required": [
+          "day"
+        ],
+        "title": "find_slots_arguments",
+        "type": "object"
+      },
+      "output": {
+        "description": "The free times on one day.",
+        "properties": {
+          "read_back": {
+            "default": "",
+            "title": "Read Back",
+            "type": "string"
+          },
+          "slots": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Slots",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "free",
+              "none_free",
+              "closed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "Slots",
+        "type": "object"
+      },
+      "execution": "local",
+      "handler": "tools/salon.py",
+      "handler_function": "find_slots",
+      "assign": [
+        {
+          "var": "offered_slots",
+          "field": "slots"
+        }
+      ],
+      "replies": [
+        {
+          "when": {
+            "status": [
+              "none_free",
+              "closed"
+            ]
+          },
+          "say": [
+            "Nothing is free on {{preferred_day}}. Would another day work?",
+            "That day is full, I'm afraid. Shall I try another?"
+          ]
+        }
+      ],
+      "precheck": "tools/salon.py:check_day",
+      "hidden": [
+        "read_back"
+      ],
+      "interruption": "provider_default",
+      "effect": "returns_data"
+    },
+    "lookup_account": {
+      "description": "Find the caller's account by their number.",
+      "input": {
+        "properties": {},
+        "required": [],
+        "title": "lookup_account_arguments",
+        "type": "object"
+      },
+      "output": {
+        "description": "The caller's account.",
+        "properties": {
+          "account_id": {
+            "title": "Account Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "account_id"
+        ],
+        "title": "Account",
+        "type": "object"
+      },
+      "execution": "local",
+      "handler": "tools/salon.py",
+      "handler_function": "lookup_account",
+      "inject": {
+        "caller_phone": "{{caller_phone}}"
+      },
+      "interruption": "provider_default",
+      "effect": "returns_data"
+    },
+    "save_booking": {
+      "description": "Save the booking the caller agreed to.",
+      "input": {
+        "$defs": {
+          "Booking": {
+            "description": "What the caller asked to book, read back before it is saved.",
+            "properties": {
+              "day": {
+                "format": "date",
+                "title": "Day",
+                "type": "string"
+              },
+              "service": {
+                "enum": [
+                  "cut",
+                  "colour"
+                ],
+                "title": "Service",
+                "type": "string"
+              },
+              "time": {
+                "format": "time",
+                "title": "Time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "service",
+              "day",
+              "time"
+            ],
+            "title": "Booking",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "booking": {
+            "$ref": "#/$defs/Booking"
+          }
+        },
+        "required": [
+          "booking"
+        ],
+        "title": "save_booking_arguments",
+        "type": "object"
+      },
+      "output": {
+        "$defs": {
+          "Appointment": {
+            "description": "A saved appointment.",
+            "properties": {
+              "reference": {
+                "title": "Reference",
+                "type": "string"
+              },
+              "spoken": {
+                "description": "The appointment as the agent says it aloud.",
+                "title": "Spoken",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reference",
+              "spoken"
+            ],
+            "title": "Appointment",
+            "type": "object"
+          }
+        },
+        "description": "The outcome of saving a booking.",
+        "properties": {
+          "appointment": {
+            "$ref": "#/$defs/Appointment"
+          },
+          "status": {
+            "enum": [
+              "booked",
+              "slot_taken"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "appointment"
+        ],
+        "title": "Saved",
+        "type": "object"
+      },
+      "execution": "local",
+      "handler": "tools/salon.py",
+      "handler_function": "save_booking",
+      "inject": {
+        "customer_phone": "{{caller_phone}}"
+      },
+      "interruption": "provider_default",
+      "effect": "returns_data"
+    }
+  },
+  "conversation": {
+    "greeting": {
+      "speaks_first": "agent",
+      "text": "Hi {{caller_name}}, this is the salon. How can I help?",
+      "instruction": "Greet the caller by name and ask how you can help.",
+      "interruptible": false
+    },
+    "inactivity": {
+      "nudge_after": "15s",
+      "end_after": "45s",
+      "nudge_text": "Are you still there?",
+      "end_text": "I'll let you go now. Call back any time."
+    }
+  },
+  "channels": {
+    "web": {
+      "kind": "realtime_audio"
+    }
+  },
+  "capacity": {
+    "peak_sessions": 5,
+    "max_sessions": 10,
+    "avg_session_duration": "5m"
+  },
+  "targets": {
+    "livekit": {
+      "name": "livekit",
+      "provider": "livekit",
+      "version": "1.8.1",
+      "sdk_language": "python",
+      "models": {
+        "listen": {
+          "provider": "deepgram",
+          "model": "nova-3",
+          "placement": "api"
+        },
+        "turn": {
+          "provider": "livekit",
+          "model": "turn-detector-mini",
+          "placement": "api"
+        },
+        "speak": {
+          "voice": {
+            "provider": "slng",
+            "model": "slng/deepgram/aura:2-en",
+            "voice": "aura-2-thalia-en",
+            "placement": "api",
+            "params": {
+              "world_part": "eu-north"
+            }
+          }
+        },
+        "reason": {
+          "reasoning": {
+            "provider": "slng",
+            "model": "openai/gpt-4o-mini",
+            "placement": "api",
+            "agent_id": "v2-core-v1",
+            "upstream": {
+              "provider": "openai",
+              "key_env": "OPENAI_API_KEY"
+            },
+            "params": {
+              "reasoning_effort": "none",
+              "world_part": "eu-west"
+            }
+          }
+        }
+      }
+    },
+    "pipecat": {
+      "name": "pipecat",
+      "provider": "pipecat",
+      "version": "1.10.0",
+      "models": {
+        "listen": {
+          "provider": "deepgram",
+          "model": "nova-3",
+          "placement": "api"
+        },
+        "turn": {
+          "provider": "local",
+          "model": "silero",
+          "placement": "local"
+        },
+        "speak": {
+          "voice": {
+            "provider": "slng",
+            "model": "slng/deepgram/aura:2-en",
+            "voice": "aura-2-thalia-en",
+            "placement": "api",
+            "params": {
+              "world_part": "eu-north"
+            }
+          }
+        },
+        "reason": {
+          "reasoning": {
+            "provider": "slng",
+            "model": "openai/gpt-4o-mini",
+            "placement": "api",
+            "agent_id": "v2-core-v1",
+            "upstream": {
+              "provider": "openai",
+              "key_env": "OPENAI_API_KEY"
+            },
+            "params": {
+              "reasoning_effort": "none",
+              "world_part": "eu-west"
+            }
+          }
+        }
+      }
+    }
+  }
+}

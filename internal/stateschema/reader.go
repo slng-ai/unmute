@@ -31,6 +31,9 @@ var readScript string
 // Reader turns a package's state.py into a Model.
 type Reader interface {
 	Read(ctx context.Context, dir string, source []byte) (*Model, error)
+	// ReadTools reads each local tool's handler types. state is state.py's
+	// bytes, nil when the package has none.
+	ReadTools(ctx context.Context, dir string, state []byte, tools []ToolRef) (map[string]ToolTypes, error)
 }
 
 // UV reads state.py by importing it under the pinned Pydantic, through uv.

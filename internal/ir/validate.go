@@ -248,8 +248,8 @@ func resolvedHasLocal(resolved Target) bool {
 // property of the package, not of the target that compiles it.
 func validateStructure(agent *Agent) (errors, warnings []string) {
 	var schemas schemaReport
-	if agent.Version != 1 {
-		errors = add(errors, "version must be 1")
+	if agent.Version != 1 && agent.Version != packagespec.Version2 {
+		errors = add(errors, "version must be 1 or 2")
 	}
 	for _, name := range sortedKeys(agent.Models) {
 		m := agent.Models[name]

@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -20,7 +21,7 @@ func TestVariablesDecodeAsAnOrderedList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0] != (Variable{Name: "caller_phone", Source: "from_number", Confirm: "verify"}) || got[1].Name != "today" {
+	if len(got) != 2 || !reflect.DeepEqual(got[0], Variable{Name: "caller_phone", Source: "from_number", Confirm: "verify"}) || got[1].Name != "today" {
 		t.Fatalf("variables = %+v", got)
 	}
 	if v, ok := got.Named("caller_phone"); !ok || v.Confirm != "verify" {
