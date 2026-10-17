@@ -836,6 +836,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	}
 	validateVaultTokens(agent, provider, row)
 	prefetchSkipWarnings(agent, resolved, row)
+	row.Warnings = add(row.Warnings, projectIDUnsentWarning(agent, resolved, provider))
 	if provider == targetcap.Slng {
 		validateSlngTarget(agent, resolved, row)
 	}
@@ -1618,6 +1619,23 @@ func validateSlngRouter(agent *Agent, resolved Target, row *TargetValidation) {
 				resolved.Provider, ProviderSlngRouter, strings.Join(slngRouterTargets(), " and ")))
 		}
 	}
+}
+
+// projectIDUnsentWarning names a project_id this target never sends. Only
+// Context Router requests carry it, and the hosted slng target emits none, so
+// without this the author would believe traffic is billed to a project it is not.
+func projectIDUnsentWarning(agent *Agent, resolved Target, provider targetcap.Provider) string {
+	if agent.ProjectID == "" {
+		return ""
+	}
+	if provider != targetcap.Slng {
+		for _, binding := range resolved.Models.Reason {
+			if binding.Router() {
+				return ""
+			}
+		}
+	}
+	return fmt.Sprintf("project_id is not sent on target %s: only SLNG Context Router think requests carry %s, so this target's traffic is billed to the API key's own project", resolved.Name, targetcap.SlngProjectIDHeader)
 }
 
 // slngOneAgentIDPerPackage holds FR-010, the rule with the worst silent cost. A

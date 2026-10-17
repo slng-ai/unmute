@@ -59,7 +59,7 @@ func ValidateSlngProjectID(id string) error {
 	if id == "" || slngProjectID.MatchString(id) {
 		return nil
 	}
-	return fmt.Errorf("project_id %q must be a project UUID like 123e4567-e89b-12d3-a456-426614174000: the value becomes the %s header value", id, SlngProjectIDHeader)
+	return fmt.Errorf("project_id %q must be a project UUID in its hyphenated form, like 123e4567-e89b-12d3-a456-426614174000: the value becomes the %s header value", id, SlngProjectIDHeader)
 }
 
 // The two per-request extensions a router think request carries, named the way

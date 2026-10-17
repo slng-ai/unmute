@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
@@ -24,6 +25,15 @@ func TestSlngRouterSendsProjectIDOnEveryHeaderDict(t *testing.T) {
 			t.Errorf("%s: a package with no project_id sends %s", tc.provider, target.SlngProjectIDHeader)
 		}
 		agent.ProjectID = testProjectID
+		report, err := ir.Validate(agent, []ir.Target{targetByProvider(t, agent, tc.provider)}, target.Default())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range report.PerTarget {
+			if strings.Contains(strings.Join(row.Warnings, "\n"), "project_id is not sent") {
+				t.Errorf("%s: a router target that sends the project warns it does not", tc.provider)
+			}
+		}
 		_, with := emitAgentSource(t, agent, tc.provider, tc.module)
 		sessions := strings.Count(with, `"`+target.SlngSessionIDHeader+`":`)
 		if got := strings.Count(with, entry); sessions == 0 || got != sessions {

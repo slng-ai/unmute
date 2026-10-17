@@ -272,11 +272,13 @@ project_id: 123e4567-e89b-12d3-a456-426614174000
 Copy the id from the project in the SLNG dashboard. Every request the generated
 agent sends to the SLNG Context Router carries it as the `X-Slng-Project-Id`
 header, next to `X-Slng-Agent-Id` and `X-Slng-Session-Id`. Without it, no
-project header is sent and SLNG uses the project the API key belongs to. An
-organisation-level key belongs to no project, so a package that uses one needs
-`project_id`.
+project header is sent and SLNG uses the project the API key belongs to.
 
-Anything that is not a UUID is refused when you validate or compile.
+Only Context Router requests carry it so far. Speech to text and text to speech
+requests do not send it yet, and the hosted `slng` target does not send it at
+all. Validate warns on a target that would not send it.
+
+Anything that is not a hyphenated UUID is refused when you validate or compile.
 
 ## `models`
 

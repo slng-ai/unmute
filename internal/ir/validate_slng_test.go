@@ -942,3 +942,14 @@ func TestProjectIDMustBeAUUID(t *testing.T) {
 		}
 	}
 }
+
+// A project_id the target never sends is a warning, not silence: the hosted
+// target sends no router request, so its traffic stays on the key's project.
+func TestProjectIDUnsentOnSlngTargetWarns(t *testing.T) {
+	agent := slngAgent(t)
+	agent.ProjectID = "123e4567-e89b-12d3-a456-426614174000"
+	row := validateSlng(t, agent)
+	if !strings.Contains(strings.Join(row.Warnings, "\n"), "project_id is not sent on target") {
+		t.Errorf("no warning for an unsent project_id; warnings=%v", row.Warnings)
+	}
+}
