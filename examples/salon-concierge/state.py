@@ -1,19 +1,10 @@
 """The call state of salon-concierge: every value its agents and tasks share."""
 
 from datetime import date, time
-from typing import Annotated, Literal
+from typing import Literal
 
-import phonenumbers
-from pydantic import BaseModel, Field, StringConstraints
-from pydantic_extra_types.phone_numbers import PhoneNumberValidator
-
-# A phone number in E.164, as +34600111222. PhoneNumber alone saves the
-# RFC 3966 form ("tel:+34-600-111-222"), which no prompt or tool expects.
-Phone = Annotated[
-    str | phonenumbers.PhoneNumber, PhoneNumberValidator(number_format="E164")
-]
-# An identifier: letters and digits, then dot, dash, underscore or colon.
-Id = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")]
+from pydantic import BaseModel, Field
+from unmute_core.state import Id, Phone
 
 
 class Appointment(BaseModel):

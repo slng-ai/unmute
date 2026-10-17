@@ -1,0 +1,13 @@
+{
+  "name": "A caller with no caller ID books a haircut on Tuesday morning",
+  "greeting": ["Sage and Stone"],
+  "turns": [
+    {"caller": "Hi, I'd like to book a haircut on Tuesday morning."},
+    {"caller": "It's plus three four, six zero zero, one one one, two two two."},
+    {"caller": "Yes, that's right."},
+    {"caller": "Nine o'clock, please."},
+    {"caller": "Yes, please book it."},
+    {"caller": "No, that's all. Thanks, bye."}
+  ],
+  "state": {"appointment.action": "book", "appointment.service": "haircut", "customer_verified": "created"}
+}

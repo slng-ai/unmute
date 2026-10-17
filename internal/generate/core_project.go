@@ -102,6 +102,9 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 	handlers := map[string]string{}
 	for _, name := range sortedKeys(agent.Tools) {
 		tool := agent.Tools[name]
+		if tool.Execution != ir.ToolLocal {
+			continue // a knowledge or builtin tool has no handler of its own
+		}
 		handlers[tool.Handler] = tool.HandlerSource
 		if file, _, _ := strings.Cut(tool.Precheck, ":"); file != "" && file != tool.Handler {
 			return nil, fmt.Errorf("tool %q: its precheck is in %s and its handler in %s; keep both in one file", name, file, tool.Handler)

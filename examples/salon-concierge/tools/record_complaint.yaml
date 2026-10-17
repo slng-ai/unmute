@@ -2,51 +2,11 @@ description: >-
   Record the verified customer's complaint after enough facts are known. This
   does not replace a requested manager transfer.
 
-input:
-  type: object
-  properties:
-    summary:
-      type: string
-      description: Short factual summary of the complaint
-    requested_resolution:
-      type: string
-      description: What the customer wants the salon to do, or an empty string
-  required:
-    - summary
-    - requested_resolution
-
 inject:
   - customer_phone: "{{state.customer_phone}}"
 
-output:
-  type: object
-  properties:
-    complaint_id:
-      type: string
-    status:
-      type: string
-      enum:
-        - recorded
-        - invalid
-        - customer_not_found
-    complaint:
-      type: object
-      description: >-
-        The saved complaint, present and complete on success and absent
-        otherwise. The step saves this without asking the model for it.
-      properties:
-        complaint_id:
-          type: string
-        summary:
-          type: string
-        requested_resolution:
-          type: string
-  required:
-    - complaint_id
-    - status
-
 local:
-  handler: tools/salon.py
+  handler: tools/salon.py:record_complaint
 
 interruption: provider_default
 effect: returns_data

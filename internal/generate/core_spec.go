@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"slices"
@@ -260,7 +261,7 @@ func coreAgent(agent *ir.Agent, name string) (map[string]any, error) {
 	}
 	slices.Sort(taskOnly)
 	out["tasks"] = map[string]any{
-		"version": 1, "mode": string(agent.Mode), "tasks": tasks, "groups": groups, "task_only_tools": taskOnly,
+		"version": 1, "mode": cmp.Or(string(agent.Mode), "status"), "tasks": tasks, "groups": groups, "task_only_tools": taskOnly,
 	}
 	return out, nil
 }
@@ -270,13 +271,20 @@ func coreAgent(agent *ir.Agent, name string) (map[string]any, error) {
 // gives it: see rewriteLines.
 func coreTask(agent *ir.Agent, name, when string, announce []string) (map[string]any, error) {
 	task := agent.Tasks[name]
-	tools := task.Tools
-	if tools == nil {
-		tools = []string{}
+	tools, handoffs := []string{}, []string{}
+	for _, item := range task.Tools {
+		if _, ok := agent.Controls[item].(*ir.AgentTransfer); ok {
+			handoffs = append(handoffs, item) // a handoff tool the step offers, as TaskSpec.handoffs
+			continue
+		}
+		tools = append(tools, item)
 	}
 	out := map[string]any{
 		"name": name, "instructions": task.Instructions, "tools": tools,
 		"history": string(task.Context.History), "assign": coreAssigns(task.Assign),
+	}
+	if len(handoffs) > 0 {
+		out["handoffs"] = handoffs
 	}
 	putString(out, "when", when)
 	putString(out, "opening", string(task.Opening))
