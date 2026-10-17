@@ -15,6 +15,7 @@ import (
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	"github.com/slng-ai/unmute/internal/target"
 )
 
@@ -37,6 +38,9 @@ func smokeDevArtifact(t *testing.T, targetName string) (composeFile, outDir stri
 	t.Helper()
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pkg.ReadState(t.Context(), stateschema.RecordedInRepo()); err != nil {
 		t.Fatal(err)
 	}
 	agent, err := ir.Build(pkg)

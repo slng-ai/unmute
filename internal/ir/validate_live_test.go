@@ -261,7 +261,7 @@ func TestValidateLiveIsRefusedOnSlngAlone(t *testing.T) {
 		tgt := targetFor(agent, ProviderPipecat)
 		tgt.Provider, tgt.Name = tc.provider, string(tc.provider)
 		if tc.provider == ProviderLiveKit {
-			tgt.Version = "1.8.1"
+			tgt.Version = "1.8.7"
 		} else {
 			tgt.Version = ""
 		}

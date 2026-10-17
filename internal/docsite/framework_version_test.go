@@ -14,7 +14,7 @@ import (
 // A framework version is written in two different moods, and only one of them
 // can rot.
 //
-// A PIN is a value a reader copies: `version: "1.10.0"` in a targets.yaml
+// A PIN is a value a reader copies: `version: "1.12.0"` in a targets.yaml
 // sample, or `pipecat-ai[...]==1.10.0` in a dependency line. Copy a stale one
 // and the compiler refuses the package, and the reader cannot tell a stale page
 // from a broken install.

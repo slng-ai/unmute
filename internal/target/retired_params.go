@@ -22,9 +22,8 @@ type RetiredParam struct {
 	// keyed by name alone would refuse packages that are correct as written.
 	//
 	// Framework, because each driver reaches a vendor through its own SDK. The
-	// LiveKit Speechmatics plugin is not the Pipecat one and did not lose these
-	// settings, so refusing them there would break a working package to report
-	// somebody else's removal.
+	// LiveKit Speechmatics plugin is not the Pipecat one: it lost its settings
+	// in its own release, and a different set of them.
 	Framework Provider
 	Vendor    string
 	Role      Role
@@ -70,6 +69,24 @@ var retiredParams = []RetiredParam{
 	// Refused rather than forwarded because a warning in a container log is a
 	// warning nobody reads, and the fix is one word.
 	{Framework: Pipecat, Vendor: "speechmatics", Role: Listen, Key: "operating_point", Replacement: "model", Since: "1.10.0", Deprecated: true},
+
+	// livekit-plugins-speechmatics 1.8.2 moved onto Agent STT too. It still
+	// accepts these keys, then drops them with a log warning (_DROPPED_ARGS in
+	// stt.py, the same through 1.8.7), so a package keeps compiling and quietly
+	// loses its turn and speaker settings. They are refused as removed, because
+	// in effect they are. Diffed against the 1.8.1 constructor.
+	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "max_delay", Since: "1.8.2"},
+	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "end_of_utterance_silence_trigger", Since: "1.8.2"},
+	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "end_of_utterance_max_delay", Since: "1.8.2"},
+	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "end_of_turn_config", Since: "1.8.2"},
+	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "vad_config", Since: "1.8.2"},
+	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "punctuation_overrides", Since: "1.8.2"},
+	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "speaker_passive_format", Since: "1.8.2"},
+	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "focus_speakers", Since: "1.8.2"},
+	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "ignore_speakers", Since: "1.8.2"},
+	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "focus_mode", Since: "1.8.2"},
+	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "operating_point", Replacement: "model", Since: "1.8.2", Deprecated: true},
+	{Framework: LiveKit, Vendor: "speechmatics", Role: Listen, Key: "speaker_active_format", Replacement: "speaker_format", Since: "1.8.2", Deprecated: true},
 }
 
 // LookupRetiredParam returns the record for a `params:` key a vendor's service

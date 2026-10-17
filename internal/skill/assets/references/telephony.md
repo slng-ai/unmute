@@ -153,7 +153,7 @@ generated code dials through any SIP carrier with them.
 targets:
   livekit:
     provider: livekit
-    version: "1.8.1"
+    version: "1.8.7"
     sdk_language: python
     connection: twilio_sip
 ```

@@ -1373,9 +1373,11 @@ async def main() -> None:
     assert not orphans, orphans
     llm_parent = by_id[by_name["llm_request"].parent.span_id].name
     assert llm_parent == "agent_turn", llm_parent
-    # Lifecycle hangs off the session directly, not off a turn.
-    for name in ("start_agent_activity",):
-        assert by_id[by_name[name].parent.span_id].name == "agent_session", name
+    # Lifecycle hangs off the session, not off a turn. livekit-agents 1.8.7
+    # groups startup under its own session_start span (agent_session.py:1015).
+    startup = by_id[by_name["start_agent_activity"].parent.span_id]
+    assert startup.name == "session_start", startup.name
+    assert by_id[startup.parent.span_id].name == "agent_session"
     # The root reads as the call, not as an envelope: it carries the whole
     # conversation rather than only the last line.
     #
@@ -1471,13 +1473,13 @@ func addLiveKitTaskTransfer(agent *ir.Agent) {
 
 func TestSmokeLiveKitV1TaskGroupContracts(t *testing.T) {
 	runLiveKitSmokeScript(t, "remy", func(target *ir.Target) {
-		target.Version = "1.8.1"
+		target.Version = "1.8.7"
 	}, addLiveKitTaskTransfer, livekitTaskGroupContractSmokeScript)
 }
 
 func TestSmokeLiveKitV1EmptyTaskResponse(t *testing.T) {
 	runLiveKitSmokeScript(t, "remy", func(target *ir.Target) {
-		target.Version = "1.8.1"
+		target.Version = "1.8.7"
 	}, addLiveKitTaskTransfer, livekitEmptyTaskResponseSmokeScript)
 }
 
@@ -1498,7 +1500,7 @@ func TestSmokeLiveKitV1OpenAIResponsesMode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runLiveKitSmokeScript(t, "remy", func(target *ir.Target) {
-				target.Version = "1.8.1"
+				target.Version = "1.8.7"
 				binding := target.Models.Reason["reasoning"]
 				binding.Model = "gpt-5.6-terra"
 				binding.Params = tc.params
@@ -1772,7 +1774,7 @@ func addLiveKitGroupStepHandoff(agent *ir.Agent) {
 // 2026-09-09 (spec 007); a deployed worker creates no RunResult.
 func TestSmokeLiveKitV1GroupStepHandoffMovesTheCaller(t *testing.T) {
 	runLiveKitSmokeScript(t, "remy", func(target *ir.Target) {
-		target.Version = "1.8.1"
+		target.Version = "1.8.7"
 	}, addLiveKitGroupStepHandoff, livekitGroupStepHandoffSmokeScript)
 }
 
@@ -1912,7 +1914,7 @@ func TestSmokeLiveKitHarnessRecoversAGroupStepHandoff(t *testing.T) {
 	}
 	addLiveKitGroupStepHandoff(agent)
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
-	tgt.Version = "1.8.1"
+	tgt.Version = "1.8.7"
 	artifact, err := Generate(agent, tgt, target.Default())
 	if err != nil {
 		t.Fatal(err)

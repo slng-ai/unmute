@@ -228,10 +228,11 @@ import os
 {{if .NeedsPrefetchClock}}from datetime import datetime
 {{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
 {{end}}from urllib.parse import {{if .NeedsRender}}quote, {{end}}urlparse
-from urllib.request import proxy_bypass_environment
+import urllib.request
 {{if .NeedsPrefetchClock}}from zoneinfo import ZoneInfo
 {{end}}
 {{if .NeedsHTTPX}}import httpx
+{{end}}{{if .Slng.Any}}import httpx2
 {{end}}from dotenv import load_dotenv
 from livekit import {{if or .Outbound .HasColdTransfer .HasWarmTransfer}}api, {{end}}rtc
 from livekit.agents import (

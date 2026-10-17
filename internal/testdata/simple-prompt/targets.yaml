@@ -2,7 +2,7 @@
 targets:
   livekit:
     provider: livekit
-    version: "1.8.1"
+    version: "1.8.7"
     sdk_language: python
     models:
       detector:
@@ -11,4 +11,4 @@ targets:
 
   pipecat:
     provider: pipecat
-    version: "1.10.0"
+    version: "1.12.0"

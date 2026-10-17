@@ -51,7 +51,7 @@ binding:  provider=slng model=slng/deepgram/nova:3
 class:    slng.STT
 args:     api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import slng
-install:  livekit-plugins-slng>=1.8.1
+install:  livekit-plugins-slng>=1.8.7
 env:      SLNG_API_KEY
 
 === livekit listen soniox ===
@@ -66,7 +66,7 @@ env:      SONIOX_API_KEY
 === livekit listen speechmatics ===
 binding:  provider=speechmatics model=model-1
 class:    speechmatics.STT
-args:     api_key=os.environ["SPEECHMATICS_API_KEY"], ="model-1", language="es-MX", sample_rate=24000
+args:     api_key=os.environ["SPEECHMATICS_API_KEY"], model="model-1", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import speechmatics
 install:  livekit-agents[speechmatics]
 env:      SPEECHMATICS_API_KEY
@@ -242,7 +242,7 @@ binding:  provider=slng model=slng/deepgram/aura:2-en voice=voice-1
 class:    slng.TTS
 args:     api_key=os.environ["SLNG_API_KEY"], voice="voice-1", model="slng/deepgram/aura:2-en", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import slng
-install:  livekit-plugins-slng>=1.8.1
+install:  livekit-plugins-slng>=1.8.7
 env:      SLNG_API_KEY
 
 === livekit speak soniox ===
@@ -321,7 +321,7 @@ binding:  provider=slng model=slng/deepgram/nova:3
 class:    SlngSTTService
 args:     api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3", language="es-MX", sample_rate=24000, world_part="eu-north"
 import:   from pipecat_slng import SlngSTTService
-install:  pipecat-slng>=0.6.0,<0.7
+install:  pipecat-slng>=0.7.0,<0.8
 env:      SLNG_API_KEY
 
 === pipecat listen soniox ===
@@ -536,7 +536,7 @@ binding:  provider=slng model=slng/deepgram/aura:2-en voice=voice-1
 class:    SlngTTSService
 args:     api_key=os.environ["SLNG_API_KEY"], voice="voice-1", model="slng/deepgram/aura:2-en", language="es-MX", sample_rate=24000, world_part="eu-north"
 import:   from pipecat_slng import SlngTTSService
-install:  pipecat-slng>=0.6.0,<0.7
+install:  pipecat-slng>=0.7.0,<0.8
 env:      SLNG_API_KEY
 
 === pipecat speak soniox ===

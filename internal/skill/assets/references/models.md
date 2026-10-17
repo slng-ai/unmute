@@ -56,7 +56,7 @@ Read the `models:` block you actually have before you write the override.
 targets:
   livekit:
     provider: livekit
-    version: "1.8.1"
+    version: "1.8.7"
     sdk_language: python
     models:
       detector:
@@ -303,9 +303,9 @@ only a turn that has already ended, and `provider: listen` is refused on LiveKit
 and slng.
 
 Speechmatics is the one vendor whose turn behaviour is written for the author.
-Its service closes turns itself by default as of Pipecat 1.10.0, so the compiler
-holds it to the caller-driven mode when the package names the local pair, and to
-its own mode when the package hands it the turn. Nothing is authored for this;
+Its service's default turn mode changed in Pipecat 1.10.0 and back in 1.11.0, so
+the compiler always writes it: the caller-driven mode when the package names the
+local pair, and its own mode when the package hands it the turn. Nothing is authored for this;
 the compile report says which was chosen.
 
 ## The default OpenAI think model needs `reasoning_effort`
@@ -336,7 +336,7 @@ instead of being dropped. The LiveKit Responses mode below is the narrow
 compiler-owned exception.
 
 On LiveKit there is a second reason to be explicit. `livekit-plugins-openai`
-1.8.1 injects `reasoning_effort="minimal"` by itself for several older ids in
+1.8.7 injects `reasoning_effort="minimal"` by itself for several older ids in
 the same GPT-5 family, and that is the same 400 once the agent has tools.
 
 ## The SLNG Context Router as the think provider
@@ -831,9 +831,10 @@ one `params:` line, which reaches the service's settings by name:
 - `elevenlabs` listen takes `params: {no_verbatim: true}` to drop filler words;
   `speechmatics` listen takes `params: {enable_partials: true}` for partial
   fragments as the caller speaks, and `params: {enable_diarization: true}` to
-  label speakers. Eleven Speechmatics settings are gone in Pipecat 1.10.0 and a
-  package still writing one is refused with the line and what to write instead,
-  so do not carry one over from an older package.
+  label speakers. Eleven Speechmatics settings are gone in Pipecat 1.10.0, and
+  ten turn and speaker settings plus `operating_point` (now `model:`) in
+  LiveKit 1.8.2. A package still writing one is refused with the line and what
+  to write instead, so do not carry one over from an older package.
 - `cartesia` listen under a listening decider takes `turn_start_threshold`,
   `turn_eager_end_threshold` and `turn_end_threshold`, which say how sure Turns
   has to be. Leave them out and Cartesia's own defaults apply.

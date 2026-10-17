@@ -587,8 +587,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// The emitted mixin names llm.LLM to tell a per-class model override from
 	// the session default, the way the framework's own activity does.
 	data.NeedsLLM = data.NeedsLLM || slng.Any()
-	// The provenance hook annotates its argument as an httpx.Response.
-	data.NeedsHTTPX = data.NeedsHTTPX || slng.Any()
 	// _slng_llm_node serves agents and tasks, which share no base class that
 	// declares _slng_scope, so its first argument is typed Any.
 	data.TypingImports = typingImports(slng.Any())
@@ -1940,17 +1938,18 @@ func livekitDeps(data livekitData) []string {
 	}
 	deps = append(deps, []string{
 		"python-dotenv",
-		// httpx is unconditional, and not only for our own webhook tools.
-		// `livekit/agents/inference/llm.py` imports it while livekit-agents
-		// declares no httpx dependency: it used to arrive transitively through
-		// `openai`, and openai 3.0 switched to the `httpx2` distribution. Since
-		// `livekit/agents/__init__.py` imports `inference` eagerly, a package
-		// that pulls httpx from nowhere else cannot import livekit.agents at
-		// all. Verified 2026-08-12 against livekit-agents 1.6.9 and openai
-		// 3.0.0 in a clean container: undeclared by the former, absent from the
-		// latter. Drop this when livekit-agents declares its own.
+		// httpx is for our own webhook and prefetch calls. livekit-agents 1.8.7
+		// no longer needs it: the framework and its openai plugin import
+		// httpx2, and declare it. ponytail: unconditional, gate it on
+		// NeedsHTTPX if a package without webhooks ever needs a smaller image.
 		"httpx",
 	}...)
+	if data.Slng.Any() {
+		// The router client's provenance hook is an httpx2 event hook, because
+		// openai 3 takes an httpx2 client. livekit-agents brings httpx2 too, but
+		// the emitted code imports it, so it declares it.
+		deps = append(deps, "httpx2")
+	}
 	deps = append(deps, sortedKeys(packages)...)
 	if data.Tracing {
 		// Every backend is plain OTLP over HTTP from utils/telemetry.py, so no
@@ -1958,7 +1957,7 @@ func livekitDeps(data livekitData) []string {
 		// and SDK in through its telemetry module, but nothing in the LiveKit
 		// stack pulls the OTLP HTTP exporter. Declare both so a clean install
 		// cannot import telemetry.py and fail on the exporter.
-		deps = append(deps, "opentelemetry-sdk>=1.33,<2", "opentelemetry-exporter-otlp-proto-http>=1.33,<2")
+		deps = append(deps, "opentelemetry-sdk>=1.40,<2", "opentelemetry-exporter-otlp-proto-http>=1.40,<2")
 	}
 	// The connector bridge is a standalone aiohttp server that places outbound
 	// Twilio calls and validates inbound webhook signatures. livekit-agents

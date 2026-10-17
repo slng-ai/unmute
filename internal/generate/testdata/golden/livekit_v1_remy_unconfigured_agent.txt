@@ -110,7 +110,7 @@ def _caller_turns(chat_ctx: llm.ChatContext) -> int:
 
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Self, get_args, get_origin
+from typing import Any, ClassVar, Self, get_args, get_origin
 
 from pydantic import (
     BaseModel,
@@ -698,8 +698,7 @@ def _field_type(name: str) -> Any:
         The annotation, wrapped back in Annotated when the field carries
         constraints, because FieldInfo keeps those apart from the annotation.
     """
-    info = CallState.model_fields[name]
-    return Annotated[(info.annotation, *info.metadata)] if info.metadata else info.annotation
+    return CallState.model_fields[name].rebuild_annotation()
 
 
 def _item_type(annotation: Any) -> Any:
@@ -2009,8 +2008,8 @@ async def run_call(ctx: JobContext) -> None:
 from __future__ import annotations
 
 import os
+import urllib.request
 from urllib.parse import urlparse
-from urllib.request import proxy_bypass_environment
 
 from dotenv import load_dotenv
 from livekit.agents import AgentServer, JobContext
@@ -2020,13 +2019,14 @@ from settings import LOCAL_INIT_TIMEOUT_SECS
 
 load_dotenv()
 
-# livekit-agents 1.8.1 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
-# connection to LIVEKIT_URL and ignores NO_PROXY (worker.py:358). A proxy that
+# livekit-agents 1.8.7 takes HTTPS_PROXY or HTTP_PROXY for the worker's own
+# connection to LIVEKIT_URL and ignores NO_PROXY (worker.py:363). A proxy that
 # only tunnels HTTPS answers that request with 405, and the worker never
 # registers. So a LiveKit host listed in NO_PROXY is reached directly. Anything
-# else gets the value the SDK would have picked itself.
+# else gets the value the SDK would have picked itself. proxy_bypass_environment
+# is stdlib but has no typeshed stub, hence the ignore.
 WORKER_PROXY = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
-if proxy_bypass_environment(urlparse(os.getenv("LIVEKIT_URL", "")).hostname or ""):
+if urllib.request.proxy_bypass_environment(urlparse(os.getenv("LIVEKIT_URL", "")).hostname or ""):  # ty: ignore[unresolved-attribute]
     WORKER_PROXY = None
 
 server = AgentServer(http_proxy=WORKER_PROXY)

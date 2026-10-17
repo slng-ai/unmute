@@ -60,74 +60,78 @@ type SupportWindow struct {
 // Each runtime intentionally supports one tested SDK version rather than
 // claiming a compatibility range the release matrix does not exercise.
 var supportWindows = map[Provider]SupportWindow{
-	// 1.8.1 is the first release carrying the GPT-Live model
-	// (livekit/plugins/openai/realtime/gpt_live_model.py), which is why this
-	// moved: architecture: live cannot compile on this target below it. Checked
-	// by downloading the 1.7.0, 1.7.1 and 1.8.0 wheels, none of which contains
-	// the module.
+	// 1.8.7 is the line unmute-core needs: it brings OpenTelemetry 1.45 and
+	// openai 3, which the library builds on. GPT-Live (architecture: live)
+	// first shipped in 1.8.1, so no live package loses anything here.
 	//
-	// Verified on 2026-09-13 by two things short of a call: the offline suite,
-	// and the opt-in smoke suite running every emitted LiveKit module against
-	// the real 1.8.1 wheel, livekit-plugins-slng 1.8.1 beside it, with the same
-	// suite green on 1.6.10 first so a failure could be attributed.
+	// Verified on 2026-10-17 by the offline suite and the opt-in smoke suite
+	// running every emitted LiveKit module against the real 1.8.7 wheels, with
+	// the same smoke tests run on main at 1.8.1 first so a failure could be
+	// attributed. What 1.8.7 changed in the emitted code, and why:
 	//
-	// Two checks are OWED rather than made:
+	//  - livekit-agents and livekit-plugins-openai moved to openai 3, which is
+	//    built on httpx2 and no longer pulls httpx. The SLNG router client is an
+	//    httpx2 client now, like the plugin's own (llm.py:22).
+	//  - Startup spans sit under a new session_start span, and a handoff under
+	//    update_agent, both children of agent_session (agent_session.py:1015,
+	//    1888). The smoke suite now holds that shape.
+	//  - livekit-plugins-speechmatics 1.8.2 moved to Agent STT and drops ten
+	//    settings with only a log warning. retired_params.go refuses them, and
+	//    the catalogue row takes model: in place of operating_point.
 	//
-	//  1. A browser call. The machine that did this reaches no provider. The
-	//     1.6.10 row carried a bare date and no comment, so what closed it is
-	//     not recorded; make the call on salon-concierge and replace this
-	//     paragraph with its counts.
-	//  2. PII redaction, which is new here. 1.8.1's set_tracer_provider also
-	//     calls _install_pii_redaction (telemetry/traces.py:581), which prepends
-	//     a filtering span processor to the provider WE build. The default
-	//     allows, so nothing changes today, but LIVEKIT_TELEMETRY_ALLOW_PII=0
-	//     would now strip the conversation out of our Langfuse and Coval spans
-	//     with no error anywhere. Absent at 1.6.10. Nothing asserts the default,
-	//     and a run with that variable set would pass every gate we have.
+	// Checks OWED rather than made:
 	//
-	// `metrics_collected` is deprecated and the emitted module subscribes to it
-	// in four places (call.py, the two tracing templates behind utils/tracing.py,
-	// and utils/dev_metrics.py),
-	// which prints a warning per registration: two on a deployed traced run,
-	// three under `unmute dev`. It is NOT owed by this bump and this row is not
-	// where it gets fixed: the deprecation block is byte-identical in 1.6.10
-	// (agent_session.py:717-723), so it has been printing all along. Moving off
-	// it changes what every traced span carries, so it is its own change with
-	// its own verification. Pipecat has a gate refusing deprecated shapes in
-	// emitted code (pipecat_deprecations_test.go); LiveKit has none, and this is
-	// the first thing it would catch.
+	//  1. A browser call on salon-concierge. The machine that did this reaches
+	//     no provider. Replace this item with the call's counts.
+	//  2. Tools still running when the interruption timeout fires are no longer
+	//     cancelled: they keep running and deliver a deferred reply
+	//     (agent_activity.py:3959-3990). The terminal-tool guard was written for
+	//     a cancellation. Interrupt a booking mid-call and read the trace.
+	//  3. PII redaction, unchanged from 1.8.1: set_tracer_provider still calls
+	//     _install_pii_redaction (telemetry/traces.py:695) on the provider WE
+	//     build. LIVEKIT_TELEMETRY_ALLOW_PII=0 would strip the conversation out
+	//     of our Langfuse and Coval spans with no error, and nothing asserts the
+	//     default.
+	//  4. Worker memory on Linux. The worker now preloads the local turn
+	//     detector's weights (ipc/_preload.py) unless
+	//     LIVEKIT_AGENTS_PRELOAD_LOCAL_INFERENCE=0. Check the deployed worker's
+	//     memory against its plan before the first busy day.
 	//
-	// The deprecated AgentSession keywords are NOT owed: 1.8.1 marks eleven for
-	// removal in v2.0.0 (min_endpointing_delay, allow_interruptions,
-	// turn_detection and the rest) in favour of TurnHandlingOptions and
-	// STTContextOptions, and the emitted module already passes the new shapes
-	// and none of the old ones.
-	LiveKit: {Floor: "1.8.1", Ceiling: "1.8.1", Verified: "2026-09-13"},
-	// 1.10.0 verified on 2026-09-12 by three things short of a call: the offline
-	// suite; the opt-in smoke suite running every emitted Pipecat module against
-	// the real 1.10.0 wheel, pipecat-slng 0.5.2 beside it; and a diff of every
-	// module the emitted bot imports between 1.9.0 and 1.10.0, all 24 of them
-	// byte-identical (research R1 of spec 022). Only two services a package can
-	// bind changed at all, and both are handled: speechmatics, whose turn mode
-	// default flipped and is now pinned from the turn binding, and gradium,
-	// which gained turn detection and joined the decider table.
+	// `metrics_collected` is still deprecated and still prints a warning per
+	// registration. It is not owed by this bump: moving off it changes what
+	// every traced span carries, so it is its own change. The eleven
+	// AgentSession keywords marked for removal in v2.0.0 are not owed either:
+	// the emitted module passes TurnHandlingOptions and none of the old ones.
+	LiveKit: {Floor: "1.8.7", Ceiling: "1.8.7", Verified: "2026-10-17"},
+	// 1.12.0 is the line unmute-core needs. Verified on 2026-10-17 by the
+	// offline suite and the opt-in smoke suite running every emitted Pipecat
+	// module against the real 1.12.0 wheel, pipecat-slng 0.7.0 beside it, with
+	// the same smoke tests run on main at 1.10.0 first. What 1.11 and 1.12
+	// changed in the emitted code, and why:
 	//
-	// Two checks are OWED rather than made, and neither is a formality:
+	//  - UserBotLatencyObserver sees only a frame's first push now
+	//    (user_bot_latency_observer.py:580). The dev page's playback observer
+	//    watches every push itself, because the transport's TTSStartedFrame is
+	//    a repeat, and hands the framework only first pushes.
+	//  - An empty user turn now adds a "please repeat" developer message and
+	//    runs the model by default (llm_response_universal.py:185). It is
+	//    switched off, so the model sees the same conversation as on LiveKit.
+	//  - Pipecat splits sentences with sentencex and no longer imports nltk, so
+	//    the Dockerfile no longer bakes NLTK's tokenizer.
+	//  - Speechmatics' default turn mode went back to EXTERNAL in 1.11.0. The
+	//    compiler writes the mode either way (turn_listener.go).
 	//
-	//  1. A browser call. The machine that did this reaches no provider, so the
-	//     call on salon-concierge that closed 1.8.0 (13 turns, 20 interruptions,
-	//     3 handoffs, 12 function calls settled, no errors) is still owed, for
-	//     1.9.0 and now for this. Make it, and replace this paragraph with its
-	//     counts.
-	//  2. The base image's certificate set. 1.10.0 widens the OpenAI SDK pin to
-	//     the 3.x line, which builds on httpx2 and verifies TLS against the
-	//     operating system trust store rather than a bundled set. An image with
-	//     no system certificates fails every provider call. The emitted project
-	//     builds on the framework vendor's own image, which could not be
-	//     inspected here: no container runtime, and the registry's blob CDN is
-	//     refused by the egress proxy. The runbook names the variable that
-	//     points at a bundle. The first real deployment settles it.
-	Pipecat: {Floor: "1.10.0", Ceiling: "1.10.0", Verified: "2026-09-12"},
+	// Checks OWED rather than made:
+	//
+	//  1. A browser call on salon-concierge. The machine that did this reaches
+	//     no provider. Replace this item with the call's counts.
+	//  2. MCP moved to the 2.x SDK. A failed MCP call now returns the real error,
+	//     cut to 200 characters, instead of a fixed apology line, so the model
+	//     sees different text. Read one failed MCP call in a trace.
+	//  3. The base image's certificate set, carried from 1.10.0: openai 3 checks
+	//     TLS against the operating system's trust store. The first real
+	//     deployment settles it.
+	Pipecat: {Floor: "1.12.0", Ceiling: "1.12.0", Verified: "2026-10-17"},
 }
 
 // LiveKitDeploymentRegions are the agent compute regions, not media region groups.
@@ -209,11 +213,11 @@ func ParseVersion(v string) ([3]int, bool) {
 // floor the driver emits cannot drift apart (FR-003).
 //
 // It tracks the support window because livekit's plugins version in lockstep
-// with the framework and declare it: livekit-plugins-silero 1.8.1 requires
-// livekit-agents>=1.8.1. A floor left at an older release still resolved, since
+// with the framework and declare it: livekit-plugins-silero 1.8.7 requires
+// livekit-agents>=1.8.7. A floor left at an older release still resolved, since
 // the newest plugin wins and an old one cannot pair with new agents anyway, but
 // it stated a requirement that was no longer true.
-const SileroFloor = ">=1.8.1"
+const SileroFloor = ">=1.8.7"
 
 // PinFloors is the pinnable package set for a driver, with each one's catalogue
 // floor. Empty for a driver that pins nothing.

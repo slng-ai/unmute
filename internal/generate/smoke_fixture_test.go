@@ -524,7 +524,7 @@ func TestSmokeStubbedNamesExistInTheLiveModelModule(t *testing.T) {
 		t.Fatal("the aggregator parameters do not close where the live model smoke expects")
 	}
 	for _, line := range strings.Split(rest[:end], "\n")[1:] {
-		if arg := strings.TrimSpace(line); arg != "" && !strings.Contains(arg, "=") {
+		if arg := strings.TrimSpace(line); arg != "" && !strings.HasPrefix(arg, "#") && !strings.Contains(arg, "=") {
 			t.Errorf("the aggregator parameters take a positional argument %q; the smoke wrapper accepts keywords only", arg)
 		}
 	}

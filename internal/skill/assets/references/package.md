@@ -395,11 +395,11 @@ data until its access and retention rules are approved.
 targets:
   pipecat:
     provider: pipecat
-    version: "1.10.0"
+    version: "1.12.0"
 
   livekit:
     provider: livekit
-    version: "1.8.1"
+    version: "1.8.7"
     sdk_language: python
     models:
       detector:

@@ -1035,7 +1035,7 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 					t.Pins = map[string]string{"livekit-plugins-silero": "0.0.1"}
 				})
 			},
-			want: `livekit pin livekit-plugins-silero "0.0.1" is below the catalogue floor >=1.8.1`,
+			want: `livekit pin livekit-plugins-silero "0.0.1" is below the catalogue floor >=1.8.7`,
 		},
 		{
 			name:     "version is not a version, livekit",
@@ -1051,7 +1051,7 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 			mutate: func(pkg *packagespec.Package) {
 				setTargetField(pkg, "pipecat", func(t *packagespec.Target) { t.Version = "9.9.9" })
 			},
-			want: `pipecat version "9.9.9" is newer than this unmute supports (exactly 1.10.0); a newer unmute may support it`,
+			want: `pipecat version "9.9.9" is newer than this unmute supports (exactly 1.12.0); a newer unmute may support it`,
 		},
 		{
 			name:     "version is below the exact supported version, pipecat",
@@ -1059,7 +1059,7 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 			mutate: func(pkg *packagespec.Package) {
 				setTargetField(pkg, "pipecat", func(t *packagespec.Target) { t.Version = "1.6.9" })
 			},
-			want: `pipecat version "1.6.9" is outside the supported range (exactly 1.10.0)`,
+			want: `pipecat version "1.6.9" is outside the supported range (exactly 1.12.0)`,
 		},
 		{
 			name:     "version names only two parts, livekit",
@@ -1067,7 +1067,7 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 			mutate: func(pkg *packagespec.Package) {
 				setTargetField(pkg, "livekit", func(t *packagespec.Target) { t.Version = "1.6" })
 			},
-			want: `livekit version "1.6" must be three numbers, for example "1.8.1"`,
+			want: `livekit version "1.6" must be three numbers, for example "1.8.7"`,
 		},
 		{
 			// The sharpest of the eight: `voice` is required on every speak entry,

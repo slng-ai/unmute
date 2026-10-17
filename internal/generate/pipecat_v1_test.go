@@ -498,7 +498,7 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	if !strings.Contains(pyproject, ",tracing,") {
 		t.Error("pyproject.toml missing the official pipecat-ai tracing extra")
 	}
-	if !strings.Contains(pyproject, `"opentelemetry-exporter-otlp-proto-http>=1.33,<2"`) {
+	if !strings.Contains(pyproject, `"opentelemetry-exporter-otlp-proto-http>=1.40,<2"`) {
 		t.Error("pyproject.toml missing the OpenTelemetry HTTP exporter")
 	}
 	env := artifactFile(t, artifact, ".env.example")
@@ -2003,8 +2003,9 @@ func TestCheckPipecatVersion(t *testing.T) {
 		{"1.5.3", false},
 		{"1.6.0", false},
 		{"1.6.9", false},
-		{"1.10.0", true},
-		{"1.9.0", false}, // the previous pin; one version is supported, not a range
+		{"1.12.0", true},
+		{"1.10.0", false}, // the previous pin; one version is supported, not a range
+		{"1.9.0", false},
 		{"1.8.0", false}, // and the one before that
 		{"1.0.3", false}, // never existed on PyPI; workers API not present
 		{"1.4.9", false},

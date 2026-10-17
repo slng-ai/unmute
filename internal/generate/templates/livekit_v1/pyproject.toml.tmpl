@@ -2,7 +2,7 @@
 name = "unmute-{{.Project}}"
 version = "0.1.0"
 description = "Generated LiveKit Agents project (unmute livekit driver)"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
 {{- range .Deps}}
     {{pyq .}},
@@ -45,4 +45,4 @@ link-mode = "copy"
 override-dependencies = ["pystemmer>=3.1.0,<4"]
 {{- end}}
 
-{{checkers "3.11"}}
+{{checkers "3.12"}}
