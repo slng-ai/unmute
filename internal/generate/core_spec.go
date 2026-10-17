@@ -622,7 +622,7 @@ func coreModels(resolved ir.Target) (map[string]any, error) {
 	think := map[string]any{}
 	for name, binding := range models.Reason {
 		switch {
-		case binding.Provider == "google":
+		case binding.Provider == "google", binding.Provider == "openai":
 			think[name] = binding
 		case binding.Router():
 			router, err := coreRouter(binding)
@@ -631,7 +631,7 @@ func coreModels(resolved ir.Target) (map[string]any, error) {
 			}
 			think[name] = router
 		default:
-			return nil, fmt.Errorf("think %q: version 2 compiles a google model or the slng router only so far, and this one is %s", name, binding.Provider)
+			return nil, fmt.Errorf("think %q: version 2 compiles a google or openai model, or the slng router, only so far, and this one is %s", name, binding.Provider)
 		}
 	}
 	for name, binding := range models.Speak {

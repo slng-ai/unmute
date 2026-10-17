@@ -9,6 +9,10 @@ this too, but spread across two agents, five tasks, tracing, knowledge documents
 and two phone routes. This one does nothing else, so the typed part is the only
 part there is to read.
 
+It is an `agent.yaml` version 2 package: it compiles onto unmute-core, with
+OpenAI as its model. `scenarios/` holds a whole call that `make e2e` runs on the
+real model, on LiveKit and Pipecat.
+
 No phone route and no carrier account. Browser audio on both code targets. It
 needs `OPENAI_API_KEY` and `SLNG_API_KEY` for the models, and the three
 `LANGFUSE_*` names together, because the package traces every call.
@@ -87,8 +91,8 @@ Nothing downstream re-checks anything.
 one argument from the model, a one-sentence summary. The number, the address,
 the name and the enquiry word come out of saved state through `inject:`, so they
 are never advertised to the model and it cannot retype them. The compiler
-refuses an `inject:` key that is also an `input:` property, which is what stops
-a parameter quietly having two sources.
+refuses an `inject:` key that names no parameter of the handler, which is what
+stops a parameter quietly having two sources.
 
 **A pre-fetched value is a proposal, not a fact.** `caller_phone` carries
 `confirm: verify_contact`. Until that step has heard the caller agree, the number
@@ -114,7 +118,7 @@ be opened against somebody else's number and nothing would say so.
 | `tasks/take-details.md` | name, address and enquiry in one pass |
 | `tasks/open-record.md` | calls the tool and relays the record back |
 | `tools/create_customer_record.yaml` | one model argument, four injected values |
-| `tools/intake.py` | the local handler, an in-process store, and a `_demo()` self-check |
+| `tools/intake.py` | the typed handler, an in-process store, and a `_demo()` self-check. `agent.yaml` version 2 reads the tool's argument and result types from here |
 
 ## What it does not do
 

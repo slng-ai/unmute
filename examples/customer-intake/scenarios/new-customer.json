@@ -1,0 +1,15 @@
+{
+  "name": "A new customer with no caller ID gives their details and gets a reference number",
+  "greeting": ["intake desk"],
+  "turns": [
+    {"caller": "Hi, yes. I'd like to become a new customer."},
+    {"caller": "It's plus three four, six zero zero, one one one, two two two."},
+    {"caller": "Yes, that's right."},
+    {"caller": "My name is Ana Ruiz."},
+    {"caller": "It's ana dot ruiz at example dot com."},
+    {"caller": "Yes, that's right."},
+    {"caller": "Yes, I'm a new customer. That's everything."},
+    {"caller": "Great, thanks. That's all, bye."}
+  ],
+  "state": {"contact.name": "Ana Ruiz", "caller_email": "ana.ruiz@example.com", "enquiry": "new_customer"}
+}
