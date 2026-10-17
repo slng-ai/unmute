@@ -627,7 +627,7 @@ type pipecatData struct {
 	// LocalTwilio is the runner's Twilio route (`bot.py -t twilio`) on a package
 	// with no phone route of its own, so a simulated caller can reach every
 	// Pipecat build the way Twilio reaches one that has a route. Nothing real
-	// dials it. utils/coval_sim is the caller.
+	// dials it.
 	LocalTwilio bool
 	// Prerequisites are the route's account features the provider grants on
 	// request, read from the rulebook in internal/target and never restated here.

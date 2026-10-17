@@ -37,10 +37,4 @@ release-dry: ; goreleaser release --snapshot --clean --skip=sign
 # UNMUTE_E2E_CORE=../unmute-core runs an unreleased unmute-core checkout.
 e2e:     ; go test -tags e2e -timeout 60m -count=1 ./internal/e2e/ -run 'TestScenarios$(if $(PKG),/$(PKG)$(if $(FW),/$(FW)))' -v
 
-# Coval calls the examples running on this laptop. TEST_SET is one or more
-# Coval test set IDs; empty runs every test set attached to an unmute-* agent.
-# Needs network, the Coval and LiveKit keys in .env, and `coval` and
-# `cloudflared` on PATH, which is why it is nowhere near the PR gate.
-sim:     ; uv run --project utils/coval_sim coval-sim run $(TEST_SET)
-
-.PHONY: build test smoke e2e contracts lint lint-emitted fmt install docs release-dry sim
+.PHONY: build test smoke e2e contracts lint lint-emitted fmt install docs release-dry

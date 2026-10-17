@@ -105,8 +105,8 @@ var newAuthoringKey = regexp.MustCompile(`(?m)^\s*(?:-\s+)?(finish|opening|skip_
 // its own now answers the runner's Twilio route (`bot.py -t twilio`), with a
 // `"twilio"` transport entry, the `websocket` extra and the credential-free
 // `_carrier_transport`. Before, a simulated caller had no way into a
-// browser-only bot, so utils/coval_sim could not test three of the five
-// code examples on Pipecat before a release. Nothing real dials that route.
+// browser-only bot, so three of the five code examples could not take a
+// simulated call on Pipecat. Nothing real dials that route.
 //
 // And on 2026-09-24, for one more: a Pipecat step's seeded opening line now
 // comes before the step's instruction, and the instruction points the model at
