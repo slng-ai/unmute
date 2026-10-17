@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [kestrel, wasla, nosh, faro, parcel-desk, salon-concierge]
+        package: [kestrel, wasla, nosh, faro, parcel-desk, salon-concierge, customer-intake]
         framework: [livekit, pipecat]
     steps:
       - uses: actions/checkout@v4

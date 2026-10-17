@@ -39,7 +39,7 @@ from livekit.agents import (
 from livekit.agents.beta.tools import EndCallTool
 from livekit.agents.voice import room_io
 from livekit.agents.voice.agent_session import SessionConnectOptions
-from livekit.plugins import google, silero, slng
+from livekit.plugins import google, openai, silero, slng
 from unmute_core.call import CallStartError
 from unmute_core.livekit import (
     ModelCallLLM,
@@ -110,14 +110,19 @@ class VertexLLM(google.LLM):
         self._client = vertex_client(api_key, location)
 
 
-def build_llm(binding: dict[str, Any], state: CallState) -> google.LLM | ModelCallLLM:
-    """Return the model a think binding names: the SLNG Context Router, or Gemini.
+def build_llm(
+    binding: dict[str, Any], state: CallState
+) -> google.LLM | openai.LLM | ModelCallLLM:
+    """Return the model a think binding names: the SLNG Context Router, OpenAI or Gemini.
 
-    Gemini runs on Vertex when the binding says so.
+    Gemini runs on Vertex when the binding says so. A binding's params, like
+    ``reasoning_effort``, go to the plugin as they are.
     """
     if binding["provider"] == "slng":
         return ModelCallLLM(spec.router(binding, state.call), state=state)
     params = dict(binding.get("params", {}))
+    if binding["provider"] == "openai":
+        return openai.LLM(api_key=required("OPENAI_API_KEY"), model=binding["model"], **params)
     key = required("GOOGLE_API_KEY")
     if params.pop("vertexai", False):
         location = params.pop("location", "global")

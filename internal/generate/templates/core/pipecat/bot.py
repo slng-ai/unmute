@@ -15,6 +15,7 @@ each call runs the same way:
     uv run bot.py -t twilio   # a Twilio Media Streams phone call
 """
 
+import dataclasses
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -128,9 +129,10 @@ class VertexLLM(GoogleLLMService):
 
 
 def build_llm(first: str, state: CallState) -> LLMService[Any]:
-    """Return the first agent's model: the SLNG Context Router, or Gemini.
+    """Return the first agent's model: the SLNG Context Router, OpenAI or Gemini.
 
-    ``UnmuteFlows`` sets its prompt.
+    ``UnmuteFlows`` sets its prompt. An OpenAI binding's params that Pipecat's settings
+    do not name, like ``reasoning_effort``, go in each request as they are.
     """
     binding = MODELS["think"][spec.SPEC["agents"][first]["model"]]
     if binding["provider"] == "slng":
@@ -138,6 +140,16 @@ def build_llm(first: str, state: CallState) -> LLMService[Any]:
         settings = OpenAILLMService.Settings(model=model_name(call), system_instruction="")
         return ModelCallLLMService(call, state=state, settings=settings)
     params = dict(binding.get("params", {}))
+    if binding["provider"] == "openai":
+        known = {field.name for field in dataclasses.fields(OpenAILLMService.Settings)}
+        named = {key: value for key, value in params.items() if key in known}
+        extra = {key: value for key, value in params.items() if key not in known}
+        return OpenAILLMService(
+            api_key=required("OPENAI_API_KEY"),
+            settings=OpenAILLMService.Settings(
+                model=binding["model"], system_instruction="", extra=extra, **named
+            ),
+        )
     thinking = params.pop("thinking_config", None)
     settings = GoogleLLMService.Settings(
         model=binding["model"],
