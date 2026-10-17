@@ -1,0 +1,6 @@
+{
+  "name": "A dispatch that names no account is refused before anyone is rung",
+  "dispatch": {},
+  "refused": "Missing call_start fields: account_id",
+  "turns": []
+}

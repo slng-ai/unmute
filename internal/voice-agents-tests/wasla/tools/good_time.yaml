@@ -1,0 +1,7 @@
+local:
+  handler: tools/ledger.py:good_time
+inject:
+  - amount_words: "{{state.amount_words}}"
+  - merchant: "{{state.merchant}}"
+assign:
+  - said: result.said

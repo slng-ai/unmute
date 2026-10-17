@@ -1,0 +1,87 @@
+# Nosh: an outbound restaurant and bar finder, ported from unmute-core's examples/nosh.
+#
+# One agent and no tasks. Four tools do the work. Each tool saves what it returns
+# and says code's next line, so a caller turn costs one model request.
+#
+# The scenarios in scenarios/ are unmute-core's, word for word: the same lines,
+# model request counts and final state must hold when Unmute compiles this package.
+version: 2
+
+name: nosh
+
+entry_agent: finder
+
+mode: record
+
+variables:
+  # Who asked for the call. A dispatch without a name is refused.
+  - name: customer_name
+    call_start: required
+
+agents:
+  finder:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - find_area
+      - find_places
+      - place_details
+      - end_call
+
+secrets:
+  - GOOGLE_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: google
+      model: gemini-3.1-flash-lite
+      params:
+        vertexai: true
+        location: eu
+  speak:
+    voice:
+      provider: slng
+      model: "slng/fish/tts:s2.1-pro"
+      # Fish Audio's "Avery": bright and friendly.
+      voice: "ba875f2fb2ea4a4e9b175821014984b6"
+      language: en
+      params:
+        world_part: eu-north
+  listen:
+    transcriber:
+      provider: slng
+      model: "soniox/speech-ai:rt-v5"
+      language: en
+      params:
+        world_part: eu-north
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: snappy
+
+tools:
+  - find_area
+  - find_places
+  - place_details
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: >-
+      Hey {{state.customer_name}}, it's Nosh! You wanted a hand finding
+      somewhere good. Whereabouts are you looking? An address or an area is fine.
+  max_duration: 10m
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  avg_session_duration: 5m

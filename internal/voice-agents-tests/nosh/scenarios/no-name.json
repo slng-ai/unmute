@@ -1,0 +1,6 @@
+{
+  "name": "A dispatch that does not say who asked for the call is refused",
+  "dispatch": {},
+  "refused": "Missing call_start fields: customer_name",
+  "turns": []
+}

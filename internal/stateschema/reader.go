@@ -74,9 +74,15 @@ func Digest(source []byte) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-// Args is the uv command line that reads one state.py, after `uv`.
+// Args is the uv command line that reads one state.py, after `uv`. It installs
+// unmute-core too, so a state.py may use the library's value types, like
+// Phone, Spelled or BirthDate, as the emitted project does.
+//
+// ponytail: Digest does not cover target.CorePin, so moving it keeps every
+// state recording. Hash it when a core release changes how a type reads.
 func Args(path string) []string {
-	args := []string{"run", "--no-project", "--no-config", "--quiet", "--python", target.StatePython}
+	args := []string{"run", "--no-project", "--no-config", "--quiet", "--python", target.StatePython,
+		"--with", "unmute-core==" + target.CorePin}
 	for _, name := range slices.Sorted(maps.Keys(target.StatePins)) {
 		args = append(args, "--with", name+"=="+target.StatePins[name])
 	}

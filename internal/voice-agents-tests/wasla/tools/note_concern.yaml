@@ -1,0 +1,9 @@
+local:
+  handler: tools/ledger.py:note_concern
+inject:
+  - account_id: "{{state.account_id}}"
+  - call: "{{call.session_id}}"
+interruption: continue
+assign:
+  - outcome: result.status
+  - said: result.said

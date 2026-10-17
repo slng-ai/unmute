@@ -1,0 +1,9 @@
+{
+  "name": "A wrong number is taken off the list",
+  "call_start": {"account_id": "WA-1001"},
+  "turns": [
+    {"caller": "No, there's no Layla here. You have the wrong number.", "expect": ["Shall I take this number off our list"], "max_requests": 2},
+    {"caller": "Yes please.", "expect": ["You won't get any more calls from us"], "max_requests": 1}
+  ],
+  "state": {"outcome": "WN"}
+}

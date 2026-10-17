@@ -1,0 +1,4 @@
+local:
+  handler: tools/ledger.py:verify_holder
+inject:
+  - account_id: "{{state.account_id}}"

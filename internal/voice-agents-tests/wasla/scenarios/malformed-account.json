@@ -1,0 +1,6 @@
+{
+  "name": "A dispatch with a malformed account id is refused",
+  "dispatch": {"account_id": "1001"},
+  "refused": "call_start: account_id",
+  "turns": []
+}

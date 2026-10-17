@@ -1,0 +1,14 @@
+{
+  "name": "Emma comes back and finishes the shopping lesson",
+  "call_start": {"call": {"direction": "inbound", "calling_number": "+34600555666"}},
+  "greeting": ["Let me check: is your number +34 600 555 666?"],
+  "turns": [
+    {"caller": "Yes, that's me.", "expect": ["Hi, Emma", "shopping", "Shall we carry on"], "max_requests": 1},
+    {"caller": "Let's carry on.", "expect": ["Shopping, first exercise. Answer in Spanish: Ask for a kilo of apples at the market."], "max_requests": 1},
+    {"caller": "Un kilo de manzanas, por favor.", "expect": ["Shopping, second exercise. Answer in Spanish: Ask how much it costs."], "max_requests": 1, "language": "es"},
+    {"caller": "¿Cuánto cuesta?", "expect": ["third exercise", "Buy bread and milk"], "max_requests": 1, "language": "es"},
+    {"caller": "Quiero pan y leche. ¿Cuánto es en total?", "expect": ["Lesson complete: shopping. Next is talking about your routine."], "max_requests": 1, "language": "es"},
+    {"caller": "That's all for today, bye.", "max_requests": 1}
+  ],
+  "state": {"waiting": null, "learner_name": "Emma"}
+}

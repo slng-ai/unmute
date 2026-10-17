@@ -1,0 +1,20 @@
+{
+  "name": "Daniel files a claim, one question at a time",
+  "greeting": ["Can I take your policy number"],
+  "turns": [
+    {"caller": "Hi, yes, it's K P four eight two nine one three.", "max_requests": 2},
+    {"caller": "The fifth of June, 1979.", "expect": ["Is your policy number"], "max_requests": 1},
+    {"caller": "Yes, that's right.", "expect": ["Thank you, Daniel, I have your policy", "On which day did it happen?"], "max_requests": 1},
+    {"caller": "It was yesterday.", "expect": ["Roughly what time was it?"], "max_requests": 1},
+    {"caller": "In the evening.", "expect": ["Where did it happen?"], "max_requests": 1},
+    {"caller": "On the A40 near Oxford.", "expect": ["In your own words, what happened?"], "max_requests": 1},
+    {"caller": "A van reversed into my front bumper.", "expect": ["Was anyone hurt?"], "max_requests": 1},
+    {"caller": "No, nobody was hurt.", "expect": ["reported to the police"], "max_requests": 1},
+    {"caller": "No, no police.", "expect": ["another vehicle or driver"], "max_requests": 1},
+    {"caller": "Yes, the van driver.", "expect": ["Can your car still be driven?"], "max_requests": 1},
+    {"caller": "Yes, it still drives.", "expect": ["Shall I file your claim for the blue Toyota Corolla", "Nobody was hurt", "Is that all right?"], "max_requests": 2},
+    {"caller": "Yes, please file it.", "expect": ["Your claim is filed", "K C, 1 0 0, 2 3 1"], "max_requests": 1},
+    {"caller": "No, that's all. Thanks, bye.", "max_requests": 1}
+  ],
+  "state": {"claim_number": "KC100231", "policy.first_name": "Daniel", "report.vehicle": "AB12CDE"}
+}

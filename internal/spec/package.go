@@ -608,6 +608,12 @@ type Handoff struct {
 	When     string           `json:"when,omitempty" yaml:"when,omitempty"`
 	Announce *string          `json:"announce,omitempty" yaml:"announce,omitempty"`
 	Context  *TransferContext `json:"context,omitempty" yaml:"context,omitempty"`
+	// Saves sets State values as the call moves, like `- explanation: ES`, the
+	// language the next agent speaks.
+	Saves []Pair `json:"saves,omitempty" yaml:"saves,omitempty" since:"2"`
+	// OpensWith is a tool of the next agent's own, run in code as it takes the
+	// call. When its say: line fills, that line is the agent's first reply.
+	OpensWith *OpensWith `json:"opens_with,omitempty" yaml:"opens_with,omitempty" since:"2"`
 }
 
 // Escalation is one entry under `escalations:`. The caller goes through to a

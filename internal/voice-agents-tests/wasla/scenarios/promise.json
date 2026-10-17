@@ -1,0 +1,15 @@
+{
+  "name": "Layla is verified and promises to pay on a day",
+  "dispatch": {"account_id": "WA-1001"},
+  "greeting": ["Am I speaking with Layla Haddad?"],
+  "turns": [
+    {"caller": "Yes, speaking.", "expect": ["could you tell me your date of birth?"], "reject": ["Falcon", "dirham"], "max_requests": 1},
+    {"caller": "The fourteenth of March, nineteen ninety.", "expect": ["Is your date of birth"], "reject": ["Falcon", "dirham"], "max_requests": 1},
+    {"caller": "Yes.", "expect": ["Thank you, that matches. Is now a good time"], "max_requests": 1},
+    {"caller": "Yes, go ahead.", "expect": ["This call is recorded", "four hundred thirty-four dirhams and fifty fils", "Falcon Electronics", "Could you make the payment today?"], "max_requests": 1},
+    {"caller": "Not today. Can I pay this Sunday?", "expect": ["Shall I record your promise to pay four hundred thirty-four dirhams and fifty fils for"], "max_requests": 1},
+    {"caller": "Yes, that's right.", "expect": ["Your promise to pay", "is recorded"], "max_requests": 1},
+    {"caller": "No, that's everything. Bye.", "max_requests": 1}
+  ],
+  "state": {"outcome": "PTP"}
+}

@@ -1,0 +1,251 @@
+{
+  "digest": "875f708df69ff5801a4c76990fe292cdc29577c2e6b3f75c2cb600c5f2aada5a",
+  "report": {
+    "tools": {
+      "end_call": {
+        "description": "End the call once the caller says they are done. Say your goodbye in the same reply.",
+        "input": {
+          "properties": {},
+          "title": "end_call_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``end_call`` returns.",
+          "properties": {
+            "ended": {
+              "title": "Ended",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ended"
+          ],
+          "title": "Ended",
+          "type": "object"
+        }
+      },
+      "find_parcel": {
+        "description": "Find a parcel by its tracking id: where it is and the day it is due.",
+        "input": {
+          "properties": {
+            "tracking_id": {
+              "description": "The parcel's tracking id, like PD-1042.",
+              "title": "Tracking Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tracking_id"
+          ],
+          "title": "find_parcel_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Parcel": {
+              "description": "One parcel, as the depot knows it.",
+              "properties": {
+                "tracking_id": {
+                  "format": "id",
+                  "title": "Tracking Id",
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "in_transit",
+                    "out_for_delivery",
+                    "delivered",
+                    "held"
+                  ],
+                  "title": "Status",
+                  "type": "string"
+                },
+                "delivery_day": {
+                  "anyOf": [
+                    {
+                      "format": "date",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Delivery Day"
+                },
+                "town": {
+                  "title": "Town",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tracking_id",
+                "status",
+                "town"
+              ],
+              "title": "Parcel",
+              "type": "object"
+            }
+          },
+          "description": "What ``find_parcel`` returns: the parcel, or a hint for the caller.",
+          "properties": {
+            "found": {
+              "title": "Found",
+              "type": "boolean"
+            },
+            "parcel": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Parcel"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "hint": {
+              "default": "",
+              "title": "Hint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "found"
+          ],
+          "title": "Found",
+          "type": "object"
+        }
+      },
+      "reschedule_delivery": {
+        "description": "Move a parcel's delivery to another day, from tomorrow on.",
+        "input": {
+          "properties": {
+            "tracking_id": {
+              "description": "The parcel's tracking id, like PD-1042.",
+              "title": "Tracking Id",
+              "type": "string"
+            },
+            "day": {
+              "format": "date",
+              "title": "Day",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tracking_id",
+            "day"
+          ],
+          "title": "reschedule_delivery_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Parcel": {
+              "description": "One parcel, as the depot knows it.",
+              "properties": {
+                "tracking_id": {
+                  "format": "id",
+                  "title": "Tracking Id",
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "in_transit",
+                    "out_for_delivery",
+                    "delivered",
+                    "held"
+                  ],
+                  "title": "Status",
+                  "type": "string"
+                },
+                "delivery_day": {
+                  "anyOf": [
+                    {
+                      "format": "date",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Delivery Day"
+                },
+                "town": {
+                  "title": "Town",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tracking_id",
+                "status",
+                "town"
+              ],
+              "title": "Parcel",
+              "type": "object"
+            }
+          },
+          "description": "What ``reschedule_delivery`` returns.",
+          "properties": {
+            "status": {
+              "const": "rescheduled",
+              "title": "Status",
+              "type": "string"
+            },
+            "parcel": {
+              "$ref": "#/$defs/Parcel"
+            }
+          },
+          "required": [
+            "status",
+            "parcel"
+          ],
+          "title": "Rescheduled",
+          "type": "object"
+        }
+      },
+      "save_callback_note": {
+        "description": "Leave a note for a person to call the caller back about.",
+        "input": {
+          "properties": {
+            "note": {
+              "title": "Note",
+              "type": "string"
+            },
+            "call": {
+              "title": "Call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "note",
+            "call"
+          ],
+          "title": "save_callback_note_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``save_callback_note`` returns.",
+          "properties": {
+            "saved": {
+              "title": "Saved",
+              "type": "boolean"
+            },
+            "note": {
+              "title": "Note",
+              "type": "string"
+            }
+          },
+          "required": [
+            "saved",
+            "note"
+          ],
+          "title": "NoteSaved",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "internal/voice-agents-tests/parcel-desk"
+}

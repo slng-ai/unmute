@@ -30,10 +30,17 @@ docs:    ; cd docs-site && npx --yes mint dev --no-open
 # {{ .Env.GH_PAT }} template is never evaluated (verified 2026-08-14).
 release-dry: ; goreleaser release --snapshot --clean --skip=sign
 
+# Every package under internal/voice-agents-tests with a scenarios/ folder,
+# compiled for each code target and run as whole calls on the real model by
+# unmute-core's runner. Needs uv, network and the keys in .env, so it is out of
+# the PR gate. PKG and FW narrow it: make e2e PKG=kestrel FW=pipecat.
+# UNMUTE_E2E_CORE=../unmute-core runs an unreleased unmute-core checkout.
+e2e:     ; go test -tags e2e -timeout 60m -count=1 ./internal/e2e/ -run 'TestScenarios$(if $(PKG),/$(PKG)$(if $(FW),/$(FW)))' -v
+
 # Coval calls the examples running on this laptop. TEST_SET is one or more
 # Coval test set IDs; empty runs every test set attached to an unmute-* agent.
 # Needs network, the Coval and LiveKit keys in .env, and `coval` and
 # `cloudflared` on PATH, which is why it is nowhere near the PR gate.
 sim:     ; uv run --project utils/coval_sim coval-sim run $(TEST_SET)
 
-.PHONY: build test smoke contracts lint lint-emitted fmt install docs release-dry sim
+.PHONY: build test smoke e2e contracts lint lint-emitted fmt install docs release-dry sim

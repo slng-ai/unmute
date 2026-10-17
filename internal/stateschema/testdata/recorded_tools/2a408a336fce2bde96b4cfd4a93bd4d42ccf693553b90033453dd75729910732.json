@@ -1,0 +1,707 @@
+{
+  "digest": "2a408a336fce2bde96b4cfd4a93bd4d42ccf693553b90033453dd75729910732",
+  "report": {
+    "tools": {
+      "end_call": {
+        "description": "End the call once the caller is done. Say nothing: the application says goodbye.",
+        "input": {
+          "properties": {},
+          "title": "end_call_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``end_call`` returns.",
+          "properties": {
+            "ended": {
+              "title": "Ended",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ended"
+          ],
+          "title": "Ended",
+          "type": "object"
+        }
+      },
+      "find_area": {
+        "description": "Find where the caller wants to look. The application reads the place back to them.",
+        "input": {
+          "properties": {
+            "area": {
+              "description": "Where they want to eat or drink, as they said it: an address, a cross street, a landmark, a neighbourhood or a town, with the city if they named one.",
+              "minLength": 1,
+              "title": "Area",
+              "type": "string"
+            },
+            "at_address": {
+              "description": "True only for an exact street address or a point they are at.",
+              "title": "At Address",
+              "type": "boolean"
+            },
+            "craving": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "What they said they are in the mood for along with the area, like \"tapas\". Leave it out if they have not said.",
+              "title": "Craving"
+            }
+          },
+          "required": [
+            "area",
+            "at_address"
+          ],
+          "title": "find_area_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Details": {
+              "description": "What code said about the place the caller picked.",
+              "properties": {
+                "place": {
+                  "title": "Place",
+                  "type": "string"
+                },
+                "name": {
+                  "title": "Name",
+                  "type": "string"
+                },
+                "address": {
+                  "title": "Address",
+                  "type": "string"
+                },
+                "rating": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Rating"
+                },
+                "price": {
+                  "default": "",
+                  "title": "Price",
+                  "type": "string"
+                },
+                "today": {
+                  "default": "",
+                  "title": "Today",
+                  "type": "string"
+                },
+                "phone": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Phone"
+                },
+                "website": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Website"
+                }
+              },
+              "required": [
+                "place",
+                "name",
+                "address"
+              ],
+              "title": "Details",
+              "type": "object"
+            },
+            "Offer": {
+              "description": "The places on offer for the spot and the craving.",
+              "properties": {
+                "places": {
+                  "items": {
+                    "$ref": "#/$defs/Offered"
+                  },
+                  "title": "Places",
+                  "type": "array"
+                }
+              },
+              "required": [
+                "places"
+              ],
+              "title": "Offer",
+              "type": "object"
+            },
+            "Offered": {
+              "description": "One place on offer, by the id the caller picks it with.",
+              "properties": {
+                "id": {
+                  "title": "Id",
+                  "type": "string"
+                },
+                "name": {
+                  "title": "Name",
+                  "type": "string"
+                },
+                "place_id": {
+                  "title": "Place Id",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "place_id"
+              ],
+              "title": "Offered",
+              "type": "object"
+            },
+            "Spot": {
+              "description": "The location the caller's words resolved to.",
+              "properties": {
+                "formatted_address": {
+                  "title": "Formatted Address",
+                  "type": "string"
+                },
+                "latitude": {
+                  "title": "Latitude",
+                  "type": "number"
+                },
+                "longitude": {
+                  "title": "Longitude",
+                  "type": "number"
+                },
+                "at_address": {
+                  "description": "An exact address or a point they are at.",
+                  "title": "At Address",
+                  "type": "boolean"
+                },
+                "craving": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "What they asked for with the area.",
+                  "title": "Craving"
+                }
+              },
+              "required": [
+                "formatted_address",
+                "latitude",
+                "longitude",
+                "at_address"
+              ],
+              "title": "Spot",
+              "type": "object"
+            }
+          },
+          "description": "What ``find_area`` returns. A new area takes back the offer and the details.\n\n``ask_craving`` is code's next step: with no craving and no exact address, the read-back\nasks what they are in the mood for, so the caller's yes never has to pick one.",
+          "properties": {
+            "found": {
+              "title": "Found",
+              "type": "boolean"
+            },
+            "spot": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Spot"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "formatted_address": {
+              "default": "",
+              "title": "Formatted Address",
+              "type": "string"
+            },
+            "ask_craving": {
+              "default": false,
+              "title": "Ask Craving",
+              "type": "boolean"
+            },
+            "craving": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Craving"
+            },
+            "offer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Offer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Details"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "found"
+          ],
+          "title": "FoundArea",
+          "type": "object"
+        }
+      },
+      "find_places": {
+        "description": "Search places at the location the caller agreed to. The application says them.",
+        "input": {
+          "properties": {
+            "spot": {
+              "$ref": "#/$defs/Spot"
+            },
+            "craving": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "What they are in the mood for: a cuisine, \"bar\", \"restaurant\", \"cocktail bar\", a venue by name, or \"no preference\". Leave it out to search for what they said with the area.",
+              "title": "Craving"
+            }
+          },
+          "$defs": {
+            "Spot": {
+              "description": "The location the caller's words resolved to.",
+              "properties": {
+                "formatted_address": {
+                  "title": "Formatted Address",
+                  "type": "string"
+                },
+                "latitude": {
+                  "title": "Latitude",
+                  "type": "number"
+                },
+                "longitude": {
+                  "title": "Longitude",
+                  "type": "number"
+                },
+                "at_address": {
+                  "description": "An exact address or a point they are at.",
+                  "title": "At Address",
+                  "type": "boolean"
+                },
+                "craving": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "What they asked for with the area.",
+                  "title": "Craving"
+                }
+              },
+              "required": [
+                "formatted_address",
+                "latitude",
+                "longitude",
+                "at_address"
+              ],
+              "title": "Spot",
+              "type": "object"
+            }
+          },
+          "required": [
+            "spot"
+          ],
+          "title": "find_places_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Details": {
+              "description": "What code said about the place the caller picked.",
+              "properties": {
+                "place": {
+                  "title": "Place",
+                  "type": "string"
+                },
+                "name": {
+                  "title": "Name",
+                  "type": "string"
+                },
+                "address": {
+                  "title": "Address",
+                  "type": "string"
+                },
+                "rating": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Rating"
+                },
+                "price": {
+                  "default": "",
+                  "title": "Price",
+                  "type": "string"
+                },
+                "today": {
+                  "default": "",
+                  "title": "Today",
+                  "type": "string"
+                },
+                "phone": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Phone"
+                },
+                "website": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Website"
+                }
+              },
+              "required": [
+                "place",
+                "name",
+                "address"
+              ],
+              "title": "Details",
+              "type": "object"
+            },
+            "Offer": {
+              "description": "The places on offer for the spot and the craving.",
+              "properties": {
+                "places": {
+                  "items": {
+                    "$ref": "#/$defs/Offered"
+                  },
+                  "title": "Places",
+                  "type": "array"
+                }
+              },
+              "required": [
+                "places"
+              ],
+              "title": "Offer",
+              "type": "object"
+            },
+            "Offered": {
+              "description": "One place on offer, by the id the caller picks it with.",
+              "properties": {
+                "id": {
+                  "title": "Id",
+                  "type": "string"
+                },
+                "name": {
+                  "title": "Name",
+                  "type": "string"
+                },
+                "place_id": {
+                  "title": "Place Id",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "place_id"
+              ],
+              "title": "Offered",
+              "type": "object"
+            }
+          },
+          "description": "What ``find_places`` returns: the offer, or why there is none.",
+          "properties": {
+            "found": {
+              "title": "Found",
+              "type": "boolean"
+            },
+            "ask_craving": {
+              "default": false,
+              "title": "Ask Craving",
+              "type": "boolean"
+            },
+            "listed": {
+              "default": "",
+              "title": "Listed",
+              "type": "string"
+            },
+            "craving": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Craving"
+            },
+            "offer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Offer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Details"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "found"
+          ],
+          "title": "FoundPlaces",
+          "type": "object"
+        }
+      },
+      "place_details": {
+        "description": "Say the details of the place the caller picked: where it is, price, today's hours.",
+        "input": {
+          "properties": {
+            "offer": {
+              "$ref": "#/$defs/Offer"
+            },
+            "place": {
+              "description": "The id of the place they picked from the offer, like p1.",
+              "title": "Place",
+              "type": "string"
+            }
+          },
+          "$defs": {
+            "Offer": {
+              "description": "The places on offer for the spot and the craving.",
+              "properties": {
+                "places": {
+                  "items": {
+                    "$ref": "#/$defs/Offered"
+                  },
+                  "title": "Places",
+                  "type": "array"
+                }
+              },
+              "required": [
+                "places"
+              ],
+              "title": "Offer",
+              "type": "object"
+            },
+            "Offered": {
+              "description": "One place on offer, by the id the caller picks it with.",
+              "properties": {
+                "id": {
+                  "title": "Id",
+                  "type": "string"
+                },
+                "name": {
+                  "title": "Name",
+                  "type": "string"
+                },
+                "place_id": {
+                  "title": "Place Id",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "place_id"
+              ],
+              "title": "Offered",
+              "type": "object"
+            }
+          },
+          "required": [
+            "offer",
+            "place"
+          ],
+          "title": "place_details_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Details": {
+              "description": "What code said about the place the caller picked.",
+              "properties": {
+                "place": {
+                  "title": "Place",
+                  "type": "string"
+                },
+                "name": {
+                  "title": "Name",
+                  "type": "string"
+                },
+                "address": {
+                  "title": "Address",
+                  "type": "string"
+                },
+                "rating": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Rating"
+                },
+                "price": {
+                  "default": "",
+                  "title": "Price",
+                  "type": "string"
+                },
+                "today": {
+                  "default": "",
+                  "title": "Today",
+                  "type": "string"
+                },
+                "phone": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Phone"
+                },
+                "website": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Website"
+                }
+              },
+              "required": [
+                "place",
+                "name",
+                "address"
+              ],
+              "title": "Details",
+              "type": "object"
+            }
+          },
+          "description": "What ``place_details`` returns: what code says about the place, or that it has none.",
+          "properties": {
+            "found": {
+              "title": "Found",
+              "type": "boolean"
+            },
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "spoken": {
+              "default": "",
+              "title": "Spoken",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Details"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "found",
+            "name"
+          ],
+          "title": "FoundDetails",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "internal/voice-agents-tests/nosh"
+}

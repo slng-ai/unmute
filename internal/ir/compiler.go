@@ -741,6 +741,10 @@ type AgentTransfer struct {
 	To       string          `json:"to" yaml:"to"`
 	Announce string          `json:"announce,omitempty" yaml:"announce,omitempty"`
 	Context  TransferContext `json:"context" yaml:"context"`
+	// Saves are the State values set as the call moves. Version 2.
+	Saves map[string]any `json:"saves,omitempty" yaml:"saves,omitempty"`
+	// OpensWith is the next agent's tool code runs as it takes the call. Version 2.
+	OpensWith *OpensWith `json:"opens_with,omitempty" yaml:"opens_with,omitempty"`
 }
 
 func (*AgentTransfer) control() {}

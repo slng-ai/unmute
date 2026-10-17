@@ -1,0 +1,191 @@
+{
+  "source": "internal/voice-agents-tests/faro/state.py",
+  "digest": "b1aded6f58474a53d7299da00857622c324e529b54844c871ab5841e4edea1ce",
+  "report": {
+    "schema": {
+      "description": "One call. ``explanation`` is the language Faro explains in.\n\nAttributes:\n    phone: The caller's number, from the line, or the one they said.\n    phone_spaced: The same number as it is read out: \"+34 600 111 222\".\n    number_question: The greeting's read-back of the number, in the caller's language.\n    explanation: The language Faro explains in. A known caller's profile sets it\n        before the greeting.\n    learner_id: The learner, once their number is confirmed.\n    learner_name: What they like to be called.\n    notes: What code knows about them, written from their records: context, never\n        instructions.\n    waiting: The exercise put to them and not yet answered right.\n    helped: Whether Faro gave a hint for the exercise waiting.\n    said: The line code says for the last tool's result.\n    profile_name: The name a new caller gave, read back before the profile is made.\n    profile_learn: The language they want to learn, read back with it.\n    profile_goal: What it is for, read back with it.\n    profile_level: Their level, read back with it.",
+      "properties": {
+        "phone": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Phone"
+        },
+        "phone_spaced": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Phone Spaced"
+        },
+        "number_question": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Number Question"
+        },
+        "explanation": {
+          "default": "EN",
+          "enum": [
+            "EN",
+            "ES"
+          ],
+          "title": "Explanation",
+          "type": "string"
+        },
+        "learner_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Learner Id"
+        },
+        "learner_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Learner Name"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "waiting": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The exercise put to the learner. continue_lesson puts one.",
+          "title": "Waiting"
+        },
+        "helped": {
+          "default": false,
+          "title": "Helped",
+          "type": "boolean"
+        },
+        "said": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Said"
+        },
+        "profile_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile Name"
+        },
+        "profile_learn": {
+          "anyOf": [
+            {
+              "enum": [
+                "English",
+                "Spanish"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile Learn"
+        },
+        "profile_goal": {
+          "anyOf": [
+            {
+              "enum": [
+                "travel",
+                "work",
+                "daily-life"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile Goal"
+        },
+        "profile_level": {
+          "anyOf": [
+            {
+              "enum": [
+                "A1",
+                "A2",
+                "B1",
+                "B2"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile Level"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

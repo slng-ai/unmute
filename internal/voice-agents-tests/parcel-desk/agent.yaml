@@ -1,0 +1,152 @@
+# Parcel Desk, ported from unmute-core's examples/parcel-desk: an agent defined as
+# data. The State has a shape, the tools are Python with announce and effect, one
+# group ends the call, and the model is the SLNG Context Router.
+#
+# Core has no scenarios for this example, so this package has no scenarios/ folder
+# and the e2e suite skips it.
+version: 2
+
+name: parcel-desk
+
+entry_agent: desk
+
+mode: record
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: router
+    speak: voice
+    tools:
+      - end_call
+    task_groups:
+      - move_delivery
+      - request_callback
+    tasks:
+      - name: track_parcel
+        when: The caller asks where a parcel is.
+        instructions: tasks/track-parcel.md
+        tools:
+          - find_parcel
+        finish:
+          - tool: find_parcel
+            success:
+              - found:
+                  - true
+        assign:
+          - parcel: result.parcel
+
+      - name: change_delivery
+        instructions: tasks/change-delivery.md
+        tools:
+          - reschedule_delivery
+        finish:
+          - tool: reschedule_delivery
+            success:
+              - status:
+                  - rescheduled
+            confirm:
+              - "Shall I move the delivery to {{state.day}}?"
+            say:
+              - "Done, it now arrives on {{state.parcel.delivery_day}}."
+        assign:
+          - day: input.day
+          - parcel: result.parcel
+
+      - name: callback_note
+        instructions: tasks/callback-note.md
+        tools:
+          - save_callback_note
+        finish:
+          - tool: save_callback_note
+            success:
+              - saved:
+                  - true
+            say:
+              - Thanks, someone will call you back today. Goodbye.
+        assign:
+          - callback_note: result.note
+
+task_groups:
+  move_delivery:
+    when: The caller wants a parcel delivered on another day.
+    steps:
+      - track_parcel
+      - change_delivery
+    context_scope: shared
+    then: return
+  request_callback:
+    when: The caller wants a person to call them back.
+    steps:
+      - callback_note
+    context_scope: shared
+    then: end
+
+prefetch:
+  - name: today
+    clock: now
+    timezone: Europe/London
+    assign:
+      - today: result.date
+
+  - name: caller
+    source: from_number
+    assign:
+      - caller_phone: result.value
+
+secrets:
+  - SLNG_API_KEY
+
+models:
+  think:
+    router:
+      provider: slng
+      model: slng/auto
+      agent_id: parcel-desk
+      # Core leaves the upstream to the stored router config. Unmute needs one named.
+      upstream:
+        provider: openai
+      params:
+        world_part: eu-north
+  speak:
+    voice:
+      provider: slng
+      model: "slng/fish/tts:s2.1-pro"
+      # Fish Audio's "Oliver": a calm English voice.
+      voice: "8d8aec63a56c460cb7def795bdf754fa"
+      language: en
+      params:
+        world_part: eu-north
+  listen:
+    transcriber:
+      provider: slng
+      model: "soniox/speech-ai:rt-v5"
+      language: en
+      params:
+        world_part: eu-north
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: balanced
+
+tools:
+  - find_parcel
+  - reschedule_delivery
+  - save_callback_note
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: Hi, this is Parcel Desk. How can I help?
+  max_duration: 10m
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  avg_session_duration: 3m

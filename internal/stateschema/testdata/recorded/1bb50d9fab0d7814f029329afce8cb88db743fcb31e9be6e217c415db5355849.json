@@ -1,0 +1,124 @@
+{
+  "source": "internal/voice-agents-tests/parcel-desk/state.py",
+  "digest": "1bb50d9fab0d7814f029329afce8cb88db743fcb31e9be6e217c415db5355849",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Parcel": {
+          "description": "One parcel, as the depot knows it.",
+          "properties": {
+            "tracking_id": {
+              "format": "id",
+              "title": "Tracking Id",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "in_transit",
+                "out_for_delivery",
+                "delivered",
+                "held"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "delivery_day": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Delivery Day"
+            },
+            "town": {
+              "title": "Town",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tracking_id",
+            "status",
+            "town"
+          ],
+          "title": "Parcel",
+          "type": "object"
+        }
+      },
+      "description": "One parcel call. Every value starts empty.\n\nAttributes:\n    today: Today, on the depot clock.\n    caller_phone: The caller's number, from the call itself.\n    parcel: The parcel the caller asked about.\n    day: The day the caller asked to move the delivery to.\n    callback_note: What the caller wants a person to call them back about.",
+      "properties": {
+        "today": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Today"
+        },
+        "caller_phone": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Phone"
+        },
+        "parcel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Parcel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "day": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Day"
+        },
+        "callback_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Callback Note"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

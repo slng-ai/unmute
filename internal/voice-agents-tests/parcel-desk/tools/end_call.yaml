@@ -1,0 +1,3 @@
+local:
+  handler: tools/depot.py:end_call
+effect: ends_conversation

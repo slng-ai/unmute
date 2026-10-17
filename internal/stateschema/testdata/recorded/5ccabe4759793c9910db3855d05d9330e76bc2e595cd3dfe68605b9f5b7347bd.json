@@ -1,0 +1,282 @@
+{
+  "source": "internal/voice-agents-tests/wasla/state.py",
+  "digest": "5ccabe4759793c9910db3855d05d9330e76bc2e595cd3dfe68605b9f5b7347bd",
+  "report": {
+    "schema": {
+      "description": "One reminder call.\n\nAttributes:\n    account_id: The account the call is about, like ``WA-1001``. The dispatch's\n        ``call_start`` must carry it.\n    first_name: The holder's first name, read before the greeting.\n    last_name: The holder's last name.\n    amount_words: The overdue amount in words, saved once the date of birth matched.\n    merchant: Where the purchase was made.\n    purchase_spoken: The day of the purchase, in words.\n    due_spoken: The day it was due, in words.\n    today: Today on the Dubai clock.\n    weekday: Today's weekday.\n    deadline: The last day a promise may name: today plus ten days.\n    deadline_spoken: The deadline in words.\n    birth_date: The holder's date of birth, confirmed by the ``identify`` step.\n    said: The line code says once the holder agreed to talk.\n    day: The day a promise or a callback names, read back before it is recorded.\n    at: The time of a callback.\n    when_said: When a recorded promise or callback happens, in words.\n    callback_day: A callback day the main agent already heard.\n    callback_time: A callback time the main agent already heard.\n    concern: What the holder raised, when they cannot promise.\n    concern_note: What they said about it, in their own words.\n    outcome: The outcome code the call recorded last, like ``PTP``.",
+      "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "pattern": "^WA-\\d{4}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Account Id"
+        },
+        "first_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "First Name"
+        },
+        "last_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Name"
+        },
+        "amount_words": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount Words"
+        },
+        "merchant": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Merchant"
+        },
+        "purchase_spoken": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purchase Spoken"
+        },
+        "due_spoken": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Due Spoken"
+        },
+        "today": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Today"
+        },
+        "weekday": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Weekday"
+        },
+        "deadline": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deadline"
+        },
+        "deadline_spoken": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deadline Spoken"
+        },
+        "birth_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Birth Date"
+        },
+        "said": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Said"
+        },
+        "day": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Day"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "format": "time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At"
+        },
+        "when_said": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "When Said"
+        },
+        "callback_day": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Callback Day"
+        },
+        "callback_time": {
+          "anyOf": [
+            {
+              "format": "time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Callback Time"
+        },
+        "concern": {
+          "anyOf": [
+            {
+              "enum": [
+                "hardship",
+                "legal-matter",
+                "purchase-dispute",
+                "refusal-to-pay"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Concern"
+        },
+        "concern_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Concern Note"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

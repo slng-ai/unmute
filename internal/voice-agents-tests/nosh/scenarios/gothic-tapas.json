@@ -1,0 +1,14 @@
+{
+  "name": "Tapas in the Gothic Quarter, two places' details, then goodbye",
+  "dispatch": {"customer_name": "Maya"},
+  "greeting": ["Hey Maya, it's Nosh!", "Whereabouts are you looking?"],
+  "turns": [
+    {"caller": "Tapas in the Gothic Quarter, Barcelona.", "expect": ["So that's Barri Gòtic, Barcelona, Spain, right?"], "max_requests": 1},
+    {"caller": "Yes.", "expect": ["I found Bar Cañete, a tapas restaurant with a 4.5 out of five from lots of reviews", "Do any of those sound good?"], "max_requests": 1},
+    {"caller": "The first one sounds nice.", "expect": ["Bar Cañete is on Carrer de la Unió, 17, Ciutat Vella, Barcelona", "mid-range", "Today they're open 1:00 PM to 12:00 AM"], "max_requests": 1},
+    {"caller": "And what about the third one?", "expect": ["Bodega La Palma is on Carrer de la Palma de Sant Just, 7, Barcelona"], "reject": ["mid-range", "open"], "max_requests": 1},
+    {"caller": "What's the phone number for Bar Cañete?", "max_requests": 1},
+    {"caller": "That's the one, thanks. Bye.", "expect": ["Enjoy your meal! Bye for now."], "max_requests": 1}
+  ],
+  "state": {"details.place": "p3", "craving": "tapas"}
+}
