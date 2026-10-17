@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"slices"
@@ -70,6 +71,21 @@ func buildCoreSpeech(resolved ir.Target) (coreSpeech, error) {
 		fmt.Fprintf(&body, "\n\ndef %s() -> Any:\n    \"\"\"Return the voice %s.\"\"\"\n    return %s\n", function, pyQuote(name), call)
 		voices = append(voices, fmt.Sprintf("%s: %s", pyQuote(name), function))
 	}
+	var realtime []string
+	for _, name := range sortedKeys(resolved.Models.Realtime) {
+		call, extraImports, err := coreRealtimeCall(fw, resolved.Models.Realtime[name], env, render)
+		if err != nil {
+			return out, fmt.Errorf("realtime %q: %w", name, err)
+		}
+		for _, line := range extraImports {
+			if !slices.Contains(imports, line) {
+				imports = append(imports, line)
+			}
+		}
+		function := "realtime_" + pythonName.ReplaceAllString(name, "_")
+		fmt.Fprintf(&body, "\n\ndef %s() -> Any:\n    \"\"\"Return the realtime model %s: it listens, thinks and speaks.\"\"\"\n    return %s\n", function, pyQuote(name), call)
+		realtime = append(realtime, fmt.Sprintf("%s: %s", pyQuote(name), function))
+	}
 	slices.Sort(imports)
 	out.Source = "\"\"\"This agent's speech models that are not SLNG's. Written by `unmute compile`.\n\n" +
 		"Each constructor comes from the same catalogue row version 1 uses. SLNG speech is built in\n" +
@@ -78,7 +94,8 @@ func buildCoreSpeech(resolved ir.Target) (coreSpeech, error) {
 		"from collections.abc import Callable\nfrom typing import Any\n\n" +
 		strings.Join(imports, "\n") + "\n" + body.String() +
 		fmt.Sprintf("\n\nLISTEN: Callable[[], Any] | None = %s\n\"\"\"The speech-to-text model when it is not SLNG's, else None.\"\"\"\n", listen) +
-		fmt.Sprintf("SPEAK: dict[str, Callable[[], Any]] = {%s}\n\"\"\"Each voice that is not SLNG's, by its name in agent.yaml.\"\"\"\n", strings.Join(voices, ", "))
+		fmt.Sprintf("SPEAK: dict[str, Callable[[], Any]] = {%s}\n\"\"\"Each voice that is not SLNG's, by its name in agent.yaml.\"\"\"\n", strings.Join(voices, ", ")) +
+		fmt.Sprintf("REALTIME: dict[str, Callable[[], Any]] = {%s}\n\"\"\"Each realtime model, by its name in agent.yaml.\"\"\"\n", strings.Join(realtime, ", "))
 	out.Env = env.sorted()
 	return out, nil
 }
@@ -98,4 +115,51 @@ func renderCall(call ServiceCall) string {
 		args = append(args, call.SettingsArg+"="+call.SettingsClass+"("+strings.Join(inner, ", ")+")")
 	}
 	return call.Class + "(" + strings.Join(args, ", ") + ")"
+}
+
+// coreRealtimeCall renders one realtime model the way version 1's drivers do.
+// LiveKit takes the voice as an argument and the turn detection as a kwarg.
+// Pipecat takes neither as an argument: both live in the service's session
+// properties, which version 1's own function writes.
+func coreRealtimeCall(fw targetcap.Provider, binding ir.Binding, env *envSet,
+	render func(targetcap.Role, ir.Binding) (string, error)) (string, []string, error) {
+	if fw == targetcap.LiveKit {
+		call, _, err := resolveService(fw, targetcap.Realtime, binding, env, slngSite{})
+		if err != nil {
+			return "", nil, err
+		}
+		var imports []string
+		if binding.TurnDetection != "" {
+			profile, err := targetcap.ResolveTurnDetection(targetcap.LiveKit, binding.TurnDetection)
+			if err != nil {
+				return "", nil, err
+			}
+			if !profile.Omit {
+				call.Args = append(call.Args, pyKV{Key: "turn_detection", Value: profile.Expr})
+				imports = profile.Imports
+			}
+		}
+		if _, err := render(targetcap.Realtime, binding); err != nil { // the row's import and install
+			return "", nil, err
+		}
+		return renderCall(call), imports, nil
+	}
+	voice := cmp.Or(binding.Voice, binding.VoiceID)
+	binding.Voice, binding.VoiceID = "", ""
+	call, _, err := resolveService(fw, targetcap.Realtime, binding, env, slngSite{})
+	if err != nil {
+		return "", nil, err
+	}
+	properties, err := pipecatRealtimeSessionProperties(binding.TurnDetection, voice, false)
+	if err != nil {
+		return "", nil, err
+	}
+	if call.SettingsArg == "" {
+		call.SettingsArg, call.SettingsClass = "settings", call.Class+".Settings"
+	}
+	call.SettingsArgs = append(call.SettingsArgs, pyKV{Key: "session_properties", Value: properties})
+	if _, err := render(targetcap.Realtime, binding); err != nil { // the row's import and install
+		return "", nil, err
+	}
+	return renderCall(call), []string{"from pipecat.services.openai.realtime import events as realtime_events"}, nil
 }

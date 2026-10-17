@@ -248,6 +248,7 @@ func coreAgent(agent *ir.Agent, name string) (map[string]any, error) {
 		own = []string{}
 	}
 	out := map[string]any{"instructions": def.Instructions, "tools": own, "model": def.Model, "voice": def.Voice}
+	putString(out, "realtime", def.Realtime)
 	if len(handoffs) > 0 {
 		out["handoffs"] = handoffs
 	}
@@ -643,13 +644,16 @@ func coreModels(resolved ir.Target) (map[string]any, error) {
 			return nil, fmt.Errorf("think %q: version 2 compiles a google or openai model, or the slng router, only so far, and this one is %s", name, binding.Provider)
 		}
 	}
-	if models.Listen == nil {
+	if len(models.Live) > 0 {
+		return nil, fmt.Errorf("live: version 2 compiles realtime models, not live ones, so far: unmute-core has no backend model a live model hands its work to")
+	}
+	if models.Listen == nil && len(models.Realtime) == 0 {
 		return nil, fmt.Errorf("listen: version 2 needs a speech-to-text model")
 	}
-	if models.Turn == nil {
+	if models.Turn == nil && len(models.Realtime) == 0 {
 		return nil, fmt.Errorf("turn: version 2 needs a turn model")
 	}
-	return map[string]any{"think": think, "speak": models.Speak, "listen": models.Listen, "turn": models.Turn}, nil
+	return map[string]any{"think": think, "speak": models.Speak, "listen": models.Listen, "turn": models.Turn, "realtime": models.Realtime}, nil
 }
 
 // coreRouter lowers a SLNG Context Router think binding to what spec.py builds

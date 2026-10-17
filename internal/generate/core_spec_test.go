@@ -108,3 +108,10 @@ func TestSpeechThatIsNotSlngComesFromTheCatalogue(t *testing.T) {
 		}
 	}
 }
+
+func TestALiveModelIsRefusedUntilCoreHasABackend(t *testing.T) {
+	resolved := ir.Target{Models: ir.Bindings{Live: map[string]ir.Binding{"counter_voice": {Provider: "openai", Model: "gpt-live-1"}}}}
+	if _, err := coreModels(resolved); err == nil || !strings.Contains(err.Error(), "no backend model a live model hands its work to") {
+		t.Fatalf("a live model compiled, or was refused for another reason: %v", err)
+	}
+}

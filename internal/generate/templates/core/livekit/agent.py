@@ -65,7 +65,7 @@ import speech
 load_dotenv()
 logger = logging.getLogger("agent")
 MODELS: dict[str, Any] = spec.SPEC["models"]
-WINDOW = turn_window(MODELS["turn"].get("pace", "balanced"), "livekit")
+WINDOW = turn_window((MODELS["turn"] or {}).get("pace", "balanced"), "livekit")
 
 
 def required(name: str) -> str:
@@ -174,6 +174,11 @@ def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession
     question answer it.
     """
     entry = spec.SPEC["agents"][first]
+    if realtime := entry.get("realtime"):
+        # One model listens, thinks and speaks: no speech-to-text, no voice.
+        session = AgentSession(llm=speech.REALTIME[realtime](), vad=vad, user_away_timeout=None)
+        yield_to_caller(session)
+        return session
     ids = tracking_ids(state.call)
     stt = build_stt(ids)
     session = AgentSession(

@@ -74,7 +74,7 @@ load_dotenv()
 spec.start_knowledge()
 logger = logging.getLogger("bot")
 MODELS: dict[str, Any] = spec.SPEC["models"]
-WINDOW = turn_window(MODELS["turn"].get("pace", "balanced"), "pipecat")
+WINDOW = turn_window((MODELS["turn"] or {}).get("pace", "balanced"), "pipecat")
 
 transport_params: dict[str, Callable[..., Any]] = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
@@ -135,6 +135,8 @@ def build_llm(first: str, state: CallState) -> LLMService[Any]:
     ``UnmuteFlows`` sets its prompt. An OpenAI binding's params that Pipecat's settings
     do not name, like ``reasoning_effort``, go in each request as they are.
     """
+    if realtime := spec.SPEC["agents"][first].get("realtime"):
+        return speech.REALTIME[realtime]()
     binding = MODELS["think"][spec.SPEC["agents"][first]["model"]]
     if binding["provider"] == "slng":
         call = spec.router(binding, state.call)
@@ -219,8 +221,11 @@ def build_pipeline(
 ) -> tuple[PipelineWorker, UnmuteFlows]:
     """Return the call's worker and the flows that run the call's first agent on it."""
     first = spec.entry(state)
+    entry = spec.SPEC["agents"][first]
+    realtime = entry.get("realtime")
     context = LLMContext()
-    aggregators = LLMContextAggregatorPair(
+    # A realtime service decides the caller's turns itself, so its aggregators are plain.
+    aggregators = LLMContextAggregatorPair(context) if realtime else LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(params=vad_params(WINDOW)),
@@ -235,19 +240,14 @@ def build_pipeline(
         ),
     )
     llm = build_llm(first, state)
-    entry = spec.SPEC["agents"][first]
     ids = tracking_ids(state.call)
-    pipeline = Pipeline(
-        [
-            transport.input(),
-            build_stt(ids),
-            aggregators.user(),
-            llm,
-            build_tts(entry["voice"], ids),
-            transport.output(),
-            aggregators.assistant(),
-        ]
-    )
+    if realtime:
+        # One model listens, thinks and speaks: no speech-to-text, no voice.
+        steps = [transport.input(), aggregators.user(), llm, transport.output()]
+    else:
+        stt, tts = build_stt(ids), build_tts(entry["voice"], ids)
+        steps = [transport.input(), stt, aggregators.user(), llm, tts, transport.output()]
+    pipeline = Pipeline([*steps, aggregators.assistant()])
     worker = PipelineWorker(
         pipeline, params=PipelineParams(enable_metrics=True, enable_usage_metrics=True)
     )
@@ -297,7 +297,7 @@ def build_pipeline(
     )
     flows.install()
     if telemetry is not None:
-        binding = MODELS["think"][entry["model"]]
+        binding = MODELS["realtime"][realtime] if realtime else MODELS["think"][entry["model"]]
         worker.add_observer(
             TelemetryObserver(
                 telemetry, model=binding["model"], provider=binding["provider"], flows=flows
@@ -336,7 +336,7 @@ async def bot(runner_args: RunnerArguments) -> None:
                 LLMUpdateSettingsFrame(
                     delta=LLMSettings(system_instruction=flows.main_instruction())
                 ),
-                *greeting_frames(spec.GREETING, state),
+                *greeting_frames(spec.GREETING, state, llm=flows.llm),
             ]
         )
         if spec.MAX_DURATION_S is not None:

@@ -357,7 +357,7 @@ def agent_spec(name: str, line: PhoneLine | None = None) -> AgentSpec:
     common: dict[str, Any] = {
         "name": name,
         "handoffs": tuple(agent.get("handoffs", ())),
-        "language": SPEC["models"]["speak"][agent["voice"]].get("language", "en"),
+        "language": (SPEC["models"]["speak"] or {}).get(agent["voice"], {}).get("language", "en"),
         "timezone": TIMEZONE,
     }
     if plan is not None:

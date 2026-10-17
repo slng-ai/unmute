@@ -7,7 +7,7 @@
 # check the label in their hand. A pipeline that ends the turn on silence starts
 # talking over them. Who ends the turn is the whole package, so read
 # turn_detection below before anything else.
-version: 1
+version: 2
 
 name: pharmacy-refills
 architecture: realtime
