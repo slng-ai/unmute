@@ -1562,6 +1562,7 @@ func livekitSlngSite(agent *ir.Agent, tgt ir.Target, profile string) slngSite {
 		SessionExpr:       livekitSessionIDExpr,
 		NamesExpr:         "_SLNG_TEMPLATE_PATHS.get(agent._slng_scope, ())",
 		ConfigFunc:        slngConfigFunc(profile),
+		ProjectID:         agent.ProjectID,
 		HeadersPerRequest: true,
 		BodyPerRequest:    true,
 		ClientExpr:        livekitEntryClientExpr,

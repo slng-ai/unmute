@@ -14,6 +14,10 @@ answers it judges cacheable and calls the upstream for other turns. Set
 The upstream credentials are sent to SLNG on each model request. Change the
 source binding's `agent_id` when prompt changes should invalidate cached
 answers. SLNG hosts the router; you still host this app.
+{{- if .Router.ProjectID}}
+Every model request sends `X-Slng-Project-Id: {{.Router.ProjectID}}`, the
+`project_id` from `agent.yaml`, so SLNG bills and limits it under that project.
+{{- end}}
 {{end}}
 ## Run it
 

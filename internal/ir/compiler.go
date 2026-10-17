@@ -34,6 +34,9 @@ type Agent struct {
 	// refuses: it is the one target that deploys under a name instead of into a
 	// project the author already named.
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+	// ProjectID is the SLNG project UUID from agent.yaml, sent as the
+	// X-Slng-Project-Id header on every router request. Empty sends no header.
+	ProjectID string `json:"project_id,omitempty" yaml:"project_id,omitempty"`
 	// Architecture is the resolved pipeline shape: cascade, realtime or live.
 	// Always one of the three by the time anything reads it, because Build
 	// resolves an omitted key to cascade, so no reader has to treat empty as a

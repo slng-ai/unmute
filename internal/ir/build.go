@@ -65,6 +65,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Manifest: pkg.Manifest,
 		Version:  pkg.Agent.Version,
 		Name:     strings.TrimSpace(pkg.Agent.Name),
+		// Not trimmed: validation refuses anything but a canonical UUID, so a
+		// stray space is named rather than hidden.
+		ProjectID: pkg.Agent.ProjectID,
 		// Resolved here so no reader downstream has to treat an omitted key as a
 		// fourth case. An omitted key is cascade, which is what every package
 		// written before this key existed gets.
