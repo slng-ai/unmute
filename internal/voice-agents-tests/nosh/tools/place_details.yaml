@@ -11,11 +11,13 @@ assign:
   - place_name: result.name
 replies:
   - when:
-      - found: [true]
+      - found:
+          - true
     say:
       - "{{state.spoken}}"
   - when:
-      - found: [false]
+      - found:
+          - false
     say:
       - >-
         Sorry, I can't pull up {{state.place_name}}'s details just now. Want to

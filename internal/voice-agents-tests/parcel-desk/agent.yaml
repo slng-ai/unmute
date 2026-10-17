@@ -31,7 +31,8 @@ agents:
         finish:
           - tool: find_parcel
             success:
-              - found: [true]
+              - found:
+                  - true
         assign:
           - parcel: result.parcel
 
@@ -42,7 +43,8 @@ agents:
         finish:
           - tool: reschedule_delivery
             success:
-              - status: [rescheduled]
+              - status:
+                  - rescheduled
             confirm:
               - "Shall I move the delivery to {{state.day}}?"
             say:
@@ -58,7 +60,8 @@ agents:
         finish:
           - tool: save_callback_note
             success:
-              - saved: [true]
+              - saved:
+                  - true
             say:
               - Thanks, someone will call you back today. Goodbye.
         assign:

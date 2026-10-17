@@ -52,14 +52,16 @@ agents:
         replies:
           - tool: verify_holder
             when:
-              - status: [mismatch]
+              - status:
+                  - mismatch
             say:
               - >-
                 I'm sorry, that doesn't match our records. Could you tell me
                 your date of birth again?
           - tool: verify_holder
             when:
-              - status: [locked]
+              - status:
+                  - locked
             say:
               - >-
                 I'm sorry, I can't go on with this call today. Wasla support is
@@ -68,7 +70,8 @@ agents:
         finish:
           - tool: verify_holder
             success:
-              - status: [verified]
+              - status:
+                  - verified
             confirm:
               - "Is your date of birth {{state.birth_date}}?"
             say:
@@ -94,18 +97,21 @@ agents:
         replies:
           - tool: good_time
             when:
-              - good_time: [true]
+              - good_time:
+                  - true
             say:
               - "{{state.said}}"
           - tool: good_time
             when:
-              - good_time: [false]
+              - good_time:
+                  - false
             say:
               - No problem at all. When would be a good day and time to call you back?
         finish:
           - tool: record_promise
             success:
-              - status: [PTP]
+              - status:
+                  - PTP
             confirm:
               - "Shall I record your promise to pay {{state.amount_words}} for {{state.day}}?"
             say:
@@ -115,14 +121,19 @@ agents:
                 anything else I can help with?
           - tool: note_concern
             success:
-              - status: [HARDSHIP, LEGAL, DISPUTE, RTP]
+              - status:
+                  - HARDSHIP
+                  - LEGAL
+                  - DISPUTE
+                  - RTP
             confirm:
               - "Shall I pass this to our team as a {{state.concern}}: {{state.concern_note}}?"
             say:
               - "{{state.said}}"
           - tool: schedule_callback
             success:
-              - status: [CB]
+              - status:
+                  - CB
             confirm:
               - "Shall I note a call back for {{state.day}} at {{state.at}}?"
             say:
@@ -145,7 +156,8 @@ agents:
         finish:
           - tool: schedule_callback
             success:
-              - status: [CB]
+              - status:
+                  - CB
             confirm:
               - "Shall I note a call back for {{state.day}} at {{state.at}}?"
             say:
@@ -165,7 +177,8 @@ agents:
         finish:
           - tool: mark_wrong_number
             success:
-              - status: [WN]
+              - status:
+                  - WN
             confirm:
               - >-
                 I'm sorry to have bothered you. Shall I take this number off our

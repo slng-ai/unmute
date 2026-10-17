@@ -8,12 +8,16 @@ assign:
   - said: result.said
 replies:
   - when:
-      - status: [foreign]
-      - explanation: [EN]
+      - status:
+          - foreign
+      - explanation:
+          - EN
     say:
       - Faro only takes Spanish numbers, starting with plus thirty-four. What is your Spanish number?
   - when:
-      - status: [foreign]
-      - explanation: [ES]
+      - status:
+          - foreign
+      - explanation:
+          - ES
     say:
       - Faro solo acepta números españoles, que empiezan por más treinta y cuatro. ¿Cuál es tu número español?

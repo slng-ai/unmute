@@ -58,7 +58,9 @@ agents:
         finish:
           - tool: check_number
             success:
-              - status: [known, new]
+              - status:
+                  - known
+                  - new
             confirm:
               - "Let me check: is your number {{state.phone}}?"
             say:
@@ -80,7 +82,8 @@ agents:
         finish:
           - tool: create_profile
             success:
-              - status: [created]
+              - status:
+                  - created
             confirm:
               - >-
                 Shall I create your profile as {{state.profile_name}}, learning
@@ -131,7 +134,9 @@ agents:
         finish:
           - tool: check_number
             success:
-              - status: [known, new]
+              - status:
+                  - known
+                  - new
             confirm:
               - "A ver si lo tengo bien: ¿tu número es {{state.phone}}?"
             say:
@@ -153,7 +158,8 @@ agents:
         finish:
           - tool: create_profile
             success:
-              - status: [created]
+              - status:
+                  - created
             confirm:
               - >-
                 ¿Creo tu perfil como {{state.profile_name}}, con nivel
@@ -202,7 +208,8 @@ prefetch:
   - name: language
     tool: language_of
     writes: false
-    needs_confirmed: [phone]
+    needs_confirmed:
+      - phone
     assign:
       - explanation: result.explanation
       - phone_spaced: result.phone_spaced

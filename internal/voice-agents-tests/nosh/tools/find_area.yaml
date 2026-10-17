@@ -11,17 +11,22 @@ assign:
   - details: result.details
 replies:
   - when:
-      - found: [true]
-      - ask_craving: [false]
+      - found:
+          - true
+      - ask_craving:
+          - false
     say:
       - "So that's {{state.spot.formatted_address}}, right?"
   - when:
-      - found: [true]
-      - ask_craving: [true]
+      - found:
+          - true
+      - ask_craving:
+          - true
     say:
       - "So that's {{state.spot.formatted_address}}. What are you in the mood for? A cuisine, a bar, or no preference?"
   - when:
-      - found: [false]
+      - found:
+          - false
     say:
       - >-
         Hmm, I couldn't place that. Could you give me a nearby cross street, a

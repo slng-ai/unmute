@@ -15,15 +15,18 @@ assign:
   - listed: result.listed
 replies:
   - when:
-      - ask_craving: [true]
+      - ask_craving:
+          - true
     say:
       - What are you in the mood for? A cuisine, a bar, or no preference?
   - when:
-      - found: [true]
+      - found:
+          - true
     say:
       - "I found {{state.listed}}. Do any of those sound good?"
   - when:
-      - found: [false]
+      - found:
+          - false
     say:
       - >-
         Hmm, I couldn't find anything like that right there. Want me to try a

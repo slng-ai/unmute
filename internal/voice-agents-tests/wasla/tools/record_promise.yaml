@@ -11,10 +11,12 @@ assign:
   - outcome: result.status
 replies:
   - when:
-      - status: [past_day]
+      - status:
+          - past_day
     say:
       - That day has already gone. Which other day would suit you?
   - when:
-      - status: [after_deadline]
+      - status:
+          - after_deadline
     say:
       - "I can only note a day up to {{state.deadline_spoken}}. Which day by then works for you?"

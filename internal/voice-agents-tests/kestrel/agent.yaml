@@ -43,8 +43,10 @@ agents:
         replies:
           - tool: lookup_policy
             when:
-              - found: [false]
-              - status: [looked_up]
+              - found:
+                  - false
+              - status:
+                  - looked_up
             say:
               - >-
                 I'm sorry, I can't find a policy with that number and date of
@@ -52,7 +54,8 @@ agents:
         finish:
           - tool: lookup_policy
             success:
-              - found: [true]
+              - found:
+                  - true
             confirm:
               - >-
                 Is your policy number {{state.policy_number}}, with a date of
@@ -76,7 +79,8 @@ agents:
         finish:
           - tool: file_claim
             success:
-              - filed: [true]
+              - filed:
+                  - true
             confirm:
               - "{{state.read_back}}"
             say:

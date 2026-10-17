@@ -7,6 +7,7 @@ announce:
 precheck: tools/claims.py:not_a_policy_number
 replies:
   - when:
-      - status: [not_a_number]
+      - status:
+          - not_a_number
     say:
       - A policy number is KP and six digits. Could you read me yours again?

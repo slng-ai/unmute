@@ -16,10 +16,12 @@ assign:
   - next_question: result.next_question
 replies:
   - when:
-      - status: [future_day]
+      - status:
+          - future_day
     say:
       - That day hasn't happened yet. On which day did it happen?
   - when:
-      - complete: [false]
+      - complete:
+          - false
     say:
       - "{{state.next_question}}"
