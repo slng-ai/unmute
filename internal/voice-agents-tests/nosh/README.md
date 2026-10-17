@@ -36,8 +36,7 @@ about reading them. They are optional for the demo.
 
 | Core behaviour | What is written instead |
 |---|---|
-| `local_tool(end_call, announce=GOODBYE, announce_wait=True)`: the goodbye finishes before the call ends | `announce: Enjoy your meal! Bye for now.` with `effect: ends_conversation`. `announce_wait` is refused: `unknown field "announce_wait"`. The goodbye may be cut off |
-| `AgentSpec(language="en", timezone="Europe/Madrid")`: the agent's clock is Madrid | Nothing on the agent. `tools/finder.py` reads the Madrid clock itself for "today's hours" |
+| `AgentSpec(timezone="Europe/Madrid")` | No clock prefetch, so the agent has no timezone. No line names a date. `tools/finder.py` reads the Madrid clock itself for "today's hours" |
 | Replies read `{{result.formatted_address}}`, `{{result.listed}}`, `{{result.spoken}}`, `{{result.name}}` | Rule 1: saved to state with `assign:` and read as `{{state.x}}`. New state fields `listed`, `spoken`, `place_name`; `spot.formatted_address` is read from the saved spot |
 | `hidden=["listed"]` and `["spoken"]` hide result fields only | The same `hidden:`. The saved `listed` and `spoken` state values are not hidden from the prompt, as nothing in the prompt reads them |
 | No inactivity nudge (`idle=None`) | No `inactivity:` block |

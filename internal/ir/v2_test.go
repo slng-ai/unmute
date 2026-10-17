@@ -90,6 +90,7 @@ func TestV2Refusals(t *testing.T) {
 		{"call_start is neither required nor optional", func(p *packagespec.Package) {
 			p.Agent.Variables[0].CallStart = "always"
 		}, "call_start: always; write required or optional"},
+		{"announce_wait on a tool with no announce line", withTool("find_slots", func(t *packagespec.Tool) { t.Announce, t.AnnounceWait = nil, true }), "announce_wait waits for the announce line, and find_slots has none"},
 		{"inject names no handler parameter", withTool("save_booking", func(t *packagespec.Tool) { t.Inject[0].Key = "shop" }), `inject "shop" names no parameter of save_booking`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

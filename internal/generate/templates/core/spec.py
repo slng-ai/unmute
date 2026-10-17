@@ -21,6 +21,8 @@ from unmute_core.greeting import Greeting
 from unmute_core.handoff import HandoffContext
 from unmute_core.idle import IdleNudges
 from unmute_core.prefetch import CallValue, Clock, Lookup, Prefetch
+from unmute_core.settings import env_value
+from unmute_core.slng import RouterConfig, RouterModelCall
 from unmute_core.state import CallInfo, CallState
 from unmute_core.tasks import OpeningTool, TaskPlan, TasksSpec
 from unmute_core.tools import Assign, ToolRegistry, ToolReply, local_tool
@@ -136,6 +138,35 @@ async def new_call(
     return state
 
 
+def from_env(value: Any) -> Any:
+    """Return ``value`` with each ``{"env": NAME}`` replaced by that variable's value."""
+    if isinstance(value, dict):
+        if value.keys() == {"env"}:
+            found = env_value(value["env"], str)
+            if not found:
+                raise RuntimeError(f"Set {value['env']} in the environment or in .env")
+            return found
+        return {key: from_env(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [from_env(item) for item in value]
+    return value
+
+
+def router(binding: Mapping[str, Any], call: CallInfo) -> RouterModelCall:
+    """Return the call's SLNG Context Router, from a think binding whose provider is slng.
+
+    The router groups requests by the call's agent and session ids. Needs ``SLNG_API_KEY``.
+    """
+    return RouterModelCall(
+        call,
+        model=binding["model"],
+        world_part=binding.get("world_part"),
+        config=RouterConfig.model_validate(from_env(binding["config"])),
+        pure_proxy=binding.get("pure_proxy", False),
+        body=binding.get("body"),
+    )
+
+
 def entry(state: CallState) -> str:
     """Return the agent the call starts with: by ``entry_by``'s State value, else the entry."""
     rule = SPEC.get("entry_by")
@@ -144,13 +175,29 @@ def entry(state: CallState) -> str:
     return rule["agents"].get(str(state.plain(rule["value"])), ENTRY)
 
 
+TIMEZONE: str | None = next(
+    (entry["timezone"] for entry in SPEC["prefetch"] if entry["kind"] == "clock"), None
+)
+"""Where the business is: the zone of the package's clock prefetch, or None."""
+
+
 def agent_spec(name: str) -> AgentSpec:
-    """Return one agent's ``AgentSpec``: its prompt and its tasks, or its tools."""
+    """Return one agent's ``AgentSpec``: its prompt and its tasks, or its tools.
+
+    Lines code speaks say dates in the language of the agent's voice, and name a day
+    from today on the clock prefetch's zone.
+    """
     instructions, plan, tools = AGENTS[name]
-    handoffs = tuple(SPEC["agents"][name].get("handoffs", ()))
+    agent = SPEC["agents"][name]
+    common: dict[str, Any] = {
+        "name": name,
+        "handoffs": tuple(agent.get("handoffs", ())),
+        "language": SPEC["models"]["speak"][agent["voice"]].get("language", "en"),
+        "timezone": TIMEZONE,
+    }
     if plan is not None:
-        return AgentSpec(instructions, name=name, tasks=plan, handoffs=handoffs)
-    return AgentSpec(instructions, name=name, tools=tools, handoffs=handoffs)
+        return AgentSpec(instructions, tasks=plan, **common)
+    return AgentSpec(instructions, tools=tools, **common)
 
 
 class Handoff:

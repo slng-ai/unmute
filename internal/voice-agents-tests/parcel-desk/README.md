@@ -25,7 +25,11 @@ None. Core has no scenarios for this example, so there is no `scenarios/` folder
 - **Confirm line reads `{{input.day}}`.** v2 lines read only State. I added a `day` value, saved with `assign: day: input.day`. Core has no `day` in its State, so the final state has one more value.
 - **Receipt line reads `{{result.parcel.delivery_day}}`.** It reads `{{state.parcel.delivery_day}}`, because the step saves `parcel: result.parcel` first.
 - **`then` on `move_delivery`.** Core leaves it unset. v2 needs one, so it is `then: return`, which is core's default.
-- **Router upstream.** Core leaves the upstream to the stored router config. v2 needs one named, so it is `upstream: provider: openai`. Change it to match the config. Validate also warns that no `reasoning_effort` is set. I left it out, as core does.
+- **Router upstream and model.** Core asks for `slng/auto` and leaves the rest to the router config stored with the key. Unmute sends the upstream with every request, so it names one: `upstream: provider: openai`, with `model: gpt-4.1-mini`. Change both to match your config. Validate also warns that no `reasoning_effort` is set. I left it out, as core does.
+- **The move step's prompt.** It names today, as the main prompt does, and tells the model
+  the application reads the day back. Core's prompt does neither: with them missing, a live
+  model guessed a past year and read the day back twice. `find_parcel` also matches an id
+  read aloud, like "P D 1042", which core's exact lookup misses.
 - **Task `when` and `task_only_tools`.** `when` on `track_parcel` is kept. v2 has no `task_only_tools`: the tools sit under their tasks, and `end_call` is the agent's only tool of its own.
 - **Turn pace.** Core's `balanced` is `pace: balanced` on both targets. `targets.yaml` sets the LiveKit turn model to `turn-detector-mini` with the same pace.
 - **Core's own pipecat/livekit code.** Core's example uses `SLNG_ROUTER_URL` and `SLNG_MODEL` overrides from the environment. Unmute reads the router from `models.think`.

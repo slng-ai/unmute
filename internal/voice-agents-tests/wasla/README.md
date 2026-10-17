@@ -29,7 +29,6 @@ The scenarios in `scenarios/` are unmute-core's, unchanged. The e2e suite expect
 | `good_time` false ends the step, then the main agent starts a callback | A reply says the same line, and the step stays open. The model then calls `schedule_callback` in the same step. Not covered by a scenario |
 | `birth_date` saved from the verified result | Saved from the input once the check matches |
 | `new_call` refuses an account the ledger does not hold | The `account` prefetch's `refuse_call:` says the same line, and the call does not start |
-| Agent language `en` and timezone `Asia/Dubai` | Only the prefetch clock and the TTS language carry them |
 | A web call is `outbound` (`CallInfo(direction="outbound")`) | Not expressed: a web call has no direction. No scenario reads it |
 | Ledger as a class | Module-level data and functions in `tools/ledger.py`, with the words helpers inlined |
 | Core turn pace `balanced` on both targets | `targets.yaml` sets `balanced` on the LiveKit detector: v2 refuses a per-target pace |

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/slng-ai/unmute/internal/ir"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // coreSources maps an authored prefetch source onto the unmute-core CallInfo
@@ -110,6 +111,9 @@ func coreTools(agent *ir.Agent) ([]any, error) {
 		}
 		if len(tool.Hidden) > 0 {
 			options["hidden"] = tool.Hidden
+		}
+		if tool.AnnounceWait {
+			options["announce_wait"] = true
 		}
 		putString(options, "effect", string(tool.Effect))
 		putString(options, "interruption", string(tool.Interruption))
@@ -571,9 +575,19 @@ func putString(out map[string]any, key, value string) {
 // bindings by the names agent.yaml gives them.
 func coreModels(resolved ir.Target) (map[string]any, error) {
 	models := resolved.Models
+	think := map[string]any{}
 	for name, binding := range models.Reason {
-		if binding.Provider != "google" {
-			return nil, fmt.Errorf("think %q: version 2 compiles a google model only so far, and this one is %s", name, binding.Provider)
+		switch {
+		case binding.Provider == "google":
+			think[name] = binding
+		case binding.Router():
+			router, err := coreRouter(binding)
+			if err != nil {
+				return nil, fmt.Errorf("think %q: %w", name, err)
+			}
+			think[name] = router
+		default:
+			return nil, fmt.Errorf("think %q: version 2 compiles a google model or the slng router only so far, and this one is %s", name, binding.Provider)
 		}
 	}
 	for name, binding := range models.Speak {
@@ -587,5 +601,41 @@ func coreModels(resolved ir.Target) (map[string]any, error) {
 	if models.Turn == nil {
 		return nil, fmt.Errorf("turn: version 2 needs a turn model")
 	}
-	return map[string]any{"think": models.Reason, "speak": models.Speak, "listen": models.Listen, "turn": models.Turn}, nil
+	return map[string]any{"think": think, "speak": models.Speak, "listen": models.Listen, "turn": models.Turn}, nil
+}
+
+// coreRouter lowers a SLNG Context Router think binding to what spec.py builds
+// a RouterModelCall from: the model, the world part, the slng_config with the
+// upstream as one tier, and the params the router forwards. A credential is
+// {"env": NAME}, read when the call starts: no generated file holds its value.
+func coreRouter(binding ir.Binding) (map[string]any, error) {
+	if binding.Upstream == nil {
+		return nil, fmt.Errorf("a router binding needs an upstream block")
+	}
+	fields, ok := targetcap.SlngResolveUpstream(binding.Upstream.Provider, binding.Upstream.Fields())
+	if !ok {
+		return nil, fmt.Errorf("upstream provider %q is not one the router accepts", binding.Upstream.Provider)
+	}
+	endpoint := map[string]any{}
+	for _, field := range fields {
+		if field.Env {
+			endpoint[field.Wire] = map[string]any{"env": field.Value}
+			continue
+		}
+		endpoint[field.Wire] = field.Value
+	}
+	tier := map[string]any{"model": binding.Model, "weight": 100, "endpoint": endpoint}
+	router := map[string]any{
+		"provider": binding.Provider,
+		"model":    binding.Model,
+		"config":   map[string]any{"tiers": map[string]any{"1": []any{tier}}},
+	}
+	putString(router, "world_part", slngWorldPart(binding))
+	if slngPureProxy(binding) {
+		router["pure_proxy"] = true
+	}
+	if _, body := splitParams(slngConsumedParams(binding.Params), targetcap.SlngRequestBodyArg); len(body) > 0 {
+		router["body"] = body
+	}
+	return router, nil
 }

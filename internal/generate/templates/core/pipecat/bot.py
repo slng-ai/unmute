@@ -35,7 +35,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.llm_service import FunctionCallParams, LLMService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -43,8 +44,10 @@ from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.workers.runner import WorkerRunner
 from pipecat_slng import SlngSTTService, SlngTTSService
 from unmute_core.call import CallStartError
+from unmute_core.model import model_name
 from unmute_core.pipecat import (
     IdleNudgeObserver,
+    ModelCallLLMService,
     TelemetryObserver,
     UnmuteFlows,
     greeting_frames,
@@ -119,9 +122,16 @@ class VertexLLM(GoogleLLMService):
         self._client = vertex_client(self._api_key, self._vertex_location)
 
 
-def build_llm(first: str = spec.ENTRY) -> GoogleLLMService:
-    """Return the first agent's Gemini model. ``UnmuteFlows`` sets its prompt."""
+def build_llm(first: str, state: CallState) -> LLMService[Any]:
+    """Return the first agent's model: the SLNG Context Router, or Gemini.
+
+    ``UnmuteFlows`` sets its prompt.
+    """
     binding = MODELS["think"][spec.SPEC["agents"][first]["model"]]
+    if binding["provider"] == "slng":
+        call = spec.router(binding, state.call)
+        settings = OpenAILLMService.Settings(model=model_name(call), system_instruction="")
+        return ModelCallLLMService(call, state=state, settings=settings)
     params = dict(binding.get("params", {}))
     thinking = params.pop("thinking_config", None)
     settings = GoogleLLMService.Settings(
@@ -176,7 +186,7 @@ def build_pipeline(
             ),
         ),
     )
-    llm = build_llm(first)
+    llm = build_llm(first, state)
 
     def tools_of(name: str) -> list[FunctionSchema]:
         """Return the handoff tools one agent offers, as Pipecat tools."""
@@ -242,8 +252,12 @@ def build_pipeline(
     )
     observers: list[BaseObserver] = []
     if telemetry is not None:
-        model = MODELS["think"][entry["model"]]["model"]
-        observers.append(TelemetryObserver(telemetry, model=model, provider="google", flows=flows))
+        binding = MODELS["think"][entry["model"]]
+        observers.append(
+            TelemetryObserver(
+                telemetry, model=binding["model"], provider=binding["provider"], flows=flows
+            )
+        )
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),

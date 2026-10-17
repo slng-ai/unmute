@@ -26,5 +26,5 @@ It needs `GOOGLE_API_KEY` and `SLNG_API_KEY` in `.env`.
 
 | unmute-core does | This package does instead |
 |---|---|
+| `AgentSpec(language="en-GB")`: lines say dates as "5 June" | The agent's language is its voice's, `en`: lines say dates as "June 5". The timezone is the clock prefetch's, `Europe/London`, as in core |
 | A second idle nudge, 20 s after the first | One nudge at 15 s, then the goodbye |
-| `AgentSpec(language="en-GB", timezone="Europe/London")` says dates in British English on the London clock | The clock prefetch reads London time. Lines are said in the default language |

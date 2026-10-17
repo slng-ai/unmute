@@ -41,6 +41,7 @@ from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import google, silero, slng
 from unmute_core.call import CallStartError
 from unmute_core.livekit import (
+    ModelCallLLM,
     UnmuteAgent,
     endpointing,
     greet,
@@ -107,8 +108,13 @@ class VertexLLM(google.LLM):
         self._client = vertex_client(api_key, location)
 
 
-def build_llm(binding: dict[str, Any]) -> google.LLM:
-    """Return the Gemini model a think binding names, on Vertex when it says so."""
+def build_llm(binding: dict[str, Any], state: CallState) -> google.LLM | ModelCallLLM:
+    """Return the model a think binding names: the SLNG Context Router, or Gemini.
+
+    Gemini runs on Vertex when the binding says so.
+    """
+    if binding["provider"] == "slng":
+        return ModelCallLLM(spec.router(binding, state.call), state=state)
     params = dict(binding.get("params", {}))
     key = required("GOOGLE_API_KEY")
     if params.pop("vertexai", False):
@@ -143,7 +149,7 @@ def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession
     session = AgentSession(
         conn_options=SessionConnectOptions(llm_conn_options=APIConnectOptions(max_retry=1)),
         stt=stt,
-        llm=build_llm(MODELS["think"][entry["model"]]),
+        llm=build_llm(MODELS["think"][entry["model"]], state),
         tts=slng.TTS(
             api_key=key,
             slng_base_url=slng_host(voice),

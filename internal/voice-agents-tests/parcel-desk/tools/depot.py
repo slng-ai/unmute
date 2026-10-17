@@ -4,6 +4,7 @@ Ported from unmute-core's examples/parcel-desk. The depot resets on each process
 A failure the model should read is a ``ToolError``.
 """
 
+import re
 from datetime import date, timedelta
 from typing import Annotated, Any, Literal
 
@@ -60,9 +61,18 @@ class Ended(BaseModel):
     ended: bool
 
 
+def depot_key(tracking_id: str) -> str:
+    """Return a tracking id the way the depot keys it: ``PD-1042`` from "p d 1 0 4 2".
+
+    A caller reads the id aloud, so speech to text gives "PD 1042" or "P D 1042".
+    """
+    letters = re.sub(r"[^A-Z0-9]", "", tracking_id.upper())
+    return f"{letters[:2]}-{letters[2:]}"
+
+
 def find_parcel(tracking_id: TrackingId) -> Found:
     """Find a parcel by its tracking id: where it is and the day it is due."""
-    parcel = PARCELS.get(tracking_id.strip().upper())
+    parcel = PARCELS.get(depot_key(tracking_id))
     if parcel is None:
         return Found(found=False, hint="No parcel has that id. Ask the caller to read it again.")
     return Found(found=True, parcel=Parcel.model_validate(parcel))
