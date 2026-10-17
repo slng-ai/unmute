@@ -61,5 +61,5 @@
       }
     }
   },
-  "source": "internal/voice-agents-tests/relay-desk"
+  "source": "examples/twilio"
 }

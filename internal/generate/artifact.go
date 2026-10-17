@@ -70,10 +70,11 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 	// Version 2 runs on unmute-core, on LiveKit or Pipecat. Other targets are
 	// refused rather than compiled with templates that would drop every key
 	// version 2 adds.
-	if agent.Version == ir.Version2 && resolved.Provider == ir.ProviderTwilio {
-		// Twilio keeps its own runtime, and reads version 2 with the keys it can run.
-		if err := twilioV2Refusals(agent); err != nil {
-			return Artifact{}, fmt.Errorf("generate %s twilio: %w", resolved.Name, err)
+	if agent.Version == ir.Version2 && (resolved.Provider == ir.ProviderTwilio || resolved.Provider == ir.ProviderSlng) {
+		// Twilio and SLNG keep their own runtime, and read version 2 with the keys
+		// it can run.
+		if err := ownRuntimeRefusals(agent, resolved.Provider); err != nil {
+			return Artifact{}, fmt.Errorf("generate %s %s: %w", resolved.Name, resolved.Provider, err)
 		}
 	} else if agent.Version == ir.Version2 {
 		files, err := GenerateCore(agent, resolved)

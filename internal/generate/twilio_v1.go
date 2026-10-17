@@ -550,10 +550,11 @@ func twilioReport(data twilioData, files []File, bindings []ir.ForwardedBinding,
 	return append(out, '\n'), nil
 }
 
-// twilioV2Refusals names the version 2 keys the twilio runtime cannot run.
-// They are refused rather than dropped: a package that relies on code saying a
-// read-back would otherwise compile, and the model would say it instead.
-func twilioV2Refusals(agent *ir.Agent) error {
+// ownRuntimeRefusals names the version 2 keys a target with its own runtime,
+// twilio or slng, cannot run. They are refused rather than dropped: a package
+// that relies on code saying a read-back would otherwise compile, and the
+// model would say it instead.
+func ownRuntimeRefusals(agent *ir.Agent, provider ir.Provider) error {
 	var keys []string
 	for _, name := range sortedKeys(agent.Tools) {
 		tool := agent.Tools[name]
@@ -598,6 +599,6 @@ func twilioV2Refusals(agent *ir.Agent) error {
 		return nil
 	}
 	slices.Sort(keys)
-	return fmt.Errorf("the twilio runtime runs version 2 without unmute-core, so it cannot run %s; remove them, or compile to livekit or pipecat",
-		strings.Join(keys, ", "))
+	return fmt.Errorf("the %s runtime runs version 2 without unmute-core, so it cannot run %s; remove them, or compile to livekit or pipecat",
+		provider, strings.Join(keys, ", "))
 }
