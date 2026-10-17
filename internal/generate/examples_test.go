@@ -1168,11 +1168,11 @@ func TestPublicExamplesValidateAndGenerate(t *testing.T) {
 	}
 }
 
-// assertAnswersTwilioRoute holds the one way utils/coval_sim reaches a
-// Pipecat example before a release: the runner's Twilio route, `bot.py -t
+// assertAnswersTwilioRoute holds the one way a simulated caller reaches a
+// browser-only Pipecat example: the runner's Twilio route, `bot.py -t
 // twilio`. The bot has to name the route in transport_params, and the project
 // has to install the extra that carries it, or a simulated call dies in the
-// websocket handshake and the release check tests nothing.
+// websocket handshake.
 func assertAnswersTwilioRoute(t *testing.T, name string, files []File) {
 	t.Helper()
 	contents := map[string]string{}

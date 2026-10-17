@@ -27,9 +27,6 @@ type lkVideoGrant struct {
 
 type lkAgentDispatch struct {
 	AgentName string `json:"agentName"`
-	// Metadata reaches the agent as ctx.job.metadata. Omitted when empty so a
-	// token with nothing to carry is byte-for-byte what it always was.
-	Metadata string `json:"metadata,omitempty"`
 }
 
 type lkRoomConfig struct {
@@ -49,10 +46,7 @@ type lkClaims struct {
 // agent-dispatch entry for `agentName`. The agent has agent_name set (so it
 // won't auto-dispatch), and token dispatch fires only when the room is first
 // created — so the caller must use a fresh room name per token (C5).
-//
-// dispatchMetadata is the JSON string the agent reads back as ctx.job.metadata.
-// Pass "" when there is nothing to carry.
-func mintLiveKitToken(apiKey, apiSecret, room, identity, agentName, dispatchMetadata string, now time.Time, ttl time.Duration) (string, error) {
+func mintLiveKitToken(apiKey, apiSecret, room, identity, agentName string, now time.Time, ttl time.Duration) (string, error) {
 	if apiKey == "" || apiSecret == "" {
 		return "", errors.New("LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set")
 	}
@@ -65,7 +59,7 @@ func mintLiveKitToken(apiKey, apiSecret, room, identity, agentName, dispatchMeta
 			Room: room, RoomJoin: true,
 			CanPublish: true, CanSubscribe: true, CanPublishData: true,
 		},
-		RoomConfig: lkRoomConfig{Agents: []lkAgentDispatch{{AgentName: agentName, Metadata: dispatchMetadata}}},
+		RoomConfig: lkRoomConfig{Agents: []lkAgentDispatch{{AgentName: agentName}}},
 	}
 	return signJWT(apiSecret, claims)
 }

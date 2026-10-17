@@ -325,8 +325,6 @@ Evidence levels are distinct, and a change should say which one it has:
   [scripts/text_run_twilio.py](scripts/text_run_twilio.py), with `--fake` (an in-process signed fake
   ConversationRelay client, offline and deterministic) and `--real` (the real model and key, still no
   real call).
-- **Coval runs** are advisory: `make sim TEST_SET=<id>`. Twilio has no Coval test set yet, so say so
-  rather than report an untested route as passing.
 - **Real carrier acceptance on a deployed agent** is the only thing that proves a phone call works, and
   nothing local stands in for it (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), "Where a phone call
   is exercised"). No real Twilio call has been placed through this target: its compile report says so in

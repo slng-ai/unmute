@@ -30,10 +30,4 @@ docs:    ; cd docs-site && npx --yes mint dev --no-open
 # {{ .Env.GH_PAT }} template is never evaluated (verified 2026-08-14).
 release-dry: ; goreleaser release --snapshot --clean --skip=sign
 
-# Coval calls the examples running on this laptop. TEST_SET is one or more
-# Coval test set IDs; empty runs every test set attached to an unmute-* agent.
-# Needs network, the Coval and LiveKit keys in .env, and `coval` and
-# `cloudflared` on PATH, which is why it is nowhere near the PR gate.
-sim:     ; uv run --project utils/coval_sim coval-sim run $(TEST_SET)
-
-.PHONY: build test smoke contracts lint lint-emitted fmt install docs release-dry sim
+.PHONY: build test smoke contracts lint lint-emitted fmt install docs release-dry
