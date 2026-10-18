@@ -368,9 +368,7 @@ places the call, alongside the parameter naming the agent:
 
 The number goes into that request twice, once as the number Twilio dials and
 once as this parameter. Twilio fills `{{To}}` in for a TwiML Bin but substitutes
-nothing inside an inline `Twiml=`, so the caller of the API supplies it. The
-generated `build/pipecat/README.md` prints the whole request with your own
-values already in it, which is the copy worth using.
+nothing inside an inline `Twiml=`, so the caller of the API supplies it.
 
 Leave the parameter out and the entry is skipped, exactly as a withheld caller
 ID is skipped, and the run log names the entry and says the call carried no

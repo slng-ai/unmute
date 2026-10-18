@@ -36,15 +36,21 @@ func GenerateSlng(agent *ir.Agent, tgt ir.Target) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, fmt.Errorf("agent body: %w", err)
 	}
-	// One file, and the reason there is only one is the whole shape of this
-	// target now: the body references tools SLNG already owns and creates none,
-	// so there is no tool body to write beside it.
+	// The body references tools by name. Every tool but a local one is one SLNG
+	// already owns.
 	files := []File{{Path: "agent.json", Content: body}}
 	runbook, err := renderSlngRunbook(built.Runbook)
 	if err != nil {
 		return Artifact{}, err
 	}
 	files = append(files, File{Path: "README.md", Content: runbook})
+	// A version 2 local tool is a code tool SLNG builds from its Python, written
+	// where `voiceai agents push` reads tool bodies and samples.
+	code, err := slngCodeToolFiles(agent)
+	if err != nil {
+		return Artifact{}, err
+	}
+	files = append(files, code...)
 	// The report last, because it lists the files: it is derived from the two
 	// above and names itself, the same way both code targets' reports do.
 	report, err := slngReport(built, files)

@@ -2,8 +2,8 @@ package target
 
 // Pipecat realtime entries: one model that listens, thinks and speaks over the
 // OpenAI Realtime API, standing where the transcriber, the model and the
-// synthesizer stood. Same contract as catalog_pipecat.go (the pipecat_v1 driver
-// templates, pipecat-ai ==1.12.0).
+// synthesizer stood. Same contract as catalog_pipecat.go (the core speech.py emitter,
+// pipecat-ai ==1.12.0).
 //
 // What "Verified" on the row below covers: the offline suite reading the emitted
 // module, and the opt-in smoke driving the real service with only its socket

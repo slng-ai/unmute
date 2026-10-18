@@ -6,7 +6,7 @@
 # value whose correct emission is nothing at all, and a fixture that omitted it
 # would emit nothing for the other reason.
 # internal/generate/livekit_realtime_test.go reads the emitted module.
-version: 1
+version: 2
 
 name: realtime-model
 architecture: realtime

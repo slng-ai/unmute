@@ -1,4 +1,4 @@
-// Package scaffold renders the files `unmute init` writes: a v1 agent package
+// Package scaffold renders the files `unmute init` writes: a version 2 agent package
 // (agent.yaml + instructions.md + targets.yaml). Templates live in templates/
 // and are embedded; each runs through text/template with [[ ]] delimiters, so
 // the voice-agent {{ }} variable syntax in prompts passes through verbatim.
@@ -1126,6 +1126,7 @@ func Write(dir string, d Data) ([]string, error) {
 	}
 	tools := append([]Tool(nil), d.Tools...)
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
+	written := map[string]bool{}
 	for _, tool := range tools {
 		out := filepath.Join(dir, "tools", tool.Name+".yaml")
 		var buf bytes.Buffer
@@ -1140,9 +1141,14 @@ func Write(dir string, d Data) ([]string, error) {
 		}
 		created = append(created, out)
 		if tool.ExecutionKind() == "local" {
-			handler := tool.Handler
-			if handler == "" {
-				handler = filepath.Join("tools", tool.Name+".py")
+			handler, _ := spec.SplitHandler(tool.HandlerRef())
+			if written[handler] {
+				continue // version 2 tools may share one handler file
+			}
+			written[handler] = true
+			source := tool.HandlerSource
+			if source == "" {
+				source = tool.handlerStub()
 			}
 			handlerOut, err := packagePath(dir, handler)
 			if err != nil {
@@ -1156,7 +1162,7 @@ func Write(dir string, d Data) ([]string, error) {
 			if err := os.MkdirAll(filepath.Dir(handlerOut), 0o755); err != nil {
 				return nil, fmt.Errorf("scaffold: %w", err)
 			}
-			if err := os.WriteFile(handlerOut, []byte(tool.HandlerSource), 0o644); err != nil {
+			if err := os.WriteFile(handlerOut, []byte(source), 0o644); err != nil {
 				return nil, fmt.Errorf("scaffold: %w", err)
 			}
 			created = append(created, handlerOut)

@@ -17,7 +17,7 @@
 # `booked_for` is the pair, which is a shape this compiler supplies rather than
 # one this file declares, so a path into it proves the seeded catalog resolves
 # the same way a declared shape does.
-version: 1
+version: 2
 
 name: typed-state
 

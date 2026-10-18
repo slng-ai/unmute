@@ -11,13 +11,21 @@ An optional `manifest: manifest.yaml` links the company contract copied into the
 package root. If that file exists, the link is required. See
 [Manifest](/reference/manifest) for the rules and saved defaults.
 
+Write `version: 2`. LiveKit and Pipecat compile version 2 only, onto
+[unmute-core](/core/start/why-unmute-core). A version 1 package fails there with
+a message that says to set `version: 2`, add a `state.py` and type your local
+tools. Version 1 compiles only on the Twilio and SLNG targets, and those take
+version 2 too. This page is the full key reference for both.
+[Agent configuration, version 2](/reference/agent-yaml-v2) lists what version 2
+adds, reads differently, and does not compile yet.
+
 YAML decoding is strict. An unknown field is an error with the file and the
 line, not a shrug.
 
 Durations use Go duration syntax, for example `90s`, `15m`, or `1h30m`.
 
 ```yaml agent.yaml
-version: 1
+version: 2
 name: acme-greeter
 entry_agent: greeter
 
@@ -208,11 +216,11 @@ Where the deployed name lands:
 | Target | What carries it |
 |---|---|
 | `slng` | the pushed agent's `name`, which is how a push finds the agent to update |
-| `pipecat` | `agent_name` in `pcc-deploy.toml`, its secret set, and every `pipecat cloud agent ...` command |
+| `pipecat` | the agent name you give `pipecat cloud deploy`, its secret set, and every `pipecat cloud agent ...` command |
 | `livekit` | the worker's `agent_name`, which is what a SIP dispatch rule matches |
 
 `name:` on its own, without the target, labels the generated project: the
-pyproject distribution name, the logger, the trace name, the README title.
+pyproject distribution name, the logger and the trace name.
 
 ### Why unmute does not infer it
 
@@ -247,8 +255,7 @@ second, so after changing `name:`:
   id in the preserved `livekit.toml` and re-registers the worker under the new
   name. The **SIP dispatch rule** is what breaks: it still names the old worker,
   so inbound calls ring and nothing answers. Delete it
-  (`lk sip dispatch delete <id>`) and create it again from
-  `sip-dispatch-rule.json`, which carries the new name after you compile.
+  (`lk sip dispatch delete <id>`) and create it again with the new name.
 
 There is no way to keep the old bare name. An agent deployed as `livekit` was
 named after the target, and the new name always carries the package half, so the
@@ -782,7 +789,8 @@ agent.yaml:17: task "verify_customer" is defined by agent "concierge" and again 
 `when` makes a task callable; `assign` says which values it saves.
 A task may omit `assign:` and still finish. Every generated finish also takes
 optional `unserved_request`; it returns only an `unserved` status to the owner.
-Ordinary tool `input:` and `output:` JSON Schemas are unchanged.
+A webhook tool keeps its `input:` and `output:` JSON Schemas. A local tool has
+neither: its handler's types are the contract.
 
 ### `context`
 
@@ -1038,7 +1046,10 @@ a `tools:` list in `agent.yaml`.
 ### Tool files
 
 One file per tool, in `tools/`. The top level is the contract with the model;
-exactly one execution block says how it runs.
+exactly one execution block says how it runs. A local tool names a typed Python
+function with `local: handler: tools/<name>.py:<function>`. The function's
+arguments are the model's input and its Pydantic return model is the output, so a
+local tool file has no `input:` or `output:`. A webhook tool writes both as JSON Schema.
 
 <ParamField path="description" type="string">
   Required for local, webhook, and knowledge tools: explains when the model should call
@@ -1047,15 +1058,17 @@ exactly one execution block says how it runs.
 </ParamField>
 
 <ParamField path="input" type="object">
-  Required for authored local and webhook contracts: a JSON Schema with `type: object`
-  describing model arguments. Refused on builtin, MCP, knowledge, and hosted `slng` tools,
-  which own their schemas.
+  Required for authored webhook contracts: a JSON Schema with `type: object`
+  describing model arguments. A version 2 local tool leaves it out, because its handler signature is the
+  input. Refused on builtin, MCP, knowledge, and hosted `slng` tools, which own
+  their schemas. Write version 2: livekit, pipecat and SLNG refuse a version 1 handler.
 </ParamField>
 
 <ParamField path="output" type="object">
   An author-side JSON Schema with `type: object`. Omit for no declared result schema. Used
   by assignments and success checks; it is not a general runtime result validator or a
-  model prompt. Refused on builtin, MCP, knowledge, and hosted `slng` tools.
+  model prompt. A version 2 local tool leaves it out, because its return model is the
+  output. Refused on builtin, MCP, knowledge, and hosted `slng` tools.
 </ParamField>
 
 <ParamField path="inject" type="list of one-key pairs">
@@ -1090,7 +1103,7 @@ exactly one execution block says how it runs.
 | Execution block | Fields |
 |---|---|
 | `slng` | a published tool name, or the [legacy hash block](/build/tools/hosted#the-legacy-form-still-loads) |
-| `local` | optional `handler`; omitted means `tools/<tool-name>.py`. Optional `dependencies`, exact `name==version` pins for a SLNG per-tool environment; refused on LiveKit and Pipecat, which build one dependency list for the whole project |
+| `local` | `handler`, written `file.py:function`. It is required: write `version: 2`, because livekit, pipecat and SLNG refuse a version 1 handler. Optional `dependencies`, exact `name==version` pins for a SLNG per-tool environment; refused on LiveKit and Pipecat, which build one dependency list for the whole project |
 | `webhook` | `url_env` is required on LiveKit and Pipecat; `base_url` is a legacy literal HTTPS base that neither code target reads. SLNG refuses authored webhooks; optional `path` and `auth`; a non-empty path starts with `/` |
 | `mcp` | required `url_env`; optional `server` (the platform's name for it, when it differs from this tool's name), `transport`, `auth`, and non-empty unique `tools` entries |
 | `builtin` | required `id`; optional `instructions` |

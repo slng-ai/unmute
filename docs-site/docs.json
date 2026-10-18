@@ -267,6 +267,7 @@
             "public": true,
             "pages": [
               "reference/agent-yaml",
+              "reference/agent-yaml-v2",
               "reference/manifest",
               "reference/targets-yaml",
               "reference/connections-yaml",

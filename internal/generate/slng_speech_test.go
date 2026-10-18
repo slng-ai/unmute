@@ -1,15 +1,12 @@
 package generate
 
 import (
-	"fmt"
 	"maps"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/ir"
-	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
 
@@ -52,95 +49,6 @@ func TestSlngSpeechGateways(t *testing.T) {
 					}
 				})
 			}
-		}
-	}
-}
-
-func TestSlngSpeechGatewayKeepsDeployment(t *testing.T) {
-	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
-		t.Run(string(provider), func(t *testing.T) {
-			agent := loadCompilerAgent(t)
-			tgt := targetByProvider(t, agent, provider)
-			tgt.DeploymentRegions = []string{"eu-central"}
-			first := map[string]any{"world_part": "eu-north"}
-			tgt.Models.Listen = &ir.Binding{Provider: "slng", Model: "sarvam/saaras:v3", Placement: ir.PlacementAPI, Params: first}
-			for name := range tgt.Models.Speak {
-				tgt.Models.Speak[name] = ir.Binding{Provider: "slng", Model: "sarvam/bulbul:v3", Voice: "shubh", Placement: ir.PlacementAPI, Params: first}
-			}
-			before, err := Generate(agent, tgt, target.Default())
-			if err != nil {
-				t.Fatal(err)
-			}
-			tgt.Models.Listen.Params = map[string]any{"world_part": "in"}
-			for name, binding := range tgt.Models.Speak {
-				binding.Params = map[string]any{"world_part": "au"}
-				tgt.Models.Speak[name] = binding
-			}
-			after, err := Generate(agent, tgt, target.Default())
-			if err != nil {
-				t.Fatal(err)
-			}
-			file, gateway, deploy := agentSource, `world_part="%s"`, "pcc-deploy.toml"
-			if provider == ir.ProviderLiveKit {
-				file, gateway, deploy = agentSource, `slng_base_url="%s.api.slng.ai"`, "README.md"
-			}
-			src := artifactFile(t, after, file)
-			for _, part := range []string{"in", "au"} {
-				if !strings.Contains(src, fmt.Sprintf(gateway, part)) {
-					t.Errorf("%s missing %s gateway", file, part)
-				}
-			}
-			if got, want := artifactFile(t, after, deploy), artifactFile(t, before, deploy); got != want {
-				t.Errorf("speech gateway changed %s", deploy)
-			}
-			if provider == ir.ProviderLiveKit {
-				tgt.Models.ListenFallbacks = []ir.ListenFallback{{Name: "backup", Binding: ir.Binding{
-					Provider: "slng", Model: "sarvam/saaras:v3", Placement: ir.PlacementAPI,
-					Params: map[string]any{"world_part": "sg"},
-				}}}
-				fallback, err := Generate(agent, tgt, target.Default())
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !strings.Contains(artifactFile(t, fallback, file), `slng_base_url="sg.api.slng.ai"`) {
-					t.Error("fallback did not use its own gateway")
-				}
-			}
-		})
-	}
-}
-
-func TestSlngSpeechGatewayUsesTargetOverride(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	model := pkg.Agent.Models.Listen["transcriber"]
-	model.Provider, model.Model = "slng", "sarvam/saaras:v3"
-	model.Params = map[string]any{"world_part": "in"}
-	pkg.Agent.Models.Listen["transcriber"] = model
-	override := pkg.Targets["livekit"]
-	model.Params = map[string]any{"world_part": "jp"}
-	override.Models["transcriber"] = model
-	pkg.Targets["livekit"] = override
-	agent, err := buildWithState(t, pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		provider ir.Provider
-		file     string
-		want     string
-	}{
-		{ir.ProviderLiveKit, agentSource, `slng_base_url="jp.api.slng.ai"`},
-		{ir.ProviderPipecat, agentSource, `world_part="in"`},
-	} {
-		artifact, err := Generate(agent, targetByProvider(t, agent, tc.provider), target.Default())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(artifactFile(t, artifact, tc.file), tc.want) {
-			t.Errorf("%s did not use its resolved model gateway %s", tc.provider, tc.want)
 		}
 	}
 }

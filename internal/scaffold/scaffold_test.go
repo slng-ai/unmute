@@ -2,7 +2,6 @@ package scaffold
 
 import (
 	"bytes"
-	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
@@ -92,10 +92,10 @@ func TestWriteDefaultFileSet(t *testing.T) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	// .gitignore is one of the five, and it is not optional: agent.yaml and
+	// .gitignore is one of the six, and it is not optional: agent.yaml and
 	// .env.example both tell the author that `.env` is not committed, and
 	// nothing was making that true.
-	want := []string{".env.example", ".gitignore", "agent.yaml", "instructions.md", "targets.yaml"}
+	want := []string{".env.example", ".gitignore", "agent.yaml", "instructions.md", "state.py", "targets.yaml"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("default files = %v, want %v", names, want)
 	}
@@ -136,6 +136,9 @@ func TestScaffoldAgreesWithItsOwnBuild(t *testing.T) {
 			if err != nil {
 				t.Fatalf("the scaffold wrote a package the compiler cannot load: %v", err)
 			}
+			if err := data.readState(t.Context(), pkg, stateschema.UV{}); err != nil {
+				t.Fatal(err)
+			}
 			agent, err := ir.Build(pkg)
 			if err != nil {
 				t.Fatalf("the scaffold wrote a package the compiler cannot build: %v", err)
@@ -162,27 +165,6 @@ func TestScaffoldAgreesWithItsOwnBuild(t *testing.T) {
 			}
 			if got := envNames(string(built)); !slices.Equal(got, want) {
 				t.Errorf("build/%s asks for %v, want exactly %v", name, got, want)
-			}
-
-			if name == "livekit" {
-				var report struct {
-					RequiredEnv []string `json:"required_env"`
-				}
-				if err := json.Unmarshal(files["compile-report.json"], &report); err != nil {
-					t.Fatal(err)
-				}
-				startupEnv := regexp.MustCompile(`(?s)REQUIRED_ENV = \[.*?\]`).Find(files["settings.py"])
-				if startupEnv == nil {
-					t.Fatal("settings.py has no REQUIRED_ENV startup check")
-				}
-				for _, platform := range []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL"} {
-					if !slices.Contains(report.RequiredEnv, platform) {
-						t.Errorf("compile-report.json lost runtime requirement %s: %v", platform, report.RequiredEnv)
-					}
-					if !bytes.Contains(startupEnv, []byte(platform)) {
-						t.Errorf("agent.py startup checks lost runtime requirement %s", platform)
-					}
-				}
 			}
 		})
 	}
@@ -735,7 +717,8 @@ func TestScaffoldToolManifestsAreBlockStyle(t *testing.T) {
 		name string
 		tool Tool
 	}{
-		{"local", Tool{Execution: "local", Handler: "tools/t.py"}},
+		// local is not in this table: version 2 reads its types from the
+		// handler. TestScaffoldLocalToolIsATypedHandler covers what it writes.
 		{"webhook", Tool{Execution: "webhook", URLEnv: "T_URL"}},
 		{"webhook_bearer", Tool{Execution: "webhook", URLEnv: "T_URL",
 			Auth: &spec.ToolAuth{Type: "bearer", TokenEnv: "T_TOKEN"}}},
@@ -938,5 +921,50 @@ func TestPhoneRouteGetsItsTargetsTransport(t *testing.T) {
 				t.Errorf("a phone package on %s got transport %q, want %q", target, got, want)
 			}
 		})
+	}
+}
+
+func TestScaffoldLocalToolIsATypedHandler(t *testing.T) {
+	tool := Tool{
+		Name: "check_order", Description: "Look up an order.", Execution: "local",
+		Input: `{"type":"object","properties":{"order_id":{"type":"string","description":"The order id."},"limit":{"type":"integer"}},"required":["order_id"]}`,
+	}
+	data := Data{Name: "agent", Tools: []Tool{tool}}
+	data.SetTarget("livekit")
+	dir := filepath.Join(t.TempDir(), "agent")
+	if _, err := Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(dir, "tools", "check_order.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(manifest), "handler: tools/check_order.py:check_order\n") || strings.Contains(string(manifest), "input:") {
+		t.Errorf("a version 2 local tool names its function and carries no input:\n%s", manifest)
+	}
+	handler, err := os.ReadFile(filepath.Join(dir, "tools", "check_order.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `def check_order(order_id: Annotated[str, Field(description="The order id.")], limit: int | None = None) -> CheckOrderResult:`
+	if !strings.Contains(string(handler), want) {
+		t.Errorf("handler stub does not carry the typed signature %q:\n%s", want, handler)
+	}
+	if _, err := Preflight(data); err != nil {
+		t.Errorf("a package with a stub handler fails preflight: %v", err)
+	}
+}
+
+// The CLI and console tests read a fresh package's state.py from a recording,
+// so the recorded copy has to be the bytes init writes.
+func TestEmptyStateMatchesItsRecording(t *testing.T) {
+	recorded, err := os.ReadFile(filepath.Join("..", "stateschema", "testdata", "models", "scaffold_empty.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := Data{Name: "agent"}
+	data.SetTarget("livekit")
+	if got := statePy(data); string(got) != string(recorded) {
+		t.Errorf("init writes a state.py the recordings do not hold; copy it to internal/stateschema/testdata/models/scaffold_empty.py and re-record:\n%s", got)
 	}
 }

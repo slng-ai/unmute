@@ -1,0 +1,6 @@
+# An API request tool SLNG hosts: a Google Places text search behind
+# tools-agent-infra, authenticated with the SEARCH_PLACES_API vault secret.
+description: Search for places near the salon, such as a car park or a café.
+slng: search_places
+interruption: provider_default
+effect: returns_data
