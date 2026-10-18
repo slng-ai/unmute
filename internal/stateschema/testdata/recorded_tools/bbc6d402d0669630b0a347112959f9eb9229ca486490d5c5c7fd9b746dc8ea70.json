@@ -1,0 +1,158 @@
+{
+  "digest": "bbc6d402d0669630b0a347112959f9eb9229ca486490d5c5c7fd9b746dc8ea70",
+  "report": {
+    "tools": {
+      "book_slot": {
+        "description": "Book one free time for the caller. Call it once the caller has picked a time.",
+        "input": {
+          "properties": {
+            "day": {
+              "description": "The day the caller picked, year-month-day.",
+              "format": "date",
+              "title": "Day",
+              "type": "string"
+            },
+            "time": {
+              "description": "One of the free times, as 10:00.",
+              "title": "Time",
+              "type": "string"
+            },
+            "service": {
+              "enum": [
+                "cut",
+                "colour"
+              ],
+              "title": "Service",
+              "type": "string"
+            },
+            "phone_number": {
+              "default": "",
+              "title": "Phone Number",
+              "type": "string"
+            }
+          },
+          "required": [
+            "day",
+            "time",
+            "service"
+          ],
+          "title": "book_slot_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Booking": {
+              "description": "One appointment the salon saved.",
+              "properties": {
+                "reference": {
+                  "description": "The booking reference.",
+                  "title": "Reference",
+                  "type": "string"
+                },
+                "day": {
+                  "description": "The day of the appointment, written year-month-day.",
+                  "format": "date",
+                  "title": "Day",
+                  "type": "string"
+                },
+                "time": {
+                  "description": "The start time, as 10:00.",
+                  "title": "Time",
+                  "type": "string"
+                },
+                "service": {
+                  "enum": [
+                    "cut",
+                    "colour"
+                  ],
+                  "title": "Service",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reference",
+                "day",
+                "time",
+                "service"
+              ],
+              "title": "Booking",
+              "type": "object"
+            }
+          },
+          "description": "The outcome of booking one time.",
+          "properties": {
+            "status": {
+              "enum": [
+                "booked",
+                "taken"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "booking": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Booking"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "Booked",
+          "type": "object"
+        }
+      },
+      "find_free_slots": {
+        "description": "Find the free times on one day. The salon is closed on Sundays.",
+        "input": {
+          "properties": {
+            "day": {
+              "description": "The day the caller wants, year-month-day.",
+              "format": "date",
+              "title": "Day",
+              "type": "string"
+            }
+          },
+          "required": [
+            "day"
+          ],
+          "title": "find_free_slots_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "The free times on one day.",
+          "properties": {
+            "status": {
+              "enum": [
+                "free",
+                "closed"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "times": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Times",
+              "type": "array"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "Slots",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "internal/voice-agents-tests/slng-live"
+}

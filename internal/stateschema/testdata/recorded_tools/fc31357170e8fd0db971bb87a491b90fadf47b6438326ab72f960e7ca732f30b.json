@@ -1,0 +1,114 @@
+{
+  "digest": "fc31357170e8fd0db971bb87a491b90fadf47b6438326ab72f960e7ca732f30b",
+  "report": {
+    "tools": {
+      "check_availability": {
+        "description": "List Sage and Stone slots for one service and date.\n\nCall only after customer identification succeeds. This tool accepts only\nservice and date.",
+        "input": {
+          "properties": {
+            "service": {
+              "enum": [
+                "haircut",
+                "hair-color",
+                "blowout"
+              ],
+              "title": "Service",
+              "type": "string"
+            },
+            "date": {
+              "description": "Preferred date in YYYY-MM-DD form",
+              "title": "Date",
+              "type": "string"
+            }
+          },
+          "required": [
+            "service",
+            "date"
+          ],
+          "title": "check_availability_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Slot": {
+              "description": "One free slot.",
+              "properties": {
+                "slot_id": {
+                  "title": "Slot Id",
+                  "type": "string"
+                },
+                "start_time": {
+                  "title": "Start Time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "slot_id",
+                "start_time"
+              ],
+              "title": "Slot",
+              "type": "object"
+            }
+          },
+          "description": "The free slots for one service and date.",
+          "properties": {
+            "slots": {
+              "items": {
+                "$ref": "#/$defs/Slot"
+              },
+              "title": "Slots",
+              "type": "array"
+            }
+          },
+          "required": [
+            "slots"
+          ],
+          "title": "Slots",
+          "type": "object"
+        }
+      },
+      "lookup_customer": {
+        "description": "Identify a Sage and Stone customer by phone number.\n\nDo it before any availability check or appointment change. Use only the\nreturned customer_id; never invent one or use a placeholder.",
+        "input": {
+          "properties": {
+            "phone": {
+              "description": "Customer phone number",
+              "title": "Phone",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phone"
+          ],
+          "title": "lookup_customer_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "The customer the phone number belongs to, when there is one.",
+          "properties": {
+            "found": {
+              "title": "Found",
+              "type": "boolean"
+            },
+            "customer_id": {
+              "title": "Customer Id",
+              "type": "string"
+            },
+            "name": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "found",
+            "customer_id",
+            "name"
+          ],
+          "title": "Customer",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "internal/testdata/realtime_model"
+}

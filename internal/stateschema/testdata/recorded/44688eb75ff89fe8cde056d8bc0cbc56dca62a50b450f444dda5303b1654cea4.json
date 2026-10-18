@@ -1,0 +1,247 @@
+{
+  "source": "examples/salon-concierge/state.py",
+  "digest": "44688eb75ff89fe8cde056d8bc0cbc56dca62a50b450f444dda5303b1654cea4",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Appointment": {
+          "description": "The latest booking that was created, moved or cancelled.",
+          "properties": {
+            "booking_id": {
+              "format": "id",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "service": {
+              "enum": [
+                "haircut",
+                "hair-color",
+                "blowout"
+              ],
+              "title": "Service",
+              "type": "string"
+            },
+            "date": {
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            },
+            "time": {
+              "format": "time",
+              "title": "Time",
+              "type": "string"
+            },
+            "action": {
+              "enum": [
+                "book",
+                "move",
+                "cancel"
+              ],
+              "title": "Action",
+              "type": "string"
+            }
+          },
+          "required": [
+            "booking_id",
+            "service",
+            "date",
+            "time",
+            "action"
+          ],
+          "title": "Appointment",
+          "type": "object"
+        }
+      },
+      "description": "What one call knows. Every value has a default, as ``CallState`` requires.",
+      "properties": {
+        "appointment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Appointment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The latest successful booking action, saved after the tool succeeds."
+        },
+        "booking_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Today's date in the salon's timezone, read once before the greeting.",
+          "title": "Booking Date"
+        },
+        "booking_weekday": {
+          "default": "",
+          "description": "The weekday of booking_date, in English.",
+          "title": "Booking Weekday",
+          "type": "string"
+        },
+        "salon_local_time": {
+          "anyOf": [
+            {
+              "format": "time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The salon's wall clock when the call began.",
+          "title": "Salon Local Time"
+        },
+        "customer_phone": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The caller's phone number in E.164. It shows in no prompt but verify_customer's until the caller agrees to it.",
+          "title": "Customer Phone"
+        },
+        "requested_service": {
+          "anyOf": [
+            {
+              "enum": [
+                "haircut",
+                "hair-color",
+                "blowout"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The service the caller asked for. Leave it out if they did not say.",
+          "title": "Requested Service"
+        },
+        "requested_day": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The day the caller asked for, YYYY-MM-DD. Leave it out if they did not name one; never guess today.",
+          "title": "Requested Day"
+        },
+        "requested_intent": {
+          "anyOf": [
+            {
+              "enum": [
+                "book",
+                "move",
+                "cancel"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether the caller wants to book a new time, move theirs, or cancel it.",
+          "title": "Requested Intent"
+        },
+        "customer_verified": {
+          "default": "",
+          "description": "What verification found on this call: existing or created. Empty means nobody was verified yet. Customer care reads it instead of the phone number.",
+          "title": "Customer Verified",
+          "type": "string"
+        },
+        "number_heard": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The number the caller gave, read back before verification runs.",
+          "title": "Number Heard"
+        },
+        "chosen_service": {
+          "anyOf": [
+            {
+              "enum": [
+                "haircut",
+                "hair-color",
+                "blowout"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The service a booking or a cancellation reads back.",
+          "title": "Chosen Service"
+        },
+        "chosen_day": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The day a booking, move or cancel reads back.",
+          "title": "Chosen Day"
+        },
+        "chosen_time": {
+          "anyOf": [
+            {
+              "format": "time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The time a booking, move or cancel reads back.",
+          "title": "Chosen Time"
+        },
+        "offer": {
+          "default": "",
+          "description": "The offer find_slots last returned, said by code.",
+          "title": "Offer",
+          "type": "string"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

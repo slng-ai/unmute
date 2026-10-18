@@ -1,0 +1,11 @@
+description: >-
+  Move the caller's booking to a free time: its booking_id, and the new day and
+  time exactly as find_slots returned them. It first asks the caller to confirm
+  the move, so never ask that yourself. Call it again with the same values after
+  their yes, and it moves the booking.
+
+local:
+  handler: tools/salon.py:move_appointment
+
+inject:
+  - customer_phone: "{{state.customer_phone}}"

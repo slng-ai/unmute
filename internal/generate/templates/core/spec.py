@@ -9,10 +9,15 @@ again rather than this file.
 
 import importlib
 import json
+import logging
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Literal
+from urllib.parse import urlsplit
+
+from pydantic import BaseModel, Field, create_model
 
 import unmute_core
 from unmute_core.agent import AgentSpec
@@ -25,15 +30,26 @@ from unmute_core.settings import env_value
 from unmute_core.slng import RouterConfig, RouterModelCall
 from unmute_core.state import CallInfo, CallState
 from unmute_core.tasks import OpeningTool, TaskPlan, TasksSpec
-from unmute_core.tools import Assign, ToolRegistry, ToolReply, local_tool
+from unmute_core.telephony import PhoneLine, Transfer, transfer_tool
+from unmute_core.tools import (
+    Assign,
+    ToolRegistry,
+    ToolReply,
+    ToolSpec,
+    WebhookAuth,
+    local_tool,
+    webhook_tool,
+)
 
 from state import State
 
 unmute_core.require("{{.CorePin}}")
 
-SPEC: dict[str, Any] = json.loads((Path(__file__).parent / "agent.json").read_text())
+HERE = Path(__file__).parent
+SPEC: dict[str, Any] = json.loads((HERE / "agent.json").read_text())
 AGENT_ID: str = SPEC["agent_id"]
 ENTRY: str = SPEC["entry"]
+logger = logging.getLogger("spec")
 PLACEHOLDER = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 
 
@@ -43,10 +59,127 @@ def function(ref: str) -> Callable[..., Any]:
     return getattr(importlib.import_module(file.removesuffix(".py").replace("/", ".")), name)
 
 
+def embedder(embed: Mapping[str, str]) -> Callable[[], Any]:
+    """Return what builds a knowledge base's embedder: the class agent.json names."""
+
+    def build() -> Any:
+        """Build the embedder once its package is imported."""
+        made = getattr(importlib.import_module(embed["module"]), embed["class"])
+        return made(**{embed["kwarg"]: embed["model"]})
+
+    return build
+
+
+def build_knowledge() -> dict[str, Any]:
+    """Return each knowledge base. ``start_knowledge`` reads and indexes them.
+
+    The library's knowledge needs its ``knowledge`` extra, which the project installs
+    only when agent.yaml declares a knowledge base, so it is imported only then.
+    """
+    if not SPEC.get("knowledge"):
+        return {}
+    from unmute_core.knowledge import KnowledgeBase
+
+    bases = {}
+    for name, base in SPEC["knowledge"].items():
+        embeds = base["mode"] != "keyword"
+        bases[name] = KnowledgeBase(
+            name,
+            HERE / base["documents"],
+            mode=base["mode"],
+            chunk_size=base["chunk_size"],
+            chunk_overlap=base["chunk_overlap"],
+            top_k=base["top_k"],
+            min_score=base["min_score"],
+            embed=embedder(base["embed"]) if embeds else None,
+            credential_env=(base["embed"]["credential_env"] or None) if embeds else None,
+        )
+    return bases
+
+
+KNOWLEDGE = build_knowledge()
+
+
+def start_knowledge() -> None:
+    """Read and index every knowledge base. Call it once per process, before a call."""
+    for base in KNOWLEDGE.values():
+        base.start()
+
+
+JSON_TYPES: dict[str, type] = {"string": str, "integer": int, "number": float, "boolean": bool}
+"""The JSON Schema scalar types a webhook's input or output may hold."""
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+"""Hosts a webhook may reach on this machine, while developing."""
+
+
+def json_type(name: str, schema: Mapping[str, Any]) -> Any:
+    """Return the Python type of one JSON Schema property of a webhook."""
+    if "enum" in schema:
+        return Literal[tuple(schema["enum"])]  # ty: ignore[invalid-type-form]
+    kind = schema.get("type")
+    if kind == "object":
+        return json_model(name, schema)
+    if kind == "array":
+        return list[json_type(name, schema.get("items", {}))]  # ty: ignore[invalid-type-form]
+    if kind in JSON_TYPES:
+        return JSON_TYPES[kind]
+    raise ValueError(f"{name}: spec.py reads no JSON Schema type {kind!r}")
+
+
+def json_model(name: str, schema: Mapping[str, Any]) -> type[BaseModel]:
+    """Return a webhook's input or output, a JSON Schema object, as a Pydantic model.
+
+    It reads what a tool file writes: ``properties``, ``required``, ``description``,
+    ``enum``, and objects and arrays of them. A property not required may be absent.
+    """
+    required = set(schema.get("required", ()))
+    fields: dict[str, Any] = {}
+    for key, prop in schema.get("properties", {}).items():
+        kind = json_type(f"{name}_{key}", prop)
+        about = prop.get("description")
+        if key in required:
+            fields[key] = (kind, Field(description=about))
+        else:
+            fields[key] = (kind | None, Field(None, description=about))
+    return create_model(name, **fields)
+
+
+def build_webhook(tool: Mapping[str, Any]) -> ToolSpec:
+    """Return one webhook tool: its endpoint from the environment, its types from agent.json.
+
+    Raises:
+        RuntimeError: The variable holding the endpoint is not set.
+    """
+    options = dict(tool["options"])
+    name, description = options.pop("name"), options.pop("description", "")
+    hook = tool["webhook"]
+    base = env_value(hook["url_env"], str)
+    if not base:
+        raise RuntimeError(f"Set {hook['url_env']} in the environment or in .env")
+    url = base.rstrip("/") + hook["path"]
+    title = name.title().replace("_", "")
+    return webhook_tool(
+        name,
+        description,
+        url,
+        input=json_model(f"{title}Input", tool["input"]),
+        output=json_model(f"{title}Output", tool["output"]),
+        auth=WebhookAuth(**hook["auth"]) if hook.get("auth") else None,
+        allow_private_network=urlsplit(url).hostname in LOCAL_HOSTS,
+        **options,
+    )
+
+
 def build_tools() -> ToolRegistry:
     """Return every tool of the package, with what each result saves."""
     tools = []
     for tool in SPEC["tools"]:
+        if base := tool.get("knowledge"):
+            tools.append(KNOWLEDGE[base].tool(**tool["options"]))
+            continue
+        if "webhook" in tool:
+            tools.append(build_webhook(tool))
+            continue
         options = dict(tool["options"])
         options["replies"] = [ToolReply(**reply) for reply in options.get("replies", ())]
         if precheck := tool.get("precheck"):
@@ -108,6 +241,20 @@ IDLE = IdleNudges(**SPEC["idle"]) if "idle" in SPEC else None
 MAX_DURATION_S: float | None = SPEC.get("max_duration_s")
 
 
+CALL_FACTS_ENV = "UNMUTE_CALL_FACTS"
+"""What ``unmute dev --source`` seeds on a browser call: the facts a carrier would send."""
+CALL_FACTS = MappingProxyType(
+    {
+        "from_number": "calling_number",
+        "to_number": "called_number",
+        "direction": "direction",
+        "call_id": "carrier_call_id",
+        "session_id": "session_id",
+    }
+)
+"""Each fact's ``CallInfo`` field. A fact with none, like ``carrier``, is left out."""
+
+
 async def new_call(
     call: CallInfo | None = None, call_start: Mapping[str, object] | None = None
 ) -> CallState[State]:
@@ -121,6 +268,9 @@ async def new_call(
         CallStartError: A required start value is missing, or one does not fit, or a
             lookup with ``refuse_call`` found nothing.
     """
+    if call is None and (facts := env_value(CALL_FACTS_ENV, dict[str, str])):
+        seeded = {CALL_FACTS[name]: value for name, value in facts.items() if name in CALL_FACTS}
+        call = CallInfo.model_validate({"agent_id": AGENT_ID, **seeded})
     rules = SPEC["state"]
     state = CallState(
         State,
@@ -181,18 +331,51 @@ TIMEZONE: str | None = next(
 """Where the business is: the zone of the package's clock prefetch, or None."""
 
 
-def agent_spec(name: str) -> AgentSpec:
+def transfers(name: str, line: PhoneLine) -> list[ToolSpec]:
+    """Return one agent's transfers to a person, on this call's phone line.
+
+    On a call with no phone leg, like a browser call, the model reads that there is no
+    phone caller to transfer. A transfer whose number is not set is left out, with a
+    warning: a browser session needs no phone route to start.
+    """
+    built = []
+    for transfer in SPEC["agents"][name].get("transfers", ()):
+        rule = SPEC["transfers"][transfer]
+        destination = env_value(rule["destination_env"], str)
+        if not destination:
+            logger.warning("%s: set %s to offer it", transfer, rule["destination_env"])
+            continue
+        person = Transfer(
+            transfer,
+            destination,
+            description=rule["description"],
+            mode=rule["mode"],
+            briefing=rule.get("briefing", ""),
+            ring_timeout_s=rule.get("ring_timeout_s"),
+            on_unavailable=rule["on_unavailable"],
+        )
+        built.append(transfer_tool(person, line))
+    return built
+
+
+def agent_spec(name: str, line: PhoneLine | None = None) -> AgentSpec:
     """Return one agent's ``AgentSpec``: its prompt and its tasks, or its tools.
 
     Lines code speaks say dates in the language of the agent's voice, and name a day
-    from today on the clock prefetch's zone.
+    from today on the clock prefetch's zone. An agent with transfers gets them on
+    ``line``, so its tools are built for this call.
     """
     instructions, plan, tools = AGENTS[name]
     agent = SPEC["agents"][name]
+    if line is not None and (extra := transfers(name, line)):
+        tools = tools.with_tools(*extra)
+        if plan is not None:
+            tasks = TasksSpec.model_validate(agent["tasks"])
+            plan = TaskPlan(tasks, state=State, confirm=CONFIRM, tools=tools)
     common: dict[str, Any] = {
         "name": name,
         "handoffs": tuple(agent.get("handoffs", ())),
-        "language": SPEC["models"]["speak"][agent["voice"]].get("language", "en"),
+        "language": (SPEC["models"]["speak"] or {}).get(agent["voice"], {}).get("language", "en"),
         "timezone": TIMEZONE,
     }
     if plan is not None:

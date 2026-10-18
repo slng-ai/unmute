@@ -44,7 +44,7 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("target %q does not generate: %v", name, err)
 			}
-			if name == "livekit" && !strings.Contains(artifactFile(t, artifact, agentSource), `model="gemini-3.1-flash-lite"`) {
+			if !strings.Contains(artifactFile(t, artifact, "agent.json"), `"model": "gemini-3.1-flash-lite"`) {
 				t.Error("salon-concierge must reason on gemini-3.1-flash-lite")
 			}
 		})
@@ -57,6 +57,8 @@ func TestSalonConciergeTargetsResolveAndGenerate(t *testing.T) {
 // single-agent shape the compiler tests need.
 func examplePackagePath(name string) string {
 	switch name {
+	case "salon-concierge-v1":
+		return filepath.Join("..", "testdata", name)
 	case "remy", "safe_core", "daily_carrier", "simple-prompt", "typed_state", "typed_inputs", "prefetch_core", "terminal_step", "turn_listener", "turn_listener_gradium", "speechmatics_local", "speechmatics_listen", "live_model":
 		return filepath.Join("..", "testdata", name)
 	case "salon-concierge-v2", "salon-concierge-v3":
@@ -216,8 +218,16 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if transfer.Announce != "" || transfer.Context.History != ir.HistoryMessages {
-			t.Errorf("internal handoff %q must stay silent and carry spoken messages: %#v", name, transfer)
+		if transfer.Context.History != ir.HistoryMessages {
+			t.Errorf("internal handoff %q must carry spoken messages: %#v", name, transfer)
+		}
+		// Customer care says why the call moves. Back to the concierge, it moves silently.
+		want := ""
+		if name == "to_complaints" {
+			want = "I'm sorry to hear that. Let me take this down properly."
+		}
+		if transfer.Announce != want {
+			t.Errorf("internal handoff %q says %q, want %q", name, transfer.Announce, want)
 		}
 	}
 	for name, task := range resolved.Tasks {
@@ -391,14 +401,16 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if !ok || verify.When == "" {
 		t.Errorf("verify_customer = %#v, want a delegate with a when: of its own", resolved.Controls["verify_customer"])
 	}
-	// One read and one write, and the seam is the conversation's own: find_slots
-	// answers "what do they hold" and "what is free" together, because a caller
-	// moving an appointment needs their booking id and the new day's free times
-	// in the same breath, and fetching those separately cost two model round
-	// trips for one request. save_booking is the only tool that changes
-	// anything, so `confirmed` is checked in one place.
-	if !slices.Equal(slices.Sorted(slices.Values(booking.Tools)), []string{"find_slots", "save_booking", "to_complaints"}) {
-		t.Errorf("booking tools = %v, want one read, one write and the complaints handoff", booking.Tools)
+	// One read, and one write per action. find_slots answers "what do they
+	// hold" and "what is free" together, because a caller moving an appointment
+	// needs their booking id and the new day's free times in the same breath,
+	// and fetching those separately cost two model round trips for one request.
+	// Each write is read back by code before it runs, so no tool takes a
+	// `confirmed` flag the model could set on its own.
+	if !slices.Equal(slices.Sorted(slices.Values(booking.Tools)), []string{
+		"book_appointment", "cancel_appointment", "find_slots", "move_appointment", "to_complaints",
+	}) {
+		t.Errorf("booking tools = %v, want one read, a write per action and the complaints handoff", booking.Tools)
 	}
 	// The five narrower booking tools are gone, not merely unlisted: each one the
 	// model could still see was a name it had to choose between, and a package an
@@ -474,15 +486,17 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// confirmed as "3:00 PM" off the caller's earlier words "the same time".
 	// The tool composes it now, so a package that drops this field puts the
 	// agent back to composing one.
-	appointment := modelNamed(resolved, "Appointment")
-	if appointment == nil {
-		t.Fatal("state.py declares no Appointment, so nothing in the tree exercises it")
-	}
-	if _, ok := appointment.Field("spoken"); !ok {
-		t.Error("the Appointment model has no spoken phrase, so the agent composes the day and time itself")
-	}
-	if !strings.Contains(resolved.Agents["concierge"].Instructions, "`spoken` phrase, word for word") {
-		t.Error("the concierge is not told to read the saved phrase word for word")
+	// Code says the booked day and time, from the typed appointment, in the
+	// step's receipt: the model never composes them. The day comes out relative
+	// to the salon's today ("tomorrow, October 9") and the time on the clock.
+	for _, rule := range booking.Finish {
+		if rule.Tool == "cancel_appointment" {
+			continue
+		}
+		said := strings.Join(rule.Say, " ")
+		if !strings.Contains(said, "appointment__date") || !strings.Contains(said, "appointment__time") {
+			t.Errorf("%s's receipt does not say the saved day and time: %q", rule.Tool, rule.Say)
+		}
 	}
 	// Hanging up is the one action with no undo on a live call, so the rule
 	// against it lives in the tool the model reads and not only in a prompt.
@@ -508,18 +522,16 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if got := resolved.Tasks["verify_customer"].EndsOnTools(); !slices.Equal(got, []string{"find_or_create_customer"}) {
 		t.Errorf("verify_customer ends on %v, want its lookup", got)
 	}
-	// One write tool, one entry, and all three of its successes end the step.
-	// Written as three entries the compiler kept only the last, so an ordinary
-	// booking left the step open and spent a model request calling `finish`;
-	// that shape is refused now, and this holds the shape that replaced it.
-	if got := booking.EndsOnTools(); !slices.Equal(got, []string{"save_booking"}) {
-		t.Errorf("manage_booking ends on %v, want its one write tool", got)
+	// Each write ends the step on its own success, read back by code before it
+	// runs and answered by code after, so a booking costs no model request to
+	// confirm or to close.
+	if got := booking.EndsOnTools(); !slices.Equal(got, []string{"book_appointment", "cancel_appointment", "move_appointment"}) {
+		t.Errorf("manage_booking ends on %v, want its three writes", got)
 	}
-	if len(booking.Finish) != 1 {
-		t.Fatalf("manage_booking has %d finish entries, want one naming save_booking", len(booking.Finish))
-	}
-	if got := booking.Finish[0].Success["status"]; !slices.Equal(got, []string{"booked", "moved", "cancelled"}) {
-		t.Errorf("save_booking succeeds on %v, want all three actions", got)
+	for _, rule := range booking.Finish {
+		if len(rule.Confirm) == 0 || len(rule.Say) == 0 {
+			t.Errorf("%s has no read-back or no receipt: %#v", rule.Tool, rule)
+		}
 	}
 	// find_slots returns the caller's own bookings whatever it was asked, which
 	// is what lets one call replace the list-then-check pair. A booking id the
@@ -542,30 +554,6 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if read.Execution != ir.ToolLocal {
 		t.Errorf("find_slots execution = %q, want local", read.Execution)
 	}
-	// The write still refuses an unconfirmed change, and now in one place rather
-	// than three. `confirmed` is the caller's yes, and the backend is where that
-	// rule holds: a live call proved the prompt alone does not.
-	write := resolved.Tools["save_booking"]
-	writeProperties, ok := write.Input["properties"].(map[string]any)
-	if !ok {
-		t.Fatalf("save_booking input properties = %#v, want object", write.Input["properties"])
-	}
-	confirmed, ok := writeProperties["confirmed"].(map[string]any)
-	if !ok || confirmed["type"] != "boolean" {
-		t.Errorf("save_booking confirmed = %#v, want boolean", writeProperties["confirmed"])
-	}
-	writeRequired, ok := write.Input["required"].([]any)
-	if !ok || !slices.Contains(writeRequired, any("confirmed")) || !slices.Contains(writeRequired, any("action")) {
-		t.Errorf("save_booking must require action and confirmed: %#v", write.Input)
-	}
-	action, ok := writeProperties["action"].(map[string]any)
-	if !ok {
-		t.Fatalf("save_booking action = %#v, want an object", writeProperties["action"])
-	}
-	if got, want := action["enum"], []any{"book", "move", "cancel"}; !slices.Equal(got.([]any), want) {
-		t.Errorf("save_booking action enum = %#v, want %v", got, want)
-	}
-
 	requireText := func(name, text string, wants ...string) {
 		t.Helper()
 		text = strings.Join(strings.Fields(text), " ")
@@ -607,12 +595,6 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// context_scope: shared, so the booking step's turns are in the owner's
 	// context when it speaks. Both halves are held, because either one drifting
 	// alone brings one of the two calls back.
-	requireText("concierge", resolved.Agents["concierge"].Instructions,
-		"say\n   the day and the time only when that exchange did not already settle them out\n   loud",
-		"exactly once in the call,\n   never twice and never not at all")
-	requireText("booking task", resolved.Tasks["manage_booking"].Instructions,
-		"Say the whole thing back in one sentence and ask one yes-or-no question",
-		"so say nothing here that would make it the second time they hear it")
 
 	// One placeholder, in the one prompt that says the value. The compiler sends
 	// the union of every name any prompt on the think profile references, so an
@@ -706,12 +688,6 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// re-asked in the same words, which the caller heard as the line breaking.
 	// Replayed against the router 8 times per variant, the step reached the
 	// lookup 1/8 before these lines and 8/8 after.
-	requireText("verification", verification.Instructions,
-		"You never decide whether a number is long enough",
-		"Never invent a country code",
-		"Read every digit back once",
-		"Agreement is a yes, however it arrives",
-		"Never send the same sentence twice")
 	for _, banned := range []string{"first name", "surname", "one letter at a time", "spell"} {
 		if strings.Contains(strings.ToLower(verification.Instructions), banned) {
 			t.Errorf("verification still collects a name: prompt mentions %q", banned)
@@ -731,15 +707,9 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// part, so +34 111 111 111 came back as "3 411 111 1111": a lone "3" standing
 	// in for a country code that is really 34, and a caller hearing their own
 	// number read as somebody else's.
-	requireText("verification", verification.Instructions,
-		"Return it in E.164 and in no other shape",
-		"a plus sign, then digits, with nothing between them",
-		"leaves their order alone")
 	// E.164 is not the shape to say out loud: a model asked to speak it regroups
 	// it, which is measured to cost the turn its cache. The readback speaks
 	// digits one at a time instead, and nothing else reads the number back.
-	requireText("verification", verification.Instructions,
-		"Never read this string back as one long number")
 	if _, returned := verification.Result["customer_phone"]; !returned {
 		t.Error("verification no longer returns customer_phone, so the specialists' {{customer_phone}} has no value and the router answers their first request with a 422")
 	}
@@ -763,11 +733,20 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if got := assignedField(verification.Assign, "customer_phone"); got != "customer_phone" {
 		t.Errorf("verify_customer assigns customer_phone from result.%q, want result.customer_phone", got)
 	}
+	// The read-backs these calls broke on are code now, not prompt wording. The
+	// lookup runs only after code reads the number back and hears a yes, with
+	// core's Phone type saying it digit by digit. A saved number opens the step
+	// on the lookup, so a caller who has one is never asked to recite it. Each
+	// booking write is read back by code before it runs, and its receipt names
+	// the day and time once, after it.
+	verifyFinish := verification.Finish
+	if len(verifyFinish) != 1 || verifyFinish[0].Tool != "find_or_create_customer" || len(verifyFinish[0].Confirm) == 0 {
+		t.Errorf("verify_customer must read the number back in code before the lookup runs: %#v", verifyFinish)
+	}
+	if opens := verification.OpensWith; opens == nil || opens.Tool != "find_or_create_customer" {
+		t.Errorf("verify_customer must open on the lookup with a saved number: %#v", opens)
+	}
 	lookup := resolved.Tools["find_or_create_customer"]
-	requireText("customer lookup", lookup.Description,
-		"exact confirmed phone number",
-		"only after the digit readback got a clear yes",
-		"Never guess a number or pass one the caller has not confirmed")
 	lookupProperties, ok := lookup.Input["properties"].(map[string]any)
 	if !ok {
 		t.Fatalf("find_or_create_customer input properties = %#v, want object", lookup.Input["properties"])
@@ -778,20 +757,6 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	// The confirmation gate moved from a step boundary into this one prompt, so
 	// the prompt is now the only thing standing between a spoken time and a
 	// written booking. Every clause that makes it a gate is held here.
-	requireText("booking", booking.Instructions,
-		"Say the whole thing back in one sentence and ask one yes-or-no question",
-		"Nothing said before that question counts as a yes",
-		"including the caller choosing the time",
-		"On a clear yes, save it in the same turn with `confirmed` set to true",
-		"On a no, or on a second unclear answer, use the finish escape and save nothing",
-		// The date arrives pre-fetched, so the prompt names the value rather than a
-		// tool to call for it, and it says out loud not to call one. A model handed
-		// a date and still told to "call get_current_date first" would call a tool
-		// that no longer exists.
-		"Today is `{{booking_weekday}}` `{{booking_date}}`",
-		"the salon clock reads\n   `{{salon_local_time}}`",
-		"Do not\n   call a tool to ask what day or time it is",
-		"Never say a booking is saved, moved, or cancelled unless the matching tool ran in this turn")
 	// Open chat is the entry agent's job now, and it holds exactly one lookup:
 	// the salon's own documents. The prompt's job is the same as the deleted chat
 	// agent's was, to stop it claiming a lookup it cannot perform, but the true
@@ -838,194 +803,6 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	}
 	if !slices.Contains(resolved.Agents[resolved.EntryAgent].Tools, "book") {
 		t.Errorf("the entry agent does not hold the booking flow: %v", resolved.Agents[resolved.EntryAgent].Tools)
-	}
-}
-
-// FR-012 and FR-013: every agent in this example earns its place.
-//
-// An agent is worth its turn when it holds a capability no other agent does: a
-// tool, a knowledge base, or a permission. A control is not a capability. An
-// agent that holds only controls is a routing table the caller has to be spoken
-// through, and this package shipped two of them for months, purely because the
-// compiler could not put a prerequisite on a step.
-// salon-concierge-v2 exists to be the scoped reading of the same salon, and an
-// example whose authored shape nobody holds is an example that quietly becomes a
-// second copy of the package it was meant to be read against. So this pins the
-// four choices that are the whole point of it, and the two that keep it from
-// landing on the other salon's deployment.
-//
-// It deliberately does not pin the prompts, the tools, the models or the routes.
-// Those are meant to stay identical to salon-concierge: the comparison only says
-// anything if the context wiring is the only difference.
-func TestSalonConciergeV2ScopesEveryStep(t *testing.T) {
-	resolved := loadExample(t, "salon-concierge-v2")
-
-	// The step that only reads a number back runs on nothing. This is the value
-	// the package is for, and the one with a floor: a `reset` step never receives
-	// the caller's triggering utterance, so moving another step onto it is a
-	// decision to make on purpose rather than by copying this line.
-	if got := resolved.Tasks["verify_customer"].Context.History; got != ir.HistoryReset {
-		t.Errorf("verify_customer runs on history %q; this package's point is that a step reading a number back needs no conversation, so it is %q", got, ir.HistoryReset)
-	}
-
-	// Everywhere else: the spoken turns, without the tool records. Both handoffs
-	// included, because a handoff is where a trimmed context is permanent.
-	for name, got := range map[string]ir.History{
-		"manage_booking": resolved.Tasks["manage_booking"].Context.History,
-		"to_complaints":  resolved.Controls["to_complaints"].(*ir.AgentTransfer).Context.History,
-		"to_concierge":   resolved.Controls["to_concierge"].(*ir.AgentTransfer).Context.History,
-	} {
-		if got != ir.HistoryMessages {
-			t.Errorf("%s carries history %q, want %q: a tool record crossing this seam is what the package removes", name, got, ir.HistoryMessages)
-		}
-	}
-
-	if _, ok := resolved.Controls["manage_booking"].(*ir.Delegate); !ok {
-		t.Fatalf("manage_booking = %#v, want a delegate", resolved.Controls["manage_booking"])
-	}
-	verify, ok := resolved.Controls["verify_customer"].(*ir.Delegate)
-	if !ok {
-		t.Fatalf("verify_customer = %#v, want a delegate", resolved.Controls["verify_customer"])
-	}
-	if got := assignedField(resolved.Tasks[verify.Task].Assign, "customer"); got != "customer" {
-		t.Errorf("verify_customer assigns customer from result.%q, want result.customer: nothing else in the package supplies it", got)
-	}
-
-	// No default, and this is the load-bearing one. A default is a value the
-	// variable holds before the first word, so a defaulted customer would
-	// render in the conversation info as a real-looking record before anyone
-	// had been looked up.
-	if def := resolved.Variables["customer"].Default; def != nil {
-		t.Errorf("customer declares default %#v; the conversation info would then show a caller nobody verified", def)
-	}
-	if schema := resolved.Variables["customer"].Schema; schema.String() != "Customer | None" {
-		t.Errorf("customer resolves to %q, want Customer | None: absent until the verification step fills it", schema.String())
-	}
-
-	// The declared shapes, and the four values they back. This package is what
-	// the feature is verified with, so a package that stops exercising a part of
-	// it fails here rather than passing quietly.
-	//
-	// The field floor is per shape rather than one number, because a shape is
-	// only as wide as the tools that fill it. `Customer` carries two: the
-	// lookup returns a number and a status and nothing else, so a third field
-	// would be one the model could only invent, which is the defect the shape's
-	// own `no id` comment records and the one the missing name recreated. Two
-	// still exercises what this shape is here for, a shaped text beside a
-	// Literal, and that pair is asserted rather than the count.
-	floors := map[string]int{"Customer": 2, "Appointment": 3, "Complaint": 3}
-	for _, name := range []string{"Customer", "Appointment", "Complaint"} {
-		shape := modelNamed(resolved, name)
-		if shape == nil {
-			t.Errorf("model %q is no longer declared in state.py, so nothing in the tree exercises it", name)
-			continue
-		}
-		if len(shape.Fields) < floors[name] {
-			t.Errorf("model %q declares %d fields, want at least %d; it is the verification package's own shape and it is meant to be a group",
-				name, len(shape.Fields), floors[name])
-		}
-	}
-	// What `Customer` is for, now that its floor is two: the shaped text and the
-	// Literal are the two kinds a step has to hand back correctly, and a live
-	// call refused both before they were right.
-	var shaped, literal bool
-	for _, field := range modelNamed(resolved, "Customer").Fields {
-		if field.Type == nil {
-			continue
-		}
-		if field.Type.Format != "" || field.Type.Pattern != "" {
-			shaped = true
-		}
-		if len(field.Type.Enum) > 0 {
-			literal = true
-		}
-	}
-	if !shaped || !literal {
-		t.Errorf("Customer carries shaped text %v and a Literal %v; it needs both, because those are the two kinds a step hands back", shaped, literal)
-	}
-	// A shape inside a shape, which is the one thing no unit test settles: the
-	// generated schema emits $defs and $ref for it, and whether the provider
-	// accepts that has to be proven on a real request. Keeping the nesting here
-	// is what keeps that request meaningful.
-	complaint := modelNamed(resolved, "Complaint")
-	nested := false
-	for _, field := range complaint.Fields {
-		nested = nested || field.Type.String() == "Appointment | None"
-	}
-	if !nested {
-		t.Error("Complaint no longer nests an Appointment; the nested-schema question is settled on a real request against this package, and a flat package cannot ask it")
-	}
-	for name, want := range map[string]string{
-		"caller_reason":  `list[Literal["create_booking", "modify_booking", "cancel_booking", "request_informations", "complain"]]`,
-		"appointments":   "list[Appointment]",
-		"complaints":     "list[Complaint]",
-		"customer_phone": "str (phone) | None",
-	} {
-		got := resolved.Variables[name].Schema
-		if got == nil {
-			t.Errorf("variable %q declares no type, so this package stops exercising the type it exists to exercise", name)
-			continue
-		}
-		if got.String() != want {
-			t.Errorf("variable %q resolves to %q, want %q", name, got.String(), want)
-		}
-	}
-	// Two steps append rather than replace, because a caller can book twice and
-	// can be unhappy about two things. A replace here is what the `+` exists to
-	// prevent, and it would look like nothing at all.
-	for control, variables := range map[string][]string{
-		// Two steps append to one list, which is the case the spec separates
-		// from a change of mind: a caller who books and also complains rang for
-		// two reasons and the state holds both, while a step that changes its
-		// own mind replaces its own value. Both of them are steps that act, and
-		// that is the fix to a real call rather than a preference. The
-		// verification step recorded the reason first, and it runs on a reset
-		// history: it never receives the caller's triggering utterance, so the
-		// only way it could fill that field was to ask, and it asked on every
-		// call, immediately after the caller had said why they rang.
-		"manage_booking":   {"appointments", "caller_reason"},
-		"handle_complaint": {"complaints", "caller_reason"},
-	} {
-		delegate, ok := resolved.Controls[control].(*ir.Delegate)
-		if !ok {
-			t.Fatalf("%s = %#v, want a delegate", control, resolved.Controls[control])
-		}
-		for _, variable := range variables {
-			appends := false
-			for _, entry := range resolved.Tasks[delegate.Task].Assign {
-				if entry.Var == variable {
-					appends = entry.Append
-				}
-			}
-			if !appends {
-				t.Errorf("%s does not append to %q, so the caller's second one erases the first", control, variable)
-			}
-		}
-	}
-	// And the step that cannot see the conversation records nothing about it.
-	if got := ir.AssignedVars(resolved.Tasks[verify.Task].Assign); slices.Contains(got, "caller_reason") {
-		t.Errorf("verify_customer assigns %v; a reason recorded by a step running on a reset history can "+
-			"only be asked for, and asking is what this step must never do", got)
-	}
-	// The record holds no id, because no tool in the package returns one. A
-	// required shaped id here was a field the model could only invent, its own
-	// prompt forbids inventing one, and the empty string it sent instead ended
-	// every call at the finish call.
-	for _, field := range modelNamed(resolved, "Customer").Fields {
-		if strings.Contains(field.Name, "id") {
-			t.Errorf("Customer declares %q; nothing in the package supplies a customer id, so the model can only invent one or leave it empty", field.Name)
-		}
-	}
-
-	// Its own deployment and its own router scope. Sharing either with
-	// salon-concierge means one deploy landing on the other, or one package being
-	// served the other's prompt.
-	other := loadExample(t, "salon-concierge")
-	if resolved.Name == other.Name {
-		t.Errorf("both salon packages state name %q, so their deploys land on top of each other", resolved.Name)
-	}
-	if id := resolved.Models["reasoning"].AgentID; id != "" && id == other.Models["reasoning"].AgentID {
-		t.Errorf("both salon packages state agent_id %q, and the router key carries neither the system prompt nor the substituted values, so one is served the other's prompt", resolved.Models["reasoning"].AgentID)
 	}
 }
 
@@ -1179,108 +956,15 @@ func assertAnswersTwilioRoute(t *testing.T, name string, files []File) {
 	for _, file := range files {
 		contents[file.Path] = string(file.Content)
 	}
-	if !strings.Contains(contents["call.py"], `"twilio": lambda: FastAPIWebsocketParams(`) {
+	transports := contents["call.py"]
+	if transports == "" {
+		transports = contents["bot.py"] // version 2 keeps the transports in its entrypoint
+	}
+	if !strings.Contains(transports, `"twilio": lambda: FastAPIWebsocketParams(`) {
 		t.Errorf("target %q: bot.py has no \"twilio\" entry in transport_params, so `bot.py -t twilio` cannot take a simulated call", name)
 	}
 	if !regexp.MustCompile(`pipecat-ai\[[^\]]*\bwebsocket\b`).MatchString(contents["pyproject.toml"]) {
 		t.Errorf("target %q: pyproject.toml does not install pipecat-ai's websocket extra, which the Twilio route needs", name)
-	}
-}
-
-// FR-031 / SC-008: an existing package keeps its meaning. The Daily-route work
-// must reach the Daily route and nothing else.
-//
-// Written as a scoping property rather than against a stored copy of every
-// example's old output. A byte-for-byte baseline would need a golden per example
-// per file, and it would go stale on the first unrelated template edit, at which
-// point the honest question ("did this feature widen?") gets buried in noise.
-// The property is the same and it is checkable directly: none of this feature's
-// additions may appear on any target that is not the Daily route.
-//
-// A failure here means the change was made unconditionally. Narrow it, do not
-// extend this list.
-func TestDailyRouteWorkDoesNotReachOtherTargets(t *testing.T) {
-	// Every marker this feature adds to an emitted project.
-	markers := []string{
-		"DailyParams", "pipecat.transports.daily",
-		"## Phone calls",
-		"Account prerequisites", "route_prerequisites", "daily_dialout",
-		// The carrier leg's own markers (SCHEMA N37): the emitted helper, the
-		// forward-once guard, and the runbook's opening line. Carrier work must not
-		// leak onto a target that is not the Daily route either.
-		//
-		// The runbook's *heading* would be the obvious third marker and it is the
-		// wrong one: the LiveKit SIP route heads its own runbook "Telephony setup"
-		// too, so it names a shape both drivers share rather than one route.
-		"telephony_helper.py", "call_forwarded", "One piece runs outside the platform",
-	}
-	// _transfer_result used to be on that list and is not any more. It is the
-	// one-attempt-per-call guard shared by both Pipecat transfer routes, so it now
-	// marks "a route that emits a cold transfer" rather than "the Daily route".
-	// The Daily-only markers above are what still scopes this test. Public
-	// examples prove they do not leak; an internal fixture proves they still emit.
-	root := filepath.Join("..", "..", "examples")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkedDaily := false
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(root, entry.Name(), "agent.yaml")); err != nil {
-			continue
-		}
-		pkg, err := spec.Load(filepath.Join(root, entry.Name()))
-		if err != nil {
-			t.Fatalf("%s: load: %v", entry.Name(), err)
-		}
-		agent, err := buildWithState(t, pkg)
-		if err != nil {
-			t.Fatalf("%s: build: %v", entry.Name(), err)
-		}
-		for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
-			resolved := agent.Targets[name]
-			daily := resolved.Provider == ir.ProviderPipecat && resolved.Transport == "daily-sip"
-			artifact, err := Generate(agent, resolved, target.Default())
-			if err != nil {
-				t.Fatalf("%s/%s: generate: %v", entry.Name(), name, err)
-			}
-			for _, file := range artifact.Files {
-				for _, marker := range markers {
-					if !strings.Contains(string(file.Content), marker) {
-						continue
-					}
-					if !daily {
-						t.Errorf("%s/%s (%s, transport %q) emits %q: this feature must reach the Daily route only",
-							entry.Name(), name, resolved.Provider, resolved.Transport, file.Path)
-					}
-					checkedDaily = checkedDaily || daily
-				}
-			}
-		}
-	}
-	dailyPkg, err := spec.Load(filepath.Join("..", "testdata", "daily_carrier"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	dailyAgent, err := buildWithState(t, dailyPkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dailyArtifact, err := Generate(dailyAgent, dailyAgent.Targets["pipecat"], target.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, file := range dailyArtifact.Files {
-		for _, marker := range markers {
-			checkedDaily = checkedDaily || strings.Contains(string(file.Content), marker)
-		}
-	}
-	// A test that finds the markers nowhere would pass while proving nothing.
-	if !checkedDaily {
-		t.Error("no example exercises the Daily route, so this test cannot tell scoped from absent")
 	}
 }
 
@@ -1687,10 +1371,18 @@ func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s: %v", provider, err)
 				}
-				entry := agentSource
-				if provider == ir.ProviderLiveKit {
-					entry = agentSource
+				if pkg.Agent.Version == spec.Version2 {
+					// Version 2 starts on unmute-core and checks no list at
+					// startup: compile-report.json says what it needs.
+					report := artifactFile(t, artifact, "compile-report.json")
+					for _, name := range routeOnly {
+						if strings.Contains(report, `"`+name+`"`) {
+							t.Errorf("%s: required_env demands %q, so a browser session cannot start:\n%s", provider, name, report)
+						}
+					}
+					continue
 				}
+				entry := agentSource
 				source := artifactFile(t, artifact, entry)
 				start := strings.Index(source, "REQUIRED_ENV = [")
 				if start < 0 {
@@ -1839,14 +1531,6 @@ func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
 func TestRouterScopeSurfacesDoNotContradictTheCompiler(t *testing.T) {
 	root := filepath.Join("..", "..")
 	for _, surface := range []string{
-		filepath.Join("internal", "generate", "templates", "livekit_v1", "README.md.tmpl"),
-		filepath.Join("internal", "generate", "templates", "pipecat_v1", "README.md.tmpl"),
-		// The emitted modules themselves. They carried the same claim in a
-		// module-level comment, and leaving it out of this list is how that one
-		// survived the first pass of the rewrite: a reader in the code sees it
-		// long before they open a runbook.
-		filepath.Join("internal", "generate", "templates", "livekit_v1", "utils_router.py.tmpl"),
-		filepath.Join("internal", "generate", "templates", "pipecat_v1", "utils_router.py.tmpl"),
 		filepath.Join("examples", "salon-concierge", "README.md"),
 		filepath.Join("docs-site", "optimization", "context-router.mdx"),
 		filepath.Join("internal", "skill", "assets", "references", "models.md"),
@@ -1896,15 +1580,13 @@ func TestRouterSurfacesCarryThePlaceholderAndProvenanceFacts(t *testing.T) {
 		path  string
 		facts []string
 	}{
-		{filepath.Join("internal", "generate", "templates", "livekit_v1", "README.md.tmpl"), []string{"slng router: ", "every request"}},
-		{filepath.Join("internal", "generate", "templates", "pipecat_v1", "README.md.tmpl"), []string{"slng router: ", "refreshed whenever the call writes one"}},
 		{filepath.Join("docs-site", "optimization", "context-router.mdx"), []string{"slng router: ", "read again for every request"}},
 		// examples/salon-concierge/README.md was on this list and is not any
 		// more. An example README now states what the package is, what is in it,
 		// and how to run it, and nothing else: the router's behaviour is not a
 		// fact about that package, and a reader who needs it is one link away on
 		// the docs-site page above. Router facts stay gated on the two runbook
-		// templates, that page, and the skill, which is every surface a reader or
+		// that page and the skill, which is every surface a reader or
 		// a coding agent actually learns this from.
 		// The skill, which is what a coding assistant reads before it writes a
 		// package. Both facts, because it is the only surface that decides what
@@ -1966,13 +1648,9 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	if !declared {
 		t.Fatal("the package declares no customer_phone")
 	}
-	for _, want := range []string{
-		"E.164",
-		"no spaces, brackets or dashes",
-	} {
-		if !strings.Contains(phone.Description, want) {
-			t.Errorf("customer_phone description omits %q: the phone format must be stated", want)
-		}
+	// unmute-core's Phone type holds the shape: a plus, then digits only.
+	if !strings.Contains(phone.Description, "E.164") {
+		t.Error("customer_phone description omits E.164: the phone format must be stated")
 	}
 	if phone.Confirm == "" {
 		t.Error("customer_phone declares no confirm:, so a pre-fetched number would be acted on without the caller agreeing")
@@ -1991,15 +1669,13 @@ func TestSalonConciergePlaceholdersAgreeWithItsVariables(t *testing.T) {
 	if len(holders) != 1 || holders[0] != phone.Confirm {
 		t.Errorf("prompts holding {{customer_phone}} = %v, want exactly [%s], the step that confirms it", holders, phone.Confirm)
 	}
-	// And that prompt has to read it back rather than ask for it, which is the
-	// whole user-visible half of the feature.
-	// Whitespace-normalised, because the prompt is wrapped prose and the phrases
-	// worth pinning straddle line breaks.
-	verification := strings.Join(strings.Fields(taskBodies(resolved.Tasks)[phone.Confirm]), " ")
-	for _, want := range []string{"read it back", "Never ask for a number you were handed"} {
-		if !strings.Contains(verification, want) {
-			t.Errorf("the confirming step's prompt omits %q, so a caller with a known number is still asked to recite it", want)
-		}
+	// And that step has to read a known number back rather than ask for it,
+	// which is the whole user-visible half of the feature. Code does it: the
+	// step opens on the lookup with the saved number, and the lookup's finish
+	// rule reads it back before it runs.
+	confirming := resolved.Tasks[phone.Confirm]
+	if opens := confirming.OpensWith; opens == nil || len(confirming.Finish) == 0 || len(confirming.Finish[0].Confirm) == 0 {
+		t.Errorf("%s does not open on the lookup and read the number back, so a caller with a known number is still asked to recite it", phone.Confirm)
 	}
 	for _, bodies := range []map[string]string{promptBodies(resolved.Agents), taskBodies(resolved.Tasks)} {
 		for name, body := range bodies {

@@ -17,8 +17,11 @@ this caller already has a record.
 import sys
 import threading
 import types
-from datetime import datetime
+from datetime import date, datetime
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
+
+from pydantic import BaseModel, Field
 
 _fresh = types.ModuleType("unmute_intake_state")
 vars(_fresh).update(records={}, lock=threading.Lock())
@@ -47,7 +50,7 @@ def _reference(phone: str) -> str:
     return f"REC-{tail}-{len(_state.records) + 1:03d}"
 
 
-def create_customer_record(summary, phone="", email="", name="", enquiry=""):
+def _create_customer_record(summary, phone="", email="", name="", enquiry=""):
     """Write the record and hand back what the model reads out.
 
     `summary` is the model's; the other four arrive through `inject:` and were
@@ -75,13 +78,37 @@ def create_customer_record(summary, phone="", email="", name="", enquiry=""):
     return dict(record, name=name, email=email, summary=summary, status="created")
 
 
+
+class Opened(BaseModel):
+    """What ``create_customer_record`` returns."""
+
+    record_id: str
+    opened_on: date
+    enquiry: str
+    status: Literal["created", "duplicate", "invalid"]
+
+
+def create_customer_record(
+    summary: Annotated[
+        str,
+        Field(description="One sentence in the caller's own words saying what they rang about."),
+    ],
+    phone: str = "",
+    email: str = "",
+    name: str = "",
+    enquiry: str = "",
+) -> Opened:
+    """Open the customer record. agent.yaml version 2 reads its types from here."""
+    return Opened.model_validate(_create_customer_record(summary, phone, email, name, enquiry))
+
+
 def _demo():
     import importlib.util
     import re
 
     _state.records.clear()
 
-    created = create_customer_record(
+    created = _create_customer_record(
         "Wants to book something next week.",
         phone="+34600111222",
         email="someone@invalid.test",
@@ -94,7 +121,7 @@ def _demo():
     assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}", created["record_id"])
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", created["opened_on"])
 
-    repeated = create_customer_record(
+    repeated = _create_customer_record(
         "Ringing again.",
         phone="+34600111222",
         email="someone@invalid.test",
@@ -110,7 +137,7 @@ def _demo():
     # carries a real date, because the shape it lands in declares one.
     for bad in ({"phone": ""}, {"enquiry": "vip"}, {"enquiry": ""}):
         arguments = {"phone": "+34600111333", "enquiry": "other"} | bad
-        refused = create_customer_record("Nothing to write.", **arguments)
+        refused = _create_customer_record("Nothing to write.", **arguments)
         assert refused["status"] == "invalid"
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", refused["opened_on"])
 
@@ -121,7 +148,7 @@ def _demo():
     copy_two = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(copy_two)
     assert copy_two._state is _state
-    assert copy_two.create_customer_record(
+    assert copy_two._create_customer_record(
         "Same caller, other copy.",
         phone="+34600111222",
         enquiry="new_customer",

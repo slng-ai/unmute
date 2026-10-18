@@ -1,13 +1,8 @@
 package generate
 
 import (
-	"bytes"
 	"slices"
 	"strings"
-	"text/template"
-
-	"github.com/slng-ai/unmute/internal/ir"
-	"github.com/slng-ai/unmute/internal/stateschema"
 )
 
 // The call state the code targets emit is two modules. state.py is the
@@ -47,175 +42,6 @@ type TypedStateValue struct {
 	Confirm string
 }
 
-// callStateData fills callStateTemplate.
-type callStateData struct {
-	HasState     bool
-	Members      string
-	Assignments  string
-	Results      string
-	Confirm      string
-	Dependencies string
-	CallStart    string
-	Empty        string
-	ValueMax     int
-	Unserved     string
-}
-
-// TypedState renders call_state.py for a package that keeps state, runs a
-// step, or has target members to carry, and nothing otherwise. members is the
-// target's own class body, added to CallState after the shared members.
-func TypedState(agent *ir.Agent, members string) (TypedStateBlock, error) {
-	if agent.State == nil && len(agent.Tasks) == 0 && members == "" {
-		return TypedStateBlock{}, nil
-	}
-	block := TypedStateBlock{Empty: ir.StateEmptyText(), HasState: agent.State != nil}
-	if agent.State != nil {
-		block.ExtraTypes = agent.State.ExtraTypes
-		for _, name := range agent.VariableOrder {
-			variable := agent.Variables[name]
-			block.Values = append(block.Values, TypedStateValue{Name: name, Type: variable.Schema.String(), Confirm: variable.Confirm})
-			block.NeedsEmailValidator = block.NeedsEmailValidator || reachesEmail(variable.Schema)
-		}
-	}
-	data := callStateData{
-		HasState: block.HasState, Members: members,
-		Assignments: assignmentsTable(agent), Results: resultsTable(agent),
-		Confirm: confirmTable(agent), Dependencies: dependenciesTable(agent),
-		CallStart: "(" + pyTuple(callStartNames(agent)) + ")",
-		Empty:     pyQuote(ir.StateEmptyText()), ValueMax: slngVariableLimit,
-		Unserved: pyQuote(ir.UnservedResultDescription),
-	}
-	var b bytes.Buffer
-	if err := callStateTemplate.Execute(&b, data); err != nil {
-		return TypedStateBlock{}, err
-	}
-	block.Source = b.String()
-	return block, nil
-}
-
-// reachesEmail reports whether a type holds an email anywhere in it.
-func reachesEmail(typ *stateschema.Type) bool {
-	if typ == nil {
-		return false
-	}
-	if typ.Format == "email" || typ.Format == "name-email" {
-		return true
-	}
-	if reachesEmail(typ.Items) {
-		return true
-	}
-	for _, field := range typ.Fields {
-		if reachesEmail(field.Type) {
-			return true
-		}
-	}
-	return false
-}
-
-// callStartNames are the variables a dispatch may fill, sorted so the emitted
-// tuple does not move when a field is declared in a different place.
-func callStartNames(agent *ir.Agent) []string {
-	var names []string
-	for _, name := range agent.VariableOrder {
-		if source := agent.Variables[name].Source; source == "" || source == ir.VariableSourceCallStart {
-			names = append(names, name)
-		}
-	}
-	slices.Sort(names)
-	return names
-}
-
-// assignmentsTable is step -> what its finish saves: (state field, result path,
-// append). Every step has a row, so a step that saves nothing reads as that.
-func assignmentsTable(agent *ir.Agent) string {
-	var b strings.Builder
-	b.WriteString("{")
-	for _, name := range sortedKeys(agent.Tasks) {
-		b.WriteString("\n        " + pyQuote(name) + ": (")
-		for _, entry := range agent.Tasks[name].Assign {
-			b.WriteString("(" + pyQuote(entry.Var) + ", " + pyQuote(entry.Field) + ", " + pyLiteral(entry.Append) + "), ")
-		}
-		b.WriteString("),")
-	}
-	if len(agent.Tasks) > 0 {
-		b.WriteString("\n    ")
-	}
-	b.WriteString("}")
-	return b.String()
-}
-
-// resultsTable is step -> its finish fields: (field, state field, append,
-// required). StepResult builds each step's model from it.
-func resultsTable(agent *ir.Agent) string {
-	var b strings.Builder
-	b.WriteString("{")
-	for _, name := range sortedKeys(agent.Tasks) {
-		b.WriteString("\n        " + pyQuote(name) + ": (")
-		result := agent.Tasks[name].Result
-		for _, field := range sortedKeys(result) {
-			entry := result[field]
-			b.WriteString("(" + pyQuote(field) + ", " + pyQuote(entry.Var) + ", " +
-				pyLiteral(entry.Append) + ", " + pyLiteral(entry.Required) + "), ")
-		}
-		b.WriteString("),")
-	}
-	if len(agent.Tasks) > 0 {
-		b.WriteString("\n    ")
-	}
-	b.WriteString("}")
-	return b.String()
-}
-
-// confirmTable is value -> the step that must hear the caller agree to it.
-func confirmTable(agent *ir.Agent) string {
-	pairs := map[string]any{}
-	for _, name := range sortedKeys(agent.Variables) {
-		if step := agent.Variables[name].Confirm; step != "" {
-			pairs[name] = step
-		}
-	}
-	return pyLiteral(pairs)
-}
-
-// dependenciesTable is pre-fetched value -> the values it was looked up from,
-// for each one whose confirmation it inherits.
-func dependenciesTable(agent *ir.Agent) string {
-	reads := map[string][]string{}
-	for _, entry := range agent.Prefetch {
-		var roots []string
-		for _, input := range entry.Inputs {
-			if root := ir.PathRoot(input); !slices.Contains(roots, root) {
-				roots = append(roots, root)
-			}
-		}
-		for _, pair := range entry.Assign {
-			if agent.Variables[pair.Key].ConfirmInherited {
-				reads[pair.Key] = roots
-			}
-		}
-	}
-	entries := make([]string, 0, len(reads))
-	for _, name := range sortedKeys(reads) {
-		entries = append(entries, pyQuote(name)+": ("+pyTuple(reads[name])+")")
-	}
-	return "{" + strings.Join(entries, ", ") + "}"
-}
-
-// PydanticImports is the `from pydantic import ...` line the modules draw on.
-// A superset is fine: each module keeps only the names it uses.
-func PydanticImports(needsField bool, typed *TypedStateBlock) string {
-	var names []string
-	if typed != nil {
-		names = append(names, "BaseModel", "ConfigDict", "Field", "PrivateAttr", "ValidationError",
-			"TypeAdapter", "ValidationInfo", "create_model", "field_validator")
-	}
-	if needsField {
-		names = append(names, "Field")
-	}
-	slices.Sort(names)
-	return strings.Join(slices.Compact(names), ", ")
-}
-
 // CallStateMethods are the names CallState defines beside the author's fields,
 // for the test that holds ir.CallStateMembers to them: the methods
 // callStateTemplate defines, and the session id field the LiveKit target adds.
@@ -238,8 +64,6 @@ func CallStateMethods() []string {
 	slices.Sort(names)
 	return names
 }
-
-var callStateTemplate = template.Must(template.New("call_state").Parse(callStateSource))
 
 // callStateSource is call_state.py. Shared by both targets, so the save, the
 // refusal wording and the prompt rendering cannot differ between them.
@@ -1037,53 +861,3 @@ class StepResult(BaseModel):
 # One result model per step, built once at import.
 STEP_RESULTS = {step: StepResult.for_step(step) for step in CallState.RESULTS}
 `
-
-// callStateTypingNames are the typing names call_state.py reads.
-var callStateTypingNames = []string{"Any", "ClassVar", "Self", "get_args", "get_origin"}
-
-// withTypingNames adds names to a `from typing import` list, in the order
-// ruff's import sorter keeps: classes first, then functions, each sorted.
-func withTypingNames(current string, names ...string) string {
-	all := slices.Clone(names)
-	if current != "" {
-		all = append(all, strings.Split(current, ", ")...)
-	}
-	slices.SortFunc(all, func(a, b string) int {
-		lowerA, lowerB := a[:1] == strings.ToLower(a[:1]), b[:1] == strings.ToLower(b[:1])
-		if lowerA != lowerB {
-			if lowerA {
-				return 1
-			}
-			return -1
-		}
-		return strings.Compare(a, b)
-	})
-	return strings.Join(slices.Compact(all), ", ")
-}
-
-// Deps are the packages the project installs for state.py, beyond Pydantic,
-// which both frameworks already depend on: email-validator for an email type,
-// and pydantic-extra-types with the extra each imported module needs.
-func (b *TypedStateBlock) Deps() []string {
-	if b == nil {
-		return nil
-	}
-	var deps, extras []string
-	if b.NeedsEmailValidator {
-		deps = append(deps, "email-validator>=2.2,<3")
-	}
-	for _, module := range b.ExtraTypes {
-		extra := "pycountry"
-		if module == "phone_numbers" {
-			extra = "phonenumbers"
-		}
-		if !slices.Contains(extras, extra) {
-			extras = append(extras, extra)
-		}
-	}
-	if len(extras) > 0 {
-		slices.Sort(extras)
-		deps = append(deps, "pydantic-extra-types["+strings.Join(extras, ",")+"]>=2.11,<3")
-	}
-	return deps
-}

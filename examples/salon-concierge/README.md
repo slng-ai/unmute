@@ -17,7 +17,7 @@ On this page:
 - [What you need](#what-you-need) - the values in `.env`
 - [Structure](#structure) - what each path holds
 - [The two agents and their tasks](#the-two-agents-and-their-tasks) - who does what
-- [The booking flow](#the-booking-flow) - one group, two steps, one request in
+- [The booking flow](#the-booking-flow) - one group, two steps, one request per turn
 - [Typed values and context](#typed-values-and-context) - what crosses a handoff
 - [Before the greeting](#before-the-greeting) - the pre-fetch block
 - [The manager transfer and the knowledge bases](#the-manager-transfer-and-the-knowledge-bases) - escalation and documents
@@ -36,8 +36,7 @@ unmute compile examples/salon-concierge
 ```
 
 The generated projects land in `build/livekit/` and `build/pipecat/`. Each one
-carries its own `README.md`, which is the deployment and carrier runbook. Do not
-commit `build/`, it is disposable.
+has a `Dockerfile` and a `.env.example`. Do not commit `build/`, it is disposable.
 
 Talk to it in the browser:
 
@@ -98,7 +97,7 @@ session.
 | `instructions.md` | the concierge prompt |
 | `agents/complaint-specialist.md` | the customer care prompt |
 | `tasks/` | the verification and booking step prompts |
-| `tools/` | one file per tool: local Python over one in-memory store, plus the `end_call` builtin |
+| `tools/` | one file per tool, plus `salon.py`: the typed tools over one in-memory diary, and the `end_call` builtin |
 | `knowledge/refunds/`, `knowledge/services/` | two document sets, each its own index |
 | `connections/` | the two carrier connections |
 
@@ -140,150 +139,71 @@ its own fixed line as it starts, so the prompt adds none of its own.
 
 ## The booking flow
 
-**One flow, two steps, and the concierge decides nothing in between.** `book` is
-a task group holding `verify_customer` and then `manage_booking`. The concierge
-calls it once; when verification ends, booking opens by itself. Nothing reads a
-variable to work out what comes next, and no model request is spent choosing.
+One booking costs one model request per caller turn. The model picks what to do,
+and code says the lines that must be exact: the read-backs, the offer and the
+receipt.
 
-**Verification is skipped once the caller has agreed to their number.**
-`skip_when_confirmed: customer_phone` decides that as the flow starts, so a
-second booking on the same call goes straight to the diary. A caller who
-corrects their number gets verification again, because entering that step
-withdraws the confirmation it made.
+```mermaid
+flowchart TD
+    A[Caller asks to book] --> B[concierge starts book: service, day, intent]
+    B --> C{Number confirmed?}
+    C -- no --> D[verify_customer asks for the number]
+    D --> E[Code reads the number back]
+    E --> F[Lookup runs on the yes]
+    C -- yes --> G[manage_booking reads the diary in code]
+    F --> G
+    G --> H[Code says the offer]
+    H --> I[Model calls book, move or cancel]
+    I --> J[Code reads the change back]
+    J --> K[Write runs on the yes, code says the receipt]
+```
 
-**This went the long way round.** The group was removed in September 2026 after
-a live Pipecat call where it was entered, held the caller for eleven seconds,
-made no model request and produced no audio at all. The two steps became plain
-tasks the concierge picked between, which cost one model request on every
-booking turn: a request that spoke nothing, did nothing, and only named the next
-task.
+1. The concierge starts the `book` group once, with what the caller asked for as
+   typed `arguments:`: `requested_service`, `requested_day`, `requested_intent`.
+2. `verify_customer` runs only while the number is not confirmed
+   (`skip_when_confirmed: customer_phone`). With no saved number it asks for one
+   and listens (`opening: listen`). With a saved number it opens on the lookup.
+3. The model calls `find_or_create_customer` with the number. Code reads it back
+   (`confirm:`), and the lookup runs on the caller's yes. The model never asks
+   for the yes itself.
+4. `manage_booking` opens by calling `find_slots` in code, with the group's
+   arguments (`opens_with:`). The tool returns the offer as a sentence, and code
+   says it (`say: {{state.offer}}`). No model request.
+5. The caller picks a time. The model calls `book_appointment`,
+   `move_appointment` or `cancel_appointment`. Code reads the change back, and
+   the write runs on the yes.
+6. Code says the receipt, with the day and time from the saved appointment:
+   "Lovely, your haircut is booked for tomorrow, October 9 at 9:00 AM." The step
+   ends, and the concierge makes no request to confirm it.
 
-The cause was not the group. It was the step's opening line, which was lowered
-to a Pipecat Flows `tts_say` pre-action. A pre-action holds the node until the
-frame behind it has travelled to the end of the worker's pipeline, and a frame
-queued from inside the tool call that is building the flow does not move until
-that call returns. The first node of every flow waited on itself. The line is a
-plain queued frame now, nothing waits, and
-`TestSmokePipecatGroupChainsWithoutAnOwnerRequest` drives the package through
-the real framework to keep it that way.
+Code says the day relative to the salon's today, in the voice's language, because
+the prefetch clock sets the agent's timezone. Every part of that sentence the
+agent composed itself, it got wrong on a live call on 2026-09-16, so the model no
+longer composes it.
 
-**Both steps end on their own tools.** `verify_customer` names its lookup
-under `finish:`, and `manage_booking` names `save_booking` once, with its three
-successful statuses listed under the one `status:` field. Written as three
-entries naming the same tool it used to compile to the last one alone, so an
-ordinary booking left the step open; that shape is refused now. When one of
-those returns a result
-the package calls a success, the step saves its `assign:` from that result and
-hands over, with no model request in between and without the result reaching
-the model. A result that is not a success, a `not_confirmed` or a
-`slot_taken`, goes back to the model and the step stays open.
+The diary keeps three rules in code. `book_appointment` refuses with
+`has_booking` while the caller already holds one, unless the caller asked for
+another (`additional`). A slot earlier than the salon's clock today is neither
+offered nor accepted. And `find_slots` with no day answers `need_date` when the
+caller holds nothing, and its offer asks which day.
 
-`finish:` is what takes the model out of the seams now: it removes the model
-request between a tool succeeding and the hand-over that follows it, on both
-steps. The one request left on the turn that books is the concierge saying it is
-done.
+### What changed from the version 1 salon
 
-`save_booking` returns the record it saved, whole, on success: the
-`appointment`, complete. That is what makes the step's `assign:` possible
-without the model, and it is the reason the model can never retype an id it was
-handed.
+This design is ported from unmute-core's `examples/salon-concierge-unmute`, which
+is this salon written by hand on the library.
 
-**One read tool and one write tool.** `find_slots` answers what the caller
-already holds and what is free in one call, because a caller moving an
-appointment needs their booking id and the new day's free times in the same
-breath. Asking for those separately cost two model round trips for one request.
-`save_booking` is the only tool that changes anything, so the caller's yes is
-checked in one place.
+| Before | Now |
+|---|---|
+| One `save_booking` tool with `action` and a `confirmed` flag the model set | `book_appointment`, `move_appointment`, `cancel_appointment`. Code reads each one back, so there is no `confirmed` flag |
+| The model read the number and the booking back | Code reads them back (`confirm:`) |
+| The model offered the free times | `find_slots` returns the offer, and code says it |
+| `Appointment.spoken` held the sentence to read | Code says the typed day and time in the receipt (`say:`) |
+| `to_complaints` was silent | It says "I'm sorry to hear that. Let me take this down properly." first |
+| 2 to 3 model requests on a booking turn | 1 |
+| `phonenumbers` and `pydantic-extra-types` for the phone type | unmute-core's `Phone` and `Id` |
 
-**One line per step, and neither is on a tool.** A booking has two silences in
-it and they need different lines, because different things are happening behind
-them.
-
-The front one is `verify_customer`'s. It fires as the flow enters the step,
-covering the two model requests it takes to ask the caller for their number.
-
-The second is `manage_booking`'s, covering the three requests between the caller
-confirming their number and hearing what is free: the lookup, the diary read,
-then the turn that says what is open. On a booking after the first this is the
-only line the caller hears, because verification is skipped.
-
-**Both sit on the step, not on the tool it calls, and that is the useful part.**
-A tool's `announce:` is emitted inside the tool body, so it fires once per call
-rather than once per request. The diary line lived on `find_slots` until
-September 2026, when a live call had the model read the diary twice in one turn
-and the caller heard two different announcements 0.8 seconds apart. No prompt
-rule stops a model chaining a tool, and this package had one that said not to.
-
-A step's line fires once in the entry, before the model has decided anything, so
-the repetition is not a rule to follow but a shape that cannot break. It is also
-earlier: measured on that same call, the step entry ran 0.64 seconds ahead of
-the tool.
-
-**Both lines are written as alternatives.** `announce:` takes a list, and the
-caller hears one of its entries each time the line fires, never the one that site
-used last. One fixed sentence is the same sentence every time, and a caller who
-books and then moves the booking hears it twice inside a minute.
-
-Three other places were tried and each was a different mistake. The `book` group
-carried one line for both steps, and no sentence was true on both halves: "let
-me pull that up" was followed by a question about the caller's phone number, and
-"let me get you verified" would play again on a move where nobody is verified.
-`find_or_create_customer` lost its line to the step above it, which is earlier
-and honest on both routes in. And `save_booking`'s line was a promise the tool
-could break, because an `announce:` is spoken when a tool is called and this one
-refuses a save that arrives unconfirmed. The caller heard "putting that through
-now" and then a question asking their permission.
-
-**A spoken line is not a caller turn.** A step that opens with "Got it," after
-its own announcement is agreeing with itself, which a live call on Pipecat did:
-the line was spoken and the model could not see it, so its first turn read as an
-answer to nothing. The line is seeded as the step's own first assistant turn now
-on both targets, and both step prompts still say in one sentence that a fixed
-line was already spoken and to go straight to the question.
-
-The hesitation a person actually makes before answering rides on the answer
-instead. The booking prompt opens its first sentence with a written "hmm" or
-"okay", which the voice reads as thinking, and which costs no speech of its own
-and no extra request. When the caller has just confirmed their number it opens
-by closing that off instead, "Perfect, got you.", and writes no hesitation as
-well. That opener is not "you're all set", because the concierge already owns
-that line for the moment a booking lands, and a live call played both of them
-thirteen seconds apart.
-
-**The offer turn asks a question, and which question depends on the count.**
-Three times read out with nothing asked is a wasted round trip: a live call
-answered "Gotcha." to a bare list, and the next turn had to guess which slot the
-caller meant. Several free times end the turn with "which works best for you?".
-Exactly one free time ends it with "would that work for you?", because a call
-offered a single slot and asked which one suited them, and the caller answered
-"Um, well. It's the only one that you have." That second question is already the
-confirming question, so a yes to it saves.
-
-**Three rules live in the booking backend, not the prompt.** `save_booking`
-refuses with `has_booking` while the caller already holds one, unless the model
-passes `additional` because the caller asked for another appointment. A change
-to a booking is `action: move`, and a prompt rule alone does not stop a model
-from answering "move it" with a second booking. And a slot earlier than the
-salon's own clock today is not offered and not accepted.
-
-The third is `find_slots`, and it is a rule about what the tool does **not**
-offer. The booking step opens with a generated turn, and a step whose whole job
-is the diary pulls the model straight at the diary tool. While an empty `date`
-was a documented way to call it, the model took that route on entry, every turn,
-before the caller had named a day. A live call on 2026-09-16 did it twice, read
-the two empty lists and the `ok` beside them as a finished search, invented an
-appointment the diary had just denied, and asked for the service three times.
-The step prompt already said to ask for a day first, which is the repo's own
-lesson that a tool in reach beats a prompt rule.
-
-So the empty date is gone from the tool's description: every call names a day.
-Nothing is lost, because `bookings` comes back whatever day you ask for, so a
-caller changing an appointment is found by asking for today. `need_date` stays
-as the backstop, returned when a dateless call arrives from a caller holding
-nothing, and it says what to do rather than reporting success. A text run before
-the description changed called the tool with an empty date on three consecutive
-turns, each one speaking an `announce:` line; after it, every call carried a day
-and the turn with nothing new to look up made no call at all.
+Core's version has a second idle nudge. `agent.yaml` version 2 has one, so the
+salon keeps its one nudge at 15 seconds and its end at 45.
 
 ## Typed values and context
 
@@ -298,15 +218,6 @@ in `state.py`, only after a book, move or cancellation succeeds. The owner and
 customer care read it through explicit `{{state.appointment}}` prompt references, so a later complaint can refer to the updated date
 without asking again. Tools inject the confirmed phone number. No value is
 automatically added to a prompt.
-
-That record carries a `spoken` field, which is the confirmation sentence itself:
-"Friday at 9:00 AM". It is there because every part of that sentence the agent
-composed itself, it got wrong on a live call. A weekday worked out from a date
-turned a Friday booking into "Thursday the 18th". A 24 hour time copied out of
-the record was read back as "09:00 AM". A move saved at 09:00 was confirmed as
-"3:00 PM", which was what the caller had meant two turns earlier by "the same
-time". A value the backend already knows is cheaper to write down than to ask
-the model to derive, and it is right every time.
 
 **Five variables, and each one is read somewhere.** A saved value costs a task
 to write and a line in every prompt that names it, so a value nothing reads is
@@ -348,9 +259,10 @@ and the transfer over a Twilio Elastic SIP Trunk (`sip`). The Pipecat target
 carries them over Pipecat Cloud's Twilio websocket (`cloud-websocket`). Both
 targets also do browser audio. There is no outbound route.
 
-Phone calls need a deployment. Both targets deploy to a managed platform, and
-the generated runbook has the carrier steps for the route you chose. There is no
-local phone loop.
+Phone calls need a deployment. Compile writes the Dockerfile, and you deploy it
+with the platform's own tool, `lk agent create` or `pcc deploy`. Unmute does not
+write the carrier files (`pcc-deploy.toml`, `sip-*.json`) yet, so you set up the
+route in the carrier console and the platform CLI. There is no local phone loop.
 
 **Tracing.** Both targets send traces to Langfuse.
 
@@ -445,16 +357,16 @@ unmute dev examples/salon-concierge --source from_number=<E.164 number>
 
 ### The agent will not book a second appointment
 
-That rule is in the booking backend, not the prompt. `save_booking` refuses
+That rule is in the booking backend, not the prompt. `book_appointment` refuses
 while the caller already holds a booking, unless the caller has asked for another
 appointment as well as the one they have.
 
 **Fix:** say that the second appointment is an extra one, so the model sends
-`additional`, or move the booking instead of making a new one. The backend's own
-check shows both rules on their own:
+`additional`, or move the booking instead of making a new one. The scenarios in
+`scenarios/` run whole calls on the real model, on LiveKit and Pipecat:
 
 ```sh
-python3 examples/salon-concierge/tools/salon.py
+make e2e PKG=salon-concierge
 ```
 
 ### Asking for a manager goes nowhere
@@ -471,13 +383,9 @@ The route's carrier credentials are missing from `.env`, or the package has not
 been deployed yet.
 
 **Fix:** set the four `SIP_*` values for the `livekit` target, or the three
-`TWILIO_*` values for the `pipecat` target, then follow the carrier steps in
-that target's generated runbook:
-
-```sh
-unmute compile examples/salon-concierge
-cat examples/salon-concierge/build/pipecat/README.md
-```
+`TWILIO_*` values for the `pipecat` target, then set up the route in the carrier
+console and deploy the compiled project with `lk agent create` or `pcc deploy`.
+Unmute does not write the deploy or SIP files for you yet.
 
 ## Where to go next
 

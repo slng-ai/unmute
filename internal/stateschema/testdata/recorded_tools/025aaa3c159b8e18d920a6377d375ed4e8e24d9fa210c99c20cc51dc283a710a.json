@@ -1,0 +1,483 @@
+{
+  "digest": "025aaa3c159b8e18d920a6377d375ed4e8e24d9fa210c99c20cc51dc283a710a",
+  "report": {
+    "tools": {
+      "find_or_create_customer": {
+        "description": "Look up or create one salon customer from the exact confirmed phone number.",
+        "input": {
+          "properties": {
+            "phone": {
+              "description": "The exact confirmed number in E.164: a plus sign, then 10 to 15 digits, with no spaces, brackets or dashes. The plus sign is part of the number and is never dropped; a text run sent the digits alone and the lookup could not tell which country it was. Never infer a country code the caller did not say.",
+              "title": "Phone",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phone"
+          ],
+          "title": "find_or_create_customer_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``find_or_create_customer`` returns.",
+          "properties": {
+            "customer_phone": {
+              "description": "The confirmed number in E.164: a plus sign then digits, no spaces or punctuation. Return it exactly as it comes back, character for character.",
+              "title": "Customer Phone",
+              "type": "string"
+            },
+            "customer_status": {
+              "enum": [
+                "existing",
+                "created",
+                "invalid"
+              ],
+              "title": "Customer Status",
+              "type": "string"
+            },
+            "summary": {
+              "title": "Summary",
+              "type": "string"
+            }
+          },
+          "required": [
+            "customer_phone",
+            "customer_status",
+            "summary"
+          ],
+          "title": "Customer",
+          "type": "object"
+        }
+      },
+      "find_slots": {
+        "description": "Read the diary: what the caller already has booked, and what times are free.",
+        "input": {
+          "properties": {
+            "customer_phone": {
+              "title": "Customer Phone",
+              "type": "string"
+            },
+            "date": {
+              "description": "The day to look at, YYYY-MM-DD. Always a real day, never an empty string: the caller's own bookings come back whatever day you ask for, so an empty date buys nothing and answers nothing. Send the day the caller named, and never a day they did not name. Today is not a default. A caller who asks for an appointment without saying when needs the question \"which day?\", not a guess.",
+              "title": "Date",
+              "type": "string"
+            },
+            "service": {
+              "default": "any",
+              "description": "Narrow the free times to one service, or `any` to see all three. Use `any` when the caller has not said which service they want.",
+              "enum": [
+                "any",
+                "haircut",
+                "hair-color",
+                "blowout"
+              ],
+              "title": "Service",
+              "type": "string"
+            }
+          },
+          "required": [
+            "customer_phone",
+            "date"
+          ],
+          "title": "find_slots_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Held": {
+              "description": "One booking the caller already holds.",
+              "properties": {
+                "booking_id": {
+                  "title": "Booking Id",
+                  "type": "string"
+                },
+                "service": {
+                  "title": "Service",
+                  "type": "string"
+                },
+                "date": {
+                  "title": "Date",
+                  "type": "string"
+                },
+                "time": {
+                  "title": "Time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "booking_id",
+                "service",
+                "date",
+                "time"
+              ],
+              "title": "Held",
+              "type": "object"
+            },
+            "Slot": {
+              "description": "One free time.",
+              "properties": {
+                "slot_id": {
+                  "title": "Slot Id",
+                  "type": "string"
+                },
+                "service": {
+                  "title": "Service",
+                  "type": "string"
+                },
+                "date": {
+                  "title": "Date",
+                  "type": "string"
+                },
+                "time": {
+                  "title": "Time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "slot_id",
+                "service",
+                "date",
+                "time"
+              ],
+              "title": "Slot",
+              "type": "object"
+            }
+          },
+          "description": "What ``find_slots`` returns.",
+          "properties": {
+            "bookings": {
+              "description": "Every booking this caller currently holds, soonest first.",
+              "items": {
+                "$ref": "#/$defs/Held"
+              },
+              "title": "Bookings",
+              "type": "array"
+            },
+            "slots": {
+              "description": "Free times on the requested date, empty when no date was given.",
+              "items": {
+                "$ref": "#/$defs/Slot"
+              },
+              "title": "Slots",
+              "type": "array"
+            },
+            "status": {
+              "description": "`need_date` means this caller holds no booking and you gave no date, so there was nothing to look up: ask which day they want and call again with it. Never call again without a date, and never describe a booking after this answer, because it means there is none.",
+              "enum": [
+                "ok",
+                "need_date",
+                "full",
+                "invalid_date",
+                "invalid_service"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "bookings",
+            "slots",
+            "status"
+          ],
+          "title": "Diary",
+          "type": "object"
+        }
+      },
+      "record_complaint": {
+        "description": "Record the verified customer's complaint after enough facts are known.",
+        "input": {
+          "properties": {
+            "customer_phone": {
+              "title": "Customer Phone",
+              "type": "string"
+            },
+            "summary": {
+              "description": "Short factual summary of the complaint",
+              "title": "Summary",
+              "type": "string"
+            },
+            "requested_resolution": {
+              "description": "What the customer wants the salon to do, or an empty string",
+              "title": "Requested Resolution",
+              "type": "string"
+            }
+          },
+          "required": [
+            "customer_phone",
+            "summary",
+            "requested_resolution"
+          ],
+          "title": "record_complaint_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Complaint": {
+              "description": "One complaint, as it was saved.",
+              "properties": {
+                "complaint_id": {
+                  "title": "Complaint Id",
+                  "type": "string"
+                },
+                "summary": {
+                  "title": "Summary",
+                  "type": "string"
+                },
+                "requested_resolution": {
+                  "title": "Requested Resolution",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complaint_id",
+                "summary",
+                "requested_resolution"
+              ],
+              "title": "Complaint",
+              "type": "object"
+            }
+          },
+          "description": "What ``record_complaint`` returns.",
+          "properties": {
+            "complaint_id": {
+              "title": "Complaint Id",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "recorded",
+                "invalid",
+                "customer_not_found"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "complaint": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Complaint"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The saved complaint, present and complete on success and absent otherwise. The step saves this without asking the model for it."
+            }
+          },
+          "required": [
+            "complaint_id",
+            "status"
+          ],
+          "title": "Recorded",
+          "type": "object"
+        }
+      },
+      "save_booking": {
+        "description": "Write the diary: book a new time, move an existing booking, or cancel one.",
+        "input": {
+          "properties": {
+            "customer_phone": {
+              "title": "Customer Phone",
+              "type": "string"
+            },
+            "action": {
+              "description": "book a new time, move an existing booking, or cancel one",
+              "enum": [
+                "book",
+                "move",
+                "cancel"
+              ],
+              "title": "Action",
+              "type": "string"
+            },
+            "confirmed": {
+              "description": "True only after the caller said yes to the sentence you read back.",
+              "title": "Confirmed",
+              "type": "boolean"
+            },
+            "slot_id": {
+              "default": "",
+              "description": "The exact slot_id from find_slots when booking or moving. An empty string when cancelling, which needs no slot.",
+              "title": "Slot Id",
+              "type": "string"
+            },
+            "booking_id": {
+              "default": "",
+              "description": "The exact booking_id from find_slots when moving or cancelling. An empty string when booking, which has no booking yet.",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "additional": {
+              "default": false,
+              "description": "True only when the caller asked for a second appointment on top of one they already hold. A caller who holds a booking is changing it, so this is false for an ordinary booking and the tool refuses with has_booking.",
+              "title": "Additional",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "customer_phone",
+            "action",
+            "confirmed"
+          ],
+          "title": "save_booking_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Appointment": {
+              "description": "The latest booking successfully created, moved, or cancelled.",
+              "properties": {
+                "booking_id": {
+                  "format": "id",
+                  "title": "Booking Id",
+                  "type": "string"
+                },
+                "service": {
+                  "enum": [
+                    "haircut",
+                    "hair-color",
+                    "blowout"
+                  ],
+                  "title": "Service",
+                  "type": "string"
+                },
+                "date": {
+                  "format": "date",
+                  "title": "Date",
+                  "type": "string"
+                },
+                "spoken": {
+                  "title": "Spoken",
+                  "type": "string"
+                },
+                "time": {
+                  "format": "time",
+                  "title": "Time",
+                  "type": "string"
+                },
+                "action": {
+                  "enum": [
+                    "book",
+                    "move",
+                    "cancel"
+                  ],
+                  "title": "Action",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "booking_id",
+                "service",
+                "date",
+                "spoken",
+                "time",
+                "action"
+              ],
+              "title": "Appointment",
+              "type": "object"
+            },
+            "Held": {
+              "description": "One booking the caller already holds.",
+              "properties": {
+                "booking_id": {
+                  "title": "Booking Id",
+                  "type": "string"
+                },
+                "service": {
+                  "title": "Service",
+                  "type": "string"
+                },
+                "date": {
+                  "title": "Date",
+                  "type": "string"
+                },
+                "time": {
+                  "title": "Time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "booking_id",
+                "service",
+                "date",
+                "time"
+              ],
+              "title": "Held",
+              "type": "object"
+            }
+          },
+          "description": "What ``save_booking`` returns.",
+          "properties": {
+            "status": {
+              "enum": [
+                "booked",
+                "moved",
+                "cancelled",
+                "not_confirmed",
+                "slot_taken",
+                "not_found",
+                "has_booking",
+                "invalid"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "booking_id": {
+              "default": "",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "service": {
+              "default": "",
+              "title": "Service",
+              "type": "string"
+            },
+            "date": {
+              "default": "",
+              "title": "Date",
+              "type": "string"
+            },
+            "time": {
+              "default": "",
+              "title": "Time",
+              "type": "string"
+            },
+            "appointment": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Appointment"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The saved booking, present and complete on success and absent otherwise. The step saves this without asking the model for it."
+            },
+            "summary": {
+              "description": "One plain sentence saying what happened, or what went wrong.",
+              "title": "Summary",
+              "type": "string"
+            },
+            "existing": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Held"
+              },
+              "title": "Existing",
+              "type": "array"
+            }
+          },
+          "required": [
+            "status",
+            "summary"
+          ],
+          "title": "Saved",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "examples/salon-concierge-single-prompt"
+}

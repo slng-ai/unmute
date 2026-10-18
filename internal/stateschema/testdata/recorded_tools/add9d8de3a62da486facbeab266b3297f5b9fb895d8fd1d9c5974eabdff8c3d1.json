@@ -1,0 +1,80 @@
+{
+  "digest": "add9d8de3a62da486facbeab266b3297f5b9fb895d8fd1d9c5974eabdff8c3d1",
+  "report": {
+    "tools": {
+      "create_customer_record": {
+        "description": "Open the customer record. agent.yaml version 2 reads its types from here.",
+        "input": {
+          "properties": {
+            "summary": {
+              "description": "One sentence in the caller's own words saying what they rang about.",
+              "title": "Summary",
+              "type": "string"
+            },
+            "phone": {
+              "default": "",
+              "title": "Phone",
+              "type": "string"
+            },
+            "email": {
+              "default": "",
+              "title": "Email",
+              "type": "string"
+            },
+            "name": {
+              "default": "",
+              "title": "Name",
+              "type": "string"
+            },
+            "enquiry": {
+              "default": "",
+              "title": "Enquiry",
+              "type": "string"
+            }
+          },
+          "required": [
+            "summary"
+          ],
+          "title": "create_customer_record_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``create_customer_record`` returns.",
+          "properties": {
+            "record_id": {
+              "title": "Record Id",
+              "type": "string"
+            },
+            "opened_on": {
+              "format": "date",
+              "title": "Opened On",
+              "type": "string"
+            },
+            "enquiry": {
+              "title": "Enquiry",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "created",
+                "duplicate",
+                "invalid"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "record_id",
+            "opened_on",
+            "enquiry",
+            "status"
+          ],
+          "title": "Opened",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "examples/customer-intake"
+}

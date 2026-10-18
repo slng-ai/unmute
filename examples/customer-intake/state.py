@@ -3,16 +3,11 @@
 from datetime import date, time
 from typing import Annotated, Literal
 
-import phonenumbers
 from pydantic import BaseModel, EmailStr, Field, StringConstraints
-from pydantic_extra_types.phone_numbers import PhoneNumberValidator
+from unmute_core.state import Phone
 
-# A phone number in E.164, as +34600111222. PhoneNumber alone saves the
-# RFC 3966 form ("tel:+34-600-111-222"), which no prompt or tool expects.
-Phone = Annotated[
-    str | phonenumbers.PhoneNumber, PhoneNumberValidator(number_format="E164")
-]
-# An identifier: letters and digits, then dot, dash, underscore or colon.
+# An identifier: letters and digits, then dot, dash, underscore or colon. A
+# pattern-checked text type, which this example is here to show.
 Id = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")]
 
 

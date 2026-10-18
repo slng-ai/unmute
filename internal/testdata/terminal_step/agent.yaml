@@ -6,7 +6,7 @@
 # interaction between a terminal tool and a handoff in the same response is the
 # part with no other fixture to prove it on.
 
-version: 1
+version: 2
 
 name: terminal-step-fixture
 

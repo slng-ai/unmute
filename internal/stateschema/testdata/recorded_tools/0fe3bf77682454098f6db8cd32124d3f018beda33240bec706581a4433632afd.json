@@ -1,0 +1,988 @@
+{
+  "digest": "0fe3bf77682454098f6db8cd32124d3f018beda33240bec706581a4433632afd",
+  "report": {
+    "tools": {
+      "book_appointment": {
+        "description": "Book a free time for the caller.",
+        "input": {
+          "properties": {
+            "customer_phone": {
+              "title": "Customer Phone",
+              "type": "string"
+            },
+            "service": {
+              "description": "The service, exactly as find_slots returned it.",
+              "enum": [
+                "haircut",
+                "hair-color",
+                "blowout"
+              ],
+              "title": "Service",
+              "type": "string"
+            },
+            "date": {
+              "description": "The day, YYYY-MM-DD, exactly as find_slots returned it.",
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            },
+            "time": {
+              "description": "The time, HH:MM, exactly as find_slots returned it.",
+              "format": "time",
+              "title": "Time",
+              "type": "string"
+            },
+            "additional": {
+              "default": false,
+              "description": "True only when the caller asked for a second appointment on top of one they already hold. A caller who holds a booking is changing it, so this is false for an ordinary booking and the tool refuses with has_booking.",
+              "title": "Additional",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "customer_phone",
+            "service",
+            "date",
+            "time"
+          ],
+          "title": "book_appointment_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Appointment": {
+              "description": "The latest booking that was created, moved or cancelled.",
+              "properties": {
+                "booking_id": {
+                  "format": "id",
+                  "title": "Booking Id",
+                  "type": "string"
+                },
+                "service": {
+                  "enum": [
+                    "haircut",
+                    "hair-color",
+                    "blowout"
+                  ],
+                  "title": "Service",
+                  "type": "string"
+                },
+                "date": {
+                  "format": "date",
+                  "title": "Date",
+                  "type": "string"
+                },
+                "time": {
+                  "format": "time",
+                  "title": "Time",
+                  "type": "string"
+                },
+                "action": {
+                  "enum": [
+                    "book",
+                    "move",
+                    "cancel"
+                  ],
+                  "title": "Action",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "booking_id",
+                "service",
+                "date",
+                "time",
+                "action"
+              ],
+              "title": "Appointment",
+              "type": "object"
+            },
+            "Held": {
+              "description": "One of the caller's active bookings.",
+              "properties": {
+                "booking_id": {
+                  "title": "Booking Id",
+                  "type": "string"
+                },
+                "service": {
+                  "enum": [
+                    "haircut",
+                    "hair-color",
+                    "blowout"
+                  ],
+                  "title": "Service",
+                  "type": "string"
+                },
+                "date": {
+                  "format": "date",
+                  "title": "Date",
+                  "type": "string"
+                },
+                "time": {
+                  "format": "time",
+                  "title": "Time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "booking_id",
+                "service",
+                "date",
+                "time"
+              ],
+              "title": "Held",
+              "type": "object"
+            }
+          },
+          "description": "What a booking, a move or a cancellation returns, or why it was refused.",
+          "properties": {
+            "status": {
+              "enum": [
+                "booked",
+                "moved",
+                "cancelled",
+                "not_found",
+                "invalid",
+                "has_booking",
+                "slot_taken"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "summary": {
+              "title": "Summary",
+              "type": "string"
+            },
+            "booking_id": {
+              "default": "",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "service": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "haircut",
+                    "hair-color",
+                    "blowout"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Service"
+            },
+            "time": {
+              "anyOf": [
+                {
+                  "format": "time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Time"
+            },
+            "appointment": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Appointment"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "existing": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Held"
+              },
+              "title": "Existing",
+              "type": "array"
+            },
+            "date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Date"
+            }
+          },
+          "required": [
+            "status",
+            "summary"
+          ],
+          "title": "BookingAction",
+          "type": "object"
+        }
+      },
+      "cancel_appointment": {
+        "description": "Cancel the caller's booking.",
+        "input": {
+          "properties": {
+            "customer_phone": {
+              "title": "Customer Phone",
+              "type": "string"
+            },
+            "booking_id": {
+              "description": "The exact booking_id find_slots returned for the caller's booking.",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "service": {
+              "description": "The service, exactly as find_slots returned it.",
+              "enum": [
+                "haircut",
+                "hair-color",
+                "blowout"
+              ],
+              "title": "Service",
+              "type": "string"
+            },
+            "date": {
+              "description": "The day, YYYY-MM-DD, exactly as find_slots returned it.",
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            },
+            "time": {
+              "description": "The time, HH:MM, exactly as find_slots returned it.",
+              "format": "time",
+              "title": "Time",
+              "type": "string"
+            }
+          },
+          "required": [
+            "customer_phone",
+            "booking_id",
+            "service",
+            "date",
+            "time"
+          ],
+          "title": "cancel_appointment_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Appointment": {
+              "description": "The latest booking that was created, moved or cancelled.",
+              "properties": {
+                "booking_id": {
+                  "format": "id",
+                  "title": "Booking Id",
+                  "type": "string"
+                },
+                "service": {
+                  "enum": [
+                    "haircut",
+                    "hair-color",
+                    "blowout"
+                  ],
+                  "title": "Service",
+                  "type": "string"
+                },
+                "date": {
+                  "format": "date",
+                  "title": "Date",
+                  "type": "string"
+                },
+                "time": {
+                  "format": "time",
+                  "title": "Time",
+                  "type": "string"
+                },
+                "action": {
+                  "enum": [
+                    "book",
+                    "move",
+                    "cancel"
+                  ],
+                  "title": "Action",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "booking_id",
+                "service",
+                "date",
+                "time",
+                "action"
+              ],
+              "title": "Appointment",
+              "type": "object"
+            },
+            "Held": {
+              "description": "One of the caller's active bookings.",
+              "properties": {
+                "booking_id": {
+                  "title": "Booking Id",
+                  "type": "string"
+                },
+                "service": {
+                  "enum": [
+                    "haircut",
+                    "hair-color",
+                    "blowout"
+                  ],
+                  "title": "Service",
+                  "type": "string"
+                },
+                "date": {
+                  "format": "date",
+                  "title": "Date",
+                  "type": "string"
+                },
+                "time": {
+                  "format": "time",
+                  "title": "Time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "booking_id",
+                "service",
+                "date",
+                "time"
+              ],
+              "title": "Held",
+              "type": "object"
+            }
+          },
+          "description": "What a booking, a move or a cancellation returns, or why it was refused.",
+          "properties": {
+            "status": {
+              "enum": [
+                "booked",
+                "moved",
+                "cancelled",
+                "not_found",
+                "invalid",
+                "has_booking",
+                "slot_taken"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "summary": {
+              "title": "Summary",
+              "type": "string"
+            },
+            "booking_id": {
+              "default": "",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "service": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "haircut",
+                    "hair-color",
+                    "blowout"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Service"
+            },
+            "time": {
+              "anyOf": [
+                {
+                  "format": "time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Time"
+            },
+            "appointment": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Appointment"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "existing": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Held"
+              },
+              "title": "Existing",
+              "type": "array"
+            },
+            "date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Date"
+            }
+          },
+          "required": [
+            "status",
+            "summary"
+          ],
+          "title": "BookingAction",
+          "type": "object"
+        }
+      },
+      "find_or_create_customer": {
+        "description": "Return the customer for a phone number: existing or created.",
+        "input": {
+          "properties": {
+            "phone": {
+              "description": "The caller's number in full international form, as they said it: a plus, the country code, then the number. Never infer a country code the caller did not say.",
+              "format": "phone",
+              "title": "Phone",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phone"
+          ],
+          "title": "find_or_create_customer_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``find_or_create_customer`` returns.",
+          "properties": {
+            "status": {
+              "enum": [
+                "existing",
+                "created"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "customer_phone": {
+              "format": "phone",
+              "title": "Customer Phone",
+              "type": "string"
+            },
+            "summary": {
+              "title": "Summary",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "customer_phone",
+            "summary"
+          ],
+          "title": "Customer",
+          "type": "object"
+        }
+      },
+      "find_slots": {
+        "description": "Return the caller's bookings, the free slots on ``date``, and the offer to say.",
+        "input": {
+          "properties": {
+            "customer_phone": {
+              "title": "Customer Phone",
+              "type": "string"
+            },
+            "date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The day the caller named. Leave it out when they named none: never pick a day for them, today included. Without a day, the caller's own bookings still come back, and code asks a caller who holds none which day they want.",
+              "title": "Date"
+            },
+            "service": {
+              "default": "any",
+              "description": "Narrow the free times to one service, or `any` to see all three. Use `any` when the caller has not said which service they want.",
+              "enum": [
+                "any",
+                "haircut",
+                "hair-color",
+                "blowout"
+              ],
+              "title": "Service",
+              "type": "string"
+            },
+            "intent": {
+              "default": "book",
+              "description": "What the caller wants to do with the time: book a new one, move theirs, or cancel. It only changes the offer sentence that comes back.",
+              "enum": [
+                "book",
+                "move",
+                "cancel"
+              ],
+              "title": "Intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "customer_phone"
+          ],
+          "title": "find_slots_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Held": {
+              "description": "One of the caller's active bookings.",
+              "properties": {
+                "booking_id": {
+                  "title": "Booking Id",
+                  "type": "string"
+                },
+                "service": {
+                  "enum": [
+                    "haircut",
+                    "hair-color",
+                    "blowout"
+                  ],
+                  "title": "Service",
+                  "type": "string"
+                },
+                "date": {
+                  "format": "date",
+                  "title": "Date",
+                  "type": "string"
+                },
+                "time": {
+                  "format": "time",
+                  "title": "Time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "booking_id",
+                "service",
+                "date",
+                "time"
+              ],
+              "title": "Held",
+              "type": "object"
+            },
+            "Slot": {
+              "description": "One free time in the diary.",
+              "properties": {
+                "slot_id": {
+                  "title": "Slot Id",
+                  "type": "string"
+                },
+                "service": {
+                  "enum": [
+                    "haircut",
+                    "hair-color",
+                    "blowout"
+                  ],
+                  "title": "Service",
+                  "type": "string"
+                },
+                "date": {
+                  "format": "date",
+                  "title": "Date",
+                  "type": "string"
+                },
+                "time": {
+                  "format": "time",
+                  "title": "Time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "slot_id",
+                "service",
+                "date",
+                "time"
+              ],
+              "title": "Slot",
+              "type": "object"
+            }
+          },
+          "description": "What ``find_slots`` returns: the caller's bookings, the free times, and the offer.",
+          "properties": {
+            "bookings": {
+              "items": {
+                "$ref": "#/$defs/Held"
+              },
+              "title": "Bookings",
+              "type": "array"
+            },
+            "slots": {
+              "items": {
+                "$ref": "#/$defs/Slot"
+              },
+              "title": "Slots",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "need_date",
+                "ok",
+                "invalid_service",
+                "invalid_date",
+                "full"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "offer": {
+              "default": "",
+              "title": "Offer",
+              "type": "string"
+            },
+            "offered": {
+              "default": false,
+              "title": "Offered",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "bookings",
+            "slots",
+            "status"
+          ],
+          "title": "Diary",
+          "type": "object"
+        }
+      },
+      "move_appointment": {
+        "description": "Move the caller's booking to a free time.",
+        "input": {
+          "properties": {
+            "customer_phone": {
+              "title": "Customer Phone",
+              "type": "string"
+            },
+            "booking_id": {
+              "description": "The exact booking_id find_slots returned for the caller's booking.",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "date": {
+              "description": "The day, YYYY-MM-DD, exactly as find_slots returned it.",
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            },
+            "time": {
+              "description": "The time, HH:MM, exactly as find_slots returned it.",
+              "format": "time",
+              "title": "Time",
+              "type": "string"
+            }
+          },
+          "required": [
+            "customer_phone",
+            "booking_id",
+            "date",
+            "time"
+          ],
+          "title": "move_appointment_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Appointment": {
+              "description": "The latest booking that was created, moved or cancelled.",
+              "properties": {
+                "booking_id": {
+                  "format": "id",
+                  "title": "Booking Id",
+                  "type": "string"
+                },
+                "service": {
+                  "enum": [
+                    "haircut",
+                    "hair-color",
+                    "blowout"
+                  ],
+                  "title": "Service",
+                  "type": "string"
+                },
+                "date": {
+                  "format": "date",
+                  "title": "Date",
+                  "type": "string"
+                },
+                "time": {
+                  "format": "time",
+                  "title": "Time",
+                  "type": "string"
+                },
+                "action": {
+                  "enum": [
+                    "book",
+                    "move",
+                    "cancel"
+                  ],
+                  "title": "Action",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "booking_id",
+                "service",
+                "date",
+                "time",
+                "action"
+              ],
+              "title": "Appointment",
+              "type": "object"
+            },
+            "Held": {
+              "description": "One of the caller's active bookings.",
+              "properties": {
+                "booking_id": {
+                  "title": "Booking Id",
+                  "type": "string"
+                },
+                "service": {
+                  "enum": [
+                    "haircut",
+                    "hair-color",
+                    "blowout"
+                  ],
+                  "title": "Service",
+                  "type": "string"
+                },
+                "date": {
+                  "format": "date",
+                  "title": "Date",
+                  "type": "string"
+                },
+                "time": {
+                  "format": "time",
+                  "title": "Time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "booking_id",
+                "service",
+                "date",
+                "time"
+              ],
+              "title": "Held",
+              "type": "object"
+            }
+          },
+          "description": "What a booking, a move or a cancellation returns, or why it was refused.",
+          "properties": {
+            "status": {
+              "enum": [
+                "booked",
+                "moved",
+                "cancelled",
+                "not_found",
+                "invalid",
+                "has_booking",
+                "slot_taken"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "summary": {
+              "title": "Summary",
+              "type": "string"
+            },
+            "booking_id": {
+              "default": "",
+              "title": "Booking Id",
+              "type": "string"
+            },
+            "service": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "haircut",
+                    "hair-color",
+                    "blowout"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Service"
+            },
+            "time": {
+              "anyOf": [
+                {
+                  "format": "time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Time"
+            },
+            "appointment": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Appointment"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "existing": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Held"
+              },
+              "title": "Existing",
+              "type": "array"
+            },
+            "date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Date"
+            }
+          },
+          "required": [
+            "status",
+            "summary"
+          ],
+          "title": "BookingAction",
+          "type": "object"
+        }
+      },
+      "record_complaint": {
+        "description": "Record the verified customer's complaint.",
+        "input": {
+          "properties": {
+            "customer_phone": {
+              "title": "Customer Phone",
+              "type": "string"
+            },
+            "summary": {
+              "description": "Short factual summary of the complaint",
+              "title": "Summary",
+              "type": "string"
+            },
+            "requested_resolution": {
+              "description": "What the customer wants the salon to do, or an empty string",
+              "title": "Requested Resolution",
+              "type": "string"
+            }
+          },
+          "required": [
+            "customer_phone",
+            "summary",
+            "requested_resolution"
+          ],
+          "title": "record_complaint_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Complaint": {
+              "description": "One recorded complaint.",
+              "properties": {
+                "complaint_id": {
+                  "title": "Complaint Id",
+                  "type": "string"
+                },
+                "summary": {
+                  "title": "Summary",
+                  "type": "string"
+                },
+                "requested_resolution": {
+                  "title": "Requested Resolution",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "complaint_id",
+                "summary",
+                "requested_resolution"
+              ],
+              "title": "Complaint",
+              "type": "object"
+            }
+          },
+          "description": "What ``record_complaint`` returns.",
+          "properties": {
+            "complaint_id": {
+              "title": "Complaint Id",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "recorded",
+                "invalid",
+                "customer_not_found"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "complaint": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Complaint"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "complaint_id",
+            "status"
+          ],
+          "title": "ComplaintRecord",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "examples/salon-concierge"
+}

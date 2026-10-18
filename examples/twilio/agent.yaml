@@ -1,7 +1,7 @@
 # A front desk that answers the phone through Twilio ConversationRelay. One
 # agent, one inbound phone channel, one read-only tool and end_call. The README
 # shows direct OpenAI and Gemini alternatives to the SLNG Context Router.
-version: 1
+version: 2
 name: twilio-desk
 architecture: cascade
 entry_agent: desk

@@ -51,7 +51,6 @@ func TestCarrierlessDailyAuthoringIsNotDocumented(t *testing.T) {
 		"docs-site/telephony/overview.mdx",
 		"docs-site/transfers/overview.mdx",
 		"docs-site/reference/connections-yaml.mdx",
-		"internal/generate/templates/pipecat_v1/README.md.tmpl",
 		"internal/skill/assets/references/telephony.md",
 		"internal/skill/assets/references/transfers.md",
 	} {

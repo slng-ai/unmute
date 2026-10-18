@@ -1,0 +1,212 @@
+{
+  "digest": "7ce72a27f15ba488e652cd00f9736fdec7a8daacc913dfc5a05c865660c50b78",
+  "report": {
+    "tools": {
+      "inspect_state": {
+        "description": "Return the deliberately selected values for the sharing check.",
+        "input": {
+          "properties": {
+            "note": {
+              "title": "Note",
+              "type": "string"
+            },
+            "appointment": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Appointment"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Date"
+            },
+            "accepted": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Accepted"
+            },
+            "count": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Count"
+            },
+            "label": {
+              "default": "",
+              "title": "Label",
+              "type": "string"
+            }
+          },
+          "$defs": {
+            "Appointment": {
+              "description": "One thing being booked, moved or cancelled.",
+              "properties": {
+                "scheduled_date": {
+                  "format": "date",
+                  "title": "Scheduled Date",
+                  "type": "string"
+                },
+                "scheduled_time": {
+                  "description": "The time the caller agreed to.",
+                  "format": "time",
+                  "title": "Scheduled Time",
+                  "type": "string"
+                },
+                "appointment_type": {
+                  "description": "The service the caller asked for, in the salon's own words.",
+                  "enum": [
+                    "haircut",
+                    "dry_cut"
+                  ],
+                  "title": "Appointment Type",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "scheduled_date",
+                "scheduled_time",
+                "appointment_type"
+              ],
+              "title": "Appointment",
+              "type": "object"
+            }
+          },
+          "required": [
+            "note"
+          ],
+          "title": "inspect_state_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Appointment": {
+              "description": "One thing being booked, moved or cancelled.",
+              "properties": {
+                "scheduled_date": {
+                  "format": "date",
+                  "title": "Scheduled Date",
+                  "type": "string"
+                },
+                "scheduled_time": {
+                  "description": "The time the caller agreed to.",
+                  "format": "time",
+                  "title": "Scheduled Time",
+                  "type": "string"
+                },
+                "appointment_type": {
+                  "description": "The service the caller asked for, in the salon's own words.",
+                  "enum": [
+                    "haircut",
+                    "dry_cut"
+                  ],
+                  "title": "Appointment Type",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "scheduled_date",
+                "scheduled_time",
+                "appointment_type"
+              ],
+              "title": "Appointment",
+              "type": "object"
+            }
+          },
+          "description": "Each argument the tool received, as it received it.",
+          "properties": {
+            "note": {
+              "title": "Note",
+              "type": "string"
+            },
+            "appointment": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Appointment"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "date": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date"
+            },
+            "accepted": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Accepted"
+            },
+            "count": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Count"
+            },
+            "label": {
+              "title": "Label",
+              "type": "string"
+            }
+          },
+          "required": [
+            "note",
+            "appointment",
+            "date",
+            "accepted",
+            "count",
+            "label"
+          ],
+          "title": "Inspected",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "internal/testdata/typed_state"
+}

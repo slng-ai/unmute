@@ -28,9 +28,10 @@ import (
 	"testing"
 )
 
-// packagesDir holds every package with a scenarios/ folder. Each one is an
-// agent ported from unmute-core's examples, with the scenarios it passes there.
-const packagesDir = "internal/voice-agents-tests"
+// packagesDirs hold every package with a scenarios/ folder: the agents ported
+// from unmute-core's examples, with the scenarios they pass there, and this
+// repo's own examples.
+var packagesDirs = []string{"internal/voice-agents-tests", "examples"}
 
 // entrypoints is the module the runner drives on each code target.
 var entrypoints = map[string]string{"livekit": "agent", "pipecat": "bot"}
@@ -109,9 +110,16 @@ func missingKeys(t *testing.T, project string) []string {
 // scenarioPackages lists the packages that carry scenarios.
 func scenarioPackages(t *testing.T, root string) []string {
 	t.Helper()
-	found, err := filepath.Glob(filepath.Join(root, packagesDir, "*", "scenarios"))
-	if err != nil || len(found) == 0 {
-		t.Fatalf("no package under %s has a scenarios/ folder", packagesDir)
+	var found []string
+	for _, dir := range packagesDirs {
+		matches, err := filepath.Glob(filepath.Join(root, dir, "*", "scenarios"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found = append(found, matches...)
+	}
+	if len(found) == 0 {
+		t.Fatalf("no package under %s has a scenarios/ folder", strings.Join(packagesDirs, " or "))
 	}
 	packages := make([]string, len(found))
 	for i, dir := range found {

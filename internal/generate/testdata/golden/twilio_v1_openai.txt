@@ -72,7 +72,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # an attestation. Hashed from the rest of the app's modules, the prompt, the
 # TwiML, the pins, the image and the tools; never from a credential or the
 # public origin.
-ARTIFACT_ID = "sha256:3d98366b2be8771dc64b2877811defdc74ef71447a8175880dc35dd19279838c"
+ARTIFACT_ID = "sha256:6ee989a3ab6f6731753115feaf9dfa43dd6da8da6dec388a47dc97d070268bc7"
 === prompts/__init__.py ===
 """The system prompts, one Markdown file each beside this module.
 
@@ -699,7 +699,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from brain import Brain, Cycle, Reply, ToolCall
 from settings import (
@@ -1284,6 +1284,8 @@ class Call:
             self.event("tool_failed", tool=tool.name, error=type(future.exception()).__name__)
             return {"error": "tool_failed", "detail": "the action raised an error"}
         result = future.result()
+        if isinstance(result, BaseModel):
+            result = result.model_dump(mode="json")  # a typed handler's result, as JSON
         try:
             if tool.result is not None:
                 tool.result.model_validate(result)
@@ -2010,7 +2012,7 @@ change before restoring. Otherwise set its webhook back to the snapshot's
 </Response>
 === compile-report.json ===
 {
-  "artifact_id": "sha256:3d98366b2be8771dc64b2877811defdc74ef71447a8175880dc35dd19279838c",
+  "artifact_id": "sha256:6ee989a3ab6f6731753115feaf9dfa43dd6da8da6dec388a47dc97d070268bc7",
   "bindings": [
     {
       "binding": {

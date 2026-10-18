@@ -2167,6 +2167,18 @@ function sendClientReady(){
   }));
 }
 
+// A text-only call still sends audio: silence. A live model listens all the time and
+// answers nothing until audio arrives, and Pipecat's input fails on a call with no track.
+function silentStream(){
+  const ctx = new AudioContext();
+  const source = ctx.createConstantSource();
+  const out = ctx.createMediaStreamDestination();
+  source.offset.value = 0;
+  source.connect(out);
+  source.start();
+  return out.stream;
+}
+
 async function connectPipecat(session){
   const offerUrl = session.offerUrl || '/api/offer';
   let stream = null;
@@ -2195,8 +2207,8 @@ async function connectPipecat(session){
   const peer = new RTCPeerConnection();
   pc = peer;
   try {
-    if (stream) stream.getTracks().forEach(t=>peer.addTrack(t,stream));
-    else peer.addTransceiver('audio',{direction:'recvonly'});   // still hear the agent
+    const sent = stream || silentStream();
+    sent.getTracks().forEach(t=>peer.addTrack(t,sent));
     peer.addEventListener('track',e=>{
       if (!currentConnection(session)) return;
       el.remote.srcObject=e.streams[0];startMeter(e.streams[0]);
@@ -2288,7 +2300,7 @@ async function connectLivekit(session){
   });
   nextRoom.on(LK.RoomEvent.TrackUnsubscribed,()=>{if(currentConnection(session))el.remote.srcObject=null;});
   nextRoom.on(LK.RoomEvent.LocalTrackPublished,pub=>{
-    if(currentConnection(session) && pub?.kind===LK.Track.Kind.Audio)attachLocalMic();
+    if(currentConnection(session) && !textOnly && pub?.kind===LK.Track.Kind.Audio)attachLocalMic();
   });
   nextRoom.on(LK.RoomEvent.Disconnected,()=>{if(currentConnection(session))teardown('idle');});
   nextRoom.on(LK.RoomEvent.ParticipantConnected,p=>{
@@ -2302,7 +2314,13 @@ async function connectLivekit(session){
     el.connect.textContent = "end call";
     openComposer();
   } catch(err){if(currentConnection(session))teardown('error',String(err.message || err));return;}
-  if (textOnly) return;
+  if (textOnly) {
+    try {
+      const [track] = silentStream().getAudioTracks();
+      await nextRoom.localParticipant.publishTrack(track,{source:LK.Track.Source.Microphone});
+    } catch {}
+    return;
+  }
   try {
     await nextRoom.localParticipant.setMicrophoneEnabled(true);
     if (!currentConnection(session)) return;
