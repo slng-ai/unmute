@@ -277,10 +277,10 @@ func TestTextChatReachesTheBotThroughTheTransportsOwnChannel(t *testing.T) {
 		`id="chatinput"`,
 		`id="chatsend"`,
 		`id="textonly"`,
-		`type:"send-text"`,                 // the RTVI client message Pipecat reads
-		`run_immediately:true`,             // the typed line is the caller's turn now
-		`audio_response:true`,              // the bot answers by voice
-		`sendText(text,{topic:"lk.chat"})`, // the LiveKit agent's chat topic
+		`type:"send-text"`,                       // the RTVI client message Pipecat reads
+		`run_immediately:true`,                   // the typed line is the caller's turn now
+		`audio_response:true`,                    // the bot answers by voice
+		`sendText(text,{topic:"lk.chat"})`,       // the LiveKit agent's chat topic
 		`const sent = stream || silentStream();`, // text only sends silence: a live model answers nothing without audio
 	} {
 		if !strings.Contains(source, want) {
