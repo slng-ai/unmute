@@ -112,11 +112,10 @@ agents:
 [[range .Steps]][[if .SkipWhenConfirmed]]      - task: [[.Task]]
         skip_when_confirmed: [[.SkipWhenConfirmed]]
 [[else]]      - [[.Task]]
-[[end]][[end]]    context_scope: [[.ContextScope]]
-    then: [[.Then]]
-[[if .ThenTarget]]    then_target: [[.ThenTarget]]
-[[end]]    merge: results
-[[end]]
+[[end]][[end]][[if and .ContextScope (ne .ContextScope "shared")]]    context_scope: [[.ContextScope]]
+[[end]][[if and .Then (ne .Then "return")]]    then: [[.Then]]
+[[end]][[if .ThenTarget]]    then_target: [[.ThenTarget]]
+[[end]][[end]]
 [[end]][[if .BehaviourVariables]]# How the values on State in state.py behave: where one comes from, and which
 # step confirms it. A value needs an entry only for one of those.
 variables:

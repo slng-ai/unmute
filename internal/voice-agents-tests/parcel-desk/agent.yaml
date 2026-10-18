@@ -10,8 +10,6 @@ name: parcel-desk
 
 entry_agent: desk
 
-mode: record
-
 agents:
   desk:
     instructions: instructions.md
@@ -73,13 +71,10 @@ task_groups:
     steps:
       - track_parcel
       - change_delivery
-    context_scope: shared
-    then: return
   request_callback:
     when: The caller wants a person to call them back.
     steps:
       - callback_note
-    context_scope: shared
     then: end
 
 prefetch:

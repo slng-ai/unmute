@@ -16,8 +16,6 @@ name: kestrel
 
 entry_agent: sam
 
-mode: record
-
 agents:
   sam:
     instructions: instructions.md
@@ -99,8 +97,6 @@ task_groups:
     steps:
       - find_policy
       - take_report
-    context_scope: shared
-    then: return
     arguments:
       - policy_number
       - birth_date

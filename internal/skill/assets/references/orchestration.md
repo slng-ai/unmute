@@ -591,9 +591,6 @@ task_groups:
       - identify_customer
       - select_appointment
       - finalize_appointment
-    context_scope: shared
-    then: return
-    merge: results
 ```
 
 The three member tasks are nested inside the agent that runs the group, the
@@ -615,10 +612,13 @@ saves no value and the default spoken-message history is right.
 
 | Field | Values | What it does |
 |---|---|---|
-| `context_scope` | `shared`, `isolated` | whether the steps see one running context or each start clean |
-| `then` | `return`, `transfer`, `end` | what happens after the last step |
+| `context_scope` | `shared` (default), `isolated` | whether the steps see one running context or each start clean |
+| `then` | `return` (default), `transfer`, `end` | what happens after the last step |
 | `then_target` | an agent name | required with `transfer`, illegal otherwise |
-| `merge` | `results` | how the steps' results are combined |
+| `merge` | `results` (default) | how the steps' results are combined |
+
+Write a field only to change its default. A group that shares context and
+returns to its owner writes none of them.
 
 **Choose the conversation each member receives:**
 
@@ -781,8 +781,8 @@ than forbidding it. `to_concierge` is the way back. Both tasks end on their own 
 `finish:`.
 
 The same package carries the task group, `book`: `verify_customer` with
-`skip_when_confirmed: customer_phone`, then `manage_booking`, with
-`context_scope: shared` and `then: return`. `manage_booking` has no `when:`
+`skip_when_confirmed: customer_phone`, then `manage_booking`, on the group
+defaults: shared context, and the call returns to the concierge. `manage_booking` has no `when:`
 because the group runs it. `verify_customer` keeps a `when:` for one case
 only, a caller correcting their phone number; every other route into
 verification goes through the group. Read it before writing a group of your

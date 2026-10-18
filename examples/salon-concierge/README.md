@@ -207,8 +207,8 @@ salon keeps its one nudge at 15 seconds and its end at 45.
 
 ## Typed values and context
 
-**Spoken messages across every task and handoff.** Each context block declares
-`history: messages`, also the framework default. The receiver gets the caller
+**Spoken messages across every task and handoff.** No task or handoff writes a
+`context:` block, so each gets the default, `history: messages`. The receiver gets the caller
 and assistant speech available at entry, without tool calls and results.
 Returning from a task restores the owner's earlier conversation and gives only
 a completed or unserved status. It does not copy the task's conversation back.

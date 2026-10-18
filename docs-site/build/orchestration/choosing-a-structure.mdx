@@ -161,9 +161,9 @@ number. Every other route into verification goes through the group below.
 is the task-group question, and here the answer is yes. A booking made against
 a number nobody agreed to is a booking for a stranger, so the order is not a
 request to the model. It is something the package has to hold. The group
-`book` runs `verify_customer` and then `manage_booking`, with
-`context_scope: shared` so the booking step hears what verification heard, and
-`then: return` so the concierge gets the call back:
+`book` runs `verify_customer` and then `manage_booking`. A group's defaults fit
+here: its steps share one context, so the booking step hears what verification
+heard, and it returns the call to the concierge:
 
 ```yaml
 task_groups:
@@ -175,8 +175,6 @@ task_groups:
       - task: verify_customer
         skip_when_confirmed: customer_phone
       - manage_booking
-    context_scope: shared
-    then: return
 ```
 
 Three things follow from the group.

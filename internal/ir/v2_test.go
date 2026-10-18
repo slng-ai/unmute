@@ -69,8 +69,6 @@ func TestV2Refusals(t *testing.T) {
 		{"a tool assign does not fit its variable", withTool("find_slots", func(t *packagespec.Tool) { t.Assign[0].Key = "caller_name" }), `does not fit variable "caller_name"`},
 		{"an input assign reads an input the tool lacks", withTask(func(t *packagespec.Task) { t.Assign[0].Value = "input.order" }), "no tool the step finishes on takes that input (save_booking)"},
 		{"opens_with passes a parameter the tool lacks", withTask(func(t *packagespec.Task) { t.OpensWith.Arguments[0].Key = "date" }), `opens_with passes "date", which find_slots does not take`},
-		{"an inputs entry holds two keys", withTask(func(t *packagespec.Task) { t.Inputs[0].Tool = "account" }), "exactly one of memory:, tool: and input:"},
-		{"via names a tool outside the step", withTask(func(t *packagespec.Task) { t.Via = []string{"lookup_account"} }), `via names "lookup_account"`},
 		{"non_blocking names a tool outside the group", func(p *packagespec.Package) {
 			group := p.Agent.TaskGroups["check_in"]
 			group.NonBlocking = []string{"manage_booking"}
@@ -84,9 +82,9 @@ func TestV2Refusals(t *testing.T) {
 		{"refuse_call sits on an entry that runs no tool", func(p *packagespec.Package) {
 			p.Agent.Prefetch = append(p.Agent.Prefetch, packagespec.Prefetch{Name: "today", Clock: "now", Timezone: "Europe/Madrid", Assign: []packagespec.Pair{{Key: "reason", Value: "result.date"}}, RefuseCall: "Closed."})
 		}, `refuse_call refuses a call whose lookup finds nothing, so it goes on a tool: entry`},
-		{"mode is neither record nor status", func(p *packagespec.Package) {
-			p.Agent.Mode = "fast"
-		}, "mode: fast; write record or status"},
+		{"mode is removed", func(p *packagespec.Package) {
+			p.Agent.Mode = "record"
+		}, "mode: is removed. Every task runs in record mode"},
 		{"call_start is neither required nor optional", func(p *packagespec.Package) {
 			p.Agent.Variables[0].CallStart = "always"
 		}, "call_start: always; write required or optional"},

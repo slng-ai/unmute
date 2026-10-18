@@ -69,7 +69,6 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		// fourth case. An omitted key is cascade, which is what every package
 		// written before this key existed gets.
 		Architecture: pkg.Agent.Architecture.Or(ArchitectureCascade),
-		Mode:         TasksMode(pkg.Agent.Mode),
 		EntryAgent:   pkg.Agent.EntryAgent,
 		Models:       models,
 		Listen:       listenName,
@@ -314,7 +313,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 			merge = GroupMergeResults
 		}
 		out.TaskGroups[name] = TaskGroup{
-			Steps: steps, ContextScope: ContextScope(raw.ContextScope), Then: GroupThen(raw.Then),
+			Steps: steps, ContextScope: cmp.Or(ContextScope(raw.ContextScope), ContextShared), Then: cmp.Or(GroupThen(raw.Then), GroupReturn),
 			ThenTarget: raw.ThenTarget, Merge: merge,
 		}
 	}

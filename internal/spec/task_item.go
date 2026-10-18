@@ -9,6 +9,9 @@ func (t *Task) UnmarshalYAML(node ast.Node) error {
 	if err := rejectTaskFields(node); err != nil {
 		return err
 	}
+	if err := rejectRemovedTaskKeys(node); err != nil {
+		return err
+	}
 	type plainTask Task
 	if err := yaml.NodeToValue(node, (*plainTask)(t), yaml.Strict()); err != nil {
 		return err
@@ -73,6 +76,27 @@ func rejectTaskFields(node ast.Node) error {
 		if key == "result" || key == "expect" || key == "requires" {
 			return &PairError{Line: entry.Key.GetToken().Position.Line,
 				Msg: key + ": is retired. Declare typed variables and save them with assign:. Use messages history for earlier speech, or reference saved values in a reset prompt."}
+		}
+	}
+	return nil
+}
+
+// removedTaskKeys are step keys that were removed, each with the sentence that
+// says what replaces it. They are refused by name, so an author upgrading a
+// file reads what to write instead of a bare "unknown field".
+var removedTaskKeys = map[string]string{
+	"inputs": "inputs: is removed. A prompt reads a State value where it names {{state.x}}: write that in the step's prompt file. Save a prefetch result to State first if the step needs it.",
+	"via":    "via: is removed. The agent starts a step through the step's when: sentence or a flow.",
+}
+
+func rejectRemovedTaskKeys(node ast.Node) error {
+	mapping, ok := node.(*ast.MappingNode)
+	if !ok {
+		return nil
+	}
+	for _, entry := range mapping.Values {
+		if msg, removed := removedTaskKeys[entry.Key.String()]; removed {
+			return &PairError{Line: entry.Key.GetToken().Position.Line, Msg: msg}
 		}
 	}
 	return nil

@@ -13,8 +13,8 @@ func TestVersionKeys(t *testing.T) {
 		want string
 	}{
 		{"a version 2 agent key under version 1",
-			Package{Agent: AgentFile{Version: 1, Mode: "record"}},
-			"mode: is a version 2 key; write version: 2"},
+			Package{Agent: AgentFile{Version: 1, EntryBy: &EntryBy{Value: "caller_name"}}},
+			"entry_by: is a version 2 key; write version: 2"},
 		{"a version 2 key deep in a step under version 1",
 			Package{Agent: AgentFile{Version: 1, Agents: map[string]AgentDef{"desk": {Tasks: []TaskItem{{Task: &Task{
 				Finish: []FinishEntry{{Tool: "save", Confirm: []string{"Shall I?"}}}}}}}}}},

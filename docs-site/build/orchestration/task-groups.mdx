@@ -72,9 +72,6 @@ task_groups:
       - identify_customer
       - select_appointment
       - finalize_appointment
-    context_scope: shared
-    then: return
-    merge: results
 ```
 
 These three tasks have no `when:`. The group decides when they run, so they
@@ -105,13 +102,13 @@ and saves the values needed later.
   announcement.
 </ParamField>
 
-<ParamField path="context_scope" type="string" required>
-  Accepts `shared` or `isolated`. There is no default. Each member still applies its own
+<ParamField path="context_scope" type="string" default="shared">
+  Accepts `shared` or `isolated`. Omit it for `shared`. Each member still applies its own
   `context.history`; an isolated group cannot be widened by a member’s `full`.
 </ParamField>
 
-<ParamField path="then" type="string" required>
-  Accepts `return`, `transfer`, or `end`. There is no default.
+<ParamField path="then" type="string" default="return">
+  Accepts `return`, `transfer`, or `end`. Omit it for `return`.
 </ParamField>
 
 <ParamField path="then_target" type="string">

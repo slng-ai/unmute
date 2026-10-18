@@ -11,8 +11,6 @@ name: nosh
 
 entry_agent: finder
 
-mode: record
-
 variables:
   # Who asked for the call. A dispatch without a name is refused.
   - name: customer_name
