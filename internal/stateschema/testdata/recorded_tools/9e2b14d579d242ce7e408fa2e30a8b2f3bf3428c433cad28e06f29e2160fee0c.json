@@ -1,0 +1,116 @@
+{
+  "digest": "9e2b14d579d242ce7e408fa2e30a8b2f3bf3428c433cad28e06f29e2160fee0c",
+  "report": {
+    "tools": {
+      "look_up_prescription": {
+        "description": "Look up one repeat prescription by its reference.",
+        "input": {
+          "properties": {
+            "reference": {
+              "description": "The prescription reference the caller read out: two letters, four digits, and one letter. Write it as the caller said it. Spaces, dashes and lower case are all read the same way.",
+              "title": "Reference",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reference"
+          ],
+          "title": "look_up_prescription_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``look_up_prescription`` returns.",
+          "properties": {
+            "found": {
+              "title": "Found",
+              "type": "boolean"
+            },
+            "reference": {
+              "title": "Reference",
+              "type": "string"
+            },
+            "medicine": {
+              "title": "Medicine",
+              "type": "string"
+            },
+            "repeats_left": {
+              "title": "Repeats Left",
+              "type": "integer"
+            },
+            "last_issued": {
+              "title": "Last Issued",
+              "type": "string"
+            },
+            "already_ordered": {
+              "title": "Already Ordered",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "found",
+            "reference",
+            "medicine",
+            "repeats_left",
+            "last_issued",
+            "already_ordered"
+          ],
+          "title": "Prescription",
+          "type": "object"
+        }
+      },
+      "request_refill": {
+        "description": "Place the reorder for one repeat prescription.",
+        "input": {
+          "properties": {
+            "reference": {
+              "description": "The same reference look_up_prescription found, exactly as it came back from that tool.",
+              "title": "Reference",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reference"
+          ],
+          "title": "request_refill_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``request_refill`` returns.",
+          "properties": {
+            "status": {
+              "enum": [
+                "placed",
+                "already_ordered",
+                "no_repeats_left",
+                "unknown_reference"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "reference": {
+              "title": "Reference",
+              "type": "string"
+            },
+            "medicine": {
+              "title": "Medicine",
+              "type": "string"
+            },
+            "ready_on": {
+              "title": "Ready On",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "reference",
+            "medicine",
+            "ready_on"
+          ],
+          "title": "Refill",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "examples/pharmacy-refills"
+}

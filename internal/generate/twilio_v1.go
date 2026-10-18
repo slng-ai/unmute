@@ -86,8 +86,9 @@ type twilioRouter struct {
 }
 
 type twilioTool struct {
-	Name   string
-	Source string
+	Name     string
+	Function string
+	Source   string
 }
 
 type twilioEnv struct {
@@ -315,7 +316,8 @@ func buildTwilioData(agent *ir.Agent, resolved ir.Target) (twilioData, error) {
 		case ir.ToolBuiltin:
 			spec.EndCall = true
 		case ir.ToolLocal:
-			data.LocalTools = append(data.LocalTools, twilioTool{Name: name, Source: tool.HandlerSource})
+			function := cmp.Or(tool.HandlerFunction, name) // version 2 names it, version 1 is the tool's name
+			data.LocalTools = append(data.LocalTools, twilioTool{Name: name, Function: function, Source: tool.HandlerSource})
 			deps = append(deps, tool.Dependencies...)
 		default:
 			return twilioData{}, fmt.Errorf("twilio: tool %q has execution %s, which validation refuses", name, tool.Execution)
@@ -546,4 +548,58 @@ func twilioReport(data twilioData, files []File, bindings []ir.ForwardedBinding,
 		return nil, err
 	}
 	return append(out, '\n'), nil
+}
+
+// ownRuntimeRefusals names the version 2 keys a target with its own runtime,
+// twilio or slng, cannot run. They are refused rather than dropped: a package
+// that relies on code saying a read-back would otherwise compile, and the
+// model would say it instead.
+func ownRuntimeRefusals(agent *ir.Agent, provider ir.Provider) error {
+	var keys []string
+	for _, name := range sortedKeys(agent.Tools) {
+		tool := agent.Tools[name]
+		for key, used := range map[string]bool{
+			"assign": len(tool.Assign) > 0, "replies": len(tool.Replies) > 0, "precheck": tool.Precheck != "",
+			"hidden": len(tool.Hidden) > 0, "announce_wait": tool.AnnounceWait,
+		} {
+			if used {
+				keys = append(keys, "tools/"+name+".yaml "+key)
+			}
+		}
+	}
+	for _, name := range sortedKeys(agent.Tasks) {
+		task := agent.Tasks[name]
+		for _, rule := range task.Finish {
+			// SLNG speaks a finish say: line itself. Twilio has no step to end.
+			if len(rule.Confirm) > 0 || (len(rule.Say) > 0 && provider != ir.ProviderSlng) {
+				keys = append(keys, "task "+name+" finish confirm or say")
+				break
+			}
+		}
+		if len(task.Replies) > 0 {
+			keys = append(keys, "task "+name+" replies")
+		}
+		if task.OpensWith != nil {
+			keys = append(keys, "task "+name+" opens_with")
+		}
+	}
+	if agent.EntryBy != nil {
+		keys = append(keys, "entry_by")
+	}
+	for _, entry := range agent.Prefetch {
+		if entry.RefuseCall != "" {
+			keys = append(keys, "prefetch "+entry.Name+" refuse_call")
+		}
+	}
+	for _, name := range sortedKeys(agent.Controls) {
+		if handoff, ok := agent.Controls[name].(*ir.AgentTransfer); ok && (len(handoff.Saves) > 0 || handoff.OpensWith != nil) {
+			keys = append(keys, "handoff "+name+" saves or opens_with")
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	slices.Sort(keys)
+	return fmt.Errorf("the %s runtime runs version 2 without unmute-core, so it cannot run %s; remove them, or compile to livekit or pipecat",
+		provider, strings.Join(keys, ", "))
 }

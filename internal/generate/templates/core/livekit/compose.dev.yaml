@@ -1,0 +1,46 @@
+# Written by `unmute compile` for `unmute dev`. Local development only.
+# A single-node LiveKit server and this agent's worker. The devkey/secret pair is
+# LiveKit's --dev placeholder, never for production.
+services:
+  livekit_server:
+    image: livekit/livekit-server:v1.13.4
+    # Browser WebRTC through Docker Desktop needs three published ports: signal,
+    # ICE over TCP, and one UDP port. --node-ip gives the browser a reachable address.
+    command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1", "--rtc.tcp_port", "${LIVEKIT_TCP_HOST_PORT:-7881}", "--udp-port", "${LIVEKIT_UDP_HOST_PORT:-7882}"]
+    ports:
+      - "${LIVEKIT_HOST_PORT:-7880}:7880"
+      - "${LIVEKIT_TCP_HOST_PORT:-7881}:${LIVEKIT_TCP_HOST_PORT:-7881}"
+      - "${LIVEKIT_UDP_HOST_PORT:-7882}:${LIVEKIT_UDP_HOST_PORT:-7882}/udp"
+    # The `unmute dev` process that started this stack. The next run stops a stack
+    # whose process is gone.
+    labels:
+      - "unmute.dev.pid=${UNMUTE_DEV_PID:-}"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  application:
+    build:
+      context: .
+    command: ["python", "agent.py", "start"]
+    environment:
+      - LIVEKIT_URL=ws://livekit_server:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=secret
+      - LIVEKIT_AGENT_NAME={{.AgentName}}
+      # Set by `unmute dev`: dev records, --var and --source.
+      - UNMUTE_DEV_METRICS
+      - UNMUTE_CALL_START
+      - UNMUTE_CALL_FACTS{{.DevEnv}}
+    labels:
+      - "unmute.dev.pid=${UNMUTE_DEV_PID:-}"
+    depends_on:
+      livekit_server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('livekit_server', 7880), timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

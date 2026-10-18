@@ -139,7 +139,7 @@ func sampleSlngSite(entry targetcap.Entry) slngSite {
 	}
 	return slngSite{
 		SessionExpr: "slng_session_id", StateExpr: "state",
-		Names: []string{"salon_name"}, ConfigFunc: slngConfigFunc("reasoning"),
+		Names: []string{"salon_name"}, ConfigFunc: "_slng_config_reasoning",
 		Scope: targetcap.SlngScope("catalog-sample-v1",
 			targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: "concierge"}),
 	}

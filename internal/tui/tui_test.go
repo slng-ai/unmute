@@ -20,6 +20,7 @@ import (
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/scaffold"
 	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 	"github.com/slng-ai/unmute/internal/style"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
@@ -800,42 +801,7 @@ func TestV41LiveKitInitWebhookCompilesOnAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var livekit ir.Target
-	for _, target := range agent.Targets {
-		livekit = target
-	}
-	artifact, err := generate.Generate(agent, livekit, targetcap.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, file := range artifact.Files {
-		if file.Path == "agents.py" && strings.Contains(string(file.Content), "@function_tool") && strings.Contains(string(file.Content), "async def lookup_customer(") {
-			return
-		}
-	}
-	t.Fatal("generated agents.py omitted the entry agent's @function_tool method")
-}
-
-func TestV42LiveKitInitMCPCompilesOnAgent(t *testing.T) {
-	data := scaffold.Data{
-		Name: "agent", Instructions: scaffold.DefaultInstructions,
-		Tools: []scaffold.Tool{{
-			Name: "book_table", Description: "Book through the bookings MCP server.",
-			Execution: "mcp", URLEnv: "BOOKINGS_MCP_URL", Input: `{"type":"object"}`,
-			AttachTo: []string{"assistant"},
-		}},
-	}
-	data.SetTarget(string(targetcap.LiveKit))
-	dir := filepath.Join(t.TempDir(), "agent")
-	if _, err := scaffold.Write(dir, data); err != nil {
-		t.Fatal(err)
-	}
-	pkg, err := spec.Load(dir)
-	if err != nil {
+	if err := pkg.ReadState(t.Context(), stateschema.RecordedInRepo()); err != nil {
 		t.Fatal(err)
 	}
 	agent, err := ir.Build(pkg)
@@ -851,11 +817,11 @@ func TestV42LiveKitInitMCPCompilesOnAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, file := range artifact.Files {
-		if file.Path == "utils/mcp.py" && strings.Contains(string(file.Content), `mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"]`) {
+		if file.Path == "agent.json" && strings.Contains(string(file.Content), `"lookup_customer"`) {
 			return
 		}
 	}
-	t.Fatal("generated utils/mcp.py omitted the MCP server mount")
+	t.Fatal("generated agent.json omitted the entry agent's webhook tool")
 }
 
 func TestV18AgentMenuShowsAndEditsSavedAgent(t *testing.T) {
@@ -1277,7 +1243,7 @@ func TestV40LocalPythonSelectionScaffoldsHandler(t *testing.T) {
 	if back {
 		t.Fatal("Local Python selection unexpectedly went back")
 	}
-	if tool.Execution != "local" || tool.Handler != "tools/lookup_customer.py" || tool.URLEnv != "" {
+	if tool.Execution != "local" || tool.Handler != "tools/lookup_customer.py:lookup_customer" || tool.URLEnv != "" {
 		t.Fatalf("local tool = %#v", tool)
 	}
 	if !strings.Contains(output.String(), "creates tools/lookup_customer.py when saved") {
@@ -1294,8 +1260,8 @@ func TestV40LocalPythonSelectionScaffoldsHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(content) != 0 {
-		t.Fatalf("new handler content = %q, want empty", content)
+	if !strings.Contains(string(content), "def lookup_customer(") {
+		t.Fatalf("new handler content = %q, want a typed stub", content)
 	}
 }
 
@@ -1303,14 +1269,14 @@ func TestV40MaintainPreservesLocalHandler(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "agent")
 	data := scaffold.Data{Name: "agent", Tools: []scaffold.Tool{{
 		Name: "lookup_customer", Description: "Look up the customer.", Execution: "local",
-		Handler: "tools/lookup_customer.py", Input: `{"type":"object"}`,
+		Handler: "tools/lookup_customer.py:lookup_customer", Input: `{"type":"object"}`,
 	}}}
 	data.SetTarget(string(targetcap.LiveKit))
 	if _, err := scaffold.Write(root, data); err != nil {
 		t.Fatal(err)
 	}
 	handler := filepath.Join(root, "tools", "lookup_customer.py")
-	want := "def lookup_customer():\n    return {}\n"
+	want := "from pydantic import BaseModel\n\n\nclass Customer(BaseModel):\n    name: str = \"\"\n\n\ndef lookup_customer() -> Customer:\n    return Customer()\n"
 	if err := os.WriteFile(handler, []byte(want), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1792,7 +1758,7 @@ func TestMaintainToolBlocksRoundTrip(t *testing.T) {
 		},
 		scaffold.Tool{
 			Name: "notes", Description: "Load notes.", Execution: "local",
-			Handler: "tools/notes.py", HandlerSource: "def notes():\n    return {}\n",
+			Handler: "tools/notes.py:notes", HandlerSource: "def notes():\n    return {}\n",
 			Input: input, AttachTo: []string{"assistant"},
 		},
 		scaffold.Tool{
@@ -1825,7 +1791,7 @@ func TestMaintainToolBlocksRoundTrip(t *testing.T) {
 		got.Auth == nil || got.Auth.Type != "api_key" || got.Auth.TokenEnv != "LOOKUP_KEY" || got.Auth.Header != "X-API-Key" {
 		t.Errorf("webhook tool round-trip lost fields: %#v (auth %#v)", got, got.Auth)
 	}
-	if got := byName["notes"]; got.Execution != "local" || got.Handler != "tools/notes.py" {
+	if got := byName["notes"]; got.Execution != "local" || got.Handler != "tools/notes.py:notes" {
 		t.Errorf("local tool round-trip = %#v", got)
 	}
 	if got := byName["search"]; got.Execution != "mcp" || got.URLEnv != "SEARCH_MCP_URL" {

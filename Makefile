@@ -36,5 +36,6 @@ release-dry: ; goreleaser release --snapshot --clean --skip=sign
 # the PR gate. PKG and FW narrow it: make e2e PKG=kestrel FW=pipecat.
 # UNMUTE_E2E_CORE=../unmute-core runs an unreleased unmute-core checkout.
 e2e:     ; go test -tags e2e -timeout 60m -count=1 ./internal/e2e/ -run 'TestScenarios$(if $(PKG),/$(PKG)$(if $(FW),/$(FW)))' -v
+e2e-slng: ; go test -tags e2e -timeout 30m -count=1 ./internal/e2e/ -run 'TestSlngLive$(if $(PKG),/$(PKG))' -v
 
-.PHONY: build test smoke e2e contracts lint lint-emitted fmt install docs release-dry
+.PHONY: build test smoke e2e e2e-slng contracts lint lint-emitted fmt install docs release-dry

@@ -3,6 +3,8 @@
 Take a takeaway order with an OpenAI live voice model and tools that look up dishes and calculate the total.
 The live model handles the conversation. Its OpenAI backend runs local tools and searches the shop documents.
 
+It is an `agent.yaml` version 2 package, compiled onto unmute-core. The tools' types come from `tools/takeaway.py`. `state.py` holds an empty `State`, because the call saves no values. It has no scenarios: the scenario runner drives cascade calls, and has no live path yet.
+
 On this page:
 
 - [Quickstart](#quickstart) - start the browser call
@@ -107,7 +109,8 @@ unmute dev examples/takeaway-orders --target pipecat
 | `targets.yaml` | Pipecat and LiveKit targets, both with browser audio. |
 | `instructions.md` | Conversation instructions and when to call tools. |
 | `tools/*.yaml` | Local tool contracts, knowledge lookup. |
-| `tools/takeaway.py` | Local handlers, demo records, and runnable checks. |
+| `tools/takeaway.py` | Local handlers and their types, demo records, and runnable checks. |
+| `state.py` | An empty `State`: the call saves no values. |
 | `knowledge/kitchen/*.md` | Menu policies, allergens, and opening hours. |
 
 ## Advanced

@@ -10,7 +10,7 @@
 # The turn section is written out rather than left off so the assertion is about
 # the local decider rather than about the default. Its sibling
 # internal/testdata/speechmatics_listen hands the turn to the transcriber.
-version: 1
+version: 2
 
 name: speechmatics-local
 entry_agent: desk

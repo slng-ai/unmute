@@ -27,8 +27,8 @@ func newCompileCmd() *cobra.Command {
 	var names []string
 	cmd := &cobra.Command{
 		Use:   "compile [package-dir]",
-		Short: "Compile a v1 agent package to its resolved target artifacts.",
-		Long: "Compile a v1 agent package to its resolved target artifacts.\n\n" +
+		Short: "Compile an agent package to its resolved target artifacts.",
+		Long: "Compile an agent package to its resolved target artifacts.\n\n" +
 			"With no package-dir, the package is the current directory, so you can " +
 			"cd into an agent and run this with no arguments.",
 		Args: cobra.MaximumNArgs(1),

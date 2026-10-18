@@ -4,37 +4,8 @@ description: >-
   pounds and whether the kitchen has it tonight. Use the name and the price this
   returns, never one you remember.
 
-input:
-  type: object
-  properties:
-    spoken_name:
-      type: string
-      description: The dish as the caller said it, such as "sweet and sour chicken".
-  required:
-    - spoken_name
-
-output:
-  type: object
-  properties:
-    found:
-      type: boolean
-    name:
-      type: string
-    price:
-      type: number
-    available:
-      type: boolean
-    note:
-      type: string
-  required:
-    - found
-    - name
-    - price
-    - available
-    - note
-
 local:
-  handler: tools/takeaway.py
+  handler: tools/takeaway.py:look_up_dish
 
 interruption: provider_default
 effect: returns_data

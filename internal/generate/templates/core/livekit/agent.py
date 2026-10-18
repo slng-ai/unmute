@@ -42,6 +42,7 @@ from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import google, openai, silero, slng
 from unmute_core.call import CallStartError
 from unmute_core.livekit import (
+    DevObserver,
     ModelCallLLM,
     SipLine,
     UnmuteAgent,
@@ -53,6 +54,7 @@ from unmute_core.livekit import (
     sip_call_info,
     yield_to_caller,
 )
+from unmute_core.dev import DevRecorder, metrics_enabled
 from unmute_core.settings import env_value
 from unmute_core.slng import TrackingIds, tracking_ids
 from unmute_core.state import CallState, call_phone_region, use_phone_region
@@ -65,7 +67,7 @@ import speech
 load_dotenv()
 logger = logging.getLogger("agent")
 MODELS: dict[str, Any] = spec.SPEC["models"]
-WINDOW = turn_window(MODELS["turn"].get("pace", "balanced"), "livekit")
+WINDOW = turn_window((MODELS["turn"] or {}).get("pace", "balanced"), "livekit")
 
 
 def required(name: str) -> str:
@@ -174,6 +176,11 @@ def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession
     question answer it.
     """
     entry = spec.SPEC["agents"][first]
+    if realtime := entry.get("realtime"):
+        # One model listens, thinks and speaks: no speech-to-text, no voice.
+        session = AgentSession(llm=speech.REALTIME[realtime](), vad=vad, user_away_timeout=None)
+        yield_to_caller(session)
+        return session
     ids = tracking_ids(state.call)
     stt = build_stt(ids)
     session = AgentSession(
@@ -280,6 +287,10 @@ async def entrypoint(ctx: JobContext) -> None:
         )
     first = spec.entry(state)
     session = build_session(state, ctx.proc.userdata["vad"], first)
+    if metrics_enabled():
+        recorder = DevRecorder(ctx.room.name, target="livekit")
+        recorder.watch_state(state)
+        DevObserver(recorder, controls=list(spec.SPEC["transfers"])).attach(session)
     if spec.IDLE is not None:
         idle_nudges(session, spec.IDLE)
     with use_phone_region(lambda: call_phone_region(state.call)):

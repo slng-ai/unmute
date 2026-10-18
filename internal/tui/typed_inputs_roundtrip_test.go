@@ -1,11 +1,12 @@
 package tui
 
 import (
-	"github.com/slng-ai/unmute/internal/scaffold"
-	"github.com/slng-ai/unmute/internal/spec"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/slng-ai/unmute/internal/scaffold"
+	"github.com/slng-ai/unmute/internal/spec"
 )
 
 func TestMaintainKeepsOrderedInjection(t *testing.T) {

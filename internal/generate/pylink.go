@@ -78,36 +78,12 @@ func renderPythonModules(fsys embed.FS, dir string, funcs template.FuncMap, data
 	return linkPython(imports, rendered)
 }
 
-// utilsPackage is utils/__init__.py. The code targets that emit utils/ always
-// add it, because their dev metrics module is emitted into it on every build.
-var utilsPackage = File{Path: "utils/__init__.py", Content: []byte(`"""Helpers the agent's modules share."""` + "\n")}
-
 // pyPrompt is one system prompt: the prompts/ constant that holds it and the
 // Markdown file under prompts/ it is read from, without the suffix.
 type pyPrompt struct {
 	Const string
 	File  string
 	Text  string
-}
-
-// uniquePrompts drops a prompt listed twice with the same text, and refuses
-// two different texts under one constant or one file.
-func uniquePrompts(prompts []pyPrompt) ([]pyPrompt, error) {
-	seen := map[string]string{}
-	var out []pyPrompt
-	for _, p := range prompts {
-		constText, constSeen := seen["const "+p.Const]
-		fileText, fileSeen := seen["file "+p.File]
-		if constSeen && constText == p.Text && fileSeen && fileText == p.Text {
-			continue
-		}
-		if constSeen || fileSeen {
-			return nil, fmt.Errorf("two prompts compile to %s (prompts/%s.md); rename an agent or a task", p.Const, p.File)
-		}
-		seen["const "+p.Const], seen["file "+p.File] = p.Text, p.Text
-		out = append(out, p)
-	}
-	return out, nil
 }
 
 // writePromptFiles writes each prompt as written, byte for byte, to prompts/.
