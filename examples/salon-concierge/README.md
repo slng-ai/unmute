@@ -187,7 +187,7 @@ another (`additional`). A slot earlier than the salon's clock today is neither
 offered nor accepted. And `find_slots` with no day answers `need_date` when the
 caller holds nothing, and its offer asks which day.
 
-### What changed from the version 1 salon
+### What changed from the earlier salon
 
 This design is ported from unmute-core's `examples/salon-concierge-unmute`, which
 is this salon written by hand on the library.
@@ -202,7 +202,7 @@ is this salon written by hand on the library.
 | 2 to 3 model requests on a booking turn | 1 |
 | `phonenumbers` and `pydantic-extra-types` for the phone type | unmute-core's `Phone` and `Id` |
 
-Core's version has a second idle nudge. `agent.yaml` version 2 has one, so the
+Core's version has a second idle nudge. `agent.yaml` has one, so the
 salon keeps its one nudge at 15 seconds and its end at 45.
 
 ## Typed values and context

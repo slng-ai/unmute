@@ -1,5 +1,4 @@
 {
-  "version": 2,
   "name": "v2-core",
   "architecture": "cascade",
   "entry_agent": "desk",

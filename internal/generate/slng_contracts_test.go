@@ -195,7 +195,7 @@ func TestSlngReproducesTheRealExportedAgent(t *testing.T) {
 func TestSlngNegativeFixturesAreRejectable(t *testing.T) {
 	// fixture name -> how this compiler makes the shape impossible.
 	covered := map[string]string{
-		"agent_config_legacy_tool_leaks.json":     "unmute never writes a legacy tools list; TestSlngV1BodyInvariants asserts the key is absent",
+		"agent_config_legacy_tool_leaks.json":     "unmute never writes a legacy tools list; TestSlngBodyInvariants asserts the key is absent",
 		"agent_config_mixed_mode.json":            "tool_mode is the constant \"shared\"; there is no code path that writes legacy mode",
 		"dynamic_url_scheme.json":                 "ir.validateWebhookBaseURL refuses a base_url that is not https, and refuses any template token in it",
 		"dynamic_url_authority.json":              "same rule: a template token anywhere in base_url is refused, so the authority can never be templated",

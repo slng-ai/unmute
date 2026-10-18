@@ -50,7 +50,7 @@ Four rules hold the boundary:
 - Maintained runtime code in this repository is Go.
 - Python exists in templates, copied local handlers, examples, and generated
   output.
-- A LiveKit or Pipecat project is version 2 only. It runs on the unmute-core library from PyPI: `compile` writes its data to `agent.json`, and `spec.py` and `agent.py` are the same in every project (`internal/generate/core_project.go`). A twilio or slng project still carries its own runtime and no Unmute dependency, from version 1 or 2.
+- A LiveKit or Pipecat project runs on the unmute-core library from PyPI: `compile` writes its data to `agent.json`, and `spec.py` and `agent.py` are the same in every project (`internal/generate/core_project.go`). A twilio or slng project carries its own runtime and no Unmute dependency.
 - Authors edit the source package and compile again instead of editing
   `build/<target>/`.
 
@@ -302,7 +302,7 @@ Start with these files rather than scanning the whole tree.
 | Capabilities and model provider catalogue | `internal/target/` |
 | Driver dispatch and emitted artifacts | `internal/generate/artifact.go` |
 | LiveKit and Pipecat projects on unmute-core | `internal/generate/core_*.go`, `internal/generate/templates/core/` |
-| Twilio and SLNG drivers | `internal/generate/twilio_v1*.go`, `internal/generate/slng_v1*.go` |
+| Twilio and SLNG drivers | `internal/generate/twilio*.go`, `internal/generate/slng*.go` |
 | Dev conversation and measurement contract | `internal/devmetrics/` |
 | Package scaffolding | `internal/scaffold/` |
 | Shipped coding-agent skill | `internal/skill/assets/` |

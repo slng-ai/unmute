@@ -192,7 +192,7 @@ func TestSkillInstallAgentClaudeWritesWhatItsPointersName(t *testing.T) {
 	if _, _, err := runSkillInstallCommand(t, "--dir", project, "--agent", "claude"); err != nil {
 		t.Fatal(err)
 	}
-	for _, dir := range []string{"unmute", "unmute-manifest", "unmute-deploy"} {
+	for _, dir := range []string{"unmute", "unmute-manifest", "unmute-deploy", "unmute-migrate"} {
 		for _, root := range []string{".agents", ".claude"} {
 			file := filepath.Join(project, root, "skills", dir, "SKILL.md")
 			if _, err := os.Stat(file); err != nil {

@@ -16,13 +16,13 @@ If it is just an authenticated HTTP call, use
 [a webhook tool](/build/tools/webhook) instead. It needs no code from you and no
 code review.
 
-A `local:` handler is a `version: 2` typed function. The signature is the tool's
+A `local:` handler is a typed function. The signature is the tool's
 input and the Pydantic return model is its output, so the tool file has no
-`input:` or `output:`. Livekit and pipecat compile `version: 2` only. Twilio runs
+`input:` or `output:`. Livekit and pipecat compile typed handlers. Twilio runs
 the same typed handlers ([the Twilio target](/targets/twilio)). On an slng target,
 a typed handler is wrapped into an SLNG code tool and published by
-`unmute deploy` ([details](#on-the-slng-target)). SLNG needs `version: 2` and
-refuses a version 1 handler.
+`unmute deploy` ([details](#on-the-slng-target)). SLNG refuses a handler with no
+`:function`.
 
 On this page:
 
@@ -77,7 +77,7 @@ that shows a handler receiving a value from State. For real ones, every tool in
   `file.py:function`. The path is a Python file inside the package, and the name after
   the colon is the function to call. Its signature is the tool's input and its return
   type is the output. A tool file with `input:` or `output:` next to a local handler
-  is a version 1 file, which livekit and pipecat no longer compile.
+  is refused.
 </ParamField>
 
 The function does not need the tool's name, and one file can hold many tools. In
@@ -141,7 +141,7 @@ LiveKit and Pipecat.
 
 ## On the slng target
 
-A version 2 `local:` tool works on the slng target. `unmute compile` wraps the
+A `local:` tool works on the slng target. `unmute compile` wraps the
 handler into SLNG's code tool file and writes `build/slng/tools/<name>.json`
 and `build/slng/samples/<name>.json`.
 
@@ -155,7 +155,7 @@ object of arguments:
 `unmute deploy --target slng` creates or updates the code tool, runs it once on
 this sample, and publishes it. Then it attaches the tool by id and version.
 SLNG publishes a code tool only after one run, so a local tool with no sample is
-refused. A version 1 handler and an `async def` handler are refused too. SLNG
+refused. A handler with no `:function` and an `async def` handler are refused too. SLNG
 code has no internet access.
 
 ## Share a helper between tools

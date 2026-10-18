@@ -1,6 +1,6 @@
 {
   "source": "examples/salon-concierge-unoptimized/state.py",
-  "digest": "7c3254b32222a3e7996e901a7080e54a025dac8cfcd8834ed5dd931341825d96",
+  "digest": "f03537a2e7f4af6a6da9b75bc0d23baae3c4f0b6b87b0191df640128d97b6138",
   "report": {
     "schema": {
       "description": "One call. It holds no values.",

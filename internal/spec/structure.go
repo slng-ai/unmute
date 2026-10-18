@@ -90,7 +90,19 @@ var (
 	}
 )
 
+// OldContract is what an agent.yaml written for unmute 0.8 or older hears.
+// Every such file has version:, because it was required, so it is checked
+// before any retired key: the author reads one instruction, not the first of
+// twenty renames.
+const OldContract = "version: is gone. This agent.yaml is written for unmute 0.8 or older, " +
+	"and unmute reads one contract now. Migrate it: run unmute skill install and ask your coding " +
+	"assistant to use the unmute-migrate skill, or follow https://unmute.ai/reference/migrate. " +
+	"Then delete the version: line"
+
 func (a *AgentFile) UnmarshalYAML(node ast.Node) error {
+	if err := removedKeys(node, map[string]string{"version": OldContract}); err != nil {
+		return err
+	}
 	if err := removedKeys(node, topLevelMoved); err != nil {
 		return err
 	}

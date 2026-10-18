@@ -168,7 +168,7 @@ func TestSlngRefusesReservedToolNamesButNotTheBuiltinThatOwnsOne(t *testing.T) {
 // GATE. A builtin selected from a file with another name is refused here, not at
 // the push.
 //
-// slng_v1_build.go emits {"tool": <file name>}, so tools/hang_up.yaml declaring
+// slng_build.go emits {"tool": <file name>}, so tools/hang_up.yaml declaring
 // `builtin: {id: end_call}` asks SLNG for a tool called hang_up. It compiles
 // clean, the account has no such tool, and the push fails. A code target lowers
 // the builtin to a function of that name and is right to accept it, which is why
@@ -192,7 +192,7 @@ func TestSlngRefusesABuiltinUnderAnotherFilesName(t *testing.T) {
 		"rename tools/hang_up.yaml to tools/end_call.yaml")
 }
 
-// GATE. The slng target authors a code tool only from a typed version 2 handler
+// GATE. The slng target authors a code tool only from a typed handler
 // with a sample, and refuses a webhook, whose URL and credential SLNG stores.
 // Each refusal says how to get the tool onto the platform instead.
 func TestSlngRefusesAuthoredToolBodies(t *testing.T) {
@@ -202,16 +202,14 @@ func TestSlngRefusesAuthoredToolBodies(t *testing.T) {
 		want []string
 	}{
 		{
-			name: "a version 1 local handler with no sample",
+			name: "a local handler with no sample",
 			tool: Tool{
 				Description: "Look one up.", Execution: ToolLocal,
-				Handler: "tools/check_order.py", HandlerSource: "def check_order() -> dict:\n    return {}\n",
+				Handler: "tools/authored.py", HandlerFunction: "authored", HandlerSource: "def authored() -> dict:\n    return {}\n",
 				Input:        map[string]any{"type": "object", "properties": map[string]any{}},
 				Interruption: ToolProviderDefault, Effect: ToolReturnsData,
 			},
 			want: []string{
-				"a version 1 handler",
-				"handler: tools/authored.py:authored",
 				"no sample",
 				"tools/authored.sample.json",
 			},

@@ -1,5 +1,3 @@
-version: 2
-
 name: salon-concierge
 
 entry_agent: concierge

@@ -1,6 +1,6 @@
 """What a salon-concierge-unoptimized call keeps: nothing.
 
-This package saves no values and injects none, on purpose. `agent.yaml` version 2
+This package saves no values and injects none, on purpose. `agent.yaml`
 still reads a State class from this file. ``Appointment`` is here because the
 booking tool returns one.
 """

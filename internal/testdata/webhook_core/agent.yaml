@@ -1,6 +1,5 @@
 # A version 2 package with one webhook tool, so the webhook format compiles on
 # both code targets. It has no scenarios: nothing here answers the webhook.
-version: 2
 
 name: webhook-core
 

@@ -98,7 +98,7 @@ def create_customer_record(
     name: str = "",
     enquiry: str = "",
 ) -> Opened:
-    """Open the customer record. agent.yaml version 2 reads its types from here."""
+    """Open the customer record. agent.yaml reads its types from here."""
     return Opened.model_validate(_create_customer_record(summary, phone, email, name, enquiry))
 
 

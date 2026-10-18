@@ -1026,7 +1026,7 @@ func TestEntryDocumentBudget(t *testing.T) {
 // SKILL.md, and each reference its SKILL.md names exists.
 func TestNoOrphanReferences(t *testing.T) {
 	named := regexp.MustCompile("`(references/[a-z0-9-]+\\.md)`")
-	for _, dest := range []Destination{Canonical, ManifestCanonical, DeployCanonical} {
+	for _, dest := range []Destination{Canonical, ManifestCanonical, DeployCanonical, MigrateCanonical} {
 		files, err := New("test").Files(dest)
 		if err != nil {
 			t.Fatal(err)
@@ -1093,6 +1093,7 @@ func TestFrontmatterIsThePortableSet(t *testing.T) {
 		{Canonical, Pointer},
 		{ManifestCanonical, ManifestPointer},
 		{DeployCanonical, DeployPointer},
+		{MigrateCanonical, MigratePointer},
 	} {
 		canonical := destinationFile(t, pair.canonical, "SKILL.md")
 		pointer := destinationFile(t, pair.pointer, "SKILL.md")
@@ -1421,7 +1422,7 @@ func TestOneFrameworkVersionEverywhere(t *testing.T) {
 	// livekit-agents 1.6.9") stay out of scope.
 	constraint := regexp.MustCompile(`(livekit-agents|pipecat-ai)(\[[^\]]*\])?(==|>=|<=|~=)([0-9][0-9.]*)`)
 	// A target's declared version in an authoring sample. Quoted and three-part,
-	// so `version: 1` (the package schema version) and a project's own
+	// so a manifest's `version: 1` and a project's own
 	// `version = "0.1.0"` are not swept up.
 	declared := regexp.MustCompile(`version:\s*"(\d+\.\d+\.\d+)"`)
 

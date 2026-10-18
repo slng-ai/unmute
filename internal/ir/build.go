@@ -66,7 +66,6 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	}
 	out := &Agent{
 		Manifest: pkg.Manifest,
-		Version:  pkg.Agent.Version,
 		Name:     strings.TrimSpace(pkg.Agent.Name),
 		// Resolved here so no reader downstream has to treat an omitted key as a
 		// fourth case. An omitted key is cascade, which is what every package
@@ -270,7 +269,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		// names it, so the profile cannot come from where it happens to be written.
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg,
 			cmp.Or(raw.Think, pkg.Agent.Agents[pkg.Agent.EntryAgent].Think)))
-		assign, err := assignments(raw.Assign, pkg.Agent.Version == packagespec.Version2)
+		assign, err := assignments(raw.Assign, true)
 		if err != nil {
 			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}

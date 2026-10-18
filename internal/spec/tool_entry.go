@@ -24,16 +24,16 @@ type ToolEntry struct {
 	Name string `json:"name" yaml:"name"`
 	// Save writes State on every result of the tool, whatever its outcome.
 	// Package scope only: it is the tool's own save, the same on every agent.
-	Save []Pair `json:"save,omitempty" yaml:"save,omitempty" since:"2"`
+	Save []Pair `json:"save,omitempty" yaml:"save,omitempty"`
 	// Confirm is read back by code before the tool runs, and the tool runs on
 	// the caller's yes. A step's tool only, beside an outcome that ends it.
-	Confirm []string `json:"confirm,omitempty" yaml:"confirm,omitempty" since:"2"`
+	Confirm []string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
 	// Outcomes say what each result does, tried top to bottom.
 	Outcomes []Outcome `json:"outcomes,omitempty" yaml:"outcomes,omitempty"`
 	// Start is what is said as the tool starts. Package scope only.
-	Start *ToolStart `json:"start,omitempty" yaml:"start,omitempty" since:"2"`
+	Start *ToolStart `json:"start,omitempty" yaml:"start,omitempty"`
 	// Hidden names result fields the model never reads. Package scope only.
-	Hidden []string `json:"hidden,omitempty" yaml:"hidden,omitempty" since:"2"`
+	Hidden []string `json:"hidden,omitempty" yaml:"hidden,omitempty"`
 }
 
 // Bare reports an entry that names a tool and says nothing else about it.

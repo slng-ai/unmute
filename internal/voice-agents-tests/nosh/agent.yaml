@@ -5,7 +5,6 @@
 #
 # The scenarios in scenarios/ are unmute-core's, word for word: the same lines,
 # model request counts and final state must hold when Unmute compiles this package.
-version: 2
 
 name: nosh
 

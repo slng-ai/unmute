@@ -7,7 +7,6 @@
 # turn binding alone decides it: external here, the service's own there.
 #
 # No `eager:` and no `pace:`, for the same two reasons Gradium writes neither.
-version: 2
 
 name: speechmatics-listen
 

@@ -21,7 +21,7 @@ type TerminalTool struct {
 	// resolved shape, and every reader wants it by field name.
 	Success map[string][]string `json:"success" yaml:"success"`
 	// Confirm is read back by code before the tool runs, and Say is spoken
-	// when the step ends on it. Version 2 only.
+	// when the step ends on it.
 	Confirm []string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
 	Say     []string `json:"say,omitempty" yaml:"say,omitempty"`
 	// Assign is what this outcome saves. Empty on an outcome that ends the
@@ -98,7 +98,7 @@ func terminalTools(pkg *packagespec.Package, taskName string, raw packagespec.Ta
 		if len(success) == 0 && ends == "" {
 			return nil, fmt.Errorf("an outcome of %q ends the step with no if:; a step cannot complete on a result nothing checks", entry.Tool)
 		}
-		own, err := assignments(entry.Save, pkg.Agent.Version == packagespec.Version2)
+		own, err := assignments(entry.Save, true)
 		if err != nil {
 			return nil, fmt.Errorf("an outcome of %q: %w", entry.Tool, err)
 		}

@@ -48,7 +48,6 @@ taken out so the shape is visible.
 
 <Accordion title="Complete agent.yaml">
 ```yaml
-version: 2
 name: my-agent
 entry_agent: assistant
 
@@ -95,17 +94,6 @@ conversation:
 </Accordion>
 
 Now each block.
-
-### `version`
-
-```yaml
-version: 2
-```
-
-Version 2 is the version to write. It compiles onto the
-[unmute-core](/core/start/why-unmute-core) library, so a package needs a
-`state.py` and typed local tools. Version 1 still compiles on the Twilio and SLNG
-targets only. See [Agent configuration, version 2](/reference/agent-yaml-v2).
 
 ### `name`
 

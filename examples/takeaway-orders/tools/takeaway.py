@@ -174,7 +174,7 @@ def _rejected(problem):
     }
 
 
-# What each tool takes and returns. agent.yaml version 2 reads these types here.
+# What each tool takes and returns. agent.yaml reads these types here.
 class Dish(BaseModel):
     """What ``look_up_dish`` returns."""
 

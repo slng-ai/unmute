@@ -169,7 +169,7 @@ var (
 
 	// The code tool writes, since voiceai 0.1.23: create or update builds the
 	// Python, run proves it on a sample, and publish makes the version an agent
-	// attaches. Deploy runs them for a version 2 local tool, on a real deploy
+	// attaches. Deploy runs them for a local tool, on a real deploy
 	// only. Create takes the .py path, update the tool name and --file.
 	SlngToolCreate  = SlngCommand{"tool", "create"}
 	SlngToolUpdate  = SlngCommand{"tool", "update"}

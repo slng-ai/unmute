@@ -42,8 +42,8 @@ var relayDesk = filepath.Join("..", "voice-agents-tests", "relay-desk")
 // Vertex in the acceptance package. Everything the driver writes is in them.
 func TestTwilioGolden(t *testing.T) {
 	for _, tc := range []struct{ dir, instance, golden string }{
-		{filepath.Join("..", "testdata", "twilio"), "twilio", "twilio_v1_openai.txt"},
-		{relayDesk, "twilio-gemini", "twilio_v1_gemini_vertex.txt"},
+		{filepath.Join("..", "testdata", "twilio"), "twilio", "twilio_openai.txt"},
+		{relayDesk, "twilio-gemini", "twilio_gemini_vertex.txt"},
 	} {
 		t.Run(tc.golden, func(t *testing.T) {
 			artifact := twilioArtifact(t, tc.dir, tc.instance)

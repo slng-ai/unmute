@@ -1547,7 +1547,7 @@ func TestOpenDiscoversOnlyImmediateAgentPackages(t *testing.T) {
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(path, "agent.yaml"), []byte("version: 1\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(path, "agent.yaml"), []byte(""), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

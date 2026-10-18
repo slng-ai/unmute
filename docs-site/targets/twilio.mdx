@@ -123,7 +123,7 @@ The connection contains environment variable names, never secret values.
 | turn | optional, `params` only: `speechTimeout` (600 to 5000 ms), `interruptSensitivity` (`high`, `medium`, `low`), `ignoreBackchannel`, and `eotThreshold` (0.5 to 0.9, listen model `flux` only) |
 | greeting | a fixed `say` line with `speaks_first: agent`, or `speaks_first: user` with no text |
 | interruption | `enabled: true` or `false`, and `protect: [greeting]` |
-| tools | `version: 2` typed local handlers (`tools/<name>.py:<name>`) whose input and output are flat `string`, `integer`, `number` and `boolean` fields, and the builtin `end_call` |
+| tools | typed local handlers (`tools/<name>.py:<name>`) whose input and output are flat `string`, `integer`, `number` and `boolean` fields, and the builtin `end_call` |
 
 The app builds ConversationRelay's `voice` attribute as `<voice id>-<model>`,
 for example `UgBBYS2sOqTuMpoF3BR0-flash_v2_5`. Write the id alone; a voice
@@ -206,7 +206,7 @@ do instead. The refused list:
 - `instructions` on `end_call`;
 - inactivity and duration timers, `pace` and the other turn fields;
 - tracing, realtime and live architectures, fallbacks and custom endpoints;
-- these `version: 2` keys, because the Twilio runtime runs version 2 without unmute-core: a tool entry's `save`, `outcomes`, `hidden` and `start: wait`, and a tool file's `precheck`; a step's outcomes without `then:`, its `start:` with `call:`, and an outcome with `confirm:` or `say:`; `entry_by`; prefetch `refuse_call`; and a handoff's `save` or `start`. To use them, compile to livekit or pipecat;
+- these keys, because the Twilio runtime runs without unmute-core: a tool entry's `save`, `outcomes`, `hidden` and `start: wait`, and a tool file's `precheck`; a step's outcomes without `then:`, its `start:` with `call:`, and an outcome with `confirm:` or `say:`; `entry_by`; prefetch `refuse_call`; and a handoff's `save` or `start`. To use them, compile to livekit or pipecat;
 - the target keys `version`, `pins`, `deployment_region` and `warm_instances`.
 
 ## What compiling writes

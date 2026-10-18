@@ -28,7 +28,7 @@ var coreSources = map[ir.VariableSource]string{
 // {{root}} or {{root__field__field}}.
 var linePlaceholder = regexp.MustCompile(`\{\{\s*([A-Za-z_][A-Za-z0-9_]*?)((?:__[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\}`)
 
-// coreSpec lowers a version 2 agent to agent.json: the data the emitted
+// coreSpec lowers an agent to agent.json: the data the emitted
 // spec.py turns into unmute-core's objects. Each key is named as the library
 // names it, so spec.py passes most of it through unchanged.
 func coreSpec(agent *ir.Agent) (map[string]any, error) {
@@ -61,7 +61,7 @@ func coreSpec(agent *ir.Agent) (map[string]any, error) {
 		spec["entry_by"] = agent.EntryBy
 	}
 	if agent.Tracing != nil && agent.Tracing.Provider != "langfuse" {
-		return nil, fmt.Errorf("tracing: version 2 traces to langfuse only so far, and this is %s", agent.Tracing.Provider)
+		return nil, fmt.Errorf("tracing: livekit and pipecat trace to langfuse only so far, and this is %s", agent.Tracing.Provider)
 	}
 	if len(agent.Knowledge) > 0 {
 		knowledge, err := coreKnowledge(agent)
@@ -105,7 +105,7 @@ func coreTools(agent *ir.Agent) ([]any, error) {
 		switch tool.Execution {
 		case ir.ToolBuiltin:
 			if tool.Builtin != "end_call" {
-				return nil, fmt.Errorf("tool %q: version 2 compiles the end_call builtin only so far, and this one is %s", name, tool.Builtin)
+				return nil, fmt.Errorf("tool %q: livekit and pipecat compile the end_call builtin only so far, and this one is %s", name, tool.Builtin)
 			}
 			continue // the framework's own end-call tool, given to each agent that lists it
 		case ir.ToolKnowledge:
@@ -116,7 +116,7 @@ func coreTools(agent *ir.Agent) ([]any, error) {
 			continue
 		}
 		if tool.Execution != ir.ToolLocal && tool.Execution != ir.ToolWebhook {
-			return nil, fmt.Errorf("tool %q: version 2 compiles local and webhook tools only so far, and this one is %s", name, tool.Execution)
+			return nil, fmt.Errorf("tool %q: livekit and pipecat compile local and webhook tools only so far, and this one is %s", name, tool.Execution)
 		}
 		if tool.Execution == ir.ToolWebhook && (len(tool.Replies) > 0 || tool.Precheck != "") {
 			return nil, fmt.Errorf("tool %q: outcomes that say a line, and precheck, run on a local tool only; unmute-core's webhook tool takes neither", name)
@@ -645,7 +645,7 @@ func coreModels(agent *ir.Agent, resolved ir.Target) (map[string]any, error) {
 			}
 			think[name] = router
 		default:
-			return nil, fmt.Errorf("think %q: version 2 compiles a google or openai model, or the slng router, only so far, and this one is %s", name, binding.Provider)
+			return nil, fmt.Errorf("think %q: livekit and pipecat compile a google or openai model, or the slng router, only so far, and this one is %s", name, binding.Provider)
 		}
 	}
 	// A live model runs where a realtime one does: one model listens, thinks and
@@ -654,10 +654,10 @@ func coreModels(agent *ir.Agent, resolved ir.Target) (map[string]any, error) {
 	maps.Copy(realtime, models.Realtime)
 	maps.Copy(realtime, models.Live)
 	if models.Listen == nil && len(realtime) == 0 {
-		return nil, fmt.Errorf("listen: version 2 needs a speech-to-text model")
+		return nil, fmt.Errorf("listen: the package needs a speech-to-text model")
 	}
 	if models.Turn == nil && len(realtime) == 0 {
-		return nil, fmt.Errorf("turn: version 2 needs a turn model")
+		return nil, fmt.Errorf("turn: the package needs a turn model")
 	}
 	return map[string]any{"think": think, "speak": models.Speak, "listen": listenBindings(agent, resolved), "turn": models.Turn, "realtime": realtime}, nil
 }
@@ -713,7 +713,7 @@ func coreRouter(binding ir.Binding) (map[string]any, error) {
 
 // coreKnowledge lowers each knowledge base to KnowledgeBase's arguments, and
 // the embedder spec.py imports to build its index: a module, a class and the
-// model it pins, from the same table version 1 reads.
+// model it pins, from the catalogue table.
 func coreKnowledge(agent *ir.Agent) (map[string]any, error) {
 	out := map[string]any{}
 	for _, name := range sortedKeys(agent.Knowledge) {
@@ -740,7 +740,7 @@ func coreKnowledge(agent *ir.Agent) (map[string]any, error) {
 
 // coreTransfers lowers each escalation to core's Transfer: when the model
 // calls it, the variable that holds the number, and what happens when nobody
-// answers. The number stays in the environment, as version 1 keeps it.
+// answers. The number stays in the environment, as the catalogue keeps it.
 func coreTransfers(agent *ir.Agent, resolved ir.Target) (map[string]any, error) {
 	out := map[string]any{}
 	for _, name := range sortedKeys(agent.Controls) {

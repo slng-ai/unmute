@@ -1,7 +1,6 @@
 # The OpenAI Responses API binding, authored once on the base think binding:
 # `api` and `use_websocket` reach LiveKit and are dropped, with a warning, on
 # Pipecat. internal/generate/responses_params_test.go reads this package.
-version: 2
 
 name: responses-params
 

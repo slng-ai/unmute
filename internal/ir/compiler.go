@@ -14,21 +14,16 @@ import (
 // second copy is how a value reaches one list and goes missing from another.
 type Architecture = packagespec.Architecture
 
-// Version2 is the agent.yaml version that maps onto unmute-core's typed
-// concepts.
-const Version2 = packagespec.Version2
-
 const (
 	ArchitectureCascade  = packagespec.ArchitectureCascade
 	ArchitectureRealtime = packagespec.ArchitectureRealtime
 	ArchitectureLive     = packagespec.ArchitectureLive
 )
 
-// Agent is the resolved v1 package. References remain names so the graph is
+// Agent is the resolved package. References remain names so the graph is
 // acyclic and schema derivation does not recurse through agent handoffs.
 type Agent struct {
 	Manifest *packagespec.Manifest `json:"manifest,omitempty" yaml:"manifest,omitempty"`
-	Version  int                   `json:"version" yaml:"version"`
 	// Name is the package's own name, carried through from agent.yaml and
 	// trimmed. Empty when the author wrote none, which only the slng target
 	// refuses: it is the one target that deploys under a name instead of into a
@@ -40,7 +35,7 @@ type Agent struct {
 	// fourth case.
 	Architecture Architecture `json:"architecture" yaml:"architecture"`
 	EntryAgent   string       `json:"entry_agent" yaml:"entry_agent"`
-	// EntryBy picks the first agent from a State value. Version 2, nil when unset.
+	// EntryBy picks the first agent from a State value. Nil when unset.
 	EntryBy *EntryBy `json:"entry_by,omitempty" yaml:"entry_by,omitempty"`
 	// Models flattens the authoring sections into one name-keyed map; each
 	// entry's Kind records its section (names are one namespace, N15).
@@ -400,8 +395,8 @@ type Variable struct {
 	// existed before the prefetch feature.
 	Confirm          string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
 	ConfirmInherited bool   `json:"confirm_inherited,omitempty" yaml:"confirm_inherited,omitempty"`
-	// CallStart is required or optional for a value dispatched with the call,
-	// version 2 only. Source is call_start whenever it is set.
+	// CallStart is required or optional for a value dispatched with the call.
+	// Source is call_start whenever it is set.
 	CallStart CallStartRule `json:"call_start,omitempty" yaml:"call_start,omitempty"`
 	// Dependencies name the values a prefetched value was looked up from.
 	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
@@ -438,7 +433,7 @@ type Prefetch struct {
 	// NeedsConfirmed names State values the caller must have agreed to first.
 	NeedsConfirmed []string `json:"needs_confirmed,omitempty" yaml:"needs_confirmed,omitempty"`
 	// RefuseCall is the line logged when the entry saves nothing, and the call
-	// does not start. Version 2, tool entries only.
+	// does not start. Tool entries only.
 	RefuseCall string `json:"refuse_call,omitempty" yaml:"refuse_call,omitempty"`
 	// Inputs are the declared variables Args reads, sorted. Resolved here so the
 	// emitted skip check and the per-target warning both read one list rather
@@ -531,8 +526,7 @@ type Task struct {
 	// replace. Scoped this way on purpose: a package naming no skip keeps
 	// today's behaviour exactly.
 	Withdraws bool `json:"withdraws,omitempty" yaml:"withdraws,omitempty"`
-	// The version 2 step keys, each unmute-core's TaskSpec field of the same
-	// name. Empty on version 1.
+	// The step keys, each unmute-core's TaskSpec field of the same name.
 	Replies   []Reply    `json:"replies,omitempty" yaml:"replies,omitempty"`
 	OpensWith *OpensWith `json:"opens_with,omitempty" yaml:"opens_with,omitempty"`
 	Arguments []string   `json:"arguments,omitempty" yaml:"arguments,omitempty"`
@@ -694,7 +688,7 @@ type AssignTo struct {
 	// step may leave out: None there means no value yet.
 	Optional bool `json:"optional,omitempty" yaml:"optional,omitempty"`
 	// FromInput reads Field from the closing tool's input rather than its
-	// result, as `- booking: input.booking`. Version 2 only. It is saved with
+	// result, as `- booking: input.booking`. It is saved with
 	// the result rows when the closing tool succeeds, never before. A confirm
 	// line still names it as {{state.booking}}, and the compiler reads that
 	// from the tool's input, so nothing is saved before the caller's yes.
@@ -722,9 +716,9 @@ type AgentTransfer struct {
 	// Announce is the handoff's say: lines. One is said in the next agent's voice.
 	Announce []string        `json:"announce,omitempty" yaml:"announce,omitempty"`
 	Context  TransferContext `json:"context" yaml:"context"`
-	// Saves are the State values set as the call moves. Version 2.
+	// Saves are the State values set as the call moves.
 	Saves map[string]any `json:"saves,omitempty" yaml:"saves,omitempty"`
-	// OpensWith is the next agent's tool code runs as it takes the call. Version 2.
+	// OpensWith is the next agent's tool code runs as it takes the call.
 	OpensWith *OpensWith `json:"opens_with,omitempty" yaml:"opens_with,omitempty"`
 }
 
@@ -781,18 +775,17 @@ type Tool struct {
 	Builtin      string         `json:"builtin,omitempty" yaml:"builtin,omitempty"` // prebuilt registry id (builtin only)
 	Instructions string         `json:"instructions,omitempty" yaml:"instructions,omitempty"`
 	Handler      string         `json:"handler,omitempty" yaml:"handler,omitempty"`
-	// HandlerFunction is the function a version 2 handler names, after the
-	// colon in `file.py:function`. Empty on version 1, where it is the file's
-	// own name.
+	// HandlerFunction is the function a handler names, after the
+	// colon in `file.py:function`.
 	HandlerFunction string `json:"handler_function,omitempty" yaml:"handler_function,omitempty"`
-	// Assign, Replies, Precheck and Hidden are version 2: what the tool's
+	// Assign, Replies, Precheck and Hidden are the typed-handler keys: what the tool's
 	// result saves to State, the lines code speaks for a typed result, the
 	// function run before it, and the result fields the model never reads.
 	Assign   []AssignTo `json:"assign,omitempty" yaml:"assign,omitempty"`
 	Replies  []Reply    `json:"replies,omitempty" yaml:"replies,omitempty"`
 	Precheck string     `json:"precheck,omitempty" yaml:"precheck,omitempty"`
 	Hidden   []string   `json:"hidden,omitempty" yaml:"hidden,omitempty"`
-	// AnnounceWait is version 2: the tool runs once its announce line has played.
+	// AnnounceWait means the tool runs once its announce line has played.
 	AnnounceWait  bool   `json:"announce_wait,omitempty" yaml:"announce_wait,omitempty"`
 	HandlerSource string `json:"-" yaml:"-"` // local handler file content, loaded by spec.Load
 	// Sample is the local tool's tools/<name>.sample.json, one set of

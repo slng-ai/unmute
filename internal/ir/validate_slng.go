@@ -208,7 +208,7 @@ func validateSlngTool(name string, tool Tool, row *TargetValidation) {
 	}
 	// The other half of the same fact, and slng-only because only this target
 	// attaches by name. The emitted reference is the tool file's own name and
-	// not the id it selects — slng_v1_build.go writes {"tool": <file name>} —
+	// not the id it selects — slng_build.go writes {"tool": <file name>} —
 	// so tools/hang_up.yaml declaring `builtin: {id: end_call}` reaches SLNG
 	// asking for a tool nobody has. A code target lowers the builtin to a
 	// function and the file's name is free, which is why this is not a rule
@@ -232,11 +232,7 @@ func validateSlngTool(name string, tool Tool, row *TargetValidation) {
 	// A local tool becomes an SLNG code tool, which needs typed Python and one
 	// run before SLNG publishes it.
 	if tool.Execution == ToolLocal {
-		function := tool.HandlerFunction
-		if function == "" {
-			row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
-				"tool %q has a version 1 handler, and SLNG builds a code tool from a typed function: write version: 2 and handler: tools/%s.py:%s", name, name, name))
-		} else if strings.Contains(tool.HandlerSource, "async def "+function+"(") {
+		if function := tool.HandlerFunction; strings.Contains(tool.HandlerSource, "async def "+function+"(") {
 			row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
 				"tool %q is async def %s, and SLNG calls a code tool synchronously: make it a plain def", name, function))
 		}

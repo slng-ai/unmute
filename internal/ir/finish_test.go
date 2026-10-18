@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-yaml"
+
 	packagespec "github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/stateschema"
 )
@@ -30,8 +32,7 @@ func finishPackage(t *testing.T, state []stateschema.Field, entries, task, outpu
 			t.Fatal(err)
 		}
 	}
-	write("agent.yaml", `version: 1
-
+	write("agent.yaml", `
 name: finish-refusal
 
 entry_agent: desk
@@ -74,12 +75,24 @@ models:
 	write("targets.yaml", "channels:\n  - name: web\n    kind: realtime_audio\n\n"+
 		"capacity:\n  peak_sessions: 5\n  max_sessions: 10\n  avg_session_duration: 5m\n\n"+
 		"targets:\n  livekit:\n    provider: livekit\n    version: \"1.6.10\"\n    sdk_language: python\n")
-	write("tools/book_it.yaml", "description: Book one appointment.\n\ninput:\n  type: object\n  properties:\n    when:\n      type: string\n  required:\n    - when\n\noutput:\n"+output+"\nlocal:\n  handler: tools/salon.py\n\neffect: returns_data\n")
-	write("tools/look_up.yaml", "description: Read the diary.\n\ninput:\n  type: object\n  properties: {}\n\noutput:\n  type: object\n  properties:\n    status:\n      type: string\n      enum:\n        - found\n  required:\n    - status\n\nlocal:\n  handler: tools/salon.py\n\neffect: returns_data\n")
+	write("tools/book_it.yaml", "description: Book one appointment.\n\nlocal:\n  handler: tools/salon.py:book_it\n\neffect: returns_data\n")
+	write("tools/look_up.yaml", "description: Read the diary.\n\nlocal:\n  handler: tools/salon.py:look_up\n\neffect: returns_data\n")
 	write("tools/salon.py", "def book_it(when: str) -> dict:\n    return {\"status\": \"booked\", \"reference\": when}\n\n\ndef look_up() -> dict:\n    return {\"status\": \"found\"}\n")
-	pkg, err := loadRecorded(root)
+	pkg, err := packagespec.Load(root)
 	if err != nil {
 		t.Fatalf("the fixture itself does not load: %v", err)
+	}
+	// What the handlers' signatures declare, built here so no test runs Python.
+	// output varies per case, so it is parsed rather than recorded.
+	var bookOutput map[string]any
+	if err := yaml.Unmarshal([]byte(output), &bookOutput); err != nil {
+		t.Fatalf("output: %v", err)
+	}
+	pkg.ToolTypes = map[string]stateschema.ToolTypes{
+		"book_it": {Description: "Book one appointment.", Output: bookOutput, Input: map[string]any{
+			"type": "object", "properties": map[string]any{"when": map[string]any{"type": "string"}}, "required": []any{"when"}}},
+		"look_up": {Description: "Read the diary.", Input: map[string]any{"type": "object", "properties": map[string]any{}}, Output: map[string]any{
+			"type": "object", "properties": map[string]any{"status": map[string]any{"type": "string", "enum": []any{"found"}}}, "required": []any{"status"}}},
 	}
 	withState(pkg, state...)
 	return pkg

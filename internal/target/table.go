@@ -454,7 +454,7 @@ func Default() Table {
 			FieldTaskNestedResult: field(allow(Slng)),
 			// SLNG runs a finish rule (backend app/schemas/agent_tasks.py
 			// TaskFinish: tool, success, say). A success rule names a field of
-			// the tool's result, which version 2 reads from the typed handler
+			// the tool's result, which agent.yaml reads from the typed handler
 			// or the hosted tool's mirror. validateSlngTasks holds the rest:
 			// one rule per task, and no confirm:.
 			FieldTaskFinish:       field(allow(Slng)),
@@ -576,11 +576,10 @@ func Default() Table {
 			FieldToolOutput: field(
 				deny(Slng, "slng target derives a tool's result shape from the tool SLNG hosts, not from the package: `output:` reaches nothing here, so remove it, or compile to livekit or pipecat which read it"),
 			),
-			// A version 2 local tool is typed, so it can become an SLNG code
-			// tool: compile wraps the handler into the file SLNG builds, and
-			// deploy creates, runs and publishes it (voiceai 0.1.23 tool create,
-			// run, publish). validateSlngTool refuses a version 1 handler and a
-			// tool with no sample.
+			// A local tool is typed, so it can become an SLNG code tool: compile
+			// wraps the handler into the file SLNG builds, and deploy creates, runs
+			// and publishes it (voiceai 0.1.23 tool create, run, publish).
+			// validateSlngTool refuses a tool with no sample.
 			FieldToolLocal: field(allow(Slng)),
 			// Core since voiceai 0.1.16, verified against a live deploy 2026-09-01.
 			// unmute writes {server, tool} by name; the push resolves the name to

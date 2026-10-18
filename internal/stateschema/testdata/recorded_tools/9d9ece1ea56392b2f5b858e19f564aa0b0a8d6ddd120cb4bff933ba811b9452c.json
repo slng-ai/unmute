@@ -1,9 +1,9 @@
 {
-  "digest": "da9b21675961331dab87a5f6d095912f0fedf44956f4fcfa105f2fa8a3b934e9",
+  "digest": "9d9ece1ea56392b2f5b858e19f564aa0b0a8d6ddd120cb4bff933ba811b9452c",
   "report": {
     "tools": {
       "create_customer_record": {
-        "description": "Open the customer record. agent.yaml version 2 reads its types from here.",
+        "description": "Open the customer record. agent.yaml reads its types from here.",
         "input": {
           "properties": {
             "summary": {

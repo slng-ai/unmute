@@ -82,7 +82,7 @@ unmute init my-agent
 cd my-agent
 ```
 
-It writes a working version 2 package: `agent.yaml`, `instructions.md`,
+It writes a working package: `agent.yaml`, `instructions.md`,
 `targets.yaml`, `state.py` (livekit and pipecat) and a `tools/end_call.yaml` so
 the agent can hang up from its first run. A local tool is a typed handler,
 `tools/<name>.py:<name>`. Edit

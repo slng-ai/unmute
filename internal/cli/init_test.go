@@ -55,7 +55,7 @@ func TestInitWithoutTTYRequiresName(t *testing.T) {
 	}
 }
 
-func TestInit_scaffoldsValidV1Package(t *testing.T) {
+func TestInit_scaffoldsValidPackage(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "support-bot")
 	out, err := run(t, "init", dir)
 	if err != nil {

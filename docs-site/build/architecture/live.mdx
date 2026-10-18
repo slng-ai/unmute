@@ -29,7 +29,6 @@ unmute init voice-desk
 Replace `voice-desk/agent.yaml` with this **complete file**:
 
 ```yaml voice-desk/agent.yaml
-version: 2
 name: voice-desk
 architecture: live
 entry_agent: desk
@@ -64,7 +63,7 @@ capacity:
   avg_session_duration: 3m
 ```
 
-Keep the scaffold's `state.py` as it is. Version 2 needs it, and this desk saves no values.
+Keep the scaffold's `state.py` as it is. The package needs it, and this desk saves no values.
 
 Keep the scaffold's `targets.yaml`, but remove its target-level `models:` overrides because the model palette above replaces the scaffold's.
 Keep its framework provider and version pin, and remove any phone `connection:` for this browser example. Replace `voice-desk/instructions.md` with this complete prompt:

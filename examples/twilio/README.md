@@ -4,7 +4,7 @@ A front desk on a Twilio number, using the `conversation-relay` transport.
 Twilio handles speech; the FastAPI app you host runs `opening_hours`, `end_call`,
 and LLM requests through the SLNG Context Router with OpenAI upstream.
 
-It is an `agent.yaml` version 2 package. The twilio target keeps its own runtime rather than unmute-core, so it runs version 2 without the keys that need the library: a tool entry's `save`, `outcomes`, `hidden` and `start` with `wait`, a tool file's `precheck`, a step's `confirm`, outcomes and `start` with `call`, `entry_by`, `refuse_call`, and a handoff's `saves` and `start` with `call`. The compiler refuses each by name. The tool's types come from `handlers/opening_hours.py`.
+The twilio target keeps its own runtime rather than unmute-core, so it runs the package without the keys that need the library: a tool entry's `save`, `outcomes`, `hidden` and `start` with `wait`, a tool file's `precheck`, a step's `confirm`, outcomes and `start` with `call`, `entry_by`, `refuse_call`, and a handoff's `saves` and `start` with `call`. The compiler refuses each by name. The tool's types come from `handlers/opening_hours.py`.
 
 On this page:
 

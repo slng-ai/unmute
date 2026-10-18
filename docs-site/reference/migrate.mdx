@@ -1,0 +1,175 @@
+---
+title: "Migrate an older package"
+description: "Rewrite an agent.yaml written for unmute 0.8 or older to the current, typed contract."
+---
+
+unmute reads one `agent.yaml` contract. A file written for unmute 0.8 or older
+has a `version:` line, and unmute refuses it first:
+
+```text
+agent.yaml:1: version: is gone. This agent.yaml is written for unmute 0.8 or older, and unmute reads one contract now. ...
+```
+
+The current contract is more typed. Each tool's types come from its Python
+function. What a tool result saves and says sits on that tool's entry in
+`agent.yaml`, as `outcomes:`. Handoffs, transfers and flows sit inside the
+agent that uses them.
+
+## Migrate with your coding assistant
+
+```bash
+unmute skill install
+```
+
+Then ask your assistant to migrate the package. The `unmute-migrate` skill
+holds the loop and every row below. It runs `unmute validate` after each
+change until the package is clean.
+
+## Migrate by hand
+
+1. Read the `version:` line, then delete it.
+2. If it said `version: 1`, do [From version 1](#from-version-1) first.
+3. Do [From unmute 0.8](#from-unmute-0-8).
+4. Run `unmute validate .` after each change. A retired key's error names its
+   new spelling, with the file and the line.
+5. Run `unmute compile .` for every target in `targets.yaml`.
+
+Move the structure first, because it changes where everything else sits:
+`agents:` becomes a list, then handoffs, transfers and flows move inside the
+agents.
+
+## From unmute 0.8
+
+### Structure
+
+| Old | New |
+|---|---|
+| `agents:` as a map, `concierge:` | a list, `- name: concierge` |
+| `instructions:` on an agent or a task | `prompt:` |
+| top-level `handoffs:` | `handoffs:` inside the agent that hands off, each `- name:`, `to:`, `when:` |
+| top-level `escalations:` and `destinations:` | `transfers:` inside the agent that transfers, each `- name:`, `to: <ENV_VAR_WITH_THE_NUMBER>`, `when:` |
+| an escalation's `cold:` or `warm:` block | flat on the transfer: `ring_timeout:` and `on_unavailable:` beside `to:`. `briefing:` is `brief:`, which makes it warm |
+| top-level `task_groups:` | `flows:` inside the agent that runs it, each `- name:`, `when:`, `steps:` |
+| the same handoff, transfer or flow on a second agent | its bare name in that agent's list |
+| `channels:` and `capacity:` | the top of `targets.yaml`. `channels:` is a list, `- name: web` |
+| a target's `version:` pin in `targets.yaml` that validate calls outside the supported range | the version the error names |
+| `mode:` | delete it |
+| a task's `inputs:` and `via:` | delete them. A flow may take `fills:` |
+| `context: history: messages`, `context_scope: shared`, `then: return` | delete them. They are the defaults |
+| a top-level `tools:` list of bare names | delete the bare names. Every file in `tools/` is a tool. Keep an entry only for `save:`, `outcomes:`, `hidden:` or `start:` |
+
+### Renames
+
+| Old | New |
+|---|---|
+| prefetch `tool:`, `args:`, `assign:` | `call:`, `with:`, `save:` |
+| handoff `announce: "one line"` | `say:` as a list, even for one line. One line is picked each time |
+| handoff `saves:` | `save:` |
+| handoff `opens_with:` | `start:` with `call:` and `with:` |
+| flow `announce:`, `arguments:` | `say:`, `fills:` |
+| `conversation.greeting.text:` | `conversation.greeting.say:` |
+
+### A step's tools
+
+The step keys about one tool move onto that tool's entry in the step's
+`tools:` list.
+
+| Old | New |
+|---|---|
+| `finish:` with `tool:` and `success:` | `outcomes:` on the tool's entry, with `if:` and `then: done` |
+| `finish:` `confirm:` | `confirm:` on the tool's entry, beside `outcomes:` |
+| `opens_with:` `say:` | gone. The call's result goes through that tool's `outcomes:` |
+| `replies:` | `outcomes:` with `if:` and `say:` |
+| a step's `assign:` | the step's `save:`, or `save:` on the one outcome that makes it |
+| `opening: listen` | `start:` with `listen: true` |
+| a step's `announce:` | `start:` with `say:` |
+| `opens_with:` with `tool:` and `arguments:` | `start:` with `call:` and `with:`, each value `state.<name>`, `?` when it may be empty |
+| a value saved only to be said | `{{input.x}}` in a `confirm:` line, `{{result.x}}` in an outcome's `say:` |
+
+```yaml agent.yaml
+# Before
+- name: manage_booking
+  instructions: tasks/booking.md
+  opens_with:
+    tool: find_slots
+    arguments:
+      - service: requested_service
+  finish:
+    - tool: book_appointment
+      success:
+        - status:
+            - booked
+  assign:
+    - appointment: result.appointment
+
+# After
+- name: manage_booking
+  prompt: tasks/booking.md
+  start:
+    call: find_slots
+    with:
+      - service: state.requested_service?
+  tools:
+    - name: book_appointment
+      outcomes:
+        - if:
+            - status:
+                - booked
+          save:
+            - appointment: result.appointment
+          then: done
+```
+
+### Tool files
+
+What the caller hears and what the call remembers moved from `tools/*.yaml`
+to the tool's entry in the top-level `tools:` list of `agent.yaml`.
+
+| Old, in the tool file | New |
+|---|---|
+| `assign:` | `save:` on the entry. It runs on every result |
+| `replies:` | `outcomes:` with `if:` and `say:` |
+| `announce:`, `announce_wait:` | `start:` with `say:`, and `wait: true` |
+| `hidden:` | `hidden:` on the entry |
+| `inject:` with `"{{state.x}}"` | `with:` with `state.x`, still in the tool file. Each name is a parameter of the handler |
+
+## From version 1
+
+Do these first, then everything under [From unmute 0.8](#from-unmute-0-8).
+Some rows are from packages older than unmute 0.7. Skip a row the package does
+not have.
+
+| Old | New |
+|---|---|
+| `variables:` as a map with `type:`, `default:`, `description:` | a field of `class State(BaseModel)` in `state.py` for each value. `variables:` is a list that keeps only values with `source:` or `confirm:` |
+| `shapes:` | a `BaseModel` in `state.py` |
+| a step's `result:`, `expect:` or `requires:` | delete them. Type the value on `State` and save it with `save:` |
+| a placeholder `{{x}}` for a saved value | `{{state.x}}` |
+| `local: handler: tools/x.py` | `local: handler: tools/x.py:function`. One file may hold many tools |
+| `input:` and `output:` on a local tool | delete them. The function's typed parameters are the input, its return type the output |
+| package `timezone:` | `timezone:` on the clock prefetch entry |
+| tool file `read_only:` | `writes: true` or `writes: false` on the prefetch entry that runs the tool |
+| tool file `execution:`, `handler:`, `url_env:`, `auth:` at the top | one block, `local:`, `webhook:`, `mcp:` or `builtin:`, holding those keys |
+
+A local tool's types now come from its Python function. Each parameter has a
+type, a required input has no default, an `enum:` becomes a `Literal[...]`,
+and the return type is a Pydantic model:
+
+```python tools/salon.py
+class Customer(BaseModel):
+    status: Literal["existing", "created"]
+
+
+def find_customer(
+    phone: Annotated[str, Field(description="The confirmed number in E.164.")],
+) -> Customer:
+    ...
+```
+
+The tool file keeps `description:`, `interruption:` and `effect:`, and its
+handler is `tools/salon.py:find_customer`.
+
+`skip_when_confirmed:`, `non_blocking:`, `models:`, `secrets:` and
+`knowledge:` are unchanged. A webhook tool keeps `input:` and `output:` as
+JSON Schema. Every key is
+described in [Agent configuration](/reference/agent-yaml).

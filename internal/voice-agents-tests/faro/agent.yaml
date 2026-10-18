@@ -15,7 +15,6 @@
 #
 # The scenarios in scenarios/ are unmute-core's, word for word. Progress is kept
 # in SQLite (FARO_DB, see README.md).
-version: 2
 
 name: faro
 

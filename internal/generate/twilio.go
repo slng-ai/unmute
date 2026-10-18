@@ -26,7 +26,7 @@ import (
 // holds no unmute dependency and no YAML: every decision is made here and
 // written into the app's modules and conversation-relay.xml.tmpl as literals.
 
-//go:embed templates/twilio_v1/*.tmpl
+//go:embed templates/twilio/*.tmpl
 var twilioTemplates embed.FS
 
 // Placeholders the XML template carries for the two values only the running app
@@ -154,7 +154,7 @@ var twilioModules = []struct{ tmpl, path string }{
 }
 
 func renderTwilioFiles(agent *ir.Agent, resolved ir.Target, data twilioData) ([]File, error) {
-	files, err := renderPythonModules(twilioTemplates, "templates/twilio_v1/", twilioFuncs(), data, twilioModules)
+	files, err := renderPythonModules(twilioTemplates, "templates/twilio/", twilioFuncs(), data, twilioModules)
 	if err != nil {
 		return nil, fmt.Errorf("twilio modules: %w", err)
 	}
@@ -225,7 +225,7 @@ func twilioFuncs() template.FuncMap {
 }
 
 func renderTwilio(name string, data twilioData) ([]byte, error) {
-	raw, err := twilioTemplates.ReadFile("templates/twilio_v1/" + name)
+	raw, err := twilioTemplates.ReadFile("templates/twilio/" + name)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", name, err)
 	}
@@ -316,7 +316,7 @@ func buildTwilioData(agent *ir.Agent, resolved ir.Target) (twilioData, error) {
 		case ir.ToolBuiltin:
 			spec.EndCall = true
 		case ir.ToolLocal:
-			function := cmp.Or(tool.HandlerFunction, name) // version 2 names it, version 1 is the tool's name
+			function := tool.HandlerFunction
 			data.LocalTools = append(data.LocalTools, twilioTool{Name: name, Function: function, Source: tool.HandlerSource})
 			deps = append(deps, tool.Dependencies...)
 		default:
@@ -550,7 +550,7 @@ func twilioReport(data twilioData, files []File, bindings []ir.ForwardedBinding,
 	return append(out, '\n'), nil
 }
 
-// ownRuntimeRefusals names the version 2 keys a target with its own runtime,
+// ownRuntimeRefusals names the keys a target with its own runtime,
 // twilio or slng, cannot run. They are refused rather than dropped: a package
 // that relies on code saying a read-back would otherwise compile, and the
 // model would say it instead.
@@ -601,6 +601,6 @@ func ownRuntimeRefusals(agent *ir.Agent, provider ir.Provider) error {
 		return nil
 	}
 	slices.Sort(keys)
-	return fmt.Errorf("the %s runtime runs version 2 without unmute-core, so it cannot run %s; remove them, or compile to livekit or pipecat",
+	return fmt.Errorf("the %s runtime runs without unmute-core, so it cannot run %s; remove them, or compile to livekit or pipecat",
 		provider, strings.Join(keys, ", "))
 }

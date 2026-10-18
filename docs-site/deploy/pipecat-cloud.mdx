@@ -45,7 +45,7 @@ cp .env.example .env
 ```
 
 Fill `.env` with only the deployed agent's required values, as described below.
-Unmute does not write a `pcc-deploy.toml` for version 2 yet. You pass the agent
+Unmute does not write a `pcc-deploy.toml` yet. You pass the agent
 name, secret set and region to `pipecat cloud deploy` as flags. These examples
 use `my-agent-pipecat` and `my-agent-pipecat-secrets`. Pick your own names.
 
@@ -133,9 +133,8 @@ pipecat cloud organizations default-region
 ```
 
 Omitting a region uses the organization's default placement. To choose one,
-pass `--region` to `deploy`. Unmute wrote `deployment_region` into
-`pcc-deploy.toml` on version 1. Version 2 writes no manifest, so the flag is the
-way to choose a region now. `eu-central` is an example. Choose from `regions list`.
+pass `--region` to `deploy`. Unmute writes no manifest, so `deployment_region`
+reaches nothing and the flag is the way to choose a region. `eu-central` is an example. Choose from `regions list`.
 
 The secret set must use the same region:
 
@@ -310,9 +309,8 @@ Pass `--min-agents` to `deploy`:
 pipecat cloud deploy my-agent-pipecat --secrets my-agent-pipecat-secrets --min-agents 1
 ```
 
-Version 1 wrote `warm_instances` from `targets.yaml` into `pcc-deploy.toml`.
-Version 2 writes no manifest, so `warm_instances` reaches nothing yet. Use the
-flag. A positive value adds a standing cost. Zero lets the platform scale to zero.
+Unmute writes no manifest, so `warm_instances` in `targets.yaml` reaches
+nothing yet. Use the flag. A positive value adds a standing cost. Zero lets the platform scale to zero.
 
 A warm instance avoids cold starts. Some phone routes need it to answer within
 the carrier's session window; see [Pipecat over Twilio](/telephony/pipecat-twilio#2-deploy-with-a-warm-instance).

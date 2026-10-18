@@ -1,4 +1,4 @@
-// Package tui gathers the basic configuration for a new v1 agent scaffold.
+// Package tui gathers the basic configuration for a new agent scaffold.
 package tui
 
 import (

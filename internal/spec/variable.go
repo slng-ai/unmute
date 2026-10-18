@@ -29,10 +29,10 @@ type Variable struct {
 	Confirm string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
 	// CallStart says the value is dispatched with the call: `required` or
 	// `optional`.
-	CallStart string `json:"call_start,omitempty" yaml:"call_start,omitempty" since:"2"`
+	CallStart string `json:"call_start,omitempty" yaml:"call_start,omitempty"`
 	// Dependencies name the values a prefetched value was looked up from. It
 	// counts as confirmed only while all of them are.
-	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty" since:"2"`
+	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
 }
 
 // Variables is the `variables:` list.

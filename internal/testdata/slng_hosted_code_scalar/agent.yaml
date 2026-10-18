@@ -25,8 +25,6 @@
 # Nothing here reaches the network, which is the whole point: `make test` has
 # no SLNG credential and never will.
 
-version: 2
-
 name: slng-hosted-code-scalar-fixture
 
 entry_agent: support

@@ -40,6 +40,7 @@ var keyExempt = map[string]string{
 	// twice is how the two copies drift.
 	"build/orchestration/first-task.mdx":           "walks each key in order and defers to build/orchestration/tasks",
 	"build/orchestration/choosing-a-structure.mdx": "compares two shapes rather than documenting either",
+	"reference/migrate.mdx":                        "maps old keys to new ones; reference/agent-yaml states the keys",
 
 	// Advice pages. They argue for a choice and link to the mechanics; their
 	// "Where the mechanics live" sections are the pointer.

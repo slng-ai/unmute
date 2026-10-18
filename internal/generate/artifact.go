@@ -73,8 +73,7 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 	for _, row := range report.PerTarget {
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, row.Warnings...)
 	}
-	// LiveKit and Pipecat run on unmute-core. ir.Validate has already refused
-	// version 1 on them.
+	// LiveKit and Pipecat run on unmute-core.
 	if resolved.Provider == ir.ProviderLiveKit || resolved.Provider == ir.ProviderPipecat {
 		files, err := GenerateCore(agent, resolved)
 		if err != nil {
@@ -83,12 +82,9 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		artifact.Files = files
 		return withManifestReport(artifact, agent)
 	}
-	// Twilio and SLNG keep their own runtime, and read version 2 with the keys it
-	// can run.
-	if agent.Version == ir.Version2 {
-		if err := ownRuntimeRefusals(agent, resolved.Provider); err != nil {
-			return Artifact{}, fmt.Errorf("generate %s %s: %w", resolved.Name, resolved.Provider, err)
-		}
+	// Twilio and SLNG keep their own runtime, and refuse the keys it cannot run.
+	if err := ownRuntimeRefusals(agent, resolved.Provider); err != nil {
+		return Artifact{}, fmt.Errorf("generate %s %s: %w", resolved.Name, resolved.Provider, err)
 	}
 	artifact.Telephony = TelephonyRuntimePlanFor(resolved)
 	switch resolved.Provider {

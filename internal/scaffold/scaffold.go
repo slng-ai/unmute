@@ -1,4 +1,4 @@
-// Package scaffold renders the files `unmute init` writes: a version 2 agent package
+// Package scaffold renders the files `unmute init` writes: an agent package
 // (agent.yaml + instructions.md + targets.yaml). Templates live in templates/
 // and are embedded; each runs through text/template with [[ ]] delimiters, so
 // the voice-agent {{ }} variable syntax in prompts passes through verbatim.
@@ -1181,7 +1181,7 @@ func Write(dir string, d Data) ([]string, error) {
 		if tool.ExecutionKind() == "local" {
 			handler, _ := spec.SplitHandler(tool.HandlerRef())
 			if written[handler] {
-				continue // version 2 tools may share one handler file
+				continue // tools may share one handler file
 			}
 			written[handler] = true
 			source := tool.HandlerSource

@@ -27,7 +27,7 @@ var movedToolKeys = map[string]string{
 	"read_only": "it moved to the caller, because the question is about one use of the tool rather than about the tool: write `writes: true` or `writes: false` on the prefetch entry that runs this one",
 	// What the caller hears and what the call remembers moved to agent.yaml, so
 	// one file shows it. The tool file keeps what the tool is.
-	"assign":        toolBehaviourMoved("assign", "outcomes: with an else: and save:"),
+	"assign":        toolBehaviourMoved("assign", "save: on that entry, which runs on every result"),
 	"replies":       toolBehaviourMoved("replies", "outcomes: with an if: and say:"),
 	"announce":      toolBehaviourMoved("announce", "start: with say:"),
 	"announce_wait": toolBehaviourMoved("announce_wait", "start: with wait: true"),

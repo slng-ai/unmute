@@ -62,14 +62,14 @@ type coreReport struct {
 	RequiredEnv []string `json:"required_env"`
 }
 
-// GenerateCore emits a version 2 package as a LiveKit or Pipecat project on
+// GenerateCore emits a package as a LiveKit or Pipecat project on
 // unmute-core: agent.json holds the package's data, and spec.py and the
 // framework's entrypoint are the same in every project. The author's state.py
 // and tool handlers are copied as written.
 func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 	entrypoints, ok := coreEntrypoints[resolved.Provider]
 	if !ok {
-		return nil, fmt.Errorf("version 2 compiles for livekit and pipecat, not %s", resolved.Provider)
+		return nil, fmt.Errorf("unmute-core compiles for livekit and pipecat, not %s", resolved.Provider)
 	}
 	spec, err := coreSpec(agent)
 	if err != nil {

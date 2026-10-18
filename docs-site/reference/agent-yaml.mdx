@@ -11,13 +11,12 @@ An optional `manifest: manifest.yaml` links the company contract copied into the
 package root. If that file exists, the link is required. See
 [Manifest](/reference/manifest) for the rules and saved defaults.
 
-Write `version: 2`. LiveKit and Pipecat compile version 2 only, onto
-[unmute-core](/core/start/why-unmute-core). A version 1 package fails there with
-a message that says to set `version: 2`, add a `state.py` and type your local
-tools. Version 1 compiles only on the Twilio and SLNG targets, and those take
-version 2 too. This page is the full key reference for both.
-[Agent configuration, version 2](/reference/agent-yaml-v2) lists what version 2
-adds, reads differently, and does not compile yet.
+A package compiles onto [unmute-core](/core/start/why-unmute-core) for LiveKit and
+Pipecat. Twilio and SLNG read the same file and run it with their own runtimes.
+Each target refuses the keys it cannot run. See [What each target compiles](#what-each-target-compiles).
+
+An `agent.yaml` written for unmute 0.8 or older has a `version:` line, and unmute
+refuses it. See [Migrate an older package](/reference/migrate).
 
 YAML decoding is strict. An unknown field is an error with the file and the
 line, not a shrug.
@@ -25,7 +24,6 @@ line, not a shrug.
 Durations use Go duration syntax, for example `90s`, `15m`, or `1h30m`.
 
 ```yaml agent.yaml
-version: 2
 name: acme-greeter
 entry_agent: greeter
 
@@ -79,10 +77,6 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
 
 ## All keys
 
-<ParamField path="version" type="integer" required>
-  Schema version. Accepts `1`. Required; omission is refused.
-</ParamField>
-
 <ParamField path="name" type="string" required>
   What the deployed agent is called. Accepts lowercase letters, digits, single hyphens; 3
   to 64 characters. Required; omission is refused.
@@ -90,6 +84,20 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
 
 <ParamField path="entry_agent" type="string" required>
   Agent that answers. Accepts declared agent name. Required; omission is refused.
+</ParamField>
+
+<ParamField path="entry_by" type="object">
+  Starts the call on the agent a State value names, read after the prefetch. Keys
+  `value`, the State field to read, and `agents`, a list of `- <value>: <agent>` pairs.
+  Omit to start on `entry_agent`. Twilio and SLNG refuse it.
+
+  ```yaml
+  entry_by:
+    value: explanation
+    agents:
+      - EN: faro_en
+      - ES: faro_es
+  ```
 </ParamField>
 
 <ParamField path="architecture" type="cascade | realtime | live">
@@ -460,10 +468,18 @@ clock, a fact the call itself carries, or the result of one already-declared
 tool with `writes:` declared on the entry. Entries resolve top to bottom, and
 one that cannot resolve is skipped rather than failing the call.
 
+A prompt and a greeting read State as `{{state.x}}` and `{{state.x.y}}`, and read
+what the call carries as `{{call.x}}`. A line code says next to a tool reads more: a
+`confirm:` line reads the tool's `{{input.x}}`, and an outcome's `say:` reads
+`{{result.x}}`. No helper `save:` is needed to say a value.
+
 A `clock:` entry also carries its own `timezone:`, an IANA zone name. It is
 required there, never defaulted, because a container's own clock is UTC, so a
 business elsewhere needs it to date a call correctly. It sits on the entry
 rather than on the package, because two entries may honestly want two zones.
+
+An entry can also carry `refuse_call:`, a line said when the lookup finds nothing.
+The call is then refused with that line. Twilio and SLNG refuse the key.
 
 A `call:` entry runs one tool, passes its inputs with `with:`, and needs `writes: true` or `writes: false`. There is no default,
 because a pre-fetch runs unasked on every call. `writes: true` compiles: it is
@@ -1128,15 +1144,15 @@ local tool file has no `input:` or `output:`. A webhook tool writes both as JSON
 
 <ParamField path="input" type="object">
   Required for authored webhook contracts: a JSON Schema with `type: object`
-  describing model arguments. A version 2 local tool leaves it out, because its handler signature is the
+  describing model arguments. A local tool leaves it out, because its handler signature is the
   input. Refused on builtin, MCP, knowledge, and hosted `slng` tools, which own
-  their schemas. Write version 2: livekit, pipecat and SLNG refuse a version 1 handler.
+  their schemas.
 </ParamField>
 
 <ParamField path="output" type="object">
   An author-side JSON Schema with `type: object`. Omit for no declared result schema. Used
   by `save:` rows and outcome matches; it is not a general runtime result validator or a
-  model prompt. A version 2 local tool leaves it out, because its return model is the
+  model prompt. A local tool leaves it out, because its return model is the
   output. Refused on builtin, MCP, knowledge, and hosted `slng` tools.
 </ParamField>
 
@@ -1156,10 +1172,15 @@ local tool file has no `input:` or `output:`. A webhook tool writes both as JSON
   builtins whose effect comes from the registry. Refused on MCP and knowledge tools.
 </ParamField>
 
+<ParamField path="precheck" type="string">
+  `file.py:function`, run before the tool. It returns an outcome to refuse the call, or
+  `None` to go on. Legal on a `local` tool only. Twilio and SLNG refuse it.
+</ParamField>
+
 | Execution block | Fields |
 |---|---|
 | `slng` | a published tool name, or the [legacy hash block](/build/tools/hosted#the-legacy-form-still-loads) |
-| `local` | `handler`, written `file.py:function`. It is required: write `version: 2`, because livekit, pipecat and SLNG refuse a version 1 handler. Optional `dependencies`, exact `name==version` pins for a SLNG per-tool environment; refused on LiveKit and Pipecat, which build one dependency list for the whole project |
+| `local` | `handler`, written `file.py:function`. It is required, and the function carries the types. Optional `dependencies`, exact `name==version` pins for a SLNG per-tool environment; refused on LiveKit and Pipecat, which build one dependency list for the whole project |
 | `webhook` | `url_env` is required on LiveKit and Pipecat; `base_url` is a legacy literal HTTPS base that neither code target reads. SLNG refuses authored webhooks; optional `path` and `auth`; a non-empty path starts with `/` |
 | `mcp` | required `url_env`; optional `server` (the platform's name for it, when it differs from this tool's name), `transport`, `auth`, and non-empty unique `tools` entries |
 | `builtin` | required `id`; optional `instructions` |
@@ -1167,7 +1188,7 @@ local tool file has no `input:` or `output:`. A webhook tool writes both as JSON
 | `client` | no fields; write `client: {}`; gated on every target today |
 | `provider_hosted` | no fields; write `provider_hosted: {}`; gated on every target today |
 
-A `knowledge` file takes no `input`, `output`, `with` or `effect`: the tool owns
+A `webhook` tool takes no `precheck:`. A `knowledge` file takes no `input`, `output`, `with` or `effect`: the tool owns
 both sides of its contract, taking one string and returning passages.
 
 An `mcp` file is the block and nothing else. The six contract fields above are
@@ -1344,6 +1365,54 @@ that lists it rather than in a top-level catalogue. A task with no `when:` and n
 flow naming it in `steps:` is a build error too. Give it a `when:` so an
 agent can decide to run it, or list it as a step of a flow that is
 reached.
+
+## What each target compiles
+
+LiveKit and Pipecat compile a package onto unmute-core. `unmute compile` writes
+`agent.json`, the package's data in the library's names. `spec.py` builds the library's
+objects from it when the agent starts, so a broken package fails then, never during a
+call. `agent.py` (LiveKit) or `bot.py` (Pipecat) builds the pipeline around them, and
+`speech.py` holds any speech model that is not SLNG's.
+
+The `twilio` and `slng` targets run the same file with their own runtimes and without
+unmute-core. They refuse these keys at compile time. The error says to remove them or
+compile to livekit or pipecat:
+
+- a tool entry's `save`, `outcomes`, `hidden` and `start: wait`, and a tool file's `precheck`;
+- a step's outcomes without `then:`, a step `start:` with `call:`, and a step outcome with `confirm:`;
+- `entry_by`;
+- prefetch `refuse_call`;
+- a handoff's `save` or `start`.
+
+A step outcome with `then: done` and `say:` is refused on Twilio only. SLNG speaks the line itself.
+Each target refuses more of its own: see [Twilio](/targets/twilio#what-the-package-may-carry)
+and [SLNG](/targets/slng).
+
+LiveKit and Pipecat do not compile these yet:
+
+| Key | Why |
+|---|---|
+| `mcp` and `slng` tools, builtins other than `end_call` | No unmute-core equivalent is wired yet. They still work on SLNG |
+| A second idle nudge | One nudge, then the end |
+
+What the models sections compile on LiveKit and Pipecat:
+
+| Role | Compiles |
+|---|---|
+| `think` | Google, OpenAI, and the SLNG Context Router |
+| `speak`, `listen` | SLNG speech, and every provider the catalogue lists for the target |
+| `realtime` | OpenAI's realtime model |
+| `live` | OpenAI's live model, with the `think` model its `backend:` names |
+
+`tracing:` compiles `langfuse` there so far. `transfers:` transfer the caller on a phone
+line, and a browser session needs no phone route variable to start. An agent's language is
+its voice's `language:`, and its timezone is the clock prefetch's `timezone:`. Code says
+dates in them.
+
+A package with a `scenarios/` folder runs whole calls on the real model with
+`make e2e PKG=salon-concierge FW=livekit`. See
+[`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
+for every key on this page in one agent.
 
 ## Where to go next
 

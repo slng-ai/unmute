@@ -17,7 +17,7 @@ func loadRegions(t *testing.T, value string) (Regions, error) {
 	t.Helper()
 	dir := t.TempDir()
 	files := map[string]string{
-		"agent.yaml":   "version: 1\nentry_agent: intake\n",
+		"agent.yaml":   "entry_agent: intake\n",
 		"targets.yaml": "targets:\n  livekit:\n    provider: livekit\n    deployment_region: " + value + "\n",
 	}
 	for name, content := range files {

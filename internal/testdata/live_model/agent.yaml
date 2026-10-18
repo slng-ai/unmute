@@ -2,7 +2,6 @@
 # greeting the model speaks in its own words, and an idle nudge. The live model
 # listens, thinks and speaks; the backend it names runs the tools and the hard
 # reasoning at OpenAI. internal/generate/live_test.go reads the emitted bot.
-version: 2
 
 name: live-model
 

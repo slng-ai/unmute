@@ -36,7 +36,7 @@ func TestLoadConnectionsStrictAndPathSafe(t *testing.T) { // telephony V1, V3
 			t.Fatal(err)
 		}
 		for name, content := range map[string]string{
-			"agent.yaml":   "version: 1\nentry_agent: intake\nmodels: {}\nagents: []\n",
+			"agent.yaml":   "entry_agent: intake\nmodels: {}\nagents: []\n",
 			"targets.yaml": "channels: []\ntargets: {}\n",
 		} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
@@ -75,11 +75,11 @@ func TestLoadConnectionsStrictAndPathSafe(t *testing.T) { // telephony V1, V3
 
 func TestLoadRejectsUnknownFieldWithPosition(t *testing.T) { // V3
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte("version: 1\nentry_agent: intake\nmisspelled: true\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte("entry_agent: intake\nmisspelled: true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(dir)
-	if err == nil || !strings.Contains(err.Error(), "agent.yaml") || !strings.Contains(err.Error(), "3:1") {
+	if err == nil || !strings.Contains(err.Error(), "agent.yaml") || !strings.Contains(err.Error(), "2:1") {
 		t.Fatalf("want filename and line:col, got %v", err)
 	}
 }
@@ -97,7 +97,7 @@ func TestLoadNeverPrintsAValueBack(t *testing.T) {
 	const pasted = "sk-live-pretendkey123456"
 	dir := t.TempDir()
 	// A map where a sequence belongs, with a credential-shaped value.
-	body := "version: 1\nentry_agent: intake\n\nsecrets:\n  OPENAI_API_KEY: " + pasted + "\n"
+	body := "entry_agent: intake\n\nsecrets:\n  OPENAI_API_KEY: " + pasted + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -119,19 +119,19 @@ func TestLoadNeverPrintsAValueBack(t *testing.T) {
 
 func TestLoadRejectsUnknownTracingField(t *testing.T) { // V25
 	dir := t.TempDir()
-	yaml := "version: 1\nentry_agent: intake\ntracing:\n  provider: langfuse\n  sample_rate: 1\n"
+	yaml := "entry_agent: intake\ntracing:\n  provider: langfuse\n  sample_rate: 1\n"
 	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(dir)
-	if err == nil || !strings.Contains(err.Error(), "sample_rate") || !strings.Contains(err.Error(), "5:3") {
+	if err == nil || !strings.Contains(err.Error(), "sample_rate") || !strings.Contains(err.Error(), "4:3") {
 		t.Fatalf("want unknown tracing field with position, got %v", err)
 	}
 }
 
 func TestLoadRejectsRetiredPipelineBlock(t *testing.T) { // V3, V22 (N15)
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte("version: 1\nentry_agent: intake\npipeline:\n  listen: { placement: api }\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte("entry_agent: intake\npipeline:\n  listen: { placement: api }\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(dir)
@@ -145,12 +145,12 @@ func TestLoadRejectsRetiredPipelineBlock(t *testing.T) { // V3, V22 (N15)
 // strict decoder refuses it on an agent, with its position.
 func TestV24_AgentTurnIsPackageLevel(t *testing.T) {
 	dir := t.TempDir()
-	yaml := "version: 1\nentry_agent: a\nagents:\n  - name: a\n    prompt: i.md\n    think: m\n    speak: v\n    listen: transcriber\n    turn: detector\n"
+	yaml := "entry_agent: a\nagents:\n  - name: a\n    prompt: i.md\n    think: m\n    speak: v\n    listen: transcriber\n    turn: detector\n"
 	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(dir)
-	if err == nil || !strings.Contains(err.Error(), "agent.yaml: [9:5]") || !strings.Contains(err.Error(), `unknown field "turn"`) {
+	if err == nil || !strings.Contains(err.Error(), "agent.yaml: [8:5]") || !strings.Contains(err.Error(), `unknown field "turn"`) {
 		t.Fatalf("want agent-level turn rejected with position, got %v", err)
 	}
 }
@@ -178,7 +178,7 @@ func writeToolPackage(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
 	files := map[string]string{
-		"agent.yaml": "version: 1\nentry_agent: intake\n" +
+		"agent.yaml": "entry_agent: intake\n" +
 			"models:\n  think:\n    m: { provider: openai, model: gpt-4o-mini }\n" +
 			"  speak:\n    v: { provider: slng, model: \"slng/deepgram/aura:2-en\", voice: aura-2-thalia-en }\n" +
 			"agents:\n  - name: intake\n    prompt: instructions.md\n    think: m\n    speak: v\n    tools: [probe]\n",
@@ -376,7 +376,7 @@ func TestLoadKnowledgeDocuments(t *testing.T) {
 	dir := t.TempDir()
 	binary := []byte("%PDF-1.7\n\x00\x01\x02 binary \xff\xfe trailer\n")
 	files := map[string][]byte{
-		"agent.yaml": []byte("version: 1\nentry_agent: intake\n" +
+		"agent.yaml": []byte("entry_agent: intake\n" +
 			"models:\n  think:\n    m: { provider: openai, model: gpt-4o-mini }\n" +
 			"  speak:\n    v: { provider: slng, model: \"slng/deepgram/aura:2-en\", voice: aura-2-thalia-en }\n" +
 			"knowledge:\n  refunds:\n    documents: kb/refunds\n  absent:\n    documents: kb/nowhere\n" +
@@ -433,7 +433,7 @@ func TestLoadKnowledgeDocuments(t *testing.T) {
 // it reaches and the message names both agents, not only the one it stopped on.
 func TestLoadRefusesATaskNameDefinedByTwoAgents(t *testing.T) {
 	dir := t.TempDir()
-	yaml := "version: 1\nentry_agent: front_desk\n" +
+	yaml := "entry_agent: front_desk\n" +
 		"agents:\n" +
 		"  - name: front_desk\n    prompt: instructions.md\n    think: m\n    speak: v\n" +
 		"    tasks:\n      - name: verify_customer\n        when: The caller has not been identified.\n        prompt: instructions.md\n" +
@@ -448,8 +448,8 @@ func TestLoadRefusesATaskNameDefinedByTwoAgents(t *testing.T) {
 	_, err := Load(dir)
 	want := `task "verify_customer" is defined by agent "back_office" and again by agent "front_desk". ` +
 		`A task name is one name across the package: keep one definition and let the other agent name it, "- verify_customer"`
-	if err == nil || !strings.Contains(err.Error(), "agent.yaml:9") || !strings.Contains(err.Error(), want) {
-		t.Fatalf("error = %v, want to contain \"agent.yaml:9\" and %q", err, want)
+	if err == nil || !strings.Contains(err.Error(), "agent.yaml:8") || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want to contain \"agent.yaml:8\" and %q", err, want)
 	}
 }
 
@@ -463,21 +463,21 @@ func TestLoadRejectsRetiredFieldSpellings(t *testing.T) {
 	}{
 		{
 			name:     "top-level delegates",
-			yaml:     "version: 1\nentry_agent: intake\ndelegates: {}\n",
+			yaml:     "entry_agent: intake\ndelegates: {}\n",
 			field:    "delegates",
-			position: "3:1",
+			position: "2:1",
 		},
 		{
 			name:     "agent-level model",
-			yaml:     "version: 1\nentry_agent: intake\nagents:\n  - name: intake\n    prompt: i.md\n    model: m\n",
+			yaml:     "entry_agent: intake\nagents:\n  - name: intake\n    prompt: i.md\n    model: m\n",
 			field:    "model",
-			position: "6:5",
+			position: "5:5",
 		},
 		{
 			name:     "agent-level voice",
-			yaml:     "version: 1\nentry_agent: intake\nagents:\n  - name: intake\n    prompt: i.md\n    voice: v\n",
+			yaml:     "entry_agent: intake\nagents:\n  - name: intake\n    prompt: i.md\n    voice: v\n",
 			field:    "voice",
-			position: "6:5",
+			position: "5:5",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -500,7 +500,7 @@ func TestLoadRejectsRetiredFieldSpellings(t *testing.T) {
 // mapping defines the task right there.
 func TestLoadTaskItemAcceptsBareNameAndMapping(t *testing.T) {
 	dir := t.TempDir()
-	yaml := "version: 1\nentry_agent: intake\n" +
+	yaml := "entry_agent: intake\n" +
 		"agents:\n  - name: intake\n    prompt: instructions.md\n    think: m\n    speak: v\n" +
 		"    tasks:\n      - look_up_order\n      - name: verify_customer\n        when: The caller has not been identified.\n        prompt: instructions.md\n"
 	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0o600); err != nil {
@@ -587,5 +587,21 @@ func TestSchemaKeepsBothSlngShapes(t *testing.T) {
 	}
 	if !strings.Contains(text, "The legacy form") {
 		t.Error("the derived schema does not publish the legacy `slng:` block")
+	}
+}
+
+// An agent.yaml from unmute 0.8 or older always has version:, so that line
+// gets the one migration message, before any retired key it also carries.
+func TestLoadSendsAnOldFileToMigrate(t *testing.T) {
+	for _, version := range []string{"1", "2"} {
+		dir := t.TempDir()
+		body := "version: " + version + "\nentry_agent: intake\nagents:\n  intake:\n    instructions: i.md\n"
+		if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(dir)
+		if err == nil || !strings.Contains(err.Error(), "agent.yaml:1: "+OldContract) {
+			t.Errorf("version: %s: got %v, want the migration message at line 1", version, err)
+		}
 	}
 }

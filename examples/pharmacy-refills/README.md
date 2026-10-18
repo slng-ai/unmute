@@ -3,7 +3,7 @@
 Try a prescription refill conversation with an OpenAI realtime model that hears and speaks directly.
 The realtime model runs the tools itself. Its explicit `turn_detection: semantic` setting asks the provider to judge when the caller has finished.
 
-It is an `agent.yaml` version 2 package, compiled onto unmute-core. The tools' types come from `tools/pharmacy.py`. `state.py` holds an empty `State`, because the call saves no values. It has no scenarios: the scenario runner drives cascade calls, and has no realtime path yet.
+It is compiled onto unmute-core. The tools' types come from `tools/pharmacy.py`. `state.py` holds an empty `State`, because the call saves no values. It has no scenarios: the scenario runner drives cascade calls, and has no realtime path yet.
 
 On this page:
 

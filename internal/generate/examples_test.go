@@ -958,7 +958,7 @@ func assertAnswersTwilioRoute(t *testing.T, name string, files []File) {
 	}
 	transports := contents["call.py"]
 	if transports == "" {
-		transports = contents["bot.py"] // version 2 keeps the transports in its entrypoint
+		transports = contents["bot.py"] // the transports sit in its entrypoint
 	}
 	if !strings.Contains(transports, `"twilio": lambda: FastAPIWebsocketParams(`) {
 		t.Errorf("target %q: bot.py has no \"twilio\" entry in transport_params, so `bot.py -t twilio` cannot take a simulated call", name)
@@ -1179,7 +1179,7 @@ func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
 // they declare, and generate.
 const voiceAgentTestsDir = "voice-agents-tests"
 
-// coreNotYet are version 2 packages the unmute-core templates refuse today, by
+// coreNotYet are packages the unmute-core templates refuse today, by
 // the words of the refusal. Each one leaves this list when its feature lands.
 var coreNotYet = map[string]string{}
 
@@ -1371,28 +1371,12 @@ func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s: %v", provider, err)
 				}
-				if pkg.Agent.Version == spec.Version2 {
-					// Version 2 starts on unmute-core and checks no list at
-					// startup: compile-report.json says what it needs.
-					report := artifactFile(t, artifact, "compile-report.json")
-					for _, name := range routeOnly {
-						if strings.Contains(report, `"`+name+`"`) {
-							t.Errorf("%s: required_env demands %q, so a browser session cannot start:\n%s", provider, name, report)
-						}
-					}
-					continue
-				}
-				entry := agentSource
-				source := artifactFile(t, artifact, entry)
-				start := strings.Index(source, "REQUIRED_ENV = [")
-				if start < 0 {
-					t.Fatalf("%s: %s has no REQUIRED_ENV startup check", provider, entry)
-				}
-				block := source[start : start+strings.Index(source[start:], "]")]
+				// The project starts on unmute-core and checks no list at startup:
+				// compile-report.json says what it needs.
+				report := artifactFile(t, artifact, "compile-report.json")
 				for _, name := range routeOnly {
-					if strings.Contains(block, `"`+name+`"`) {
-						t.Errorf("%s: the browser path's startup check demands %q, so a package "+
-							"that only wants a browser session cannot start:\n%s", provider, name, block)
+					if strings.Contains(report, `"`+name+`"`) {
+						t.Errorf("%s: required_env demands %q, so a browser session cannot start:\n%s", provider, name, report)
 					}
 				}
 			}

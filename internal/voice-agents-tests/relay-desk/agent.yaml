@@ -1,7 +1,6 @@
 # The twilio target acceptance package. One agent, one inbound phone
 # channel, one read-only tool and end_call: the whole first-release surface of
 # the twilio target, and nothing it refuses.
-version: 2
 
 name: relay-desk
 

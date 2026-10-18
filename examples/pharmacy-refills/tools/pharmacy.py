@@ -151,7 +151,7 @@ def _request_refill(reference):
 
 
 
-# What each tool takes and returns. agent.yaml version 2 reads these types here.
+# What each tool takes and returns. agent.yaml reads these types here.
 Reference = Annotated[
     str,
     Field(

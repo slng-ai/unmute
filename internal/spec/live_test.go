@@ -14,7 +14,7 @@ func livePackage(t *testing.T, liveEntry string) (*Package, error) {
 	dir := t.TempDir()
 	files := map[string]string{
 		"instructions.md": "Help the caller.\n",
-		"agent.yaml": "version: 1\nname: live-test\narchitecture: live\nentry_agent: desk\n" +
+		"agent.yaml": "name: live-test\narchitecture: live\nentry_agent: desk\n" +
 			"models:\n  live:\n" + liveEntry +
 			"  think:\n    fast:\n      provider: openai\n      model: gpt-5.6-terra\n" +
 			"agents:\n  - name: desk\n    prompt: instructions.md\n    live: live\n",
@@ -65,9 +65,9 @@ func TestLiveEntryRefusesEveryOtherModelFieldWithItsLine(t *testing.T) {
 			t.Errorf("%s: refusal names neither the field nor the file: %v", field, err)
 		}
 		// goccy/go-yaml's strict error carries the line of the offending key.
-		// Line 10 is the fourth line of the entry in livePackage's fixed text,
+		// Line 9 is the fourth line of the entry in livePackage's fixed text,
 		// which is where the caller's field lands.
-		if !strings.Contains(err.Error(), "[10:7]") {
+		if !strings.Contains(err.Error(), "[9:7]") {
 			t.Errorf("%s: refusal carries no line: %v", field, err)
 		}
 	}
