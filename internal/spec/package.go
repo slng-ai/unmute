@@ -19,6 +19,10 @@ type Package struct {
 	Root     string            `json:"-" yaml:"-"`
 	Markdown map[string]string `json:"-" yaml:"-"`
 	Handlers map[string]string `json:"-" yaml:"-"` // local tool handler sources, by path
+	// Samples holds each local tool's tools/<name>.sample.json, by tool name:
+	// one set of arguments the slng target runs the tool with before it
+	// publishes it. Optional, and read only when it is there.
+	Samples map[string][]byte `json:"-" yaml:"-"`
 	// LogicFiles holds each custom logic folder a target names, by folder, then
 	// by path inside it.
 	LogicFiles map[string]map[string]string `json:"-" yaml:"-"`

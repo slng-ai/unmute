@@ -48,6 +48,7 @@ from pipecat_slng import SlngSTTService, SlngTTSService
 from unmute_core.call import CallStartError
 from unmute_core.model import model_name
 from unmute_core.pipecat import (
+    DevObserver,
     IdleNudgeObserver,
     ModelCallLLMService,
     TelemetryObserver,
@@ -61,6 +62,7 @@ from unmute_core.pipecat import (
     telephony_call_info,
     vad_params,
 )
+from unmute_core.dev import DevRecorder, call_id_from, metrics_enabled
 from unmute_core.settings import env_value
 from unmute_core.slng import TrackingIds, tracking_ids
 from unmute_core.state import CallInfo, CallState, call_phone_region, use_phone_region
@@ -326,6 +328,13 @@ async def bot(runner_args: RunnerArguments) -> None:
             Langfuse.from_env(), agent=spec.AGENT_ID, call_id=state.call.session_id
         )
     worker, flows = build_pipeline(state, transport, telemetry)
+    if metrics_enabled():
+        recorder = DevRecorder(call_id_from(runner_args.body) or state.call.session_id)
+        recorder.watch_state(state)
+        flows.listen(recorder.task_event)
+        handoffs = {tool["name"] for tool in flows.tasks.delegate_tools()}
+        controls = [*spec.HANDOFFS, *spec.SPEC["transfers"]]
+        worker.add_observer(DevObserver(recorder, handoffs=handoffs, controls=controls))
     end_reason = "ended"
 
     @transport.event_handler("on_client_connected")

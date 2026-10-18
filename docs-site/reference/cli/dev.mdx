@@ -26,13 +26,13 @@ Flags:
 ## One mode: the browser
 
 `unmute dev ./agent` compiles the package, starts the selected target's runtime,
-and opens a page you talk through. Pipecat runs under `uv`; LiveKit runs under
-Docker Compose. That is the whole command.
+and opens a page you talk through. Both LiveKit and Pipecat run under Docker Compose, from the emitted
+`compose.dev.yaml`. That is the whole command.
 
 There is no phone mode. A phone call reaches an agent that is deployed, so
 telephony is tested after you deploy: `unmute compile ./agent`, deploy the
-emitted project, then call the number. The emitted `README.md` has the setup
-steps for the route you chose.
+emitted project, then call the number. Unmute does not write setup steps for the
+route yet, so follow your platform's SIP guide.
 
 ## Flags in detail
 
@@ -49,8 +49,7 @@ steps for the route you chose.
 </ResponseField>
 
 <ResponseField name="--bot-port" type="string" default="7860">
-  The host port the agent uses. Pipecat passes it to the local `uv` process.
-  Compose paths receive it as `UNMUTE_DEV_PORT`. Left unset, a busy default
+  The host port the agent uses. Compose receives it as `UNMUTE_DEV_PORT`. Left unset, a busy default
   gives way to a free port.
 </ResponseField>
 
@@ -95,8 +94,8 @@ phone call on this machine. They are gone, and passing one now gets cobra's
 `unknown flag` error.
 
 There is no local replacement for them. Telephony is verified on a deployed
-agent: `unmute compile ./agent`, deploy the emitted project, follow the
-Telephony setup section of its README, then call your number.
+agent: `unmute compile ./agent`, deploy the emitted project, follow
+your platform's SIP guide, then call your number.
 
 ## Errors it checks first
 

@@ -6,17 +6,17 @@ Usage:
   unmute [command]
 
 Available Commands:
-  compile     Compile a v1 agent package to its resolved target artifacts.
+  compile     Compile an agent package to its resolved target artifacts.
   completion  Generate the autocompletion script for the specified shell
   deploy      Push a package to SLNG, or point a Twilio number at a twilio target you host.
   dev         Compile, run the agent locally, and talk to it in the browser.
   help        Help about any command
-  init        Scaffold a new v1 agent package.
+  init        Scaffold a new agent package.
   manifest    Save organization contracts on this computer.
   pull        Fetch each SLNG-hosted tool's definition into the package.
   resources   List the tools, MCP servers and phone numbers your SLNG organisation offers.
   skill       Install the coding-agent skill into a project.
-  validate    Validate a v1 agent package against its targets.
+  validate    Validate an agent package against its targets.
 
 Flags:
   -h, --help      help for unmute
@@ -25,7 +25,7 @@ Flags:
 Use "unmute [command] --help" for more information about a command.
 
 $ unmute init --help
-Scaffold a new v1 agent package.
+Scaffold a new agent package.
 
 Usage:
   unmute init [name] [flags]
@@ -82,7 +82,7 @@ Flags:
   -h, --help   help for use
 
 $ unmute validate --help
-Validate a v1 agent package against its targets.
+Validate an agent package against its targets.
 
 With no package-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
 
@@ -94,7 +94,7 @@ Flags:
       --target strings   target instance name (repeatable)
 
 $ unmute compile --help
-Compile a v1 agent package to its resolved target artifacts.
+Compile an agent package to its resolved target artifacts.
 
 With no package-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
 

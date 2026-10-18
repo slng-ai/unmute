@@ -14,7 +14,7 @@ On this page:
 - [With no name](#with-no-name) - the interactive console
 - [From a saved manifest](#from-a-saved-manifest) - the picker and guided setup
 - [It never writes into an occupied directory](#it-never-writes-into-an-occupied-directory)
-- [What the scaffold contains](#what-the-scaffold-contains) - the six files
+- [What the scaffold contains](#what-the-scaffold-contains) - the seven files
 - [The scaffolded target](#the-scaffolded-target) - LiveKit, and the keys it needs
 - [Command reference](#command-reference) - flags and help
 - [Troubleshooting](#troubleshooting) - symptoms, causes and fixes
@@ -32,6 +32,7 @@ created my-agent/.env.example
 created my-agent/.gitignore
 created my-agent/instructions.md
 created my-agent/targets.yaml
+created my-agent/state.py
 created my-agent/tools/end_call.yaml
 ```
 
@@ -39,7 +40,7 @@ The name is also the directory. Each created file is printed. `cd` into it and
 `validate`, `compile` and `dev` all run with no argument.
 
 This is the whole command. It reads nothing saved on your computer and asks no
-questions, so the same six files appear every time.
+questions, so the same seven files appear every time.
 
 ## For another target
 
@@ -120,6 +121,7 @@ unmute: init my-agent: my-agent: directory already exists and is not empty
 | `tools/end_call.yaml` | a built in tool so the agent can hang up |
 | `.env.example` | starter keys for the scaffolded target |
 | `.gitignore` | keeps `.env` and `build/` out of git |
+| `state.py` | the call's `State` class, empty until you add a field |
 
 The scaffold binds SLNG speech models and an OpenAI reasoning model, so one
 `SLNG_API_KEY` covers speech to text and text to speech. The starter prompt is a
@@ -163,7 +165,7 @@ time. They remain in `compile-report.json` and the runtime startup checks.
 
 ```text Terminal — unmute init --help
 $ unmute init --help
-Scaffold a new v1 agent package.
+Scaffold a new agent package.
 
 Usage:
   unmute init [name] [flags]

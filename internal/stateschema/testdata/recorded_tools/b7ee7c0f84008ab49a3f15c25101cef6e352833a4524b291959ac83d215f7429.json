@@ -1,0 +1,138 @@
+{
+  "digest": "b7ee7c0f84008ab49a3f15c25101cef6e352833a4524b291959ac83d215f7429",
+  "report": {
+    "tools": {
+      "look_up_dish": {
+        "description": "Look one dish up on the menu.",
+        "input": {
+          "properties": {
+            "spoken_name": {
+              "description": "The dish as the caller said it, such as \"sweet and sour chicken\".",
+              "title": "Spoken Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "spoken_name"
+          ],
+          "title": "look_up_dish_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``look_up_dish`` returns.",
+          "properties": {
+            "found": {
+              "title": "Found",
+              "type": "boolean"
+            },
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "price": {
+              "title": "Price",
+              "type": "number"
+            },
+            "available": {
+              "title": "Available",
+              "type": "boolean"
+            },
+            "note": {
+              "title": "Note",
+              "type": "string"
+            }
+          },
+          "required": [
+            "found",
+            "name",
+            "price",
+            "available",
+            "note"
+          ],
+          "title": "Dish",
+          "type": "object"
+        }
+      },
+      "place_order": {
+        "description": "Place the order.",
+        "input": {
+          "properties": {
+            "items": {
+              "description": "The menu names of the dishes ordered, one entry per portion.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Items",
+              "type": "array"
+            },
+            "fulfilment": {
+              "enum": [
+                "collection",
+                "delivery"
+              ],
+              "title": "Fulfilment",
+              "type": "string"
+            },
+            "name": {
+              "description": "The name the order is under, first name is enough.",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "items",
+            "fulfilment",
+            "name"
+          ],
+          "title": "place_order_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "What ``place_order`` returns.",
+          "properties": {
+            "status": {
+              "enum": [
+                "placed",
+                "rejected"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "order_number": {
+              "title": "Order Number",
+              "type": "string"
+            },
+            "total": {
+              "title": "Total",
+              "type": "number"
+            },
+            "wait_minutes": {
+              "title": "Wait Minutes",
+              "type": "integer"
+            },
+            "offer": {
+              "description": "The offer this order qualified for, already taken off the total, or empty. Read it out so the caller hears why the sum is what it is.",
+              "title": "Offer",
+              "type": "string"
+            },
+            "problem": {
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "order_number",
+            "total",
+            "wait_minutes",
+            "offer",
+            "problem"
+          ],
+          "title": "Order",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "examples/takeaway-orders"
+}

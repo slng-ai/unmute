@@ -16,8 +16,9 @@ package = false
 [dependency-groups]
 dev = ["ruff==0.15.7", "ty"]
 
-[tool.ruff]
-line-length = 100
+[tool.ruff.format]
+# unmute compile formats what it writes. state.py and tools/ are yours, copied as written.
+exclude = ["state.py", "tools/**"]
 
 [tool.ty.environment]
 python-version = "3.12"

@@ -16,19 +16,22 @@ If it is just an authenticated HTTP call, use
 [a webhook tool](/build/tools/webhook) instead. It needs no code from you and no
 code review.
 
-A `local:` handler works on livekit and pipecat, and on twilio when its `input`
-and `output` schemas are flat ([the Twilio target](/targets/twilio)). It is
-refused on an slng target: SLNG owns a tool's code, version and gate pipeline, so a handler of
-yours has nowhere to run there. Reference a tool your organisation already has
-on the platform with [`slng:`](/build/tools/hosted) instead.
+A `local:` handler is a `version: 2` typed function. The signature is the tool's
+input and the Pydantic return model is its output, so the tool file has no
+`input:` or `output:`. Livekit and pipecat compile `version: 2` only. Twilio runs
+the same typed handlers ([the Twilio target](/targets/twilio)). On an slng target,
+a typed handler is wrapped into an SLNG code tool and published by
+`unmute deploy` ([details](#on-the-slng-target)). SLNG needs `version: 2` and
+refuses a version 1 handler.
 
 On this page:
 
 - [Quickstart](#quickstart) - add one callable
 - [The block](#the-block) - the one key it takes
-- [The rules the function follows](#the-rules-the-function-follows) - five rules
+- [The rules the function follows](#the-rules-the-function-follows) - four rules
 - [When the handler is slow](#when-the-handler-is-slow) - cover the wait
 - [Where it ends up](#where-it-ends-up) - inside the generated project
+- [On the slng target](#on-the-slng-target) - the sample file, and what deploy publishes
 - [Share a helper between tools](#share-a-helper-between-tools) - one source file, two callables
 - [Credentials, when a real handler needs one](#credentials-when-a-real-handler-needs-one) - names, never values
 - [Advanced](#advanced) - modules, dependencies, data, and SLNG limits
@@ -43,62 +46,56 @@ These files extend an existing package that declares `customer_id`. Add
 ```yaml tools/cancel_appointment.yaml expandable wrap
 description: Cancel the appointment outright. Call it only when the customer says plainly that they want to cancel, never when they want a different time.
 
-input:
-  type: object
-  properties: {}
-
 inject:
   - customer_id: "{{state.customer_id}}"
 
-output:
-  type: object
-  properties:
-    cancelled:
-      type: boolean
-    customer_id:
-      type: string
-  required:
-    - cancelled
-    - customer_id
-
 local:
-  handler: tools/cancel_appointment.py
+  handler: tools/cancel_appointment.py:cancel_appointment
 ```
 
 ```python tools/cancel_appointment.py
-def cancel_appointment(customer_id):
-    return {"cancelled": True, "customer_id": customer_id}
+from pydantic import BaseModel
+
+
+class Cancellation(BaseModel):
+    cancelled: bool
+    customer_id: str
+
+
+def cancel_appointment(customer_id: str) -> Cancellation:
+    return Cancellation(cancelled=True, customer_id=customer_id)
 ```
 
 Those two are a worked example rather than a quote: they are the smallest shape
 that shows a handler receiving an injected value. For real ones, every tool in
-`examples/salon-concierge` is a local handler, and all seven share the one
+`examples/salon-concierge` is a local handler, and all of them share the one
 `tools/salon.py`.
 
 ## The block
 
-<ParamField path="handler" type="string">
-  Path to a Python file inside the package. Omitted means `tools/<tool-name>.py`; that
-  file must exist. The file defines the callable described below.
+<ParamField path="handler" type="string" required>
+  `file.py:function`. The path is a Python file inside the package, and the name after
+  the colon is the function to call. Its signature is the tool's input and its return
+  type is the output. A tool file with `input:` or `output:` next to a local handler
+  is a version 1 file, which livekit and pipecat no longer compile.
 </ParamField>
 
-The function inside that file still has the tool name. For a tool named
-`cancel_appointment`, omitting `handler` selects
-`tools/cancel_appointment.py`.
+The function does not need the tool's name, and one file can hold many tools. In
+`examples/salon-concierge`, six tool files point at functions in `tools/salon.py`.
 
 ## The rules the function follows
 
 | Rule | Why |
 |---|---|
-| the function name matches the tool name | that is how the generated code finds it |
-| its parameters match the `input` properties plus the `inject` keys | the call is built from both |
-| it returns the value your description and prompt expect | the result goes back to the model |
-| it may be `async def` on Pipecat and LiveKit | the code targets await an awaitable result |
-| it imports nothing from Unmute | the generated project does not depend on Unmute at run time |
+| every parameter has a type | the type becomes the model's input schema |
+| the return type is a Pydantic model | its fields are the tool's output, which `assign:`, `finish:` and `replies:` read |
+| a `Field(description=...)` on a parameter says what it means | the model reads that text |
+| a parameter named by `inject:` is not the model's | it takes its value from State, so the model never sees it |
 
-The handler above takes `customer_id` even though `input.properties` is empty,
+The handler above takes `customer_id` and the model is never asked for it,
 because `customer_id` is injected. The model never sees that value and cannot
-invent one.
+invent one. Put a description on a parameter with
+`Annotated[str, Field(description="...")]`.
 
 ## When the handler is slow
 
@@ -109,7 +106,7 @@ result arrives no later than it would in silence:
 
 ```yaml tools/record_complaint.yaml
 local:
-  handler: tools/salon.py
+  handler: tools/salon.py:record_complaint
 
 announce: Let me get that written down.
 ```
@@ -131,90 +128,73 @@ go and look.
 
 ## Where it ends up
 
-`unmute compile` copies the file into the generated project, next to the code that
-calls it:
+`unmute compile` copies the file into the generated project. The generated code
+hands the function to unmute-core, which reads its types and calls it as a plain
+function. A function may be `async def`. The same handler file runs unchanged on
+LiveKit and Pipecat.
 
-```text
-build/pipecat/
-├── bot.py
-└── tools/
-    ├── __init__.py
-    └── cancel_appointment.py
+## On the slng target
+
+A version 2 `local:` tool works on the slng target. `unmute compile` wraps the
+handler into SLNG's code tool file and writes `build/slng/tools/<name>.json`
+and `build/slng/samples/<name>.json`.
+
+Put a sample beside the tool file, `tools/<name>.sample.json`. It is one JSON
+object of arguments:
+
+```json tools/book_slot.sample.json
+{"day": "2026-11-02", "time": "10:00", "service": "cut", "phone_number": "+34600111222"}
 ```
 
-The generated project imports it as a plain module and calls it like a plain
-function. The two targets differ only in how the result leaves the method:
-
-<CodeGroup>
-```python LiveKit
-result = tools.cancel_appointment.cancel_appointment(
-    customer_id=ctx.userdata.customer_id
-)
-if inspect.isawaitable(result):
-    result = await result
-return result
-```
-
-```python Pipecat
-result = tools.cancel_appointment.cancel_appointment(
-    customer_id=state.customer_id
-)
-if inspect.isawaitable(result):
-    result = await result
-await params.result_callback(result)
-```
-</CodeGroup>
-
-A LiveKit `@function_tool` method returns its value directly. A Pipecat
-function hands it to `params.result_callback` instead, which is how Pipecat's
-own function-calling convention reports a result. Either way the same handler
-file runs unchanged: only the three lines that call it differ.
+`unmute deploy --target slng` creates or updates the code tool, runs it once on
+this sample, and publishes it. Then it attaches the tool by id and version.
+SLNG publishes a code tool only after one run, so a local tool with no sample is
+refused. A version 1 handler and an `async def` handler are refused too. SLNG
+code has no internet access.
 
 ## Share a helper between tools
 
-Keep two callables and their helper in **one authored file**. Both tool files
-point to it, so you maintain the helper once. This works on LiveKit and Pipecat.
+Keep several tool functions and their helper in **one authored file**. Each tool
+file names its own function with `file.py:function`, so you maintain the helper
+once. This works on LiveKit and Pipecat.
 
 Create these three complete files in an existing package:
 
 ```python tools/text_helpers.py
-def _words(text):
+from pydantic import BaseModel
+
+
+class WordCount(BaseModel):
+    count: int
+
+
+class FirstWord(BaseModel):
+    word: str
+
+
+def _words(text: str) -> list[str]:
     return text.split()
 
 
-def count_words(text):
-    return {"count": len(_words(text))}
+def count_words(text: str) -> WordCount:
+    return WordCount(count=len(_words(text)))
 
 
-def first_word(text):
+def first_word(text: str) -> FirstWord:
     words = _words(text)
-    return {"word": words[0] if words else ""}
+    return FirstWord(word=words[0] if words else "")
 ```
 
 ```yaml tools/count_words.yaml
 description: Count the words in text.
-input:
-  type: object
-  properties:
-    text:
-      type: string
-  required:
-    - text
 local:
-  handler: tools/text_helpers.py
+  handler: tools/text_helpers.py:count_words
 ```
 
 ```yaml tools/first_word.yaml
 description: Return the first word in text, or empty text when there are no words.
-input:
-  type: object
-  properties:
-    text:
-      type: string
-  required:
-    - text
 local:
-  handler: tools/text_helpers.py
+  handler: tools/text_helpers.py:first_word
 ```
 
 Merge these names into both existing lists; keep the other agent fields:
@@ -238,26 +218,12 @@ unmute validate
 unmute compile
 ```
 
-Each build contains `tools/count_words.py` and `tools/first_word.py`. Both
-contain the source above. The generated wrapper imports each tool's module and
-calls the function matching its tool name.
-
 <Note>
-  This shares authored code, not module state. Each emitted copy is a separate
-  Python module. Do not use its globals to share a cache or connection between tools.
+  Import a helper from another file in the package only after you check that the
+  compiled project carries it. The compiler reads the file named by `local.handler`.
+  Keep reusable functions in that one file, or move the operation behind a
+  [webhook](/build/tools/webhook) or [MCP server](/build/tools/mcp).
 </Note>
-
-### Separate imported helpers are not bundled
-
-A layout where two handler files import `tools/shared.py` is not supported
-natively. The compiler reads the files named by `local.handler`; it does not
-follow their imports or copy the rest of the source directory.
-
-The original filename is not the emitted module name: `tools/text_helpers.py`
-above becomes one copy per tool. An import of `tools.text_helpers` would
-therefore fail. Put reusable functions in that same authored file, or move the
-operation behind a [webhook](/build/tools/webhook) or
-[MCP server](/build/tools/mcp).
 
 ## Credentials, when a real handler needs one
 
@@ -273,8 +239,6 @@ Only the **name** belongs in the file. Put that name in `agent.yaml` under
 ### Dependencies, files, and regeneration
 
 Handlers run from the generated project root, `/app` in the emitted images.
-Their module path is `tools.<tool-name>`, regardless of the authored handler's
-location. Imports use that generated layout, not your source package directory.
 
 The runtime requirement lives in generated `pyproject.toml`, and the compiler
 selects dependencies from the chosen providers. Python's standard library is
@@ -298,11 +262,9 @@ manifest. Unmute has no authored lifecycle-hook or custom build-file API.
 
 ### What the SLNG sandbox expects
 
-A `local:` handler no longer reaches SLNG at all, so none of this is a refusal
-you will meet from `unmute`. It is worth knowing anyway, because a tool SLNG
-hosts runs under these rules, and if you write one in the SLNG dashboard and
-then reference it with [`slng:`](/build/tools/hosted), they are the rules it
-runs under.
+A tool SLNG hosts runs under these rules. That includes a `local:` tool that
+deploy publishes, and a tool you write by hand and reference with
+[`slng:`](/build/tools/hosted).
 
 **SLNG calls the handler itself, synchronously.** A plain `def` that runs its
 own event loop internally, with `asyncio.run(...)`, is fine: only the entry
@@ -311,8 +273,8 @@ point has to be synchronous.
 **SLNG derives the schemas by introspection.** A hosted `code` tool's module
 defines an `Input` model, an `Output` model and a `handler()` taking one
 `Input`, and the platform reads the parameter and result schemas off those
-classes. `unmute pull` mirrors that module into your package, so the same
-module is what runs on livekit and pipecat too:
+classes. `unmute compile` writes the same shape for a local tool: it wraps your typed
+handler in an adapter like this one. Livekit and pipecat do not use it:
 
 ```python
 def check_order(order_number: str) -> dict:
@@ -337,13 +299,8 @@ def handler(input: Input) -> Output:
     return Output(**result)
 ```
 
-`handler()` is what SLNG calls, and it is also what a generated livekit or
-pipecat project calls, through the mirror. A return value that does not fit
-`Output` fails there rather than reaching the model unnoticed.
-
-On the code targets `output:` on a tool file stays author documentation, the
-same as on a webhook tool: nothing sends it to the model or checks the
-handler's return value against it.
+`handler()` is what SLNG calls. A return value that does not fit `Output` fails
+there rather than reaching the model unnoticed.
 
 ## Troubleshooting
 
