@@ -160,11 +160,10 @@ every refusal.
 
 ## Reading what you set
 
-Each target's emitted `build/<target>/README.md` names the resolved pace, the
-floor, and the ceiling, so you never have to infer them from the generated
-code. It also says whether the floor came from your own `endpointing_delay` or
-from the pace, and, on Pipecat, which of the two identically named `stop_secs`
-fields in `call.py` is the floor and which is the ceiling.
+On LiveKit and Pipecat, the emitted `build/<target>/agent.json` shows what you
+set under `models.turn`: the pace, and your `endpointing_delay` when you wrote
+one. The unmute-core library turns them into the framework's floor and ceiling
+when the agent starts. See [turn taking in unmute-core](/core/reference/turn-taking).
 
 ## How to tune it
 

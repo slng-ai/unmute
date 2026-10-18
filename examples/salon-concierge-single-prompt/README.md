@@ -87,8 +87,7 @@ Change `params.world_part` on each speech model to choose another
 
 To see the difference for yourself, run the same conversation through each
 package and compare. Both resolve the same turn floor and ceiling, which
-`build/<target>/compile-report.json` records under `notes` and the emitted
-`build/<target>/README.md` spells out, so turn taking is one thing you can rule
+`build/<target>/compile-report.json` records under `notes`, so turn taking is one thing you can rule
 out of whatever you hear. Both packages trace to Langfuse, so one call through
 each is enough to compare what a request carries:
 

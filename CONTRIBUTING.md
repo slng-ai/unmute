@@ -208,13 +208,11 @@ request.
 | `docs-site/` | Always, for a user-visible change. This is the public answer somebody lands on. |
 | The page's key list under `docs-site/reference/` | You added or changed a key in `agent.yaml`, `targets.yaml` or a connection file. |
 | The example's own `README.md` | Covered in step 4. |
-| The emitted runbook template in `internal/generate/` | You changed what `build/<target>/README.md` should say. |
 | `internal/skill/assets/` | Always, for a new authoring surface. This is what a coding assistant reads before it writes a package. |
 
-Those last four are the four surfaces rule: a change to emitted behaviour
-updates the runbook template, the example README, the docs page and the skill,
-in the same commit. A fact that is only true in generated output is a fact no
-reader ever sees, and a feature the skill does not know about is a feature no
+Those last three are the three surfaces rule: a change to emitted behaviour
+updates the example README, the docs page and the skill, in the same commit.
+A fact that is only true in generated output is a fact no reader ever sees, and a feature the skill does not know about is a feature no
 coding agent will use.
 
 ### Explain the logic, not just the key
@@ -268,12 +266,16 @@ running them locally beats waiting for the runner.
 | `vuln` | `govulncheck ./...` |
 | `release-config` | `make release-dry` |
 
-Two suites are opt-in and never the pull request gate:
+Three suites are opt-in and never the pull request gate:
 
 - `make smoke` proves the emitted Python actually runs. It needs Python and the
   provider SDKs installed.
 - `make contracts` re-fetches the published SLNG conformance fixtures. It needs
   network.
+- `make e2e-slng` runs `TestSlngLive`: it deploys `internal/voice-agents-tests/slng-live`
+  to SLNG, calls it and checks the call record. It needs `SLNG_API_KEY`, `voiceai`
+  0.1.23 or newer and uv. Run it as `env -u SLNG_API_KEY make e2e-slng` to make
+  `.env` win over a key in your shell.
 
 Run `make smoke` yourself if you changed what gets emitted. It catches a
 template that produces Python which does not run.

@@ -277,11 +277,11 @@ func TestTextChatReachesTheBotThroughTheTransportsOwnChannel(t *testing.T) {
 		`id="chatinput"`,
 		`id="chatsend"`,
 		`id="textonly"`,
-		`type:"send-text"`,                 // the RTVI client message Pipecat reads
-		`run_immediately:true`,             // the typed line is the caller's turn now
-		`audio_response:true`,              // the bot answers by voice
-		`sendText(text,{topic:"lk.chat"})`, // the LiveKit agent's chat topic
-		`peer.addTransceiver('audio',{direction:'recvonly'})`, // text only still hears the bot
+		`type:"send-text"`,                       // the RTVI client message Pipecat reads
+		`run_immediately:true`,                   // the typed line is the caller's turn now
+		`audio_response:true`,                    // the bot answers by voice
+		`sendText(text,{topic:"lk.chat"})`,       // the LiveKit agent's chat topic
+		`const sent = stream || silentStream();`, // text only sends silence: a live model answers nothing without audio
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("text chat missing %q", want)
@@ -291,9 +291,9 @@ func TestTextChatReachesTheBotThroughTheTransportsOwnChannel(t *testing.T) {
 	if !strings.Contains(source, "function dropEcho(record)") || !strings.Contains(source, "pendingEchoes") {
 		t.Error("a typed line's echo must give way to a matching record")
 	}
-	// A text-only call must not reach for the microphone.
-	if !strings.Contains(source, "if (textOnly) return;") {
-		t.Error("LiveKit text only must skip enabling the microphone")
+	// A text-only call must not reach for the microphone: LiveKit publishes silence instead.
+	if !strings.Contains(source, "if (textOnly) {") || !strings.Contains(source, "publishTrack(track,{source:LK.Track.Source.Microphone})") {
+		t.Error("LiveKit text only must publish silence instead of enabling the microphone")
 	}
 }
 

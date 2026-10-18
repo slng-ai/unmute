@@ -13,6 +13,7 @@ import logging
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -240,6 +241,20 @@ IDLE = IdleNudges(**SPEC["idle"]) if "idle" in SPEC else None
 MAX_DURATION_S: float | None = SPEC.get("max_duration_s")
 
 
+CALL_FACTS_ENV = "UNMUTE_CALL_FACTS"
+"""What ``unmute dev --source`` seeds on a browser call: the facts a carrier would send."""
+CALL_FACTS = MappingProxyType(
+    {
+        "from_number": "calling_number",
+        "to_number": "called_number",
+        "direction": "direction",
+        "call_id": "carrier_call_id",
+        "session_id": "session_id",
+    }
+)
+"""Each fact's ``CallInfo`` field. A fact with none, like ``carrier``, is left out."""
+
+
 async def new_call(
     call: CallInfo | None = None, call_start: Mapping[str, object] | None = None
 ) -> CallState[State]:
@@ -253,6 +268,9 @@ async def new_call(
         CallStartError: A required start value is missing, or one does not fit, or a
             lookup with ``refuse_call`` found nothing.
     """
+    if call is None and (facts := env_value(CALL_FACTS_ENV, dict[str, str])):
+        seeded = {CALL_FACTS[name]: value for name, value in facts.items() if name in CALL_FACTS}
+        call = CallInfo.model_validate({"agent_id": AGENT_ID, **seeded})
     rules = SPEC["state"]
     state = CallState(
         State,

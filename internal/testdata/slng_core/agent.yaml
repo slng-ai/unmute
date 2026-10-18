@@ -9,7 +9,7 @@
 #   - inactivity, max_duration, thinking_audio, interruption thresholds: no slot
 #   - tracing and capacity: unmute instruments and sizes no process here
 
-version: 1
+version: 2
 name: slng-core-fixture
 entry_agent: support
 

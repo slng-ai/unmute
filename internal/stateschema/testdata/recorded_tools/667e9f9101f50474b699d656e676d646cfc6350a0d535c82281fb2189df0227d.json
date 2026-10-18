@@ -1,0 +1,49 @@
+{
+  "digest": "667e9f9101f50474b699d656e676d646cfc6350a0d535c82281fb2189df0227d",
+  "report": {
+    "tools": {
+      "lookup_customer": {
+        "description": "Identify a Sage and Stone customer by phone number.\n\nDo it before any availability check or appointment change. Use only the\nreturned customer_id; never invent one or use a placeholder.",
+        "input": {
+          "properties": {
+            "phone": {
+              "description": "Customer phone number",
+              "title": "Phone",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phone"
+          ],
+          "title": "lookup_customer_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "The customer the phone number belongs to, when there is one.",
+          "properties": {
+            "found": {
+              "title": "Found",
+              "type": "boolean"
+            },
+            "customer_id": {
+              "title": "Customer Id",
+              "type": "string"
+            },
+            "name": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "found",
+            "customer_id",
+            "name"
+          ],
+          "title": "Customer",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "internal/testdata/speechmatics_listen"
+}

@@ -29,7 +29,7 @@ unmute init voice-desk
 Replace `voice-desk/agent.yaml` with this **complete file**:
 
 ```yaml voice-desk/agent.yaml
-version: 1
+version: 2
 name: voice-desk
 architecture: cascade
 entry_agent: desk
@@ -69,6 +69,8 @@ capacity:
   max_sessions: 2
   avg_session_duration: 3m
 ```
+
+Keep the scaffold's `state.py` as it is. Version 2 needs it, and this desk saves no values.
 
 Keep the scaffold's `targets.yaml`, but remove its target-level `models:` overrides because the model palette above replaces the scaffold's.
 Keep its framework provider and version pin, and remove any phone `connection:` for this browser example. Replace `voice-desk/instructions.md` with this complete prompt:
@@ -151,7 +153,7 @@ A shorter silence window can answer faster but may cut off callers who pause mid
 
 ## 3. Add tools, tasks, or saved state
 
-Extend the same desk with a [local tool](/build/tools/python), then add a [task](/build/orchestration/tasks) when a job needs its own steps.
+Extend the same desk with a [local tool](/build/tools/python) whose Python function has typed arguments and a Pydantic return model, then add a [task](/build/orchestration/tasks) when a job needs its own steps.
 For example, the caller wants to change an existing request:
 
 1. Look up the request with a tool.
@@ -159,7 +161,7 @@ For example, the caller wants to change an existing request:
 3. Confirm the details before running the update tool.
 4. Handle a refused update, or hand the call to another agent with the context it needs.
 
-[Variables](/build/variables) hold values across steps. Each prompt names the values it may read; the tool checks the conditions for changing the record.
+The call's `State` class in `state.py` holds values across steps. Each prompt names the values it may read; the tool checks the conditions for changing the record.
 Separate steps give you places to check the behavior, but do not guarantee a correct tool call.
 Test successful updates, missing inputs, and failed actions.
 

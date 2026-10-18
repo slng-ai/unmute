@@ -1,7 +1,7 @@
 # The smallest twilio target package: one agent, one inbound phone channel and
 # the builtin end_call. The route gates compile it on (twilio,
 # conversation-relay).
-version: 1
+version: 2
 name: twilio-relay
 architecture: cascade
 entry_agent: desk

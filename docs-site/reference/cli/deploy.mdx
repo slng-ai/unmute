@@ -99,7 +99,7 @@ only when `--target` names it; see [A twilio target](#a-twilio-target).
 No line names the organisation. The key decides it, and the `credential from`
 line names the key.
 
-## Four stages
+## Stages
 
 **Validate.** The same checks as [`unmute validate`](/reference/cli/validate),
 against the slng target only. The slng target refuses what SLNG will not run,
@@ -113,6 +113,14 @@ A dry run does neither.
 **Compile.** The same output as [`unmute compile --target slng`](/reference/cli/compile),
 written to `build/slng/`. Compiling as part of deploying is deliberate: it means
 you cannot push an artifact that is older than the package.
+
+**Publish code tools.** This runs before the account is read. Each `local:` tool
+becomes an SLNG code tool. Unmute creates it (`voiceai tool create`) or updates
+it (`voiceai tool update`) when its code or description changed. It runs the tool
+once on its sample (`voiceai tool run --confirm-side-effects`) and publishes it
+(`voiceai tool publish`). A tool that is already current is left alone and
+printed as `code tool X is current (vN)`. A name already held by a tool that is
+not a code tool is refused. This needs voiceai 0.1.23 or newer.
 
 **Push.** Checked references are staged with their resolved IDs and versions,
 then passed to `voiceai agents push` with `--require-resolved`.
@@ -134,11 +142,15 @@ does not grow with how many secrets you declare.
 | every MCP tool you expose | that server's last stored probe | correct the name, or expose a different tool |
 | every vault secret and variable, including one a hosted tool or MCP server needs that the package never declares | the vault, including whether it holds a value | `unmute deploy` offers to create it |
 
-Unmute creates no tools or MCP servers. SLNG owns tool creation entirely, and
-an authored `local:` or `webhook:` block is refused before this step is
-reached. So there is no first-deploy grace period where an absent tool is
-expected. Every name this preflight checks already exists, published, or the
-run stops.
+Unmute creates no MCP servers and no tool for a `slng:` reference. The package's
+own `local:` tools are published first, so they are already current when this
+step reads the account. An authored `webhook:` block is refused before this step
+is reached. Every other name this preflight checks already exists, published, or
+the run stops.
+
+With `--dry-run`, the code tool step prints `would create code tool X, run its
+sample and publish it` (or `would update`) and stops the preview there. The rest
+is checked against the published tool, which does not exist yet.
 
 A control is never checked either. It reaches SLNG as a curated capability you
 attach to the agent in the dashboard, and the compiled body carries no reference

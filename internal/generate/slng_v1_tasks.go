@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 
@@ -28,6 +29,15 @@ type slngTask struct {
 	Announce string              `json:"announce,omitempty"`
 	Opening  string              `json:"opening,omitempty"`
 	Context  *slngTaskContext    `json:"context,omitempty"`
+	Finish   []slngFinish        `json:"finish,omitempty"`
+}
+
+// slngFinish is the backend's TaskFinish: the tool whose result ends the step,
+// the result values that count as success, and the lines SLNG says then.
+type slngFinish struct {
+	Tool    string           `json:"tool"`
+	Success []map[string]any `json:"success"`
+	Say     []string         `json:"say,omitempty"`
 }
 
 type slngTaskContext struct {
@@ -98,6 +108,11 @@ func slngTaskBody(agent *ir.Agent, body *slngBody, toolNames map[string][]string
 		if history := task.Context.History; history != "" && history != ir.HistoryMessages {
 			out.Context = &slngTaskContext{History: string(history), MaxMessages: task.Context.MaxMessages}
 		}
+		finish, err := slngTaskFinish(agent, task, toolNames)
+		if err != nil {
+			return fmt.Errorf("task %q: %w", name, err)
+		}
+		out.Finish = finish
 		body.Tasks = append(body.Tasks, out)
 	}
 
@@ -165,4 +180,38 @@ func slngShapes(t *stateschema.Type, seen map[string]bool, out *[]slngShape) err
 	}
 	*out = append(*out, shape)
 	return nil
+}
+
+// slngTaskFinish lowers a task's finish: rules. Success values are typed by the
+// tool's output, and each say: line is rewritten the way the core targets
+// rewrite it: a value the step fills from the tool's result reads
+// {{result.<path>}}, any other reads the saved value.
+func slngTaskFinish(agent *ir.Agent, task ir.Task, toolNames map[string][]string) ([]slngFinish, error) {
+	fromResult := resultPaths(task.Assign)
+	var out []slngFinish
+	for _, rule := range task.Finish {
+		tool := agent.Tools[rule.Tool]
+		typed, err := typedMatch(tool.Output, rule.Success)
+		if err != nil {
+			return nil, err
+		}
+		success := make([]map[string]any, 0, len(typed))
+		for _, field := range slices.Sorted(maps.Keys(typed)) {
+			values := typed[field]
+			if len(values) == 1 {
+				success = append(success, map[string]any{field: values[0]})
+				continue
+			}
+			success = append(success, map[string]any{field: values})
+		}
+		name := rule.Tool
+		if emitted := toolNames[rule.Tool]; len(emitted) == 1 {
+			name = emitted[0]
+		}
+		out = append(out, slngFinish{
+			Tool: name, Success: success,
+			Say: rewriteLines(rule.Say, nil, mergePaths(resultPaths(tool.Assign), fromResult)),
+		})
+	}
+	return out, nil
 }
