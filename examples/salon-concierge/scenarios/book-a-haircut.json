@@ -3,7 +3,7 @@
   "greeting": ["Sage and Stone"],
   "turns": [
     {"caller": "Hi, I'd like to book a haircut on Tuesday morning.", "max_requests": 1},
-    {"caller": "It's plus three four, six zero zero, one one one, two two two.", "expect": ["Is the best number to reach you"], "max_requests": 1},
+    {"caller": "It's plus three four, six zero zero, one one one, two two two.", "expect": ["+34 600"], "max_requests": 1},
     {"caller": "Yes, that's right.", "expect": ["I have 9:00 AM, 11:30 AM or 3:00 PM"], "max_requests": 1},
     {"caller": "Nine o'clock, please.", "expect": ["Shall I book your haircut for"], "max_requests": 1},
     {"caller": "Yes, please book it.", "expect": ["at 9:00 AM"], "max_requests": 1},

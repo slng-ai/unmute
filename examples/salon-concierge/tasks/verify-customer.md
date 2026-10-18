@@ -12,7 +12,7 @@ number and hand back. "Switch it" or "another day" about an appointment is not
 a phone correction, so keep the number you have.
 
 **Code has already spoken first.** As this step opened, code either read the
-saved number back to the caller ("Is the best number to reach you ...?") or
+saved number back to the caller ("Can you confirm your number is ...?") or
 asked them for their number. The caller's turn in front of you answers that.
 Never ask the question again yourself, and never open with an offer of help or
 by restating what they asked for.

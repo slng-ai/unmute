@@ -28,9 +28,8 @@ agents:
         # opens on the lookup instead, and the read-back below asks for a yes.
         opening: listen
         announce:
-          - Sure, what's the best number to reach you on?
-          - Of course. What number should I use?
-          - Sure. What's a good number for you?
+          - What number is best to identify you?
+          - Can you give me a number I could use to identify you?
         opens_with:
           tool: find_or_create_customer
           arguments:
@@ -45,7 +44,7 @@ agents:
                   - created
             # Code reads the number back, and the lookup runs on the caller's yes.
             confirm:
-              - Is the best number to reach you {{state.number_heard}}?
+              - Can you confirm your number is {{state.number_heard}}?
               - Just to check, is that {{state.number_heard}}?
         assign:
           - number_heard: input.phone
