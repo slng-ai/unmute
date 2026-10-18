@@ -166,9 +166,9 @@ Pydantic (2.13.5), email-validator 2.3.0, pydantic-extra-types 2.11.1,
 phonenumbers 9.0.40 and pycountry 26.2.16 on Python 3.12, about 0.2 seconds warm.
 `uv` must be on `PATH` for any package with a `state.py`, an SLNG-only one
 included, and the first run needs network. A package without a `state.py` needs
-no `uv`. The generated project gets `state.py` as written, plus a generated
-`call_state.py` with `CallState(State)`, which holds the one way a value is
-saved, the confirmation marks and the rendering.
+no `uv`. The generated project gets `state.py` as written. The `unmute-core` library
+holds `CallState`, which owns the one way a value is saved, the confirmation
+marks and the rendering.
 
 | Target | What `state.py` may hold |
 |---|---|
@@ -565,22 +565,31 @@ an error everywhere, greeting included.
 ## Passing a value into a tool without the model seeing it
 
 ```yaml tools/book_appointment.yaml
-input:
-  type: object
-  properties:
-    slot_id:
-      type: string
-  required:
-    - slot_id
+description: Book the slot the caller chose.
 
 inject:
   - customer_id: "{{state.customer_id}}"
   - service: "{{state.requested_service}}"
+
+local:
+  handler: tools/book_appointment.py:book_appointment
+```
+
+```python tools/book_appointment.py
+from pydantic import BaseModel
+
+
+class Booking(BaseModel):
+    booked: bool
+
+
+def book_appointment(slot_id: str, customer_id: str, service: str) -> Booking:
+    return Booking(booked=True)
 ```
 
 `inject` values are not part of the model's schema, so the model can neither see
-them nor overwrite them. An `inject` key that also names an `input` property is
-a compile error, for exactly that reason.
+them nor overwrite them. The model fills only `slot_id`. An `inject` key must
+name a parameter of the handler, and the model never sees it.
 
 `inject` is legal on `webhook` and `local` tools only: the two kinds whose
 request Unmute builds itself. An MCP server owns its own call shape, so there is

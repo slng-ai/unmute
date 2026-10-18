@@ -17,10 +17,9 @@ no public URL. It shares nothing with the LiveKit Twilio route except the accoun
 your number lives in.
 
 <Note>
-  Your own `build/pipecat/README.md` is the authority for your build, because it
-  was generated with your region and your agent name already filled in. This page
-  is the same route with the reasons attached. Read it before the first call
-  rather than after it.
+  Unmute no longer writes a runbook or a Pipecat Cloud manifest into the build.
+  Where this page needs one, it says what to pass to `pipecat cloud deploy`
+  yourself.
 </Note>
 
 On this page:
@@ -141,14 +140,13 @@ so the session expires before the container is ready and the call is never picke
 up at all. A knowledge base makes this more likely, because the corpus is
 embedded at import, before the server binds.
 
-`warm_instances` compiles to `[scaling] min_agents` in `pcc-deploy.toml`, so every
-deploy of this build keeps the pool. It bills for that instance whether or not
-anybody calls, which is why the compiler never adds it on its own.
+Unmute does not write the Pipecat Cloud manifest yet, so `warm_instances` does
+not reach the build. Pass the pool yourself on every deploy. It bills for that
+instance whether or not anybody calls.
 
 <Warning>
-  `pipecat cloud deploy --min-agents 1` is the same thing for one deploy only, and
-  a `[scaling]` block added to `pcc-deploy.toml` by hand does not survive the next
-  `unmute compile`. Declare it in `targets.yaml` and the manifest carries it.
+  Deploy with `pipecat cloud deploy --min-agents 1`. A deploy without it
+  scales to zero, and the first call after a quiet period is never picked up.
 </Warning>
 
 [Pipecat Cloud](/deploy/pipecat-cloud) walks the deploy and the secret set in
@@ -161,8 +159,8 @@ Two console objects, in this order: make the Bin, then tell the number to use it
 <Steps>
   <Step title="Create the TwiML Bin">
     In the Twilio Console, go to **TwiML**, **TwiML Bins**, then the plus button.
-    Name it anything. Paste the markup from your own `build/pipecat/README.md`,
-    where the address and the agent name are already correct:
+    Name it anything. Paste this markup, with the address for your region and your agent
+    name:
 
     ```xml
     <?xml version="1.0" encoding="UTF-8"?>
@@ -230,18 +228,17 @@ wss://api.pipecat.daily.co/ws/twilio              # no region declared
 ```
 
 A regional stream endpoint routes **only** to agents deployed in that region.
-Your build writes the right one, because it comes from `deployment_region` on the
-target. One declaration lands in three places, and the platform needs all three
-to match:
+Use the one for your `deployment_region`. That one region lands in three places,
+and the platform needs all three to match:
 
 | What | Where it lands |
 |---|---|
-| where the agent runs | `region` in `pcc-deploy.toml` |
+| where the agent runs | the region you deploy to |
 | where its secrets live | `--region` on `pipecat cloud secrets set` |
 | where the carrier streams to | the `wss://` host in your markup |
 
-An agent can only read a secret set from its own region. To move region, change
-that one line, compile again, and paste the new address into the Bin. Pipecat's
+An agent can only read a secret set from its own region. To move region, deploy to the new region, set the secrets there, and paste the
+new address into the Bin. Pipecat's
 [regions guide](https://docs.pipecat.ai/pipecat-cloud/guides/regions) says what
 each region name covers.
 
@@ -321,7 +318,7 @@ protected.
 
 ## Why this route has no token
 
-The generated `pcc-deploy.toml` sets `websocket_auth = "none"`. That is not a
+This route uses no websocket authentication. That is not a
 shortcut. A TwiML Bin is static markup in a console, so it cannot fetch a token
 before it opens the stream. Token authentication is structurally impossible here.
 

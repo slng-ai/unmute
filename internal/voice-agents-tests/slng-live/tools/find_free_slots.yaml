@@ -1,0 +1,4 @@
+local:
+  handler: tools/salon.py:find_free_slots
+interruption: provider_default
+effect: returns_data

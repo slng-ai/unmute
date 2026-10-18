@@ -18,7 +18,7 @@ VERTEX_LOCATION = "eu"
 # ConversationRelay speaks this line itself (welcomeGreeting). The app records it
 # in history once and never sends it.
 GREETING: str | None = "Hello, how can I help with the desk today?"
-TOOL_SPECS: list[dict[str, Any]] = json.loads("[{\"name\":\"opening_hours\",\"description\":\"Return the front desk's opening hours for one day of the week. Read-only.\",\"input\":{\"additionalProperties\":false,\"properties\":{\"day\":{\"description\":\"The day of the week the caller asked about.\",\"enum\":[\"monday\",\"tuesday\",\"wednesday\",\"thursday\",\"friday\",\"saturday\",\"sunday\"],\"type\":\"string\"}},\"required\":[\"day\"],\"type\":\"object\"},\"output\":{\"properties\":{\"closes\":{\"description\":\"Closing time as HH:MM, empty when closed.\",\"type\":\"string\"},\"day\":{\"type\":\"string\"},\"open\":{\"type\":\"boolean\"},\"opens\":{\"description\":\"Opening time as HH:MM, empty when closed.\",\"type\":\"string\"}},\"required\":[\"day\",\"open\",\"opens\",\"closes\"],\"type\":\"object\"},\"end_call\":false},{\"name\":\"end_call\",\"description\":\"End the call once the caller says they are done.\",\"input\":null,\"output\":null,\"end_call\":true}]")
+TOOL_SPECS: list[dict[str, Any]] = json.loads("[{\"name\":\"opening_hours\",\"description\":\"Return the front desk's opening hours for one day of the week. Read-only.\",\"input\":{\"properties\":{\"day\":{\"description\":\"The day of the week the caller asked about.\",\"enum\":[\"monday\",\"tuesday\",\"wednesday\",\"thursday\",\"friday\",\"saturday\",\"sunday\"],\"title\":\"Day\",\"type\":\"string\"}},\"required\":[\"day\"],\"title\":\"opening_hours_arguments\",\"type\":\"object\"},\"output\":{\"description\":\"One day's opening hours.\",\"properties\":{\"closes\":{\"description\":\"Closing time as HH:MM, empty when closed.\",\"title\":\"Closes\",\"type\":\"string\"},\"day\":{\"title\":\"Day\",\"type\":\"string\"},\"open\":{\"title\":\"Open\",\"type\":\"boolean\"},\"opens\":{\"description\":\"Opening time as HH:MM, empty when closed.\",\"title\":\"Opens\",\"type\":\"string\"}},\"required\":[\"day\",\"open\",\"opens\",\"closes\"],\"title\":\"Hours\",\"type\":\"object\"},\"end_call\":false},{\"name\":\"end_call\",\"description\":\"End the call once the caller says they are done.\",\"input\":null,\"output\":null,\"end_call\":true}]")
 
 ENV_ACCOUNT_SID = "TWILIO_ACCOUNT_SID"
 ENV_AUTH_TOKEN = "TWILIO_AUTH_TOKEN"
@@ -73,7 +73,7 @@ HANGUP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Respo
 # an attestation. Hashed from the rest of the app's modules, the prompt, the
 # TwiML, the pins, the image and the tools; never from a credential or the
 # public origin.
-ARTIFACT_ID = "sha256:80105d202abb3cc5dd76b1bf0ba794ad2113ff43ee5ca5345760b103c1426208"
+ARTIFACT_ID = "sha256:ea2c8a20c8c098792f905aceaa65de4e394724b5161ff41ceeb4dae6d14e0a3b"
 === prompts/__init__.py ===
 """The system prompts, one Markdown file each beside this module.
 
@@ -770,7 +770,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from brain import Brain, Cycle, Reply, ToolCall
 from settings import (
@@ -1355,6 +1355,8 @@ class Call:
             self.event("tool_failed", tool=tool.name, error=type(future.exception()).__name__)
             return {"error": "tool_failed", "detail": "the action raised an error"}
         result = future.result()
+        if isinstance(result, BaseModel):
+            result = result.model_dump(mode="json")  # a typed handler's result, as JSON
         try:
             if tool.result is not None:
                 tool.result.model_validate(result)
@@ -2093,6 +2095,14 @@ change before restoring. Otherwise set its webhook back to the snapshot's
   <Hangup></Hangup>
 </Response>
 === tools/opening_hours.py ===
+"""The front desk's opening hours, from a fixed table."""
+
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
+
+Day = Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
 _WEEKDAY = ("09:00", "17:00")
 _HOURS = {
     "monday": _WEEKDAY,
@@ -2103,13 +2113,25 @@ _HOURS = {
 }
 
 
-def opening_hours(day):
+class Hours(BaseModel):
+    """One day's opening hours."""
+
+    day: str
+    open: bool
+    opens: str = Field(description="Opening time as HH:MM, empty when closed.")
+    closes: str = Field(description="Closing time as HH:MM, empty when closed.")
+
+
+def opening_hours(
+    day: Annotated[Day, Field(description="The day of the week the caller asked about.")],
+) -> Hours:
+    """Return the front desk's opening hours for one day of the week. Read-only."""
     # ponytail: fixed table, read-only; a real desk would read a calendar.
     opens, closes = _HOURS.get(day, ("", ""))
-    return {"day": day, "open": bool(opens), "opens": opens, "closes": closes}
+    return Hours(day=day, open=bool(opens), opens=opens, closes=closes)
 === compile-report.json ===
 {
-  "artifact_id": "sha256:80105d202abb3cc5dd76b1bf0ba794ad2113ff43ee5ca5345760b103c1426208",
+  "artifact_id": "sha256:ea2c8a20c8c098792f905aceaa65de4e394724b5161ff41ceeb4dae6d14e0a3b",
   "bindings": [
     {
       "binding": {

@@ -6,43 +6,8 @@ description: >-
   A caller giving a replacement number is not confirmation. Ask the readback
   question first; call this tool only after a later caller message agrees to it.
 
-input:
-  type: object
-  properties:
-    phone:
-      type: string
-      description: >-
-        The exact confirmed number in E.164: a plus sign, then 10 to 15 digits,
-        with no spaces, brackets or dashes. The plus sign is part of the number
-        and is never dropped; a text run sent the digits alone and the lookup
-        could not tell which country it was. Never infer a country code the
-        caller did not say.
-  required:
-    - phone
-
-output:
-  type: object
-  properties:
-    customer_phone:
-      type: string
-      description: >-
-        The confirmed number in E.164: a plus sign then digits, no spaces or
-        punctuation. Return it exactly as it comes back, character for character.
-    customer_status:
-      type: string
-      enum:
-        - existing
-        - created
-        - invalid
-    summary:
-      type: string
-  required:
-    - customer_phone
-    - customer_status
-    - summary
-
 local:
-  handler: tools/salon.py
+  handler: tools/salon.py:find_or_create_customer
 
 # No `announce:`, the same as in salon-concierge, so the two packages run one
 # tool set and a comparison between them measures only their structure.

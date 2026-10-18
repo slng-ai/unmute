@@ -446,12 +446,12 @@ func Default() Table {
 				deny(Slng, "slng target runs every task on the agent's one model, and SLNG refuses think: on a task: remove it, or compile to livekit which switches the model per task"),
 			),
 			FieldTaskNestedResult: field(allow(Slng)),
-			// SLNG runs finish rules, but unmute cannot write one for it: a
-			// success rule names a field of the tool's output: schema, and on this
-			// target output: is refused because SLNG takes a tool's result shape
-			// from the tool it hosts. Reading that shape from the hosted tool is
-			// the way to open this row.
-			FieldTaskFinish:       field(deny(Slng, "slng target cannot check a step's tool result: a finish: rule names a field of the tool's output:, which SLNG takes from the tool it hosts and not from the package: end the step with its finish call, or compile to livekit or pipecat")),
+			// SLNG runs a finish rule (backend app/schemas/agent_tasks.py
+			// TaskFinish: tool, success, say). A success rule names a field of
+			// the tool's result, which version 2 reads from the typed handler
+			// or the hosted tool's mirror. validateSlngTasks holds the rest:
+			// one rule per task, and no confirm:.
+			FieldTaskFinish:       field(allow(Slng)),
 			FieldTaskOpening:      field(allow(Slng)),
 			FieldTaskGroup:        field(allow(Slng)),
 			FieldTaskGroupReturn:  field(allow(Slng)),
@@ -570,14 +570,12 @@ func Default() Table {
 			FieldToolOutput: field(
 				deny(Slng, "slng target derives a tool's result shape from the tool SLNG hosts, not from the package: `output:` reaches nothing here, so remove it, or compile to livekit or pipecat which read it"),
 			),
-			// The refusal that carries reference-only. It has to answer "then
-			// how do I get my tool onto SLNG", because the answer is no longer
-			// "unmute does it for you": the `tool` group of the platform CLI is
-			// list, get and run, with no create, verified at 0.1.16 on
-			// 2026-09-03.
-			FieldToolLocal: field(
-				deny(Slng, "slng target does not create tools: a `local:` handler would have to be uploaded, and SLNG owns a tool's code, version and gate pipeline: create the tool in the SLNG dashboard and reference it with `slng:`, or compile to livekit or pipecat which run your handler themselves"),
-			),
+			// A version 2 local tool is typed, so it can become an SLNG code
+			// tool: compile wraps the handler into the file SLNG builds, and
+			// deploy creates, runs and publishes it (voiceai 0.1.23 tool create,
+			// run, publish). validateSlngTool refuses a version 1 handler and a
+			// tool with no sample.
+			FieldToolLocal: field(allow(Slng)),
 			// Core since voiceai 0.1.16, verified against a live deploy 2026-09-01.
 			// unmute writes {server, tool} by name; the push resolves the name to
 			// server_id and copies each tool's observed_schema_hash out of the
@@ -667,7 +665,7 @@ func Default() Table {
 				// A hosted request tool still authenticates. Its credential is
 				// the platform's, named in the mirror's config.auth.secret_name,
 				// and it reaches the runbook and the deploy preflight from there.
-				deny(Slng, "slng target does not create tools, so there is no tool body for an `auth:` block to land in: a hosted tool keeps its own credential, which SLNG stores, so reference it with `slng:`, or compile to livekit or pipecat which send the header themselves"),
+				deny(Slng, "slng target does not create API request tools, so there is no tool body for an `auth:` block to land in: a hosted tool keeps its own credential, which SLNG stores, so reference it with `slng:`, or compile to livekit or pipecat which send the header themselves"),
 			),
 			// The warning fires only where the authored preference and the
 			// target's own behaviour disagree. See FixedToolInterruption: on
@@ -751,7 +749,7 @@ func Default() Table {
 			// body, or into the attachment's config override when it carried a
 			// template. unmute writes neither now.
 			FieldWebhookPath: field(
-				deny(Slng, "slng target does not create tools, so there is no tool URL for a `path:` to be appended to: SLNG stores a hosted tool's whole URL, so reference it with `slng:`, or compile to livekit or pipecat which build the request themselves"),
+				deny(Slng, "slng target does not create API request tools, so there is no tool URL for a `path:` to be appended to: SLNG stores a hosted tool's whole URL, so reference it with `slng:`, or compile to livekit or pipecat which build the request themselves"),
 			),
 			// SLNG installs a per-tool environment from an exact pin list, with a
 			// locked snapshot and a verification probe

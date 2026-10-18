@@ -17,39 +17,29 @@ unmute compile my-agent --target livekit
 
 ```text
 my-agent/build/livekit/
-├── agent.py              # the entry point
-├── call.py               # prewarm and one session: turn detection, telephony
-├── agents.py             # the agents, their tools and task steps
-├── session.py            # prefetch, call start and prompt rendering
-├── call_state.py         # CallState: the one way a value is saved, and each step's result
+├── agent.py              # the entry point: the LiveKit worker and one session
+├── spec.py               # builds the agent from agent.json
+├── agent.json            # what agent.yaml declares, in unmute-core's names
+├── speech.py             # the speech and model bindings
 ├── state.py              # your State class, copied as you wrote it
-├── settings.py           # every fixed value: names, timeouts, required variables
-├── prompts/              # one Markdown file per agent, tasks in prompts/tasks/
-├── utils/                # helpers, only the ones this package needs
-│   ├── dev_metrics.py    # per-turn latency for `unmute dev`, inert elsewhere
-│   ├── tracing.py        # present when the package sets tracing
-│   └── knowledge.py      # present when the package sets knowledge
 ├── tools/                # your local handlers, copied
-│   ├── __init__.py
 │   └── <name>.py         # one per local tool
 ├── knowledge/            # present when the package sets knowledge
 │   └── <name>/           # one directory per knowledge source, its documents copied in
-├── pyproject.toml        # pinned dependencies
+├── pyproject.toml        # pinned dependencies, including unmute-core
+├── .python-version       # 3.12
 ├── Dockerfile
 ├── .dockerignore
 ├── compose.dev.yaml      # what `unmute dev` runs, including a local LiveKit server
 ├── .env.example          # exactly the variables you supply
-├── README.md             # the runbook for this build
 └── compile-report.json   # what the compiler decided
 ```
 
-A target with an inbound SIP route writes two more files.
-`sip-inbound-trunk.json` and `sip-dispatch-rule.json` are the inputs for the two
-records a call needs: the inbound trunk that claims your number, and the dispatch
-rule that sends its calls to this agent. You create both with `lk sip inbound
-create` and `lk sip dispatch create`. [LiveKit over
-Twilio](/telephony/livekit-twilio#4-create-the-two-livekit-records) has the
-commands.
+`state.py` is present when the package has a `State` class. Unmute does not
+write the SIP inbound trunk or dispatch rule files for this target yet. For a
+phone number, write those records yourself. [LiveKit over
+Twilio](/telephony/livekit-twilio#4-create-the-two-livekit-records) shows the
+shape.
 
 ## Target fields
 
@@ -102,23 +92,19 @@ instance name, used by `--target` and the `build/<name>/` output folder.
 
 ## The modules
 
-`agent.py` is the entry point. It creates the worker and its session
-entrypoint. `call.py` holds the prewarm step and one session: turn detection
-and telephony. `agents.py` holds the agent classes, the tasks and task groups if
-you declared any, and the tool functions. The entry agent becomes a class,
-named after your agent, and the generated README says which one it is.
-`state.py` is your own `State` class, copied as you wrote it, and present when
-the package has one. `call_state.py` holds `CallState`, a subclass of `State`
-that is the call's saved values, with the one way a value is saved, the
-confirmation marks and the rendering, and one result model per task step.
-`session.py` holds prefetch and call start. `settings.py` holds every
-fixed value.
+The project imports the [`unmute-core`](/core/start/unmute-and-core) library from PyPI
+(`unmute-core[livekit]`). The library holds the call logic: state, tasks, tools,
+telemetry and the model call. The files here only wire it to LiveKit.
 
-Each prompt is a Markdown file in `prompts/`, with task prompts in
-`prompts/tasks/`. The file holds the prompt text exactly. Placeholders are
-filled at run time.
+`agent.py` is the entry point. It creates the worker and runs one session.
+`spec.py` reads `agent.json` and builds the objects the library runs: the
+tools, each agent's tasks, the prefetch and the greeting. It checks every name
+and path at import, so a broken package fails at start and never during a call.
+`speech.py` holds the speech and model bindings. `state.py` is your own `State`
+class, copied as you wrote it, and present when the package has one.
 
-The project imports LiveKit and your handlers. Nothing from Unmute.
+Prompts live in `agent.json`. Edit `agent.yaml` and compile again rather than
+these files.
 
 ## Run it without Unmute
 
@@ -126,24 +112,17 @@ The project imports LiveKit and your handlers. Nothing from Unmute.
 cd my-agent/build/livekit
 uv sync                       # or: pip install -e .
 cp .env.example .env          # then fill in the required values
-uv run python -m livekit.agents start agent.py    # the worker
+uv run python agent.py start  # the worker
 ```
 
 `start` needs a running LiveKit server and its `LIVEKIT_URL`,
-`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in the environment. Add `--log-format colored`
-for readable logs while developing, which is what the generated development
-Compose file does.
+`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in the environment. 
 
 If the worker's environment sets `HTTPS_PROXY`, the worker would send its
 LiveKit connection through that proxy too. To reach the LiveKit server
 directly, add its host to `NO_PROXY`. Model and speech calls still use the
 proxy. Under `unmute dev` the host is `livekit_server`, so a worker image that
 sets a proxy also needs `NO_PROXY=livekit_server`.
-
-`uv` copies the dependencies into `.venv` instead of hard-linking them out of its
-cache, because the generated `pyproject.toml` sets `link-mode = "copy"`. On Linux,
-NLTK refuses a hard-linked file, and a knowledge base reads its stopword list
-through NLTK at startup.
 
 ## Dependencies are pinned
 
@@ -166,8 +145,8 @@ and runbook through the platform's secret store.
 The worker registers under the package's
 [`name:`](/reference/agent-yaml#name) joined to the target it was compiled for,
 so `name: acme-support` on a target called `livekit` registers
-`acme-support-livekit`. A SIP dispatch rule matches a worker by that string, and
-the emitted `sip-dispatch-rule.json` carries it.
+`acme-support-livekit`. A SIP dispatch rule matches a worker by that string, so use it
+in the rule you write.
 
 Renaming the package changes the worker name. Follow the
 [rename steps](/deploy/livekit-cloud#renaming-the-agent-breaks-that-rule) to

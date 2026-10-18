@@ -25,29 +25,19 @@ description: >-
   List Sage and Stone slots for one service and date, and the caller's own
   bookings. Call this before offering a time and before changing a booking.
 
-input:
-  type: object
-  properties:
-    service:
-      type: string
-      enum:
-        - haircut
-        - hair-color
-        - blowout
-    date:
-      type: string
-      description: Preferred date in YYYY-MM-DD form
-
 local:
-  handler: tools/find_slots.py
+  handler: tools/salon.py:find_slots
 ```
 
-The top of the file is the contract. `description` and `input` are everything
-the model knows about this tool. Write the description as an instruction rather
-than a label, and let the schema do real work: the `enum` above means the model
-cannot ask for a service the salon does not offer.
+The top of the file is the contract. For a local tool the function's typed
+signature in `tools/salon.py` is the input, and its Pydantic return model is the
+output, so the file has no `input:` or `output:`. A webhook tool writes both as
+JSON Schema instead. Write the description as an instruction rather than a
+label, and let the types do real work: a `Literal["haircut", "hair-color",
+"blowout"]` on the `service` argument means the model cannot ask for a service
+the salon does not offer.
 
-The schema is also the whole argument list. Generated Pipecat tools turn an
+The signature is also the whole argument list. Generated Pipecat tools turn an
 extra argument into a normal corrective tool result, so the model can retry
 with only the declared fields. A handler failure before any result is returned
 the same way, without exposing the private exception to the model or leaving a
@@ -98,7 +88,7 @@ Both blocks have no fields, but YAML still needs an explicit body: write
 | Tool kind | SLNG | LiveKit | Pipecat | Twilio |
 |---|---|---|---|---|
 | `webhook:` | yes | yes | yes | **no** |
-| `local:` | **no** | yes | yes | yes |
+| `local:` | yes | yes | yes | yes |
 | `builtin:` | yes | yes | yes | yes |
 | `mcp:` | yes | yes | yes | **no** |
 | `slng:` | yes | yes | yes | **no** |
@@ -106,10 +96,11 @@ Both blocks have no fields, but YAML still needs an explicit body: write
 | `client:` | no | no | no | no |
 | `provider_hosted:` | no | no | no | no |
 
-On Twilio, a `local:` tool needs flat `input` and `output` schemas, and the only
-builtin is `end_call`. The target runs one agent with no tasks, and it refuses
+Twilio runs `version: 2` typed handlers, and the only builtin it takes is `end_call`. The target runs one agent with no tasks, and it refuses
 `announce` and `interruption: cancel`. [The Twilio target](/targets/twilio#what-the-package-may-carry)
 lists every refusal.
+
+This table is the capability table for `version: 1`. On version 2, livekit and pipecat compile only `local:`, `webhook:`, `knowledge:` and the `end_call` builtin: they refuse `mcp:`, `slng:` and every other builtin, so those are SLNG-only for now.
 
 The same tool file compiles to three different runtimes, and they do not all
 support the same things. This table is the capability table, which is what the
@@ -118,20 +109,17 @@ rather than a surprise on a call.
 
 Three of those rows are worth a sentence.
 
-**`local:` and `webhook:` no longer reach SLNG.** The platform owns a tool's
-code, version and gate pipeline, and unmute creates no tool there. A tool your
-SLNG organisation already has is reached with `slng:`; a brand new one starts in
-the SLNG dashboard. Both blocks work exactly as before on LiveKit and Pipecat.
+**`local:` reaches SLNG as a code tool, and `webhook:` does not.** On an slng
+target, `unmute deploy` publishes a typed `local:` tool to SLNG. It needs a
+`tools/<name>.sample.json` beside it ([details](/build/tools/python#on-the-slng-target)).
+A `webhook:` block is refused. An API request tool is created in SLNG and
+reached with `slng:`. Both blocks work as before on LiveKit and Pipecat.
 
-**`slng:` works on SLNG, LiveKit, and Pipecat; Twilio refuses it.**
-SLNG resolves a hosted reference by name at deploy
-time: no mirror, no hash, no `unmute pull`. LiveKit and Pipecat build and run
-the tool themselves, so they need a real copy; `unmute pull` is what fetches
-one, and for a code tool its module, into your package, with no network
-needed again after that. One limit is not in this table: a hosted tool that
-declares Python dependencies is refused on LiveKit and Pipecat, which build
-one dependency list for the whole project. See
-[Hosted tools](/build/tools/hosted).
+**`mcp:` and `slng:` are SLNG-only for now.** Version 2 on LiveKit and Pipecat does
+not compile them, and the compiler refuses them. Builtins other than `end_call` are
+refused there too. SLNG resolves a hosted reference by name at deploy time: no mirror,
+no hash, no `unmute pull`. See [Hosted tools](/build/tools/hosted) and
+[MCP servers](/build/tools/mcp).
 
 **`knowledge:` needs a runtime of ours to live in.** LiveKit and Pipecat compile to
 a Python project, so the documents ride in the image and the search runs in the
@@ -197,7 +185,7 @@ the wrong one. A tool the agent list does not name is not offered at all, which 
 the cheapest way to narrow a choice.
 
 **Write the description as an instruction, not a label.** `description` and
-`input` are the whole of what the model knows. Say when to call it, and say when
+the input types are the whole of what the model knows. Say when to call it, and say when
 not to.
 
 ## Fields inside each execution block
@@ -213,7 +201,7 @@ types, required conditions, and defaults:
 - [Hosted](/build/tools/hosted#hosted-reference-fields): `slng` names a published tool.
 
 `client` and `provider_hosted` take an empty object and are gated on every target.
-SLNG accepts published tool references; it refuses authored local and webhook bodies.
+SLNG accepts published tool references and typed `local:` handlers, which deploy publishes as code tools. It refuses authored webhook bodies.
 
 ## Which fields the block allows
 
@@ -226,15 +214,17 @@ The contract fields are shared, with one exception that matters:
 </ParamField>
 
 <ParamField path="input" type="object">
-  Required for authored local and webhook contracts: a JSON Schema with `type: object`
-  describing model arguments. Refused on builtin, MCP, knowledge, and hosted `slng` tools,
+  Required for authored webhook contracts: a JSON Schema with `type: object`
+  describing model arguments. A version 2 local tool leaves it out, because its handler
+  signature is the input. Refused on builtin, MCP, knowledge, and hosted `slng` tools,
   which own their schemas.
 </ParamField>
 
 <ParamField path="output" type="object">
   An author-side JSON Schema with `type: object`. Omit for no declared result schema. Used
   by assignments and success checks; it is not a general runtime result validator or a
-  model prompt. Refused on builtin, MCP, knowledge, and hosted `slng` tools.
+  model prompt. A version 2 local tool leaves it out, because its return model is the
+  output. Refused on builtin, MCP, knowledge, and hosted `slng` tools.
 </ParamField>
 
 <ParamField path="inject" type="list of one-key pairs">
@@ -351,8 +341,9 @@ to cover.
 ## Define once, attach by name
 
 **Define each tool once.** The full definition exists only in
-`tools/<name>.yaml`: `description`, `input`, optional `output` and `inject`, and
-one execution block. A local handler lives beside it in `tools/<handler>.py`.
+`tools/<name>.yaml`: `description`, `input` and optional `output` on a webhook tool,
+optional `inject`, and one execution block. A local handler lives beside it in a
+Python file, and the block names its function as `tools/<file>.py:<function>`.
 Do not put any of those fields in `agent.yaml`.
 
 Every `tools:` entry in `agent.yaml` is a string name:
@@ -429,12 +420,11 @@ or task's own list.
 
 ### `output:` is refused on an slng target
 
-It used to be allowed there, for a reason. The compiler turned it into a pydantic
-`Output` class inside the code it uploaded, and SLNG read the tool's result shape
-off that class. unmute uploads no code now, so the field reaches nothing and is
-refused rather than dropped.
+A `local:` tool's `Output` comes from the return model of its Python function.
+A tool SLNG hosts carries its own `Output` model. So the field has nothing to
+set and is refused rather than dropped.
 
-**Fix:** delete the field from the tool file. A tool SLNG hosts carries its own
+**Fix:** delete the field from the tool file. A hosted tool carries its own
 `Output` model, written where the tool was written. Full story in [Python
 tools](/build/tools/python#what-the-slng-sandbox-expects) and [Hosted
 tools](/build/tools/hosted).

@@ -1,0 +1,3 @@
+# The templates under internal/generate/templates are filled by unmute compile.
+# Their pyproject.toml holds {{...}} placeholders, which ruff cannot read as config.
+extend-exclude = ["internal/generate/templates"]

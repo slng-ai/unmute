@@ -4,8 +4,8 @@ description: "The smallest real agent: a prompt, four models, and one file that 
 ---
 
 An Unmute package is a directory. The agent lives in `agent.yaml`, the prompt
-lives in a Markdown file next to it, and the target choice lives in
-`targets.yaml`. This page walks that file, key by key. Everything else in this
+lives in a Markdown file next to it, the call state lives in `state.py`, and the
+target choice lives in `targets.yaml`. This page walks that file, key by key. Everything else in this
 section adds to it.
 
 Make one now, then read along in the file it writes. Already ran this in the
@@ -21,6 +21,7 @@ created my-agent/agent.yaml
 created my-agent/.env.example
 created my-agent/.gitignore
 created my-agent/instructions.md
+created my-agent/state.py
 created my-agent/targets.yaml
 created my-agent/tools/end_call.yaml
 ```
@@ -34,8 +35,9 @@ created my-agent/tools/end_call.yaml
 On this page:
 
 - [The agent file](#the-agent-file) - every top-level key `unmute init` writes
+- [The state file](#the-state-file) - what one call knows
 - [The target file](#the-target-file) - where this package compiles to
-- [Try it](#try-it) - validate, then talk to it in a browser
+- [Try it](#try-it) - validate, then compile
 
 ## The agent file
 
@@ -46,7 +48,7 @@ taken out so the shape is visible.
 
 <Accordion title="Complete agent.yaml">
 ```yaml
-version: 1
+version: 2
 name: my-agent
 entry_agent: assistant
 
@@ -105,6 +107,17 @@ capacity:
 </Accordion>
 
 Now each block.
+
+### `version`
+
+```yaml
+version: 2
+```
+
+Version 2 is the version to write. It compiles onto the
+[unmute-core](/core/start/why-unmute-core) library, so a package needs a
+`state.py` and typed local tools. Version 1 still compiles on the Twilio and SLNG
+targets only. See [Agent configuration, version 2](/reference/agent-yaml-v2).
 
 ### `name`
 
@@ -241,6 +254,22 @@ audio, which is what `unmute dev` serves. Phones come later, in
 and quota numbers in the generated project, and marks them unbenchmarked
 because they come from a conservative assumption, not from a measurement of
 your agent.
+
+## The state file
+
+```python state.py
+from pydantic import BaseModel
+
+
+class State(BaseModel):
+    """What one call knows, shared by every agent and task in it."""
+```
+
+`State` is empty at first. A call keeps its values here, and prompts and spoken
+lines read them as `{{state.x}}`. Add a field with a default when a task or a
+tool needs to save something. A local tool needs no schema in YAML: its Python
+function's typed signature is the input, and its Pydantic return model is the
+output. See [Python tools](/build/tools/python).
 
 ## The target file
 

@@ -1,0 +1,15 @@
+{
+  "source": "examples/salon-concierge-unoptimized/state.py",
+  "digest": "7c3254b32222a3e7996e901a7080e54a025dac8cfcd8834ed5dd931341825d96",
+  "report": {
+    "schema": {
+      "description": "One call. It holds no values.",
+      "properties": {},
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

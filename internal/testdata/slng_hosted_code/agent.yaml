@@ -17,7 +17,7 @@
 # The two mirrors are committed. Nothing here reaches the network, which is the
 # whole point: `make test` has no SLNG credential and never will.
 
-version: 1
+version: 2
 
 name: slng-hosted-code-fixture
 

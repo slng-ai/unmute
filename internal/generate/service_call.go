@@ -29,18 +29,6 @@ func withoutParams(params map[string]any, drop []string) map[string]any {
 	return out
 }
 
-// mcpTimeoutSeconds is how long an MCP tool call may take on either target.
-// Both drivers write it out rather than letting each SDK pick: LiveKit's
-// MCPServerHTTP defaults to 5 seconds, which no web search answers inside, and
-// Pipecat's MCP client defaults to 30, so the same package would wait six times
-// longer on one target than the other. 30 is Pipecat's existing default, so
-// closing the gap changes one target's behaviour and invents no new number.
-//
-// ponytail: one constant, no knob. A tool that needs longer wants `timeout:` on
-// the mcp block, which is a schema change (SCHEMA.md N40) and waits for a real
-// second user.
-const mcpTimeoutSeconds = 30
-
 // ServiceCall is a resolved constructor, ready for a template: the class and
 // its ordered kwargs, each value already a Python expression. SettingsArgs is
 // non-empty only for ParamsSettings entries; SettingsArg/SettingsClass name

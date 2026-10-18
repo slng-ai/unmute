@@ -1,0 +1,96 @@
+# A version 2 package whose speech is not SLNG's: Deepgram listens, and the
+# voices are Cartesia's, ElevenLabs' and Deepgram's. It compiles on both code
+# targets and imports offline. It has no scenarios: nothing here runs a call.
+version: 2
+
+name: speech-core
+
+entry_agent: desk
+
+agents:
+  desk:
+    instructions: instructions.md
+    think: reasoning
+    speak: voice
+    tools:
+      - look_up_order
+    handoffs:
+      - to_eleven
+      - to_aura
+  eleven:
+    instructions: instructions.md
+    think: reasoning
+    speak: eleven
+  aura:
+    instructions: instructions.md
+    think: reasoning
+    speak: aura
+
+# Two more agents, so the ElevenLabs and Deepgram voices are in use and compile.
+handoffs:
+  to_eleven:
+    to: eleven
+    when: The caller asks for the second desk.
+    context:
+      history: messages
+  to_aura:
+    to: aura
+    when: The caller asks for the third desk.
+    context:
+      history: messages
+
+secrets:
+  - GOOGLE_API_KEY
+  - DEEPGRAM_API_KEY
+  - CARTESIA_API_KEY
+  - ELEVEN_API_KEY
+  - ELEVENLABS_API_KEY
+  - ORDERS_API_URL
+  - ORDERS_API_TOKEN
+
+models:
+  think:
+    reasoning:
+      provider: google
+      model: gemini-3.1-flash-lite
+  speak:
+    voice:
+      provider: cartesia
+      model: sonic-3
+      voice: "794f9389-aac1-45b6-b726-9d9369183238"
+      language: en
+    eleven:
+      provider: elevenlabs
+      model: flash_v2_5
+      voice: UgBBYS2sOqTuMpoF3BR0
+      language: en
+    aura:
+      provider: deepgram
+      model: aura-2-thalia-en
+  listen:
+    transcriber:
+      provider: deepgram
+      model: nova-3
+      language: en
+  turn:
+    detector:
+      provider: local
+      model: silero
+      pace: balanced
+
+tools:
+  - look_up_order
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: Hi, this is the order desk. What's your order number?
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  avg_session_duration: 3m

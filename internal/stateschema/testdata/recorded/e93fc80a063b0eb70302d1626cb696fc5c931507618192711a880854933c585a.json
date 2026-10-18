@@ -1,0 +1,22 @@
+{
+  "source": "internal/testdata/webhook_core/state.py",
+  "digest": "e93fc80a063b0eb70302d1626cb696fc5c931507618192711a880854933c585a",
+  "report": {
+    "schema": {
+      "description": "One call. Every value starts empty.",
+      "properties": {
+        "order_status": {
+          "default": "",
+          "description": "The status look_up_order last returned.",
+          "title": "Order Status",
+          "type": "string"
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

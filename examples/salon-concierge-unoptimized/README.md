@@ -9,6 +9,8 @@ it next to [`salon-concierge`](../salon-concierge/), the same salon with all of
 them, and [`salon-concierge-single-prompt`](../salon-concierge-single-prompt/),
 the same one prompt with pre-fetch added.
 
+It is an `agent.yaml` version 2 package, compiled onto unmute-core. Its tools are the typed `tools/salon.py` the main salon used before it moved to core's design, so the comparison still holds. `scenarios/` has one call that `make e2e` runs on the real model.
+
 On this page:
 
 - [Quickstart](#quickstart) - validate, compile, run

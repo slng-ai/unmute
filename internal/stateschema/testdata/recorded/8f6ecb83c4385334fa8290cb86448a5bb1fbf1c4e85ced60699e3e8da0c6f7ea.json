@@ -1,0 +1,81 @@
+{
+  "source": "internal/voice-agents-tests/slng-live/state.py",
+  "digest": "8f6ecb83c4385334fa8290cb86448a5bb1fbf1c4e85ced60699e3e8da0c6f7ea",
+  "report": {
+    "schema": {
+      "$defs": {
+        "Booking": {
+          "description": "One appointment the salon saved.",
+          "properties": {
+            "reference": {
+              "description": "The booking reference.",
+              "title": "Reference",
+              "type": "string"
+            },
+            "day": {
+              "description": "The day of the appointment, written year-month-day.",
+              "format": "date",
+              "title": "Day",
+              "type": "string"
+            },
+            "time": {
+              "description": "The start time, as 10:00.",
+              "title": "Time",
+              "type": "string"
+            },
+            "service": {
+              "enum": [
+                "cut",
+                "colour"
+              ],
+              "title": "Service",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reference",
+            "day",
+            "time",
+            "service"
+          ],
+          "title": "Booking",
+          "type": "object"
+        }
+      },
+      "description": "What one call knows, shared by the agent and its tasks.",
+      "properties": {
+        "phone_number": {
+          "anyOf": [
+            {
+              "format": "phone",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The caller's number in E.164, confirmed with them.",
+          "title": "Phone Number"
+        },
+        "booking": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Booking"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The appointment booked on this call."
+        }
+      },
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

@@ -15,6 +15,9 @@ import sys
 import threading
 import types
 from datetime import date, timedelta
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
 
 _fresh = types.ModuleType("unmute_pharmacy_state")
 vars(_fresh).update(
@@ -79,7 +82,7 @@ def _ready_on(today=None):
     return day.isoformat()
 
 
-def look_up_prescription(reference):
+def _look_up_prescription(reference):
     """Find one repeat prescription and say what state it is in.
 
     `found` is false for a reference nobody holds, and every other field comes
@@ -109,7 +112,7 @@ def look_up_prescription(reference):
     }
 
 
-def request_refill(reference):
+def _request_refill(reference):
     """Place the reorder, or say why it cannot be placed.
 
     Four outcomes, and each one is a real thing that happens at a counter:
@@ -147,6 +150,56 @@ def request_refill(reference):
     }
 
 
+
+# What each tool takes and returns. agent.yaml version 2 reads these types here.
+Reference = Annotated[
+    str,
+    Field(
+        description="The prescription reference the caller read out: two letters, four "
+        "digits, and one letter. Write it as the caller said it. Spaces, dashes and lower "
+        "case are all read the same way."
+    ),
+]
+
+
+class Prescription(BaseModel):
+    """What ``look_up_prescription`` returns."""
+
+    found: bool
+    reference: str
+    medicine: str
+    repeats_left: int
+    last_issued: str
+    already_ordered: bool
+
+
+class Refill(BaseModel):
+    """What ``request_refill`` returns."""
+
+    status: Literal["placed", "already_ordered", "no_repeats_left", "unknown_reference"]
+    reference: str
+    medicine: str
+    ready_on: str
+
+
+def look_up_prescription(reference: Reference) -> Prescription:
+    """Look up one repeat prescription by its reference."""
+    return Prescription.model_validate(_look_up_prescription(reference))
+
+
+def request_refill(
+    reference: Annotated[
+        str,
+        Field(
+            description="The same reference look_up_prescription found, exactly as it came "
+            "back from that tool."
+        ),
+    ],
+) -> Refill:
+    """Place the reorder for one repeat prescription."""
+    return Refill.model_validate(_request_refill(reference))
+
+
 def _demo():
     import importlib.util
     import re
@@ -154,11 +207,11 @@ def _demo():
     _state.orders.clear()
 
     # Spoken punctuation and lower case are the same prescription.
-    spaced = look_up_prescription("rx 4821 b")
+    spaced = _look_up_prescription("rx 4821 b")
     assert spaced["found"] and spaced["reference"] == "RX4821B"
     assert spaced["repeats_left"] == 3 and not spaced["already_ordered"]
 
-    placed = request_refill("RX4821B")
+    placed = _request_refill("RX4821B")
     assert placed["status"] == "placed"
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", placed["ready_on"])
     # The counter is shut at the weekend, so a collection day never lands there.
@@ -166,13 +219,13 @@ def _demo():
 
     # A second attempt is not a second order, and the lookup now says so, which
     # is what stops the agent reordering something already on its way.
-    again = request_refill("RX4821B")
+    again = _request_refill("RX4821B")
     assert again["status"] == "already_ordered" and again["ready_on"] == placed["ready_on"]
-    assert look_up_prescription("RX4821B")["already_ordered"]
+    assert _look_up_prescription("RX4821B")["already_ordered"]
 
-    assert request_refill("RX2045K")["status"] == "no_repeats_left"
-    assert request_refill("ZZ0000Z")["status"] == "unknown_reference"
-    assert not look_up_prescription("ZZ0000Z")["found"]
+    assert _request_refill("RX2045K")["status"] == "no_repeats_left"
+    assert _request_refill("ZZ0000Z")["status"] == "unknown_reference"
+    assert not _look_up_prescription("ZZ0000Z")["found"]
 
     # Every emitted copy of this file has to reach one store, or the tool that
     # places an order and the tool that reports one would disagree.
@@ -181,7 +234,7 @@ def _demo():
     copy_two = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(copy_two)
     assert copy_two._state is _state
-    assert copy_two.look_up_prescription("RX4821B")["already_ordered"]
+    assert copy_two._look_up_prescription("RX4821B")["already_ordered"]
 
     _state.orders.clear()
     _state.prescriptions["RX4821B"]["repeats_left"] = 3

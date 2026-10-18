@@ -79,7 +79,11 @@ func deployResolution(
 	// selections do not: they are resolved to ids and versions below, and
 	// letting both paths report on them would produce two findings per
 	// reference saying different things.
-	declared := artifact.Requires
+	// A code tool was published just before this read, so it is checked and
+	// resolved by name the way a builtin is.
+	requires := artifact.Requires
+	requires.Builtins = append(slices.Clone(requires.Builtins), requires.Code...)
+	declared := requires
 	declared.Hosted, declared.MCPServers, declared.MCPTools = nil, nil, nil
 	report := comparePreflight(declared, resources)
 
@@ -90,7 +94,7 @@ func deployResolution(
 	// Builtins carry an identity too, and no extra finding: comparePreflight
 	// above already reported each by name, and a second row per builtin would be
 	// counted twice in the satisfied tally.
-	deployment.Resolution.Builtins = resolveBuiltins(artifact.Requires, resources)
+	deployment.Resolution.Builtins = resolveBuiltins(requires, resources)
 
 	// Two references arriving at one hosted tool are refused here, which is
 	// before anything is staged and before the push is asked to reconcile them.
