@@ -1,0 +1,246 @@
+{
+  "digest": "a3a064347a83709aa88af56c9192dd3c08f73aec83ebb4522017a4416a7b00d8",
+  "report": {
+    "tools": {
+      "book_it": {
+        "description": "Book one appointment for the verified caller.",
+        "input": {
+          "properties": {
+            "service": {
+              "enum": [
+                "haircut",
+                "blowout"
+              ],
+              "title": "Service",
+              "type": "string"
+            },
+            "confirmed": {
+              "description": "True only after the caller agrees to this exact booking.",
+              "title": "Confirmed",
+              "type": "boolean"
+            },
+            "customer_phone": {
+              "default": "",
+              "title": "Customer Phone",
+              "type": "string"
+            }
+          },
+          "required": [
+            "service",
+            "confirmed"
+          ],
+          "title": "book_it_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Booking": {
+              "description": "One saved booking action.",
+              "properties": {
+                "reference": {
+                  "description": "The booking reference the tool returned.",
+                  "title": "Reference",
+                  "type": "string"
+                },
+                "service": {
+                  "description": "The service booked, as the tool spelled it.",
+                  "title": "Service",
+                  "type": "string"
+                },
+                "action": {
+                  "description": "What the tool did.",
+                  "enum": [
+                    "create",
+                    "cancel"
+                  ],
+                  "title": "Action",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reference",
+                "service",
+                "action"
+              ],
+              "title": "Booking",
+              "type": "object"
+            }
+          },
+          "description": "The outcome of booking.",
+          "properties": {
+            "status": {
+              "enum": [
+                "booked",
+                "not_confirmed",
+                "slot_unavailable"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "summary": {
+              "title": "Summary",
+              "type": "string"
+            },
+            "booking": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Booking"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Present and complete on booked, absent otherwise."
+            }
+          },
+          "required": [
+            "status",
+            "summary"
+          ],
+          "title": "Booked",
+          "type": "object"
+        }
+      },
+      "cancel_it": {
+        "description": "Cancel the caller's booking.",
+        "input": {
+          "properties": {
+            "reference": {
+              "description": "The reference of the booking to cancel.",
+              "title": "Reference",
+              "type": "string"
+            },
+            "confirmed": {
+              "description": "True only after the caller agrees to the cancellation.",
+              "title": "Confirmed",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "reference",
+            "confirmed"
+          ],
+          "title": "cancel_it_arguments",
+          "type": "object"
+        },
+        "output": {
+          "$defs": {
+            "Booking": {
+              "description": "One saved booking action.",
+              "properties": {
+                "reference": {
+                  "description": "The booking reference the tool returned.",
+                  "title": "Reference",
+                  "type": "string"
+                },
+                "service": {
+                  "description": "The service booked, as the tool spelled it.",
+                  "title": "Service",
+                  "type": "string"
+                },
+                "action": {
+                  "description": "What the tool did.",
+                  "enum": [
+                    "create",
+                    "cancel"
+                  ],
+                  "title": "Action",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reference",
+                "service",
+                "action"
+              ],
+              "title": "Booking",
+              "type": "object"
+            }
+          },
+          "description": "The outcome of cancelling.",
+          "properties": {
+            "status": {
+              "enum": [
+                "cancelled",
+                "not_confirmed",
+                "not_found"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "summary": {
+              "title": "Summary",
+              "type": "string"
+            },
+            "booking": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Booking"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Present and complete on cancelled, absent otherwise."
+            }
+          },
+          "required": [
+            "status",
+            "summary"
+          ],
+          "title": "Cancelled",
+          "type": "object"
+        }
+      },
+      "look_up": {
+        "description": "Look one customer up by the phone number the caller agreed to.\n\nIt creates a record when there is none. The lookup decides whether a number\nis usable.",
+        "input": {
+          "properties": {
+            "phone": {
+              "description": "The number the caller agreed to, digits only.",
+              "title": "Phone",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phone"
+          ],
+          "title": "look_up_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "The customer the number belongs to.",
+          "properties": {
+            "customer_phone": {
+              "title": "Customer Phone",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "existing",
+                "created",
+                "invalid"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "summary": {
+              "title": "Summary",
+              "type": "string"
+            }
+          },
+          "required": [
+            "customer_phone",
+            "status",
+            "summary"
+          ],
+          "title": "Customer",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "internal/testdata/terminal_step"
+}

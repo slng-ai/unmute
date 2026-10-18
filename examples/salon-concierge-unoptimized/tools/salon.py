@@ -15,8 +15,12 @@ import sys
 import threading
 import types
 from datetime import UTC, date, datetime, timedelta
+from typing import Annotated, Literal
 from uuid import uuid4
 from zoneinfo import ZoneInfo
+
+from pydantic import BaseModel, Field
+from state import Appointment
 
 _fresh = types.ModuleType("unmute_salon_state")
 vars(_fresh).update(
@@ -48,16 +52,6 @@ def _booking_today() -> date:
     what day it is.
     """
     return datetime.now(ZoneInfo(_SALON_TIMEZONE)).date()
-
-
-def get_current_date():
-    """Today, in the salon's zone. The tool the optimized packages do not have.
-
-    The only difference from their copy of this file. They read the same clock
-    once, before the greeting, through `prefetch:`. This package has no
-    pre-fetch, so the model calls this and pays a request to find out.
-    """
-    return {"date": _booking_today().isoformat()}
 
 
 def _normalize_phone(phone):
@@ -136,7 +130,7 @@ def _held_by(caller):
     return sorted(rows, key=lambda row: (row["date"], row["time"]))
 
 
-def find_or_create_customer(phone):
+def _find_or_create_customer(phone):
     normalized_phone = _normalize_phone(phone)
     if not normalized_phone:
         return {
@@ -158,7 +152,7 @@ def find_or_create_customer(phone):
     }
 
 
-def find_slots(customer_phone, date="", service=""):
+def _find_slots(customer_phone, date="", service=""):
     """Read the diary: what the caller holds, and what is free.
 
     One call answers both questions because the conversation asks them together.
@@ -279,7 +273,7 @@ def _refuse(status, summary, booking_id=""):
     return {"status": status, "booking_id": booking_id, "summary": summary}
 
 
-def save_booking(
+def _save_booking(
     customer_phone,
     action,
     confirmed=False,
@@ -399,7 +393,7 @@ def _cancel(caller, booking_id):
     }
 
 
-def record_complaint(customer_phone, summary, requested_resolution=""):
+def _record_complaint(customer_phone, summary, requested_resolution=""):
     clean_summary = " ".join(str(summary).split())
     if not clean_summary:
         return {"complaint_id": "", "status": "invalid"}
@@ -429,12 +423,212 @@ def record_complaint(customer_phone, summary, requested_resolution=""):
     }
 
 
+# What each tool takes and returns. The functions above keep the diary's rules and
+# return plain dicts. These wrappers give the model and the call state their types,
+# which agent.yaml version 2 reads from here instead of from a JSON schema.
+Service = Literal["haircut", "hair-color", "blowout"]
+
+
+class Customer(BaseModel):
+    """What ``find_or_create_customer`` returns."""
+
+    customer_phone: str = Field(
+        description="The confirmed number in E.164: a plus sign then digits, no spaces or "
+        "punctuation. Return it exactly as it comes back, character for character."
+    )
+    customer_status: Literal["existing", "created", "invalid"]
+    summary: str
+
+
+class Held(BaseModel):
+    """One booking the caller already holds."""
+
+    booking_id: str
+    service: str
+    date: str
+    time: str
+
+
+class Slot(BaseModel):
+    """One free time."""
+
+    slot_id: str
+    service: str
+    date: str
+    time: str
+
+
+class Diary(BaseModel):
+    """What ``find_slots`` returns."""
+
+    bookings: list[Held] = Field(description="Every booking this caller currently holds, soonest first.")
+    slots: list[Slot] = Field(
+        description="Free times on the requested date, empty when no date was given."
+    )
+    status: Literal["ok", "need_date", "full", "invalid_date", "invalid_service"] = Field(
+        description="`need_date` means this caller holds no booking and you gave no date, so "
+        "there was nothing to look up: ask which day they want and call again with it. Never "
+        "call again without a date, and never describe a booking after this answer, because "
+        "it means there is none."
+    )
+
+
+class Saved(BaseModel):
+    """What ``save_booking`` returns."""
+
+    status: Literal[
+        "booked", "moved", "cancelled", "not_confirmed", "slot_taken", "not_found",
+        "has_booking", "invalid",
+    ]
+    booking_id: str = ""
+    service: str = ""
+    date: str = ""
+    time: str = ""
+    appointment: Appointment | None = Field(
+        None,
+        description="The saved booking, present and complete on success and absent "
+        "otherwise. The step saves this without asking the model for it.",
+    )
+    summary: str = Field(description="One plain sentence saying what happened, or what went wrong.")
+    existing: list[Held] = []
+
+
+class Complaint(BaseModel):
+    """One complaint, as it was saved."""
+
+    complaint_id: str
+    summary: str
+    requested_resolution: str
+
+
+class Recorded(BaseModel):
+    """What ``record_complaint`` returns."""
+
+    complaint_id: str
+    status: Literal["recorded", "invalid", "customer_not_found"]
+    complaint: Complaint | None = Field(
+        None,
+        description="The saved complaint, present and complete on success and absent "
+        "otherwise. The step saves this without asking the model for it.",
+    )
+
+
+def find_or_create_customer(
+    phone: Annotated[
+        str,
+        Field(
+            description="The exact confirmed number in E.164: a plus sign, then 10 to 15 "
+            "digits, with no spaces, brackets or dashes. The plus sign is part of the number "
+            "and is never dropped; a text run sent the digits alone and the lookup could not "
+            "tell which country it was. Never infer a country code the caller did not say."
+        ),
+    ],
+) -> Customer:
+    """Look up or create one salon customer from the exact confirmed phone number."""
+    return Customer.model_validate(_find_or_create_customer(phone))
+
+
+def find_slots(
+    customer_phone: str,
+    date: Annotated[
+        str,
+        Field(
+            description="The day to look at, YYYY-MM-DD. Always a real day, never an empty "
+            "string: the caller's own bookings come back whatever day you ask for, so an empty "
+            "date buys nothing and answers nothing. Send the day the caller named, and never a "
+            "day they did not name. Today is not a default. A caller who asks for an "
+            "appointment without saying when needs the question \"which day?\", not a guess."
+        ),
+    ],
+    service: Annotated[
+        Literal["any", "haircut", "hair-color", "blowout"],
+        Field(
+            description="Narrow the free times to one service, or `any` to see all three. Use "
+            "`any` when the caller has not said which service they want."
+        ),
+    ] = "any",
+) -> Diary:
+    """Read the diary: what the caller already has booked, and what times are free."""
+    return Diary.model_validate(_find_slots(customer_phone, date, service))
+
+
+def save_booking(
+    customer_phone: str,
+    action: Annotated[
+        Literal["book", "move", "cancel"],
+        Field(description="book a new time, move an existing booking, or cancel one"),
+    ],
+    confirmed: Annotated[
+        bool, Field(description="True only after the caller said yes to the sentence you read back.")
+    ],
+    slot_id: Annotated[
+        str,
+        Field(
+            description="The exact slot_id from find_slots when booking or moving. An empty "
+            "string when cancelling, which needs no slot."
+        ),
+    ] = "",
+    booking_id: Annotated[
+        str,
+        Field(
+            description="The exact booking_id from find_slots when moving or cancelling. An "
+            "empty string when booking, which has no booking yet."
+        ),
+    ] = "",
+    additional: Annotated[
+        bool,
+        Field(
+            description="True only when the caller asked for a second appointment on top of "
+            "one they already hold. A caller who holds a booking is changing it, so this is "
+            "false for an ordinary booking and the tool refuses with has_booking."
+        ),
+    ] = False,
+) -> Saved:
+    """Write the diary: book a new time, move an existing booking, or cancel one."""
+    return Saved.model_validate(
+        _save_booking(customer_phone, action, confirmed, slot_id, booking_id, additional)
+    )
+
+
+def record_complaint(
+    customer_phone: str,
+    summary: Annotated[str, Field(description="Short factual summary of the complaint")],
+    requested_resolution: Annotated[
+        str, Field(description="What the customer wants the salon to do, or an empty string")
+    ],
+) -> Recorded:
+    """Record the verified customer's complaint after enough facts are known."""
+    return Recorded.model_validate(
+        _record_complaint(customer_phone, summary, requested_resolution)
+    )
+
+
+def _get_current_date():
+    """Today, in the salon's zone. The tool the optimized packages do not have.
+
+    They read the same clock once, before the greeting, through `prefetch:`. This
+    package has no pre-fetch, so the model calls this and pays a request to find out.
+    """
+    return {"date": _booking_today().isoformat()}
+
+
+class Today(BaseModel):
+    """What ``get_current_date`` returns."""
+
+    date: str = Field(description="Today's date in the salon's timezone, YYYY-MM-DD")
+
+
+def get_current_date() -> Today:
+    """Get today's date in the salon's own timezone."""
+    return Today.model_validate(_get_current_date())
+
+
 def _demo():
     import importlib.util
     from concurrent.futures import ThreadPoolExecutor
 
     for phone in ("123456", "1234567", "123456789", "1234567890123456", ""):
-        invalid = find_or_create_customer(phone)
+        invalid = _find_or_create_customer(phone)
         assert invalid["customer_status"] == "invalid" and not invalid["customer_phone"]
     assert _normalize_phone("(555) 010-1010") == "5550101010"
     assert _normalize_phone("123456789012345") == "123456789012345"
@@ -449,25 +643,25 @@ def _demo():
     assert _spoken("2026-09-18", "12:00") == "Friday at 12:00 PM"
     assert _spoken("", "") == "" and _spoken("2026-09-18", "") == ""
 
-    created = find_or_create_customer("+1 555 010 1010")
-    repeated = find_or_create_customer("15550101010")
+    created = _find_or_create_customer("+1 555 010 1010")
+    repeated = _find_or_create_customer("15550101010")
     assert created["customer_status"] == "created"
     assert repeated["customer_status"] == "existing"
     assert repeated["customer_phone"] == created["customer_phone"] == "+15550101010"
     customer = created["customer_phone"]
-    assert find_or_create_customer("1-555-010-1010")["customer_status"] == "existing"
+    assert _find_or_create_customer("1-555-010-1010")["customer_status"] == "existing"
 
     spec = importlib.util.spec_from_file_location("salon_copy_two", __file__)
     assert spec is not None and spec.loader is not None
     copy_two = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(copy_two)
     assert copy_two._state is _state, "each emitted copy must reach one store"
-    assert copy_two.find_or_create_customer("15550101010")["customer_phone"] == customer
+    assert copy_two._find_or_create_customer("15550101010")["customer_phone"] == customer
 
     with ThreadPoolExecutor(max_workers=16) as pool:
         for suffix in range(20, 24):
             concurrent = list(
-                pool.map(lambda _, suffix=suffix: find_or_create_customer(f"1555010 20{suffix}"), range(16))
+                pool.map(lambda _, suffix=suffix: _find_or_create_customer(f"1555010 20{suffix}"), range(16))
             )
             assert {result["customer_status"] for result in concurrent} <= {"created", "existing"}
             assert len({result["customer_phone"] for result in concurrent}) == 1
@@ -480,58 +674,58 @@ def _demo():
     # A read with no date answers "what do I hold". A caller holding nothing has
     # asked a question this call cannot answer, so it says so rather than
     # reporting a successful search of nothing.
-    empty = find_slots(customer)
+    empty = _find_slots(customer)
     assert empty == {"bookings": [], "slots": [], "status": "need_date"}
-    assert find_slots(customer, date="not-a-date")["status"] == "invalid_date"
-    assert find_slots(customer, date=first_date, service="massage")["status"] == "invalid_service"
+    assert _find_slots(customer, date="not-a-date")["status"] == "invalid_date"
+    assert _find_slots(customer, date=first_date, service="massage")["status"] == "invalid_service"
     # No service means every service, so one call covers "what have you got".
-    every = find_slots(customer, date=first_date)
+    every = _find_slots(customer, date=first_date)
     assert {row["service"] for row in every["slots"]} == set(_SERVICES)
     assert len(every["slots"]) == len(_SERVICES) * len(_TIMES)
-    haircuts = find_slots(customer, date=first_date, service="haircut")
+    haircuts = _find_slots(customer, date=first_date, service="haircut")
     assert {row["service"] for row in haircuts["slots"]} == {"haircut"}
     first_slot = haircuts["slots"][0]["slot_id"]
 
-    assert save_booking(customer, "book", slot_id=first_slot)["status"] == "not_confirmed"
-    assert save_booking(customer, "sing", confirmed=True)["status"] == "invalid"
+    assert _save_booking(customer, "book", slot_id=first_slot)["status"] == "not_confirmed"
+    assert _save_booking(customer, "sing", confirmed=True)["status"] == "invalid"
     assert (
-        save_booking("555 000 0000", "book", confirmed=True, slot_id=first_slot)["status"]
+        _save_booking("555 000 0000", "book", confirmed=True, slot_id=first_slot)["status"]
         == "not_found"
     )
     assert not _state.bookings
 
-    booked = save_booking(customer, "book", confirmed=True, slot_id=first_slot)
+    booked = _save_booking(customer, "book", confirmed=True, slot_id=first_slot)
     assert booked["status"] == "booked"
     assert booked["appointment"]["action"] == "book"
     # The read now reports the booking without being asked for a date, and says
     # `ok` rather than `need_date`, because there is something to answer with.
-    dateless = find_slots(customer)
+    dateless = _find_slots(customer)
     assert dateless["status"] == "ok", dateless
     held = dateless["bookings"]
     assert len(held) == 1 and held[0]["booking_id"] == booked["booking_id"]
     assert held[0]["service"] == "haircut"
 
     # Two callers want one slot: the second is refused the slot, not the booking.
-    rival = copy_two.find_or_create_customer("1555010 2099")["customer_phone"]
+    rival = copy_two._find_or_create_customer("1555010 2099")["customer_phone"]
     assert (
-        copy_two.save_booking(rival, "book", confirmed=True, slot_id=first_slot)["status"]
+        copy_two._save_booking(rival, "book", confirmed=True, slot_id=first_slot)["status"]
         == "slot_taken"
     )
     assert first_slot not in {
-        row["slot_id"] for row in find_slots(customer, date=first_date, service="haircut")["slots"]
+        row["slot_id"] for row in _find_slots(customer, date=first_date, service="haircut")["slots"]
     }
 
-    second_slot = find_slots(customer, date=second_date, service="haircut")["slots"][0]["slot_id"]
+    second_slot = _find_slots(customer, date=second_date, service="haircut")["slots"][0]["slot_id"]
     # A caller who holds a booking is changing it unless they asked for another.
-    refused = save_booking(customer, "book", confirmed=True, slot_id=second_slot)
+    refused = _save_booking(customer, "book", confirmed=True, slot_id=second_slot)
     assert refused["status"] == "has_booking", refused
     assert [row["booking_id"] for row in refused["existing"]] == [booked["booking_id"]]
-    assert len(find_slots(customer)["bookings"]) == 1
-    extra = save_booking(
+    assert len(_find_slots(customer)["bookings"]) == 1
+    extra = _save_booking(
         customer, "book", confirmed=True, slot_id=second_slot, additional=True
     )
     assert extra["status"] == "booked"
-    assert save_booking(customer, "cancel", confirmed=True, booking_id=extra["booking_id"])[
+    assert _save_booking(customer, "cancel", confirmed=True, booking_id=extra["booking_id"])[
         "status"
     ] == "cancelled"
 
@@ -539,52 +733,52 @@ def _demo():
     salon_now = datetime.now(ZoneInfo(_SALON_TIMEZONE)).strftime("%H:%M")
     assert all(
         row["time"] > salon_now
-        for row in find_slots(customer, date=current_date, service="haircut")["slots"]
+        for row in _find_slots(customer, date=current_date, service="haircut")["slots"]
     )
     assert _slot_parts(f"{current_date}|haircut|00:00") is None
 
     assert (
-        save_booking(customer, "move", confirmed=True, booking_id=booked["booking_id"])["status"]
+        _save_booking(customer, "move", confirmed=True, booking_id=booked["booking_id"])["status"]
         == "invalid"
     )
     assert (
-        save_booking(
+        _save_booking(
             "555 000 0000", "move", confirmed=True, booking_id=booked["booking_id"],
             slot_id=second_slot,
         )["status"]
         == "not_found"
     )
-    moved = save_booking(
+    moved = _save_booking(
         customer, "move", confirmed=True, booking_id=booked["booking_id"], slot_id=second_slot
     )
     assert moved["status"] == "moved" and moved["appointment"]["action"] == "move"
-    assert find_slots(customer)["bookings"][0]["date"] == second_date
+    assert _find_slots(customer)["bookings"][0]["date"] == second_date
 
     assert (
-        save_booking(customer, "cancel", confirmed=True, booking_id="bkg_missing")["status"]
+        _save_booking(customer, "cancel", confirmed=True, booking_id="bkg_missing")["status"]
         == "not_found"
     )
-    cancelled = save_booking(
+    cancelled = _save_booking(
         customer, "cancel", confirmed=True, booking_id=booked["booking_id"]
     )
     assert cancelled["status"] == "cancelled" and cancelled["appointment"]["action"] == "cancel"
-    assert find_slots(customer)["bookings"] == []
-    repeat = save_booking(customer, "cancel", confirmed=True, booking_id=booked["booking_id"])
+    assert _find_slots(customer)["bookings"] == []
+    repeat = _save_booking(customer, "cancel", confirmed=True, booking_id=booked["booking_id"])
     assert repeat["status"] == "not_found" and "already cancelled" in repeat["summary"]
 
-    assert record_complaint(customer, "   ")["status"] == "invalid"
-    assert record_complaint("555 000 0000", "Uneven cut.")["status"] == "customer_not_found"
-    complaint = record_complaint(customer, "My cut  was   uneven.", "A redo")
+    assert _record_complaint(customer, "   ")["status"] == "invalid"
+    assert _record_complaint("555 000 0000", "Uneven cut.")["status"] == "customer_not_found"
+    complaint = _record_complaint(customer, "My cut  was   uneven.", "A redo")
     assert complaint["complaint"] == {
         "complaint_id": complaint["complaint_id"],
         "summary": "My cut was uneven.",
         "requested_resolution": "A redo",
     }, complaint
-    assert "complaint" not in record_complaint(customer, "   ")
+    assert "complaint" not in _record_complaint(customer, "   ")
     assert _state.complaints[complaint["complaint_id"]]["customer_phone"] == "15550101010"
 
-    reshaped = find_slots("+1 (555) 010-1010")["bookings"]
-    assert reshaped == find_slots(customer)["bookings"]
+    reshaped = _find_slots("+1 (555) 010-1010")["bookings"]
+    assert reshaped == _find_slots(customer)["bookings"]
 
     print("salon in-memory check passed")
 

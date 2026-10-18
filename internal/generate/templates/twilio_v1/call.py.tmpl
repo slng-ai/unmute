@@ -558,6 +558,8 @@ class Call:
             self.event("tool_failed", tool=tool.name, error=type(future.exception()).__name__)
             return {"error": "tool_failed", "detail": "the action raised an error"}
         result = future.result()
+        if isinstance(result, BaseModel):
+            result = result.model_dump(mode="json")  # a typed handler's result, as JSON
         try:
             if tool.result is not None:
                 tool.result.model_validate(result)

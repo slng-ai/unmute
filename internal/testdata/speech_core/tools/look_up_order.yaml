@@ -1,0 +1,40 @@
+description: Look up an order by the number the caller reads out.
+
+webhook:
+  url_env: ORDERS_API_URL
+  path: /orders
+  auth:
+    type: bearer
+    token_env: ORDERS_API_TOKEN
+
+input:
+  type: object
+  properties:
+    order_id:
+      type: string
+      description: The order number, as the caller read it out.
+  required:
+    - order_id
+
+inject:
+  - call: "{{call.session_id}}"
+
+output:
+  type: object
+  properties:
+    status:
+      type: string
+      enum:
+        - shipped
+        - processing
+        - not_found
+    eta:
+      type: string
+      description: When it arrives, in words, when it has shipped.
+  required:
+    - status
+
+assign:
+  - order_status: result.status
+
+announce: Let me look that up.

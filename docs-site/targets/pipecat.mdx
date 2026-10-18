@@ -17,32 +17,27 @@ unmute compile my-agent --target pipecat
 
 ```text
 my-agent/build/pipecat/
-├── bot.py                # the entry point
-├── call.py               # one session: pipeline, turn detection, events
-├── agents.py             # the agents, their tools and task steps
-├── session.py            # prefetch, call start and prompt rendering
-├── call_state.py         # CallState: the one way a value is saved, and each step's result
+├── bot.py                # the entry point: the pipeline and its events
+├── spec.py               # builds the agent from agent.json
+├── agent.json            # what agent.yaml declares, in unmute-core's names
+├── speech.py             # the speech and model bindings
 ├── state.py              # your State class, copied as you wrote it
-├── settings.py           # every fixed value: names, timeouts, required variables
-├── prompts/              # one Markdown file per agent, tasks in prompts/tasks/
-├── utils/                # helpers, only the ones this package needs
-│   ├── dev_metrics.py    # per-turn latency for `unmute dev`, inert elsewhere
-│   ├── tracing.py        # present when the package sets tracing
-│   └── knowledge.py      # present when the package sets knowledge
 ├── tools/                # your local handlers, copied
-│   ├── __init__.py
 │   └── <name>.py         # one per local tool
 ├── knowledge/            # present when the package sets knowledge
 │   └── <name>/           # one directory per knowledge source, its documents copied in
-├── pyproject.toml        # pinned dependencies
+├── pyproject.toml        # pinned dependencies, including unmute-core
+├── .python-version       # 3.12
 ├── Dockerfile
 ├── .dockerignore
-├── compose.dev.yaml      # an optional container run; `unmute dev` uses local uv
-├── pcc-deploy.toml       # Pipecat Cloud deploy manifest
+├── compose.dev.yaml      # what `unmute dev` runs
 ├── .env.example          # exactly the variables you supply
-├── README.md             # the runbook for this build
 └── compile-report.json   # what the compiler decided
 ```
+
+`state.py` is present when the package has a `State` class. Unmute does not
+write a Pipecat Cloud deploy manifest yet. See [Deploy to Pipecat
+Cloud](/deploy/pipecat-cloud).
 
 ## Target fields
 
@@ -96,20 +91,19 @@ instance name, used by `--target` and the `build/<name>/` output folder.
 
 ## The modules
 
-`bot.py` is the entry point. It loads `.env`, checks the required variables,
-and defines `bot()`, which Pipecat Cloud calls. `call.py` builds one session:
-the pipeline, turn detection, and the greeting. `agents.py` holds the agents,
-their tools, and the task steps. `state.py` is your own `State` class, copied as you wrote it, and present when
-the package has one. `call_state.py` holds `CallState`, a subclass of `State`
-that is the call's saved values, with the one way a value is saved, the
-confirmation marks and the rendering, and one result model per task step.
-`session.py` holds prefetch and call start. `settings.py` holds every fixed value.
+The project imports the [`unmute-core`](/core/start/unmute-and-core) library from PyPI
+(`unmute-core[pipecat]`). The library holds the call logic: state, tasks, tools,
+telemetry and the model call. The files here only wire it to Pipecat.
 
-Each prompt is a Markdown file in `prompts/`, with task prompts in
-`prompts/tasks/`. The file holds the prompt text exactly. Placeholders are
-filled at run time.
+`bot.py` is the entry point. It builds the pipeline and runs one call.
+`spec.py` reads `agent.json` and builds the objects the library runs: the
+tools, each agent's tasks, the prefetch and the greeting. It checks every name
+and path at import, so a broken package fails at start and never during a call.
+`speech.py` holds the speech and model bindings. `state.py` is your own `State`
+class, copied as you wrote it, and present when the package has one.
 
-The project imports Pipecat and your handlers, and nothing from Unmute.
+Prompts live in `agent.json`. Edit `agent.yaml` and compile again rather than
+these files.
 
 The generated startup check names missing required environment variables.
 See the build's `.env.example` and [credentials reference](/reference/secrets).
@@ -126,10 +120,7 @@ cp .env.example .env                      # then fill in your keys
 uv run bot.py -t webrtc                   # web: open the URL it prints
 ```
 
-`uv` installs the pinned dependencies on the first run. It copies them into
-`.venv` instead of hard-linking them out of its cache, because the generated
-`pyproject.toml` sets `link-mode = "copy"`. On Linux, NLTK refuses a hard-linked
-file, and a knowledge base reads its stopword list through NLTK at startup.
+`uv` installs the pinned dependencies on the first run.
 
 ## Dependencies are pinned
 
@@ -151,7 +142,7 @@ and runbook through the platform's secret store.
 
 A package named `my-agent` with target `pipecat` deploys as `my-agent-pipecat`.
 This is the package's [`name:`](/reference/agent-yaml#name) joined to its target,
-and it is `agent_name` in `pcc-deploy.toml`. The secret set uses the same name.
+and it is the agent name you give `pipecat cloud deploy`. Use the same name for the secret set.
 
 A rename creates another agent and leaves the old one running. Follow
 [Renaming the agent](/deploy/pipecat-cloud#renaming-the-agent) to move traffic

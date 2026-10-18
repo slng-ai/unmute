@@ -68,7 +68,7 @@ class Tool:
 
 HANDLERS: dict[str, Any] = {
 {{- range .LocalTools}}
-    {{pyq .Name}}: tools.{{.Name}}.{{.Name}},
+    {{pyq .Name}}: tools.{{.Name}}.{{.Function}},
 {{- end}}
 }
 

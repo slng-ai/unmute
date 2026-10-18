@@ -1,0 +1,15 @@
+{
+  "source": "internal/stateschema/testdata/models/scaffold_empty.py",
+  "digest": "07a3fb4a3d57753be015926760b5d07aaf6c9906b48c42950dc344878c3d3f84",
+  "report": {
+    "schema": {
+      "description": "What one call knows, shared by every agent and task in it.",
+      "properties": {},
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}

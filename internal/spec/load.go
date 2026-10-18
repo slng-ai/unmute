@@ -29,6 +29,7 @@ func Load(dir string) (*Package, error) {
 		Connections:    make(map[string]Connection),
 		Markdown:       make(map[string]string),
 		Handlers:       make(map[string]string),
+		Samples:        make(map[string][]byte),
 		Documents:      make(map[string][]byte),
 		Mirrors:        make(map[string]Mirror),
 		MirrorBytes:    make(map[string][]byte),
@@ -81,6 +82,12 @@ func Load(dir string) (*Package, error) {
 				return nil, err
 			}
 			pkg.Handlers[handler] = string(content)
+			sample := filepath.Join("tools", name+".sample.json")
+			if content, err := readWithin(root, sample); err == nil {
+				pkg.Samples[name] = content
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return nil, err
+			}
 			// A precheck is Python beside the handler and travels the same way.
 			if precheck, _ := SplitHandler(tool.Precheck); precheck != "" {
 				content, err := readWithin(root, precheck)

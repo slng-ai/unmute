@@ -39,9 +39,10 @@ from livekit.agents import (
 from livekit.agents.beta.tools import EndCallTool
 from livekit.agents.voice import room_io
 from livekit.agents.voice.agent_session import SessionConnectOptions
-from livekit.plugins import google, silero, slng
+from livekit.plugins import google, openai, silero, slng
 from unmute_core.call import CallStartError
 from unmute_core.livekit import (
+    DevObserver,
     ModelCallLLM,
     SipLine,
     UnmuteAgent,
@@ -53,18 +54,20 @@ from unmute_core.livekit import (
     sip_call_info,
     yield_to_caller,
 )
+from unmute_core.dev import DevRecorder, metrics_enabled
 from unmute_core.settings import env_value
-from unmute_core.slng import tracking_ids
+from unmute_core.slng import TrackingIds, tracking_ids
 from unmute_core.state import CallState, call_phone_region, use_phone_region
 from unmute_core.telemetry import Langfuse, Telemetry
 from unmute_core.turn import turn_window
 
 import spec
+import speech
 
 load_dotenv()
 logger = logging.getLogger("agent")
 MODELS: dict[str, Any] = spec.SPEC["models"]
-WINDOW = turn_window(MODELS["turn"].get("pace", "balanced"), "livekit")
+WINDOW = turn_window((MODELS["turn"] or {}).get("pace", "balanced"), "livekit")
 
 
 def required(name: str) -> str:
@@ -110,14 +113,19 @@ class VertexLLM(google.LLM):
         self._client = vertex_client(api_key, location)
 
 
-def build_llm(binding: dict[str, Any], state: CallState) -> google.LLM | ModelCallLLM:
-    """Return the model a think binding names: the SLNG Context Router, or Gemini.
+def build_llm(
+    binding: dict[str, Any], state: CallState
+) -> google.LLM | openai.LLM | ModelCallLLM:
+    """Return the model a think binding names: the SLNG Context Router, OpenAI or Gemini.
 
-    Gemini runs on Vertex when the binding says so.
+    Gemini runs on Vertex when the binding says so. A binding's params, like
+    ``reasoning_effort``, go to the plugin as they are.
     """
     if binding["provider"] == "slng":
         return ModelCallLLM(spec.router(binding, state.call), state=state)
     params = dict(binding.get("params", {}))
+    if binding["provider"] == "openai":
+        return openai.LLM(api_key=required("OPENAI_API_KEY"), model=binding["model"], **params)
     key = required("GOOGLE_API_KEY")
     if params.pop("vertexai", False):
         location = params.pop("location", "global")
@@ -130,6 +138,36 @@ def slng_host(binding: dict[str, Any]) -> str:
     return f"{binding.get('params', {}).get('world_part', 'eu-north')}.api.slng.ai"
 
 
+def build_stt(ids: TrackingIds) -> Any:
+    """Return the speech-to-text model: SLNG's with the call's tracking ids, else speech.py's."""
+    if speech.LISTEN is not None:
+        return speech.LISTEN()
+    listen = MODELS["listen"]
+    return slng.STT(
+        api_key=required("SLNG_API_KEY"),
+        slng_base_url=slng_host(listen),
+        model=listen["model"],
+        language=listen.get("language", "en"),
+        **ids,
+    )
+
+
+def build_tts(name: str, ids: TrackingIds) -> Any:
+    """Return one voice: SLNG's with the call's tracking ids, else speech.py's."""
+    if (make := speech.SPEAK.get(name)) is not None:
+        return make()
+    voice = MODELS["speak"][name]
+    return slng.TTS(
+        api_key=required("SLNG_API_KEY"),
+        slng_base_url=slng_host(voice),
+        model=voice["model"],
+        voice=voice.get("voice", ""),
+        language=voice.get("language", "en"),
+        warm_standby_enabled=True,
+        **ids,
+    )
+
+
 def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession:
     """Return the call's session: the speech and the model agent.yaml names, at its pace.
 
@@ -138,29 +176,18 @@ def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession
     question answer it.
     """
     entry = spec.SPEC["agents"][first]
-    listen, voice = MODELS["listen"], MODELS["speak"][entry["voice"]]
-    key = required("SLNG_API_KEY")
+    if realtime := entry.get("realtime"):
+        # One model listens, thinks and speaks: no speech-to-text, no voice.
+        session = AgentSession(llm=speech.REALTIME[realtime](), vad=vad, user_away_timeout=None)
+        yield_to_caller(session)
+        return session
     ids = tracking_ids(state.call)
-    stt = slng.STT(
-        api_key=key,
-        slng_base_url=slng_host(listen),
-        model=listen["model"],
-        language=listen.get("language", "en"),
-        **ids,
-    )
+    stt = build_stt(ids)
     session = AgentSession(
         conn_options=SessionConnectOptions(llm_conn_options=APIConnectOptions(max_retry=1)),
         stt=stt,
         llm=build_llm(MODELS["think"][entry["model"]], state),
-        tts=slng.TTS(
-            api_key=key,
-            slng_base_url=slng_host(voice),
-            model=voice["model"],
-            voice=voice.get("voice", ""),
-            language=voice.get("language", "en"),
-            warm_standby_enabled=True,
-            **ids,
-        ),
+        tts=build_tts(entry["voice"], ids),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),
             endpointing=endpointing(WINDOW),
@@ -169,7 +196,8 @@ def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession
         vad=vad,
         user_away_timeout=None,
     )
-    stt.attach_to_session(session)
+    if isinstance(stt, slng.STT):
+        stt.attach_to_session(session)
     yield_to_caller(session)
     return session
 
@@ -259,6 +287,10 @@ async def entrypoint(ctx: JobContext) -> None:
         )
     first = spec.entry(state)
     session = build_session(state, ctx.proc.userdata["vad"], first)
+    if metrics_enabled():
+        recorder = DevRecorder(ctx.room.name, target="livekit")
+        recorder.watch_state(state)
+        DevObserver(recorder, controls=list(spec.SPEC["transfers"])).attach(session)
     if spec.IDLE is not None:
         idle_nudges(session, spec.IDLE)
     with use_phone_region(lambda: call_phone_region(state.call)):

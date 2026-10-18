@@ -1,0 +1,65 @@
+{
+  "digest": "d2f00cae9e3405bf01413d81b0b3ccb8b35686c36a2743fe536095ca57ead2ba",
+  "report": {
+    "tools": {
+      "opening_hours": {
+        "description": "Return the front desk's opening hours for one day of the week. Read-only.",
+        "input": {
+          "properties": {
+            "day": {
+              "description": "The day of the week the caller asked about.",
+              "enum": [
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+                "sunday"
+              ],
+              "title": "Day",
+              "type": "string"
+            }
+          },
+          "required": [
+            "day"
+          ],
+          "title": "opening_hours_arguments",
+          "type": "object"
+        },
+        "output": {
+          "description": "One day's opening hours.",
+          "properties": {
+            "day": {
+              "title": "Day",
+              "type": "string"
+            },
+            "open": {
+              "title": "Open",
+              "type": "boolean"
+            },
+            "opens": {
+              "description": "Opening time as HH:MM, empty when closed.",
+              "title": "Opens",
+              "type": "string"
+            },
+            "closes": {
+              "description": "Closing time as HH:MM, empty when closed.",
+              "title": "Closes",
+              "type": "string"
+            }
+          },
+          "required": [
+            "day",
+            "open",
+            "opens",
+            "closes"
+          ],
+          "title": "Hours",
+          "type": "object"
+        }
+      }
+    }
+  },
+  "source": "internal/voice-agents-tests/relay-desk"
+}

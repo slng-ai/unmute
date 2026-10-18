@@ -3,6 +3,7 @@ package generate
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -114,8 +115,11 @@ func coreTools(agent *ir.Agent) ([]any, error) {
 			})
 			continue
 		}
-		if tool.Execution != ir.ToolLocal {
-			return nil, fmt.Errorf("tool %q: version 2 compiles local tools only so far, and this one is %s", name, tool.Execution)
+		if tool.Execution != ir.ToolLocal && tool.Execution != ir.ToolWebhook {
+			return nil, fmt.Errorf("tool %q: version 2 compiles local and webhook tools only so far, and this one is %s", name, tool.Execution)
+		}
+		if tool.Execution == ir.ToolWebhook && (len(tool.Replies) > 0 || tool.Precheck != "") {
+			return nil, fmt.Errorf("tool %q: replies and precheck run on a local tool only; unmute-core's webhook tool takes neither", name)
 		}
 		options := map[string]any{"name": name}
 		putString(options, "description", tool.Description)
@@ -153,7 +157,13 @@ func coreTools(agent *ir.Agent) ([]any, error) {
 		if len(replies) > 0 {
 			options["replies"] = replies
 		}
-		built := map[string]any{"handler": tool.Handler + ":" + tool.HandlerFunction, "options": options}
+		built := map[string]any{"options": options}
+		if tool.Execution == ir.ToolWebhook {
+			built["webhook"] = coreWebhook(tool)
+			built["input"], built["output"] = tool.Input, tool.Output
+		} else {
+			built["handler"] = tool.Handler + ":" + tool.HandlerFunction
+		}
 		putString(built, "precheck", tool.Precheck)
 		if len(tool.Assign) > 0 {
 			built["assign"] = coreAssigns(tool.Assign)
@@ -239,6 +249,7 @@ func coreAgent(agent *ir.Agent, name string) (map[string]any, error) {
 		own = []string{}
 	}
 	out := map[string]any{"instructions": def.Instructions, "tools": own, "model": def.Model, "voice": def.Voice}
+	putString(out, "realtime", cmp.Or(def.Realtime, def.Live))
 	if len(handoffs) > 0 {
 		out["handoffs"] = handoffs
 	}
@@ -622,7 +633,7 @@ func coreModels(resolved ir.Target) (map[string]any, error) {
 	think := map[string]any{}
 	for name, binding := range models.Reason {
 		switch {
-		case binding.Provider == "google":
+		case binding.Provider == "google", binding.Provider == "openai":
 			think[name] = binding
 		case binding.Router():
 			router, err := coreRouter(binding)
@@ -631,21 +642,21 @@ func coreModels(resolved ir.Target) (map[string]any, error) {
 			}
 			think[name] = router
 		default:
-			return nil, fmt.Errorf("think %q: version 2 compiles a google model or the slng router only so far, and this one is %s", name, binding.Provider)
+			return nil, fmt.Errorf("think %q: version 2 compiles a google or openai model, or the slng router, only so far, and this one is %s", name, binding.Provider)
 		}
 	}
-	for name, binding := range models.Speak {
-		if binding.Provider != "slng" {
-			return nil, fmt.Errorf("speak %q: version 2 compiles slng speech only so far, and this one is %s", name, binding.Provider)
-		}
+	// A live model runs where a realtime one does: one model listens, thinks and
+	// speaks. Its backend is an argument of its constructor, in speech.py.
+	realtime := map[string]ir.Binding{}
+	maps.Copy(realtime, models.Realtime)
+	maps.Copy(realtime, models.Live)
+	if models.Listen == nil && len(realtime) == 0 {
+		return nil, fmt.Errorf("listen: version 2 needs a speech-to-text model")
 	}
-	if models.Listen == nil || models.Listen.Provider != "slng" {
-		return nil, fmt.Errorf("listen: version 2 compiles slng speech to text only so far")
-	}
-	if models.Turn == nil {
+	if models.Turn == nil && len(realtime) == 0 {
 		return nil, fmt.Errorf("turn: version 2 needs a turn model")
 	}
-	return map[string]any{"think": think, "speak": models.Speak, "listen": models.Listen, "turn": models.Turn}, nil
+	return map[string]any{"think": think, "speak": models.Speak, "listen": models.Listen, "turn": models.Turn, "realtime": realtime}, nil
 }
 
 // coreRouter lowers a SLNG Context Router think binding to what spec.py builds
@@ -742,4 +753,17 @@ func coreTransfers(agent *ir.Agent, resolved ir.Target) (map[string]any, error) 
 		out[name] = built
 	}
 	return out, nil
+}
+
+// coreWebhook lowers a webhook tool's endpoint: the variable that holds its
+// base URL, the path after it with its placeholders in the library's spelling,
+// and its credential, by variable name only.
+func coreWebhook(tool ir.Tool) map[string]any {
+	hook := map[string]any{"url_env": tool.URLEnv, "path": stateLine(tool.Path)}
+	if auth := tool.Auth; auth != nil {
+		built := map[string]any{"kind": string(auth.Type), "token_env": auth.TokenEnv}
+		putString(built, "header", auth.Header)
+		hook["auth"] = built
+	}
+	return hook
 }

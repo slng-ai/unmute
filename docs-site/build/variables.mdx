@@ -429,22 +429,20 @@ Sometimes the tool needs a value the model does not need to read or type. Use
 `inject:` for that argument:
 
 ```yaml tools/check_slots.yaml
-input:
-  type: object
-  properties:
-    date:
-      type: string
-  required:
-    - date
 inject:
   - service: "{{state.requested_service}}"
 local:
-  handler: tools/check_slots.py
+  handler: tools/check_slots.py:check_slots
+```
+
+```python tools/check_slots.py
+def check_slots(date: str, service: str) -> Slots:
+    ...
 ```
 
 The model supplies `date`. The handler receives both `date` and the current
-`service`. Keep injected arguments out of `input.properties` and
-`input.required`.
+`service`. The handler's signature is the tool's input, so the model is asked
+only for the arguments that `inject:` does not name.
 
 If the value is missing or unconfirmed, the tool stops before it runs. The
 error names the task that supplies or confirms the value when one is declared,

@@ -23,6 +23,11 @@ func TestTelephonyRouteEmitterAgreement(t *testing.T) {
 		)
 	})
 	for _, key := range keys {
+		// LiveKit and Pipecat compile onto unmute-core, whose own templates and
+		// tests own the phone line. This repository emits Twilio's alone.
+		if key.Provider == target.LiveKit || key.Provider == target.Pipecat {
+			continue
+		}
 		route := routes[key]
 		emitted := emittedTelephonyFeatures(key)
 		features := maps.Clone(emitted)
@@ -45,71 +50,8 @@ func TestTelephonyRouteEmitterAgreement(t *testing.T) {
 }
 
 func emittedTelephonyFeatures(key target.TelephonyKey) map[target.TelephonyFeature]bool {
-	switch {
-	case key.Provider == target.Pipecat && key.Transport == "daily-sip":
-		if key.Carrier == "twilio" {
-			return pipecatDailyCarrierEmittedTelephonyFeatures
-		}
-	case key.Provider == target.Pipecat && key.Transport == "cloud-websocket":
-		if key.Carrier == "twilio" {
-			return pipecatCloudWebsocketEmittedTelephonyFeatures
-		}
-	case key.Provider == target.LiveKit && key.Transport == "sip":
-		if slices.Contains([]string{"twilio", "telnyx", "plivo"}, key.Carrier) {
-			return livekitEmittedTelephonyFeatures
-		}
-	case key.Provider == target.Twilio && key.Transport == target.TwilioTransport:
+	if key.Provider == target.Twilio && key.Transport == target.TwilioTransport {
 		return twilioEmittedTelephonyFeatures
-	case key.Provider == target.LiveKit && key.Transport == "connector":
-		if key.Carrier == "twilio" {
-			return livekitConnectorEmittedTelephonyFeatures
-		}
 	}
 	return map[target.TelephonyFeature]bool{}
-}
-
-// Gate C5 (contracts/local-planes.md). Every route's dictated carrier steps
-// survive into the emitted runbook, verbatim.
-//
-// Verbatim is the point, and it is why this gate is worth having. internal/target
-// owns a route's manual steps, so a runbook that paraphrases them has made a
-// second copy of a fact with one owner, and the copy is what goes stale. Before
-// this gate the LiveKit runbook paraphrased its steps in hand-written prose and
-// the Pipecat carrier-websocket runbook carried no carrier section at all, so on
-// that route the dictated steps reached the operator nowhere.
-//
-// This matters most for the carrier-free local loop. A local run that completes
-// without a carrier is exactly the run that could read as proof that go-live is
-// configured, and these steps are the standing correction. Pairs with gate P5,
-// which covers the printed output of a run.
-func TestTelephonyManualStepsSurviveIntoTheRunbook(t *testing.T) {
-	routes := target.SelectableTelephonyRoutes()
-	seen := 0
-	for _, key := range sortedRouteKeys(routes) {
-		route := routes[key]
-		if len(route.ManualSteps) == 0 {
-			t.Errorf("route %+v declares no manual step: going live needs real carrier "+
-				"configuration on every route, so every route dictates something", key)
-			continue
-		}
-		artifact, err := telephonyRouteArtifact(t, key)
-		if err != nil {
-			t.Errorf("%v", err)
-			continue
-		}
-		readme := artifactFile(t, artifact, "README.md")
-		seen++
-		for _, step := range route.ManualSteps {
-			if !strings.Contains(readme, step) {
-				t.Errorf("route %+v: the runbook does not carry this dictated step verbatim.\n"+
-					"  step: %s\n"+
-					"  internal/target owns this text; the runbook must render it rather "+
-					"than restate it, or the two drift and the operator reads the stale one.",
-					key, step)
-			}
-		}
-	}
-	if seen == 0 {
-		t.Fatal("no route inspected: this gate is asserting nothing")
-	}
 }

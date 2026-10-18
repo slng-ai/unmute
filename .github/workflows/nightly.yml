@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [kestrel, wasla, nosh, faro, parcel-desk, salon-concierge]
+        package: [kestrel, wasla, nosh, faro, parcel-desk, salon-concierge, customer-intake, salon-concierge-single-prompt, salon-concierge-unoptimized]
         framework: [livekit, pipecat]
     steps:
       - uses: actions/checkout@v4
@@ -39,3 +39,28 @@ jobs:
           # parcel-desk's router answers with OpenAI, and the salon's knowledge embeds with it.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           FARO_DB: ":memory:"
+
+  # Deploys internal/voice-agents-tests/slng-live to SLNG and holds each of its
+  # scenarios as a real web call (`make e2e-slng`). SLNG_API_KEY has to be a key
+  # of the organisation that holds the search_places tool, in VOICEAI_REGION.
+  slng:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install uv==0.11.16
+      - run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew install slng-ai/tap/voiceai
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+      - run: make e2e-slng
+        env:
+          SLNG_API_KEY: ${{ secrets.SLNG_API_KEY }}
+          VOICEAI_REGION: eu-north

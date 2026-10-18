@@ -10,29 +10,18 @@ description: >-
   List Sage and Stone slots for one service and date, and the caller's own
   bookings. Call this before offering a time and before changing a booking.
 
-input:
-  type: object
-  properties:
-    service:
-      type: string
-      enum:
-        - haircut
-        - hair-color
-        - blowout
-    date:
-      type: string
-      description: Preferred date in YYYY-MM-DD form
-
 local:
-  handler: tools/find_slots.py
+  handler: tools/salon.py:find_slots
 ```
 
-The top is the contract. `description` and `input` are everything the model
-knows about this tool, so write the description as an instruction rather than a
-label, and let the schema do real work. The `enum` above means the model cannot
-ask for a service the salon does not offer.
+The top is the contract. For a local tool, the typed signature of `find_slots` in
+`tools/salon.py` is the input, and its Pydantic return model is the output, so the
+file has no `input:` or `output:`. A webhook tool writes both as JSON Schema. Write
+the description as an instruction rather than a label, and let the types do real
+work: a `Literal["haircut", "hair-color", "blowout"]` on `service` means the model
+cannot ask for a service the salon does not offer.
 
-The schema is the complete argument list. Keep workflow prerequisites in the
+The signature is the complete argument list. Keep workflow prerequisites in the
 agent or task prompt; do not make their names look like extra tool inputs in the
 description. Generated Pipecat direct tools return a corrective result when a
 provider adds an undeclared argument, or when a handler fails before returning,
@@ -60,8 +49,8 @@ also the list of what you could have written.
 | Field | Required | Legal on |
 |---|---|---|
 | `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
-| `input` | yes, except on `builtin:`, `mcp:` and `knowledge:` | everywhere else |
-| `output` | no | everywhere except `builtin:`, `mcp:` and `knowledge:`, but see below |
+| `input` | on `webhook:` only; a `local:` tool's handler signature is its input | `webhook:` and version 1 `local:` |
+| `output` | no | `webhook:` and version 1 `local:`, but see below. A version 2 `local:` return model is its output |
 | `inject` | no | `webhook:`, `local:` and `slng:`, and `builtin:` for a capability's own settings |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` and `knowledge:` |
@@ -118,7 +107,7 @@ Two names, and keeping them straight is what a coding agent gets wrong first:
    `tools:` list attaches and every local diagnostic uses. It does not have
    to match the hosted name: `tools/order_status.yaml` may hold
    `slng: check_order`, so the agent attaches `order_status` and deployment
-   resolves `check_order`. This creates no tool and renames nothing on the
+   resolves `check_order`. This renames nothing on the
    platform; use it when the user wants the file and the prompt to read
    naturally without matching the platform's own naming.
 2. **The `slng:` scalar is the hosted name**, checked against the
@@ -133,12 +122,11 @@ remains model-invoked either way, never automatic.
 
 **No hash, no mirror, and no `unmute pull` for a package that deploys to
 SLNG only.** Never write `slng: {}` and tell the user to run `unmute pull`:
-that was the old shape, superseded by naming the tool directly. If the
-user's package also compiles to `livekit` or `pipecat`, which build and run
-the tool themselves, run `unmute pull` once to fetch a real copy into the
-package (`tools/<name>.slng.json`, and for a code tool `tools/<name>.slng.py`,
-plus generated `tools/<name>.slng.meta.json` holding the pin), then commit
-what it writes.
+that was the old shape, superseded by naming the tool directly.
+
+**`slng:` compiles on the slng target only for now.** Version 2 livekit and
+pipecat refuse it. When the package also targets one of them, write the tool
+as a typed `local:` handler or a `webhook:` there instead.
 
 The `.slng.` files a pull writes are the platform's copy, mirrored, never
 authored. Never edit one: the change reaches nothing, and the next compile of
@@ -151,11 +139,10 @@ write it into a new tool file; write the scalar name instead.
 
 ### Why this block exists
 
-The SLNG platform owns a tool's code, version and gate pipeline. So on an slng
-target `local:` and `webhook:` are refused: unmute creates no tool there. A new
-code tool starts from a Python file with `voiceai tool create`, and a new
-request tool in the SLNG dashboard. `slng:` is how a package reaches one that is
-already there.
+On an slng target a typed `local:` tool works: `unmute deploy` publishes it to
+SLNG as a code tool (see the slng rules in [package.md](package.md)). A
+`webhook:` block is refused there. A new request tool starts in the SLNG
+dashboard, and `slng:` is how a package reaches it once it exists.
 
 ```sh
 voiceai tool create hosted/check_availability.py --description "..."   # Input, Output, handler
@@ -251,24 +238,14 @@ this is the answer. It produces no scores, so `min_score` is refused with it. Do
 not sell it on image size: the difference is small, because no mode installs a
 vector store.
 
-### Tell the user to bake the index into the image
+### The index is built at startup
 
-Every worker process embeds the corpus at startup otherwise, and that is paid again
-on every scale-up. One extra build flag removes it:
-
-```sh
-docker build --build-arg KNOWLEDGE_BAKE=1 \
-  --secret id=OPENAI_API_KEY,env=OPENAI_API_KEY .
-```
-
-Startup becomes a disk read, with the same answers. Use the credential the chosen
-embedding service needs, and the generated `README.md` prints the exact command. Both flags are required, and the credential must be a `--secret` rather
-than a `--build-arg` so it never lands in a layer.
-
-Mention it whenever a package declares `knowledge:` with a mode that embeds. It does
-not apply to `mode: keyword`, which embeds nothing, though baking still saves the
-splitting work. A lookup embeds the caller's question either way, so the run time
-still needs the credential in `secrets:`.
+The version 2 `Dockerfile` has no step that bakes the index into the image, so
+every worker process embeds the corpus at startup, and that is paid again on
+every scale-up. Say so when a package declares `knowledge:` with a mode that
+embeds. It does not apply to `mode: keyword`, which embeds nothing. A lookup
+embeds the caller's question either way, so the run time needs the credential in
+`secrets:`.
 
 ### A startup error that names neither uv nor knowledge
 
@@ -455,35 +432,32 @@ Say so and write a Python handler instead.
 
 ## Python tools
 
-Two files that go together: the tool file and the handler beside it.
+Two files that go together: the tool file and the typed handler it names. The
+handler's signature is the tool's input and its Pydantic return model is the
+output, so the tool file has no `input:` or `output:`. LiveKit and Pipecat compile
+`version: 2` only, and this is the version 2 form.
 
 ```yaml tools/cancel_appointment.yaml
 description: Cancel the appointment outright. Call it only when the customer says plainly that they want to cancel, never when they want a different time.
 
-input:
-  type: object
-  properties: {}
-
 inject:
   - customer_id: "{{state.customer_id}}"
 
-output:
-  type: object
-  properties:
-    cancelled:
-      type: boolean
-    customer_id:
-      type: string
-  required:
-    - cancelled
-    - customer_id
-
-local: {}
+local:
+  handler: tools/cancel_appointment.py:cancel_appointment
 ```
 
 ```python tools/cancel_appointment.py
-def cancel_appointment(customer_id):
-    return {"cancelled": True, "customer_id": customer_id}
+from pydantic import BaseModel
+
+
+class Cancellation(BaseModel):
+    cancelled: bool
+    customer_id: str
+
+
+def cancel_appointment(customer_id: str) -> Cancellation:
+    return Cancellation(cancelled=True, customer_id=customer_id)
 ```
 
 This is a self-contained fixture that runs without a booking API.
@@ -492,31 +466,28 @@ The rules the function follows:
 
 | Rule | Why |
 |---|---|
-| the function name matches the tool name | that is how the generated code finds it |
-| its parameters match the `input` properties plus the `inject` keys | the call is built from both |
-| it returns the value your description and prompt expect | the result goes back to the model; the code targets do not enforce `output`, SLNG turns it into a pydantic `Output` class and validates the return value against it |
-| it may be `async def` on the code targets | the generated code awaits an awaitable result; SLNG calls the handler synchronously and refuses an `async def`, and refuses any import of `requests`, `httpx`, `urllib`, `urllib3`, `aiohttp`, `http.client` or `socket`, because custom code there has no network |
-| it imports nothing from Unmute | the generated project does not depend on Unmute at run time |
+| every parameter has a type | the type becomes the model's input schema |
+| the return type is a Pydantic model | its fields are the tool's output, which `assign:`, `finish:` and `replies:` read |
+| a `Field(description=...)` on a parameter says what it means | the model reads that text |
+| a parameter named by `inject:` is not the model's | it takes its value from State, so the model never sees it |
+| it may be `async def`, except on slng | livekit and pipecat await an awaitable result, and SLNG calls a code tool synchronously |
 
-**An optional `input` property is always passed, as an empty string.** The
-generated call is by keyword every time, so a Python default in your handler is
-dead code: it receives `""`, not `None` and not your default. Write
-`def check(date, part_of_day="")` and treat `""` as "not given". A handler that
-tests `if part_of_day is None:` compiles clean and misbehaves on the first call,
-and neither `validate` nor `compile` will say a word about it.
+`handler:` is written `file.py:function`. The function name need not match the
+tool name, and one file can hold many tools. SLNG refuses a version 1
+handler, so write the typed function and a `tools/<name>.sample.json` beside it.
+Twilio runs the typed handlers too.
 
 A handler reaches a credential through `os.environ`, and the variable name goes
 in `secrets:` like any other. Literal lookups are also inferred for generated
 environment instructions and startup checks.
 
-`unmute compile` copies the file into the generated project and imports it as a
-plain module.
-
-The `local.handler` field is optional. When it is absent, Unmute uses
-`tools/<tool-name>.py`, so the example above resolves to
-`tools/cancel_appointment.py`.
+`unmute compile` copies the file into the generated project.
 
 ## MCP servers
+
+**`mcp:` compiles on the slng target only for now.** Version 2 livekit and
+pipecat refuse it. The `url_env`, `transport` and `auth` fields below belonged
+to the version 1 livekit and pipecat output.
 
 One block, and nothing else in the file.
 
@@ -554,17 +525,6 @@ inferred. Any other value is refused with both legal ones named.
 Listing specific `tools:` is usually right. A whole server dropped into an
 agent's tool list is a large, unreviewed surface, and the model will use all of
 it.
-
-MCP sources are required at runtime. Pipecat connects them during bot setup;
-LiveKit probes every source before `AgentSession.start`, always attempts to close
-every created probe, and mounts a fresh client on the agent or task. A connection
-or tool-list error stops the session before it greets the caller on either
-target. A LiveKit probe close error also stops startup. Pipecat cleanup errors
-surface during teardown after every close has been attempted.
-
-With Langfuse tracing enabled, Pipecat MCP calls emit finite spans named after the tool, with its arguments and, when completed, the result.
-With Coval tracing enabled, the same calls emit `llm_tool_call` spans carrying `function.name`, `tool_call_id`, `function.arguments`, the bounded result as `tool.result`, `tool.latency_ms`, and a numeric `tool.error`, with an error status when the tool failed.
-Pipecat refuses to start when an agent tool, task function, or MCP source on the same agent exposes the same name.
 
 ## Prebuilt tools
 

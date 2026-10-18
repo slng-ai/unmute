@@ -1,0 +1,15 @@
+{
+  "source": "examples/pharmacy-refills/state.py",
+  "digest": "13b78a9eb8329f26040a879e96343fccacd983bc276d386be77d744c235cede5",
+  "report": {
+    "schema": {
+      "description": "One call. It holds no values.",
+      "properties": {},
+      "title": "State",
+      "type": "object"
+    },
+    "bad_defaults": [],
+    "aliased": [],
+    "frozen": []
+  }
+}
