@@ -294,17 +294,12 @@ unmute validate my-agent
 ```
 
 The scaffolded package validates clean. A warning, when you do get one, does
-not stop the command: it names a real difference worth reading. Then
-compile it:
+not stop the command: it names a real difference worth reading. Now talk to
+the agent in your browser:
 
 ```sh
-unmute compile my-agent
+unmute dev my-agent
 ```
-
-<Note>
-  `unmute dev` does not run a version 2 project yet, and says so. A package with a
-  `scenarios/` folder runs as whole calls with `make e2e PKG=<name> FW=<livekit|pipecat>`.
-</Note>
 
 ## Agent fields
 

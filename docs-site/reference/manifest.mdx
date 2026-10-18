@@ -104,10 +104,8 @@ An unfinished package fails these checks until its required settings are there.
 Fix the agent's choices when they violate a rule; do not remove the rule to
 make the check pass.
 
-A successful compile is not a runtime test. A `version: 2` package, which is the
-only version LiveKit and Pipecat compile, does not run under `unmute dev` yet. Run a
-package with a `scenarios/` folder as whole calls with
-`make e2e PKG=<name> FW=<livekit|pipecat>`. SLNG runs on its hosted platform and has no `unmute dev`;
+A successful compile is not a runtime test. Use the [browser loop](/dev/overview)
+for LiveKit or Pipecat. SLNG runs on its hosted platform and has no `unmute dev`;
 follow the [deployment workflow](/reference/cli/deploy). Twilio has no
 `unmute dev` either: its first real test is a phone call.
 

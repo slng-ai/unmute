@@ -69,11 +69,10 @@ Set `OPENAI_API_KEY` in your shell or the package's `.env`, then run:
 ```sh Terminal
 unmute validate voice-desk
 unmute compile voice-desk
+unmute dev voice-desk --target livekit
 ```
 
-<Note>
-  `unmute dev` does not run a version 2 project yet, and says so. Validate and compile here. A package with a `scenarios/` folder runs as whole calls with `make e2e PKG=<name> FW=<livekit|pipecat>`.
-</Note>
+Use Docker for this LiveKit run. The [Pipecat target](/targets/pipecat) is another option; it runs locally with `uv`.
 The example below stays with this same `desk` agent.
 
 ## Pros and cons
@@ -161,15 +160,15 @@ It has no separate `backend:` model.
 For document questions, add a [knowledge search tool](/build/tools/knowledge) in the same way.
 The [pharmacy example](https://github.com/slng-ai/unmute/tree/main/examples/pharmacy-refills) combines local tools, knowledge, and semantic turn detection.
 
-After each change, check the same desk:
+After each change, stop the old run and check the same desk:
 
 ```sh Terminal
 unmute validate voice-desk
-unmute compile voice-desk
+unmute dev voice-desk --target livekit
 ```
 
-Run the package as a whole call with `make e2e`. Ask a question that requires the tool. Pause in the middle of a sentence, then finish it.
-Check both the spoken reply and the tool row in the call record.
+Ask a question that requires the tool. Pause in the middle of a sentence, then finish it.
+Check both the spoken reply and the tool row in the dev page.
 
 ## Advanced
 

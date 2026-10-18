@@ -85,11 +85,10 @@ Set `OPENAI_API_KEY` and `SLNG_API_KEY` in your shell or the package's `.env`, t
 ```sh Terminal
 unmute validate voice-desk
 unmute compile voice-desk
+unmute dev voice-desk --target livekit
 ```
 
-<Note>
-  `unmute dev` does not run a version 2 project yet, and says so. Validate and compile here. A package with a `scenarios/` folder runs as whole calls with `make e2e PKG=<name> FW=<livekit|pipecat>`.
-</Note>
+Use Docker for this LiveKit run. The [Pipecat target](/targets/pipecat) is another option; it runs locally with `uv`.
 The example below stays with this same `desk` agent.
 
 ## Pros and cons

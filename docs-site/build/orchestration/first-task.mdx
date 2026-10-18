@@ -48,7 +48,7 @@ stop anywhere and come back.
 6. **Read it back** - a placeholder in the owner's prompt
 7. **Say what success looks like** - `finish:`, so the tool ends the step
 8. **Open with the question** - `announce:` and `opening: listen`
-9. **Run it** - run it as a whole call
+9. **Run it** - talk to it in the browser
 
 <Steps>
   <Step title="Start with no task">
@@ -455,22 +455,20 @@ stop anywhere and come back.
   </Step>
 
   <Step title="Run it">
-    `unmute dev` does not run a version 2 project yet, and says so. To run
-    this package, add a `scenarios/` folder with one scripted call and run it
-    as a whole call on the real model:
-
     ```sh
-    make e2e PKG=my-agent FW=livekit
+    unmute dev my-agent
     ```
 
-    Use `FW=pipecat` for Pipecat. Your keys from the quickstart are still in
-    `.env`. In the scenario, ask where the parcel is and read out one of the two
-    numbers in the handler, "A B one two three four five six".
+    Your keys from the quickstart are still in `.env`. When the browser opens,
+    ask where your parcel is and read out one of the two numbers in the
+    handler, "A B one two three four five six".
 
-    The call should enter the task, then call `look_up_parcel`, and then the
-    agent should answer. If the task never runs, the model went round it.
-    Check two things: that the agent does not hold the task's tool, and that
-    the `when:` line describes what the caller actually said.
+    Watch the dev page while you talk. The task shows up as its own row when
+    the model enters it, then `look_up_parcel` gets a row of its own, and then
+    the agent answers. If you never see the task's row, the model went round
+    it. Check two things: that the agent does not hold the task's tool, and
+    that the `when:` line describes what the caller actually said. [Running it
+    locally](/dev/overview) explains every row on that page.
   </Step>
 </Steps>
 

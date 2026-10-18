@@ -83,7 +83,7 @@ capacity:
   avg_session_duration: 5m
 ```
 
-That is the shape `unmute init <name>` scaffolds, with an empty `State` class in `state.py` beside it. `unmute dev` does not run a version 2 project yet. A package with a `scenarios/` folder runs as whole calls with `make e2e PKG=<name> FW=<livekit|pipecat>`.
+That is the shape `unmute init <name>` scaffolds, with an empty `State` class in `state.py` beside it, and it runs in a browser.
 
 ## Every top-level key
 

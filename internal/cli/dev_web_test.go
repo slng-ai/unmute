@@ -12,14 +12,17 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/slng-ai/unmute/internal/devmetrics"
+	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/stateschema"
+	"github.com/slng-ai/unmute/internal/target"
 	"github.com/slng-ai/unmute/internal/web"
 )
 
@@ -560,6 +563,43 @@ func TestDevSessionAnswersBeforeTheRuntimeExists(t *testing.T) {
 				t.Error("created a call identity before the runtime was ready")
 			}
 		})
+	}
+}
+
+// `unmute dev` mints a browser token whose dispatch entry names one agent, and
+// the emitted worker registers under another name entirely unless the two read
+// the same source.
+//
+// They did not. The token named the target instance and the worker registered
+// the package's deploy name, so the room opened, no worker joined it, and the
+// browser loop went silent with nothing logged as wrong. This holds the token's
+// name to the string the emitted agent.py actually registers.
+func TestDevDispatchNameMatchesTheEmittedWorker(t *testing.T) {
+	agent, targets, err := loadPackage(recordedCtx(t), filepath.Join("..", "testdata", "safe_core"), []string{"livekit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := targets[0]
+	artifact, err := generate.Generate(agent, resolved, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var compose string
+	for _, file := range artifact.Files {
+		if file.Path == "compose.dev.yaml" {
+			compose = string(file.Content)
+		}
+	}
+	if compose == "" {
+		t.Fatal("no compose.dev.yaml emitted")
+	}
+	dispatched := devDispatchName(agent, resolved)
+	// The core worker registers under LIVEKIT_AGENT_NAME, which the dev stack sets.
+	if !strings.Contains(compose, "LIVEKIT_AGENT_NAME="+dispatched+"\n") {
+		t.Errorf("dev dispatches to %q, which the dev stack does not name the worker", dispatched)
+	}
+	if dispatched == resolved.Name {
+		t.Fatal("this test needs the dispatch name to differ from the target name")
 	}
 }
 
