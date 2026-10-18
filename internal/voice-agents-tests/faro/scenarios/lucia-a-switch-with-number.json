@@ -1,0 +1,11 @@
+{
+  "name": "Lucía confirms her number and asks for English in the same turn",
+  "call_start": {"call": {"direction": "inbound", "calling_number": "+34600111222"}},
+  "greeting": ["A ver si lo tengo bien: ¿tu número es +34 600 111 222?"],
+  "turns": [
+    {"caller": "Uh, no, let's continue in English. That's perfect.", "expect": ["ordering at a café"]},
+    {"caller": "And yes, that's me.", "reject": ["Hola", "Seguimos", "Estabas"]},
+    {"caller": "Perdona, sigamos en español otra vez.", "expect": ["Responde en inglés"], "language": "es"}
+  ],
+  "state": {"explanation": "ES"}
+}
