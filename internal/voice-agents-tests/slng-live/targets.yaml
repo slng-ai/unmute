@@ -1,4 +1,9 @@
 # eu-west, where these three models run on a managed agent (see slng-tasks).
+
+channels:
+  - name: web
+    kind: realtime_audio
+
 targets:
   slng:
     provider: slng

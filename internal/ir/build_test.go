@@ -210,9 +210,10 @@ func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 func TestBuildClearsAutoWebhookWithoutInboundEndpoint(t *testing.T) {
 	pkg := loadSafeCore(t)
 	inbound, outbound := false, true
-	pkg.Agent.Channels["phone"] = packagespec.Channel{
+	setChannel(pkg, packagespec.Channel{
+		Name: "phone",
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound, OnVoicemail: "hangup",
-	}
+	})
 	routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 
 	agent, err := Build(pkg)
@@ -1191,10 +1192,11 @@ func loadSafeCore(t *testing.T) *packagespec.Package {
 
 func enableTelephony(pkg *packagespec.Package) {
 	inbound, outbound := true, false
-	pkg.Agent.Channels["phone"] = packagespec.Channel{
+	setChannel(pkg, packagespec.Channel{
+		Name: "phone",
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
 		RequiredControls: []string{"cold_transfer", "hangup"},
-	}
+	})
 }
 
 // TestBuildResolvesPipecatCloudWebsocketPlan walks every row of the route guard
@@ -1211,10 +1213,11 @@ func TestBuildResolvesPipecatCloudWebsocketPlan(t *testing.T) {
 		if transfer {
 			controls = append(controls, "cold_transfer")
 		}
-		pkg.Agent.Channels["phone"] = packagespec.Channel{
+		setChannel(pkg, packagespec.Channel{
+			Name: "phone",
 			Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
 			RequiredControls: controls,
-		}
+		})
 		if transfer {
 			addColdHumanTransfer(pkg)
 		}
@@ -1295,7 +1298,7 @@ func TestBuildResolvesPipecatCloudWebsocketPlan(t *testing.T) {
 	// transfer with it before nothing in the package uses the route (FR-016).
 	t.Run("a connection nothing uses is dead weight", func(t *testing.T) {
 		pkg := cloudWebsocket(t, true, false, false)
-		delete(pkg.Agent.Channels, "phone")
+		dropChannel(pkg, "phone")
 		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), "nothing in this package uses a phone route") {
 			t.Fatalf("got %v", err)
 		}
@@ -1753,5 +1756,62 @@ func TestOmittedHistoryMeansMessages(t *testing.T) {
 		if got := buildTaskContext(packagespec.TaskContext{History: string(history)}).History; got != history {
 			t.Errorf("%q became %q", history, got)
 		}
+	}
+}
+
+// channelNamed returns the targets.yaml channel with this name, so a test
+// can change it in place.
+func channelNamed(t *testing.T, pkg *packagespec.Package, name string) *packagespec.Channel {
+	t.Helper()
+	for i := range pkg.Channels {
+		if pkg.Channels[i].Name == name {
+			return &pkg.Channels[i]
+		}
+	}
+	t.Fatalf("no channel named %q", name)
+	return nil
+}
+
+// setChannel replaces the channel of the same name, or adds it.
+func setChannel(pkg *packagespec.Package, channel packagespec.Channel) {
+	for i := range pkg.Channels {
+		if pkg.Channels[i].Name == channel.Name {
+			pkg.Channels[i] = channel
+			return
+		}
+	}
+	pkg.Channels = append(pkg.Channels, channel)
+}
+
+// dropChannel removes the channel with this name.
+func dropChannel(pkg *packagespec.Package, name string) {
+	pkg.Channels = slices.DeleteFunc(pkg.Channels, func(c packagespec.Channel) bool { return c.Name == name })
+}
+
+// channels: and capacity: moved to targets.yaml. A file still carrying them
+// in agent.yaml hears where to move them, and the list form is held: every
+// entry has a name, and no two share one.
+func TestBuildRefusesRuntimeKeysInTheWrongFileOrShape(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*packagespec.Package)
+		want string
+	}{
+		{"channels in agent.yaml", func(p *packagespec.Package) { p.Agent.Channels = map[string]any{} }, "channels: moved to targets.yaml"},
+		{"capacity in agent.yaml", func(p *packagespec.Package) { p.Agent.Capacity = map[string]any{} }, "capacity: moved to targets.yaml"},
+		{"a channel with no name", func(p *packagespec.Package) {
+			p.Channels = append(p.Channels, packagespec.Channel{Kind: "realtime_audio"})
+		}, "a channels entry has no name"},
+		{"two channels with one name", func(p *packagespec.Package) {
+			p.Channels = append(p.Channels, p.Channels[0])
+		}, "two channels entries are named"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			tc.edit(pkg)
+			if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Build() = %v, want it to say %q", err, tc.want)
+			}
+		})
 	}
 }

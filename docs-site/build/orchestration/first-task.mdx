@@ -537,9 +537,14 @@ conversation:
   greeting:
     speaks_first: agent
     text: "Hi there, I'm listening. What can I help you with?"
+```
+</Accordion>
 
+`channels:` and `capacity:` live in targets.yaml, above `targets:`.
+
+```yaml targets.yaml
 channels:
-  web:
+  - name: web
     kind: realtime_audio
 
 capacity:
@@ -547,7 +552,6 @@ capacity:
   max_sessions: 20
   avg_session_duration: 5m
 ```
-</Accordion>
 
 ## What you have now
 

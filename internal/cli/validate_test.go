@@ -153,8 +153,20 @@ func TestValidateOmitsPrerequisiteWithoutTheCapabilityThatNeedsIt(t *testing.T) 
 		}
 		trimmed = bytes.Replace(trimmed, []byte(block), nil, 1)
 	}
-	trimmed = bytes.Replace(trimmed, []byte("    outbound: true\n"), []byte("    outbound: false\n"), 1)
 	if err := os.WriteFile(path, trimmed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The phone channel lives in targets.yaml.
+	targets := filepath.Join(dir, "targets.yaml")
+	head, err := os.ReadFile(targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbound := bytes.Replace(head, []byte("    outbound: true\n"), []byte("    outbound: false\n"), 1)
+	if bytes.Equal(inbound, head) {
+		t.Fatal("targets.yaml no longer has an outbound channel for this test to turn off")
+	}
+	if err := os.WriteFile(targets, inbound, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// The carrier route remains inbound, but nothing in the package dials out.

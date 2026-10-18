@@ -1,6 +1,16 @@
 # Both code targets. The same package compiles to either one, which is the
 # promise architecture: live is here to keep, and the reason this fixture
 # declares two targets rather than one per fixture.
+
+channels:
+  - name: web
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m
+
 targets:
   pipecat:
     provider: pipecat

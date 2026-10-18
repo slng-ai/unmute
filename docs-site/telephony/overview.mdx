@@ -19,11 +19,11 @@ On this page:
 
 ## Declare a phone channel
 
-```yaml agent.yaml
+```yaml targets.yaml
 channels:
-  web:
+  - name: web
     kind: realtime_audio
-  phone:
+  - name: phone
     kind: telephony
     inbound: true
     outbound: true
@@ -75,7 +75,7 @@ Two rules arrive with that block, and validation enforces both:
   is `telephony`, because calls arrive in bursts and each one starts a session.
   Without it: `capacity.peak_starts_per_second must be positive for telephony`.
 
-```yaml agent.yaml
+```yaml targets.yaml
 capacity:
   peak_sessions: 5
   max_sessions: 10

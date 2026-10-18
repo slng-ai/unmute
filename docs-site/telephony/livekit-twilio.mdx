@@ -100,11 +100,11 @@ though the caller only ever rang in.
 Three files. The channel says the agent answers the phone, the connection says
 how the call arrives, and the target picks that connection.
 
-```yaml agent.yaml
+```yaml targets.yaml
 channels:
-  web:
+  - name: web
     kind: realtime_audio
-  phone:
+  - name: phone
     kind: telephony
     inbound: true
     outbound: false
@@ -114,7 +114,11 @@ capacity:
   max_sessions: 10
   peak_starts_per_second: 1
   avg_session_duration: 5m
+```
 
+The secrets stay in agent.yaml.
+
+```yaml agent.yaml
 secrets:
   - SIP_TRUNK_HOSTNAME
   - SIP_AUTH_USERNAME
@@ -123,7 +127,7 @@ secrets:
 ```
 
 A telephony channel makes `capacity.peak_starts_per_second` required, so add it
-in the same edit. [Phone calls](/telephony/overview#every-key-capacity-takes)
+in the same edit, beside the channels in targets.yaml. [Phone calls](/telephony/overview#every-key-capacity-takes)
 has the rest of the `capacity:` keys.
 
 ```yaml connections/twilio_sip.yaml

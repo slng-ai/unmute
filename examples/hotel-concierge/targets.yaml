@@ -1,3 +1,17 @@
+channels:
+  - name: web
+    kind: realtime_audio
+  - name: phone
+    kind: telephony
+    inbound: true
+    outbound: false
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  peak_starts_per_second: 0.5
+  avg_session_duration: 4m
+
 targets:
   slng:
     provider: slng

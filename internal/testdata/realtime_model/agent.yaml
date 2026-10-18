@@ -42,12 +42,3 @@ conversation:
   inactivity:
     nudge_after: 20s
     end_after: 60s
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 5
-  max_sessions: 10
-  avg_session_duration: 5m

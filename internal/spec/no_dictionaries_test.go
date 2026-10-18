@@ -80,7 +80,9 @@ func TestDictionaryDebtNeverGrows(t *testing.T) {
 	// ToolWebhook.Headers were already gone before that refactor; this allowlist
 	// had simply never been swept for them. The number this test pins is still
 	// the one reflection reports, not a hand count.
-	const settled = 19
+	// 18: AgentFile.Channels left when channels moved to targets.yaml as a
+	// list with name:.
+	const settled = 18
 	if len(dictionaryDebt) > settled {
 		t.Errorf("dictionaryDebt has %d entries, and it had %d when the rule was written. "+
 			"This section may shrink and never grow: write the new field as a list instead",
@@ -119,7 +121,6 @@ var dictionaryDebt = map[string]string{
 	"AgentFile.Handoffs":     "name-keyed catalog, same reason.",
 	"AgentFile.Escalations":  "name-keyed catalog, same reason.",
 	"AgentFile.TaskGroups":   "name-keyed catalog; an agent's task_groups: list points at a key.",
-	"AgentFile.Channels":     "kind-keyed. Migrate when a channel carries kind: as a field.",
 
 	"ModelSections.Think":  "name-keyed model catalog; listen:/turn: point at a key.",
 	"ModelSections.Speak":  "same.",

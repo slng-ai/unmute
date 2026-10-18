@@ -117,9 +117,9 @@ If you need warm transfer, use the [LiveKit SIP route](/transfers/livekit).
 
 The package declares both directions:
 
-```yaml agent.yaml
+```yaml targets.yaml
 channels:
-  phone:
+  - name: phone
     kind: telephony
     inbound: true
     outbound: true

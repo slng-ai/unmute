@@ -51,15 +51,3 @@ conversation:
   greeting:
     speaks_first: agent
     text: "Front desk on the Daily carrier line. How can I help?"
-
-channels:
-  phone:
-    kind: telephony
-    inbound: true
-    outbound: true
-
-capacity:
-  peak_sessions: 2
-  max_sessions: 4
-  peak_starts_per_second: 1
-  avg_session_duration: 3m

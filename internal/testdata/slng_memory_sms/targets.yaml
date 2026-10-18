@@ -1,3 +1,7 @@
+channels:
+  - name: web
+    kind: realtime_audio
+
 targets:
   slng:
     provider: slng

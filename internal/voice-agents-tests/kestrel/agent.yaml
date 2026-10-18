@@ -164,12 +164,3 @@ conversation:
     nudge_text: Are you still there? Take your time.
     end_text: I'll let you go for now. Call us back any time. Goodbye.
   max_duration: 15m
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 2
-  max_sessions: 5
-  avg_session_duration: 6m

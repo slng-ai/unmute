@@ -432,9 +432,8 @@ func TestValidateCodeTelephonyRequiresResolvedPlan(t *testing.T) {
 func TestValidateTelephonyProvisionalRouteIsUsableAndQuiet(t *testing.T) {
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
-	phone := pkg.Agent.Channels["phone"]
+	phone := channelNamed(t, pkg, "phone")
 	phone.RequiredControls = []string{"hangup"}
-	pkg.Agent.Channels["phone"] = phone
 	routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 	agent, err := Build(pkg)
 	if err != nil {
@@ -457,10 +456,9 @@ func TestValidateTelephonyProvisionalRouteIsUsableAndQuiet(t *testing.T) {
 func TestValidateOutboundWithoutVoicemailRaisesNoVoicemailError(t *testing.T) {
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
-	phone := pkg.Agent.Channels["phone"]
+	phone := channelNamed(t, pkg, "phone")
 	outbound := true
 	phone.Outbound = &outbound
-	pkg.Agent.Channels["phone"] = phone
 	routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 	agent, err := Build(pkg)
 	if err != nil {
@@ -478,11 +476,10 @@ func TestValidateOutboundWithoutVoicemailRaisesNoVoicemailError(t *testing.T) {
 func TestValidatePipecatOnVoicemailStillErrors(t *testing.T) {
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
-	phone := pkg.Agent.Channels["phone"]
+	phone := channelNamed(t, pkg, "phone")
 	outbound := true
 	phone.Outbound = &outbound
 	phone.OnVoicemail = "hangup"
-	pkg.Agent.Channels["phone"] = phone
 	routeTarget(pkg, "pipecat", "primary_phone", "cloud-websocket", "twilio")
 	agent, err := Build(pkg)
 	if err != nil {
@@ -1325,9 +1322,8 @@ func TestV12_WarmTransferRequiresOutboundDirection(t *testing.T) {
 		pkg := loadSafeCore(t)
 		addColdHumanTransfer(pkg)
 		enableTelephony(pkg)
-		phone := pkg.Agent.Channels["phone"]
+		phone := channelNamed(t, pkg, "phone")
 		phone.Outbound = &outbound
-		pkg.Agent.Channels["phone"] = phone
 		// The shipped cold transfer, made warm: same tool wiring, same
 		// destination, only the shape block differs.
 		human := pkg.Agent.Escalations["to_human"]
@@ -1380,9 +1376,8 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	addColdHumanTransfer(pkg)
 	enableTelephony(pkg)
 	outbound := true
-	phone := pkg.Agent.Channels["phone"]
+	phone := channelNamed(t, pkg, "phone")
 	phone.Outbound = &outbound
-	pkg.Agent.Channels["phone"] = phone
 	human = pkg.Agent.Escalations["to_human"]
 	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
 	pkg.Agent.Escalations["to_human"] = human
@@ -1404,9 +1399,8 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	human = pkg.Agent.Escalations["send_to_billing"]
 	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
 	pkg.Agent.Escalations["send_to_billing"] = human
-	phone = pkg.Agent.Channels["phone"]
+	phone = channelNamed(t, pkg, "phone")
 	phone.Outbound = &outbound
-	pkg.Agent.Channels["phone"] = phone
 	agent, err = Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -1482,9 +1476,8 @@ func TestValidatePipecatDailyColdTransferNeedsPhoneLeg(t *testing.T) {
 func TestValidatePipecatDailyColdTransferNeedsActivePhoneDirection(t *testing.T) {
 	pkg := dailyCarrierPackage(t)
 	disabled := false
-	phone := pkg.Agent.Channels["phone"]
+	phone := channelNamed(t, pkg, "phone")
 	phone.Inbound, phone.Outbound = &disabled, &disabled
-	pkg.Agent.Channels["phone"] = phone
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -1867,7 +1860,7 @@ func TestValidatePipecatCloudWebsocketRequiresHangupOnUnavailable(t *testing.T) 
 
 func TestValidatePipecatCloudWebsocketTransferNeedsPhoneSession(t *testing.T) {
 	pkg := cloudWebsocketPackage(t)
-	delete(pkg.Agent.Channels, "phone")
+	dropChannel(pkg, "phone")
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)

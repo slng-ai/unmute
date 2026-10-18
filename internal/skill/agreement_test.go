@@ -218,15 +218,17 @@ func TestPipecatCloudTransferFallbackDocsStayAligned(t *testing.T) {
 	}
 }
 
+// capacity lives in targets.yaml, so the guide that states its requirement is
+// the targets.yaml reference.
 func TestCapacityRequirementMatchesPublicGuide(t *testing.T) {
-	const row = "| `capacity` | for telephony or code targets | your traffic estimate |"
+	const sentence = "`capacity` is a top-level key of `targets.yaml`, required for telephony or code targets."
 	for name, content := range map[string]string{
-		"references/package.md":              bundleFile(t, "references/package.md"),
-		"docs-site/reference/agent-yaml.mdx": trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+		"references/package.md":                bundleFile(t, "references/package.md"),
+		"docs-site/reference/targets-yaml.mdx": trackedFile(t, "docs-site/reference/targets-yaml.mdx"),
 	} {
 		param := regexp.MustCompile(`(?s)<ParamField path="capacity"[^>]*>(.*?)</ParamField>`).FindStringSubmatch(content)
 		paramStatesRequirement := param != nil && strings.Contains(strings.Join(strings.Fields(param[1]), " "), "Required for code targets or telephony")
-		if !strings.Contains(content, row) && !paramStatesRequirement {
+		if !strings.Contains(strings.Join(strings.Fields(content), " "), sentence) && !paramStatesRequirement {
 			t.Errorf("%s does not state the code-target capacity requirement", name)
 		}
 	}

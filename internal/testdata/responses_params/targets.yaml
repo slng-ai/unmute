@@ -1,4 +1,14 @@
 # Both generated code targets use the same source prompt and model bindings.
+
+channels:
+  - name: web
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m
+
 targets:
   livekit:
     provider: livekit
