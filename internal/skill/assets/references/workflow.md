@@ -59,11 +59,11 @@ Never write the hash yourself, and never edit a `.slng.` file. An edit there
 reaches nothing, and the next compile refuses because the hash no longer
 matches. Write `slng: {}` and say to run `unmute pull`.
 
-**`local:` and `webhook:` are refused on an slng target.** unmute creates no
-tool on SLNG: the platform owns a tool's code, version and gate pipeline. A new
-code tool starts from a Python file with `voiceai tool create`, a new request
-tool in the SLNG dashboard, and the package references it by name. Both
-blocks still work exactly as before on livekit and pipecat.
+**`webhook:` is refused on an slng target, and `local:` needs a sample.** A typed
+`local:` tool works there: `unmute deploy` publishes it as a code tool, and it
+needs `tools/<name>.sample.json` beside the tool file. A request tool is created
+in the SLNG dashboard, and the package references it by name with `slng:`. Both
+blocks work as before on livekit and pipecat.
 
 `--agent` narrows which assistants to write for and takes `all`, `claude`,
 `codex`, `copilot`, or `cursor`. `--dir` installs somewhere other than the

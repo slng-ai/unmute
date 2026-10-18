@@ -13,11 +13,12 @@ instead of Python. This page describes those files and the target's settings.
 </Card>
 
 <Warning>
-  SLNG creates no tool from your package. A `local:` or `webhook:` block is
-  refused on this target: reference a tool your organisation already has with
-  [`slng:`](/build/tools/hosted) instead, or compile the package to pipecat or
-  livekit, where your own handler or endpoint runs. The rest of this page
-  describes the target in full, including the tool shapes.
+  A typed [`local:` tool](/build/tools/python#on-the-slng-target) works on this
+  target. `unmute deploy` publishes it to SLNG as a code tool. A `webhook:`
+  block is refused: create an API request tool in SLNG and reference it with
+  [`slng:`](/build/tools/hosted), or compile the package to pipecat or livekit,
+  where your own endpoint runs. The rest of this page describes the target in
+  full, including the tool shapes.
 </Warning>
 
 On this page:
@@ -57,14 +58,38 @@ unmute compile my-agent --target slng
 my-agent/build/slng/
 ├── agent.json                # the agent create body
 ├── README.md                 # the runbook: what to create, what to run, what to watch
-└── compile-report.json       # what was compiled, and which checks were left to deployment
+├── compile-report.json       # what was compiled, and which checks were left to deployment
+├── tools/<name>.json         # one per local tool: the SLNG code tool (tool_type "code", code_src)
+└── samples/<name>.json       # one per local tool: the arguments of its one sample run
 ```
 
-This target writes no `tools/` directory. Every tool reference in
-`agent.json`, whether a curated capability, a hosted tool, or an MCP server,
-resolves by name against your organisation, so there is never a body of your
-own to write beside it. A `slng:` reference needs no mirror to reach even
-this point: `agent.json` carries the name, and nothing else about the tool.
+The `tools/` and `samples/` folders exist only when the package has a `local:`
+tool. Every other tool reference in `agent.json`, whether a curated capability,
+a hosted tool, or an MCP server, resolves by name against your organisation.
+A `slng:` reference needs no mirror to reach even this point: `agent.json`
+carries the name, and nothing else about the tool.
+
+### A local tool on this target
+
+`unmute compile` wraps the typed handler (`handler: tools/<file>.py:<function>`)
+into one SLNG code tool file. The file holds the handler module, the package's
+`state.py` when the handler imports from it, and an adapter. The adapter defines
+`Input` from the function signature, `Output` from the return model, and
+`handler(input) -> Output`.
+
+Three rules apply to a local tool on this target:
+
+- Put a sample beside the tool file: `tools/<name>.sample.json`, one JSON object
+  of arguments. SLNG publishes a code tool only after one run, so a local tool
+  with no sample is refused.
+- Use a version 2 handler with a function name. A version 1 handler (a file with
+  no `:function`) is refused. An `async def` handler is refused too, because SLNG
+  calls a code tool synchronously.
+- Expect no internet. SLNG code has no network access. Exact dependency pins come
+  from the tool's `dependencies:`.
+
+`unmute deploy` publishes the tool for you. See [Deploy to SLNG](/deploy/slng) and
+the [deploy command](/reference/cli/deploy).
 
 Validation and compilation run offline. Follow the
 [deployment guide](/deploy/slng) to install `voiceai` and push the generated body.
@@ -191,8 +216,11 @@ Resolving those names is the push step's job. It is also why
 `voiceai agents create --file build/slng/agent.json` is the wrong command: that
 posts the body verbatim, names included, and the API refuses it.
 
-A `local:` or `webhook:` tool never reaches this step: the block is refused
-before compiling, for the reason at the top of this page.
+A `webhook:` tool never reaches this step: the block is refused before
+compiling, for the reason at the top of this page. A `local:` tool is published
+first. `unmute deploy` creates or updates it as a code tool, runs it once on its
+sample, and publishes it. Then this step attaches it by id and version like any
+other tool.
 
 An MCP reference resolves the same way, and it needs one thing agent.yaml has to
 say up front: which tools you want. Unmute compiles offline, so it cannot expand
@@ -290,7 +318,10 @@ None is dropped quietly.
 | Package feature | Why SLNG cannot take it |
 |---|---|
 | handoffs | the create body carries one agent |
-| a task's `think:`, `finish:`, `history: summary` or `include_tool_calls: false` | SLNG runs every task on the agent's one model, has no summary, and takes a tool's result shape from the tool it hosts, so a `finish:` rule has no `output:` to read |
+| a task's `think:`, `history: summary` or `include_tool_calls: false` | SLNG runs every task on the agent's one model and has no summary |
+| a second `finish:` rule in one task, or a `finish:` rule with `confirm:` | SLNG supports one finishing tool per task today and has no read-back |
+| a `finish:` rule on a tool with no known output | the rule needs the tool's output: use a typed local tool, or a hosted `slng:` tool with a mirror |
+| a `webhook:` tool | create an API request tool in SLNG and reference it with `slng:` |
 | a second `announce:` line, an optional `result.x?`, a group with `then: end` or `then: transfer` | SLNG speaks one line, saves every assigned value, and returns from a group to the agent |
 | a task that lists another task or a handoff in its `tools:` | a SLNG task cannot start another task |
 | a `turn:` section, `semantic_endpointing`, `endpointing_delay`, `pace` | SLNG owns its own turn taking |

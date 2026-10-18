@@ -4,6 +4,23 @@ Everything `unmute deploy` checks, every way it refuses, and the parts of a push
 no package can express. `SKILL.md` beside this file has the command loop and what
 a push replaces.
 
+## Code tools are published first
+
+Before it reads the account, `unmute deploy --target slng` publishes each
+`local:` tool as an SLNG code tool. It creates the tool (`voiceai tool create`),
+or updates it (`voiceai tool update`) when the code or description changed. It
+runs the tool once on `tools/<name>.sample.json`
+(`voiceai tool run --confirm-side-effects`) and publishes it
+(`voiceai tool publish`). A tool that is already current is left alone and
+printed as `code tool X is current (vN)`. Then it attaches the tool by id and
+version like any other tool. A name already held by a non-code tool is refused.
+This needs voiceai 0.1.23 or newer. With `--dry-run` it prints `would create
+code tool X, run its sample and publish it` (or `would update`) and stops that
+preview there, because the rest is checked against the published tool.
+
+A `local:` tool with no sample, a version 1 handler, or an `async def` handler
+is refused at validate.
+
 ## What is checked before anything is written
 
 `unmute deploy` asks the organisation what it already has, resolves each hosted
@@ -19,15 +36,15 @@ useful package and one that fails at the push:
 | Checked | Not checked |
 |---|---|
 | every `builtin:` tool, by the **tool file's own name** | a control, because the compiled body carries no reference to one |
-| every `slng:` reference, against the organisation's tools and the latest published version | a `local:` or `webhook:` tool: refused before this step is reached, because unmute creates no tool on this target at all |
+| every `slng:` reference, against the organisation's tools and the latest published version | a `webhook:` tool: refused before this step is reached. A `local:` tool is published first, in the code tool step below |
 | every `inject:` argument on a `slng:` reference, against that version's published parameters | |
 | every MCP server named by an `mcp:` tool, and every tool listed under `mcp.tools` | |
 | every vault secret and variable, including one a hosted tool or MCP server needs that nothing in the package declares | |
 | two tool files resolving to the same hosted tool, refused before anything is staged and naming both | |
 
 **Two severities for a hosted reference, and telling them apart matters.** A name
-the organisation does not have at all stops the run: unmute creates no tool, so
-there is nothing else to try. A committed mirror pinned to a version the
+the organisation does not have at all stops the run: a `slng:` reference never
+creates a tool, so there is nothing else to try. A committed mirror pinned to a version the
 organisation has since moved past only warns, because the agent calls the
 organisation's latest published version either way, checked fresh on every run;
 a package with no mirror has nothing to compare and gets no warning either way.
@@ -301,9 +318,10 @@ resolves it directly against the organisation. `unmute pull` matters only for a
 package that also targets `livekit` or `pipecat`, which build and run the tool
 themselves and so need a real copy of it; a slng-only package never runs it.
 
-Do not pass `--run-samples`. A sample proves a tool before the platform publishes
-it, and this push creates no tool: every tool the agent gets was published on
-SLNG before the package named it. To exercise a hosted tool by hand, write an
+Do not pass `--run-samples` for a `slng:` reference. A sample proves a tool before
+the platform publishes it, and a hosted tool was published on SLNG before the
+package named it. The package's own `local:` tools are the exception: deploy runs
+each one on its sample by itself. To exercise a hosted tool by hand, write an
 input JSON file matching its published parameters, then run
 `voiceai tool run <tool> --input samples/<tool>.json --confirm-side-effects`.
 

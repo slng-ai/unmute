@@ -236,11 +236,12 @@ not extra steps developers must add to the native deployment workflow.
 | Choose a valid SLNG region in the console | See that deployment region is required when SLNG is selected | The console labels the shared region field optional; SLNG validation refuses omission | Enter a supported region through Advanced target settings before creating the package |
 | Deploy every target through Unmute | Run `unmute deploy` for LiveKit or Pipecat | `internal/cli/deploy.go` accepts SLNG only | Use the host CLI from the generated project directory |
 
-SLNG deliberately runs hosted tool references rather than package-local Python.
-That target boundary is documented; it is not a request to add a Python runtime.
+SLNG runs hosted tool references and typed `local:` tools that deploy publishes
+as code tools. That target boundary is documented; it is not a request to add a
+Python runtime.
 
 The dependency refusal text still suggests editing generated `pyproject.toml`
 and compiling local tools to SLNG. Those are not durable native alternatives:
-compilation replaces the file, and the SLNG target refuses local tool bodies.
+compilation replaces the file, and a local tool on SLNG must be a typed handler with a sample.
 The public guide explains the actual limits. Correcting the diagnostic is a
 separate code change.

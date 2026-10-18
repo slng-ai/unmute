@@ -88,7 +88,7 @@ Both blocks have no fields, but YAML still needs an explicit body: write
 | Tool kind | SLNG | LiveKit | Pipecat | Twilio |
 |---|---|---|---|---|
 | `webhook:` | yes | yes | yes | **no** |
-| `local:` | **no** | yes | yes | yes |
+| `local:` | yes | yes | yes | yes |
 | `builtin:` | yes | yes | yes | yes |
 | `mcp:` | yes | yes | yes | **no** |
 | `slng:` | yes | yes | yes | **no** |
@@ -108,10 +108,11 @@ rather than a surprise on a call.
 
 Three of those rows are worth a sentence.
 
-**`local:` and `webhook:` no longer reach SLNG.** The platform owns a tool's
-code, version and gate pipeline, and unmute creates no tool there. A tool your
-SLNG organisation already has is reached with `slng:`; a brand new one starts in
-the SLNG dashboard. Both blocks work exactly as before on LiveKit and Pipecat.
+**`local:` reaches SLNG as a code tool, and `webhook:` does not.** On an slng
+target, `unmute deploy` publishes a typed `local:` tool to SLNG. It needs a
+`tools/<name>.sample.json` beside it ([details](/build/tools/python#on-the-slng-target)).
+A `webhook:` block is refused. An API request tool is created in SLNG and
+reached with `slng:`. Both blocks work as before on LiveKit and Pipecat.
 
 **`slng:` works on SLNG, LiveKit, and Pipecat; Twilio refuses it.**
 SLNG resolves a hosted reference by name at deploy
@@ -203,7 +204,7 @@ types, required conditions, and defaults:
 - [Hosted](/build/tools/hosted#hosted-reference-fields): `slng` names a published tool.
 
 `client` and `provider_hosted` take an empty object and are gated on every target.
-SLNG accepts published tool references; it refuses authored local and webhook bodies.
+SLNG accepts published tool references and typed `local:` handlers, which deploy publishes as code tools. It refuses authored webhook bodies.
 
 ## Which fields the block allows
 
@@ -422,12 +423,11 @@ or task's own list.
 
 ### `output:` is refused on an slng target
 
-It used to be allowed there, for a reason. The compiler turned it into a pydantic
-`Output` class inside the code it uploaded, and SLNG read the tool's result shape
-off that class. unmute uploads no code now, so the field reaches nothing and is
-refused rather than dropped.
+A `local:` tool's `Output` comes from the return model of its Python function.
+A tool SLNG hosts carries its own `Output` model. So the field has nothing to
+set and is refused rather than dropped.
 
-**Fix:** delete the field from the tool file. A tool SLNG hosts carries its own
+**Fix:** delete the field from the tool file. A hosted tool carries its own
 `Output` model, written where the tool was written. Full story in [Python
 tools](/build/tools/python#what-the-slng-sandbox-expects) and [Hosted
 tools](/build/tools/hosted).

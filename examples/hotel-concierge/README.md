@@ -136,8 +136,9 @@ the model has no text tool, and the prompt says so to the guest.
   records it once the guest confirms the number, and it comes back on the call
   record. This target runs no Python, but `unmute validate` and `unmute compile`
   read `state.py` through `uv`, so `uv` has to be on your `PATH`.
-- **Tools.** Every one is a reference: this target creates no tool, and no
-  tool file carries a mirror.
+- **Tools.** Every one is a reference to a tool SLNG already has, and no
+  tool file carries a mirror. A typed `local:` tool would be published by
+  `unmute deploy`, but this package has none.
   - `hotel_info` (`slng: hotel_info`): a Custom Code tool SLNG hosts, answering
     from a two-row table. Its one parameter is pinned to `lumbre-sol`; change
     that line to serve the other property.

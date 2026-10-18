@@ -596,7 +596,8 @@ validate, by name, with what to do instead:
 | Feature | Why |
 |---|---|
 | agent transfers | the create body carries one agent |
-| a task's `think:`, `finish:`, `history: summary` or `include_tool_calls: false` | one model per agent, no summary, and no `output:` for a success rule to read |
+| a task's `think:`, `history: summary` or `include_tool_calls: false` | one model per agent, and no summary |
+| a second `finish:` rule in one task, or `confirm:` on a `finish:` rule | SLNG supports one finishing tool per task today, and has no read-back |
 | a second `announce:` line, an optional `result.x?`, a group `then:` other than `return` | SLNG speaks one line, saves every assigned value, and returns to the agent |
 | a task that lists another task or a handoff | a SLNG task cannot start another one |
 | a typed `state.py` value the dispatch fills; `datetime`, `dict`, a pattern other than `Id` | SLNG checks types only on values a task saves, in a grammar without those words |
@@ -615,12 +616,30 @@ A tool named `end_call`, `detected_answering_machine`, `get_current_datetime`,
 five names for its own curated capabilities. Writing `builtin: end_call` as the
 tool `end_call` is the correct way to reach one and is not a collision.
 
-**The slng target creates no tool.** `local:` and `webhook:` are refused
-there: SLNG owns a tool's code, version and gate pipeline, and unmute uploads
-nothing. Every tool an slng package names is one the organisation already
-holds.
+**A typed `local:` tool works on slng. `webhook:` does not.** `unmute compile`
+wraps the handler (`handler: tools/<file>.py:<function>`) into SLNG's code tool
+file: the handler module, the package's `state.py` inlined when the handler
+imports from it, and an adapter with `Input`, `Output` and `handler(input)`. It
+writes `build/slng/tools/<name>.json` and `build/slng/samples/<name>.json`.
+`unmute deploy` then creates or updates the code tool, runs it once on its
+sample and publishes it, before it reads the account. Rules:
 
-So there are three ways to name a tool on this target, and no fourth:
+- Write `tools/<name>.sample.json` beside the tool file: one JSON object of
+  arguments. A local tool with no sample is refused.
+- A version 1 handler (a file with no `:function`) is refused. An `async def`
+  handler is refused, because SLNG calls a code tool synchronously.
+- SLNG code has no internet access. Exact pins come from the tool's
+  `dependencies:`.
+- A `webhook:` block is refused. Create an API request tool in SLNG and
+  reference it with `slng:`.
+
+`finish:` works on slng with one rule per task. Its `tool`, `success:` values
+and up to 5 `say:` lines reach SLNG, which says the lines itself when the result
+matches. A say line may read `{{state.x}}`, or `{{state.x.y}}` only when the step
+or the tool saves `x` from `result.`. `confirm:` is refused. The tool needs a
+known output: a typed local tool, or a hosted `slng:` tool with a mirror.
+
+Besides `local:`, there are three ways to name a tool on this target:
 
 - `slng:` for a tool the organisation hosts. Write `slng: check_order`, one
   line, the tool's exact name on the platform: no hash, no mirror, no pull,
@@ -628,10 +647,10 @@ So there are three ways to name a tool on this target, and no fourth:
 - `builtin:` for a capability SLNG curates, such as `end_call`.
 - `mcp:` for a server the organisation registered.
 
-If the user wants a tool that does not exist yet, say that it starts in the
-SLNG dashboard, and that unmute cannot create it. Do not write a `local:` or
-`webhook:` block for an slng package and hope: it is refused at validate,
-before anything is written.
+If the user wants a request tool that does not exist yet, say that it starts in
+the SLNG dashboard, and that unmute cannot create it. Do not write a `webhook:`
+block for an slng package and hope: it is refused at validate, before anything
+is written.
 
 A hosted tool's Python dependencies are the platform's own. They are invisible
 to a slng-only package; a package that also pulls a mirror for `livekit` or

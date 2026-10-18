@@ -107,7 +107,7 @@ Two names, and keeping them straight is what a coding agent gets wrong first:
    `tools:` list attaches and every local diagnostic uses. It does not have
    to match the hosted name: `tools/order_status.yaml` may hold
    `slng: check_order`, so the agent attaches `order_status` and deployment
-   resolves `check_order`. This creates no tool and renames nothing on the
+   resolves `check_order`. This renames nothing on the
    platform; use it when the user wants the file and the prompt to read
    naturally without matching the platform's own naming.
 2. **The `slng:` scalar is the hosted name**, checked against the
@@ -140,11 +140,10 @@ write it into a new tool file; write the scalar name instead.
 
 ### Why this block exists
 
-The SLNG platform owns a tool's code, version and gate pipeline. So on an slng
-target `local:` and `webhook:` are refused: unmute creates no tool there. A new
-code tool starts from a Python file with `voiceai tool create`, and a new
-request tool in the SLNG dashboard. `slng:` is how a package reaches one that is
-already there.
+On an slng target a typed `local:` tool works: `unmute deploy` publishes it to
+SLNG as a code tool (see the slng rules in [package.md](package.md)). A
+`webhook:` block is refused there. A new request tool starts in the SLNG
+dashboard, and `slng:` is how a package reaches it once it exists.
 
 ```sh
 voiceai tool create hosted/check_availability.py --description "..."   # Input, Output, handler

@@ -20,10 +20,9 @@ A `local:` handler works on livekit and pipecat, which compile `version: 2` only
 There, its Python function is typed: the signature is the tool's input and the
 Pydantic return model is its output, so the tool file has no `input:` or
 `output:`. Twilio still takes the version 1 form, with `input` and `output`
-schemas that are flat ([the Twilio target](/targets/twilio)). A local handler is
-refused on an slng target: SLNG owns a tool's code, version and gate pipeline, so a handler of
-yours has nowhere to run there. Reference a tool your organisation already has
-on the platform with [`slng:`](/build/tools/hosted) instead.
+schemas that are flat ([the Twilio target](/targets/twilio)). On an slng target,
+a typed handler is wrapped into an SLNG code tool and published by
+`unmute deploy` ([details](#on-the-slng-target)).
 
 On this page:
 
@@ -32,6 +31,7 @@ On this page:
 - [The rules the function follows](#the-rules-the-function-follows) - four rules
 - [When the handler is slow](#when-the-handler-is-slow) - cover the wait
 - [Where it ends up](#where-it-ends-up) - inside the generated project
+- [On the slng target](#on-the-slng-target) - the sample file, and what deploy publishes
 - [Share a helper between tools](#share-a-helper-between-tools) - one source file, two callables
 - [Credentials, when a real handler needs one](#credentials-when-a-real-handler-needs-one) - names, never values
 - [Advanced](#advanced) - modules, dependencies, data, and SLNG limits
@@ -132,6 +132,25 @@ go and look.
 hands the function to unmute-core, which reads its types and calls it as a plain
 function. A function may be `async def`. The same handler file runs unchanged on
 LiveKit and Pipecat.
+
+## On the slng target
+
+A version 2 `local:` tool works on the slng target. `unmute compile` wraps the
+handler into SLNG's code tool file and writes `build/slng/tools/<name>.json`
+and `build/slng/samples/<name>.json`.
+
+Put a sample beside the tool file, `tools/<name>.sample.json`. It is one JSON
+object of arguments:
+
+```json tools/book_slot.sample.json
+{"day": "2026-11-02", "time": "10:00", "service": "cut", "phone_number": "+34600111222"}
+```
+
+`unmute deploy --target slng` creates or updates the code tool, runs it once on
+this sample, and publishes it. Then it attaches the tool by id and version.
+SLNG publishes a code tool only after one run, so a local tool with no sample is
+refused. A version 1 handler and an `async def` handler are refused too. SLNG
+code has no internet access.
 
 ## Share a helper between tools
 
@@ -243,11 +262,9 @@ manifest. Unmute has no authored lifecycle-hook or custom build-file API.
 
 ### What the SLNG sandbox expects
 
-A `local:` handler no longer reaches SLNG at all, so none of this is a refusal
-you will meet from `unmute`. It is worth knowing anyway, because a tool SLNG
-hosts runs under these rules, and if you write one in the SLNG dashboard and
-then reference it with [`slng:`](/build/tools/hosted), they are the rules it
-runs under.
+A tool SLNG hosts runs under these rules. That includes a `local:` tool that
+deploy publishes, and a tool you write by hand and reference with
+[`slng:`](/build/tools/hosted).
 
 **SLNG calls the handler itself, synchronously.** A plain `def` that runs its
 own event loop internally, with `asyncio.run(...)`, is fine: only the entry

@@ -323,10 +323,13 @@ Start with supported package declarations. For external services, reference
 published [hosted tools](/build/tools/hosted) or select named
 [MCP tools](/build/tools/mcp) from your organisation.
 
-The SLNG target publishes no tool code and refuses `local:` and `webhook:`
-tool bodies. It has no package-local Python imports, shared-module packaging,
-custom Dockerfile, dependency override or lifecycle hook. Publish and maintain
-the tool on SLNG, or choose LiveKit or Pipecat when the package must own Python.
+A typed `local:` tool works here. `unmute deploy` publishes it as an SLNG code
+tool, after it runs the tool once on `tools/<name>.sample.json`. See
+[a local tool on this target](/targets/slng#a-local-tool-on-this-target). The
+target refuses `webhook:` tool bodies. It has no shared-module packaging, custom
+Dockerfile, dependency override or lifecycle hook. Create a request tool on
+SLNG and reference it with `slng:`, or choose LiveKit or Pipecat when the
+package must own more Python.
 
 A hosted tool needs no local mirror for this target. `unmute pull` is for a
 package that also compiles to a code target, where that mirrored tool runs.
