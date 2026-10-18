@@ -400,16 +400,10 @@ stop anywhere and come back.
     unmute: validate my-agent: build: agent.yaml:36: task "find_parcel": look_up_parcel never returns status: fund; it declares found, not_found
     ```
 
-    This is also where you can see what the compiler adds to the task's
-    prompt. Run `unmute compile my-agent` and open
-    `build/livekit/prompts/tasks/find_parcel.md`.
-    Under your own instructions you will find these lines:
-
-    ```text
-    When this step is complete, call `finish` with: delivery_date, tracking_number.
-
-    When `look_up_parcel` returns a successful result, this step ends by itself and saves it; do not call `finish` after it. `finish` is for a request this step cannot serve, for values you already hold, and for recording a result whose save was refused.
-    ```
+    The task still has a `finish` call. When the call runs, the unmute-core
+    library adds lines about it under your own instructions. They name the
+    values `finish` saves, and they say the step ends by itself when
+    `look_up_parcel` succeeds. See [tasks in unmute-core](/core/reference/tasks).
 
     So the `finish` call is still there. The model uses it when the caller asks
     for something the task cannot do, and for a value the task already holds.

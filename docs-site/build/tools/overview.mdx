@@ -96,10 +96,11 @@ Both blocks have no fields, but YAML still needs an explicit body: write
 | `client:` | no | no | no | no |
 | `provider_hosted:` | no | no | no | no |
 
-On Twilio, a `local:` tool needs flat `input` and `output` schemas, as in `version: 1`, and the only
-builtin is `end_call`. The target runs one agent with no tasks, and it refuses
+Twilio runs `version: 2` typed handlers, and the only builtin it takes is `end_call`. The target runs one agent with no tasks, and it refuses
 `announce` and `interruption: cancel`. [The Twilio target](/targets/twilio#what-the-package-may-carry)
 lists every refusal.
+
+This table is the capability table for `version: 1`. On version 2, livekit and pipecat compile only `local:`, `webhook:`, `knowledge:` and the `end_call` builtin: they refuse `mcp:`, `slng:` and every other builtin, so those are SLNG-only for now.
 
 The same tool file compiles to three different runtimes, and they do not all
 support the same things. This table is the capability table, which is what the
@@ -114,15 +115,11 @@ target, `unmute deploy` publishes a typed `local:` tool to SLNG. It needs a
 A `webhook:` block is refused. An API request tool is created in SLNG and
 reached with `slng:`. Both blocks work as before on LiveKit and Pipecat.
 
-**`slng:` works on SLNG, LiveKit, and Pipecat; Twilio refuses it.**
-SLNG resolves a hosted reference by name at deploy
-time: no mirror, no hash, no `unmute pull`. LiveKit and Pipecat build and run
-the tool themselves, so they need a real copy; `unmute pull` is what fetches
-one, and for a code tool its module, into your package, with no network
-needed again after that. One limit is not in this table: a hosted tool that
-declares Python dependencies is refused on LiveKit and Pipecat, which build
-one dependency list for the whole project. See
-[Hosted tools](/build/tools/hosted).
+**`mcp:` and `slng:` are SLNG-only for now.** Version 2 on LiveKit and Pipecat does
+not compile them, and the compiler refuses them. Builtins other than `end_call` are
+refused there too. SLNG resolves a hosted reference by name at deploy time: no mirror,
+no hash, no `unmute pull`. See [Hosted tools](/build/tools/hosted) and
+[MCP servers](/build/tools/mcp).
 
 **`knowledge:` needs a runtime of ours to live in.** LiveKit and Pipecat compile to
 a Python project, so the documents ride in the image and the search runs in the

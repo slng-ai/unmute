@@ -82,8 +82,10 @@ unmute init my-agent
 cd my-agent
 ```
 
-It writes a working package: `agent.yaml`, `instructions.md`, `targets.yaml`,
-and a `tools/end_call.yaml` so the agent can hang up from its first run. Edit
+It writes a working version 2 package: `agent.yaml`, `instructions.md`,
+`targets.yaml`, `state.py` (livekit and pipecat) and a `tools/end_call.yaml` so
+the agent can hang up from its first run. A local tool is a typed handler,
+`tools/<name>.py:<name>`. Edit
 what it wrote rather than starting from an empty directory.
 
 The scaffold declares **one** target, `livekit`, named after its provider. One
@@ -171,9 +173,13 @@ turns the check off. There is no such flag.
 unmute compile
 ```
 
-Writes a standalone Python project under `build/<target>/` for LiveKit,
-Pipecat, or Twilio. Read that build's `README.md` for its run command and
-required services. The SLNG target emits its deployment body instead.
+Writes a Python project under `build/<target>/` for LiveKit or Pipecat. It holds
+`agent.json`, `spec.py`, `speech.py`, the entry (`agent.py` or `bot.py`),
+`tools/`, a `Dockerfile` and `pyproject.toml`, and it imports the `unmute-core`
+library. Run it with `unmute dev`, which uses its `compose.dev.yaml`. Deploy it
+with the platform's own tool (`lk agent create` or `pcc deploy`) and the
+`Dockerfile`. Twilio compiles its own app with a `README.md` runbook. The SLNG
+target emits its deployment body instead.
 
 **Never edit `build/`.** It is rewritten on every compile. Change the package.
 

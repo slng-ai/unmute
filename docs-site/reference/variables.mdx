@@ -180,10 +180,10 @@ Pydantic packages on Python 3.12, and read the JSON Schema Pydantic writes for
 - `state.py` may import `pydantic`, `phonenumbers`, the three modules above
   and the standard library. A sibling import is refused.
 
-The generated project gets your `state.py` as written. A generated
-`call_state.py` adds `CallState`, a subclass of your `State` that holds the one
-way a value is saved, the confirmation marks and the rendering. It also builds
-one result model per task step from your field types. The project's dependencies
+The generated project gets your `state.py` as written. The unmute-core
+library's `CallState` wraps your `State`. It holds the one way a value is saved,
+the confirmation marks and the rendering. It also builds one result model per
+task step from your field types. The project's dependencies
 include `email-validator` when you use an email type, and
 `pydantic-extra-types` when you import one of its modules.
 

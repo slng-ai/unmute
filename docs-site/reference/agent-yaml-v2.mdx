@@ -197,11 +197,27 @@ prefetch's `timezone:`. Code says dates in them.
 `escalations:` transfer the caller on a phone line. A browser session needs no phone
 route variable to start. `tracing:` compiles `langfuse`.
 
+## Twilio and SLNG read version 2
+
+The `twilio` and `slng` targets read `version: 2` too, but they run it with their own
+runtimes and without unmute-core. They refuse these keys at compile time, and the error
+says to remove them or compile to livekit or pipecat:
+
+- tool file keys `assign`, `replies`, `precheck`, `hidden` and `announce_wait`;
+- a task's `replies` and `opens_with`, and a task `finish` rule with `confirm`;
+- `entry_by`;
+- prefetch `refuse_call`;
+- a handoff's `saves` or `opens_with`.
+
+A task `finish` rule with `say` is refused on Twilio only. SLNG speaks the line itself.
+Each target refuses more of its own: see [Twilio](/targets/twilio#what-the-package-may-carry)
+and [SLNG](/targets/slng).
+
 ## Not compiled yet
 
 | Key | Why |
 |---|---|
-| `mcp` and `slng` tools, builtins other than `end_call` | No unmute-core equivalent wired yet |
+| `mcp` and `slng` tools, builtins other than `end_call` | No unmute-core equivalent wired yet on livekit and pipecat. They still work on SLNG |
 | A second idle nudge | One nudge and the end, as in version 1 |
 
 ## Test a package

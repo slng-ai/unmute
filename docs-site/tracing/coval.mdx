@@ -8,6 +8,13 @@ them. Coval tracing attaches the spans from a call to the simulation that made
 it, so a low score comes with the transcript, the tool calls, and the timings
 that produced it.
 
+<Note>
+  A LiveKit or Pipecat package on version 2 traces to Langfuse only so far, and
+  `provider: coval` is refused there. Coval tracing works on version 1 packages
+  and on the other targets. The LiveKit and Pipecat steps below describe the
+  version 1 build.
+</Note>
+
 On this page:
 
 - [Every key the tracing block takes](#every-key-the-tracing-block-takes) - the one key, and what it accepts
@@ -66,8 +73,7 @@ Three routes, checked in this order.
 
 **Inbound phone calls** use the SIP participant's attributes. Coval sends the SIP
 header `X-Coval-Simulation-Id`. LiveKit only surfaces a SIP header it was told
-about in advance, so the generated `sip-inbound-trunk.json` already carries the
-mapping:
+about in advance, so the inbound trunk needs this mapping:
 
 ```json
 "headers_to_attributes": {
@@ -75,8 +81,7 @@ mapping:
 }
 ```
 
-Create the inbound trunk from that file the way you already do, and the
-attribute appears on the caller. Nothing else to do.
+Add it to your inbound trunk, and the attribute appears on the caller.
 
 **Browser and app calls** use the agent's dispatch metadata. Coval calls your
 token endpoint first, so that endpoint is where the ID enters. In Coval, set the

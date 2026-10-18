@@ -24,7 +24,7 @@ instead of Python. This page describes those files and the target's settings.
 On this page:
 
 - [The trade](#the-trade) - what you give up, and what you get back
-- [What compiling writes](#what-compiling-writes) - the three files
+- [What compiling writes](#what-compiling-writes) - the files, including `tools/` and `samples/`
 - [targets.yaml](#targets-yaml) - every key this target takes, and every one it refuses
 - [The pushed agent's name](#the-pushed-agents-name) - where the deployed name comes from
 - [Model names](#model-names) - how a vendor and a model are joined
@@ -318,6 +318,9 @@ None is dropped quietly.
 | Package feature | Why SLNG cannot take it |
 |---|---|
 | handoffs | the create body carries one agent |
+| prefetch | SLNG compiles no session-start hook |
+| tool keys `assign`, `replies`, `precheck`, `hidden`, `announce_wait` | the SLNG runtime runs version 2 without unmute-core. Compile to livekit or pipecat to use them |
+| a task's `replies` or `opens_with`, `entry_by`, prefetch `refuse_call`, a handoff's `saves` or `opens_with` | the same: they need unmute-core |
 | a task's `think:`, `history: summary` or `include_tool_calls: false` | SLNG runs every task on the agent's one model and has no summary |
 | a second `finish:` rule in one task, or a `finish:` rule with `confirm:` | SLNG supports one finishing tool per task today and has no read-back |
 | a `finish:` rule on a tool with no known output | the rule needs the tool's output: use a typed local tool, or a hosted `slng:` tool with a mirror |
