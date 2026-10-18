@@ -256,7 +256,7 @@ Each verdict is a `caller.over_agent` event in the trace.
 - **LiveKit** records the probability the detector gave.
 - **Pipecat** records `interruption: true` when the caller's turn starts over the agent. It records `false` when their words wait for the line to end.
 
-A step's confirm line, like "Is the best number to reach you +34 671 51 01 03?", counts as heard when the caller cuts in after it said every value. LiveKit keeps the words that played, so a "yes, that's right" over the last word books. A cut before that asks again.
+A step's confirm line, like "Can you confirm your number is +34 671 51 01 03?", counts as heard when the caller cuts in after it said every value. LiveKit keeps the words that played, so a "yes, that's right" over the last word books. A cut before that asks again.
 
 ## When the caller goes quiet
 
