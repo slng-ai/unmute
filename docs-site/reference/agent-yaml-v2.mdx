@@ -192,7 +192,7 @@ prefetch's `timezone:`. Code says dates in them.
 | `think` | Google, OpenAI, and the SLNG Context Router |
 | `speak`, `listen` | SLNG speech, and every provider the catalogue lists for the target |
 | `realtime` | OpenAI's realtime model |
-| `live` | Not yet: unmute-core has no backend model for it |
+| `live` | OpenAI's live model, with the `think` model its `backend:` names |
 
 `escalations:` transfer the caller on a phone line. A browser session needs no phone
 route variable to start. `tracing:` compiles `langfuse`.
@@ -201,10 +201,8 @@ route variable to start. `tracing:` compiles `langfuse`.
 
 | Key | Why |
 |---|---|
-| `live` models | unmute-core has no backend model a live model hands its work to |
 | `mcp` and `slng` tools, builtins other than `end_call` | No unmute-core equivalent wired yet |
 | A second idle nudge | One nudge and the end, as in version 1 |
-| The `slng` and `twilio` targets | They keep their own runtime and read version 1 |
 
 ## Test a package
 

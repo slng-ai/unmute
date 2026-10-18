@@ -14,6 +14,9 @@ import datetime
 import sys
 import threading
 import types
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
 
 _fresh = types.ModuleType("unmute_takeaway_state")
 vars(_fresh).update(orders=[], lock=threading.Lock())
@@ -97,7 +100,7 @@ def _match(spoken):
     return hits[0] if len(hits) == 1 else ""
 
 
-def look_up_dish(spoken_name):
+def _look_up_dish(spoken_name):
     """Answer the one question the model must not answer from memory."""
     name = _match(spoken_name)
     if not name:
@@ -112,7 +115,7 @@ def look_up_dish(spoken_name):
     return {"found": True, "name": name, "price": price, "available": available, "note": note}
 
 
-def place_order(items, fulfilment, name):
+def _place_order(items, fulfilment, name):
     """Write the order and hand back what the model reads out.
 
     Every refusal here is one the prompt cannot prevent: a dish that went off
@@ -171,37 +174,83 @@ def _rejected(problem):
     }
 
 
+# What each tool takes and returns. agent.yaml version 2 reads these types here.
+class Dish(BaseModel):
+    """What ``look_up_dish`` returns."""
+
+    found: bool
+    name: str
+    price: float
+    available: bool
+    note: str
+
+
+class Order(BaseModel):
+    """What ``place_order`` returns."""
+
+    status: Literal["placed", "rejected"]
+    order_number: str
+    total: float
+    wait_minutes: int
+    offer: str = Field(
+        description="The offer this order qualified for, already taken off the total, or "
+        "empty. Read it out so the caller hears why the sum is what it is."
+    )
+    problem: str
+
+
+def look_up_dish(
+    spoken_name: Annotated[
+        str, Field(description='The dish as the caller said it, such as "sweet and sour chicken".')
+    ],
+) -> Dish:
+    """Look one dish up on the menu."""
+    return Dish.model_validate(_look_up_dish(spoken_name))
+
+
+def place_order(
+    items: Annotated[
+        list[str],
+        Field(description="The menu names of the dishes ordered, one entry per portion."),
+    ],
+    fulfilment: Literal["collection", "delivery"],
+    name: Annotated[str, Field(description="The name the order is under, first name is enough.")],
+) -> Order:
+    """Place the order."""
+    return Order.model_validate(_place_order(items, fulfilment, name))
+
+
 def _demo():
     """Run the handlers on their own, with no compiler and no models."""
-    assert look_up_dish("crispy duck")["available"] is False
-    assert look_up_dish("sweet and sour")["name"] == "sweet and sour chicken"
-    assert look_up_dish("lasagne")["found"] is False
+    assert _look_up_dish("crispy duck")["available"] is False
+    assert _look_up_dish("sweet and sour")["name"] == "sweet and sour chicken"
+    assert _look_up_dish("lasagne")["found"] is False
 
-    small = place_order(["spring rolls"], "delivery", "Sam")
+    small = _place_order(["spring rolls"], "delivery", "Sam")
     assert small["status"] == "rejected", small
     assert "Delivery needs" in small["problem"], small
 
-    placed = place_order(
+    placed = _place_order(
         ["salt and pepper chicken", "egg fried rice"], "collection", "Sam"
     )
     assert placed["status"] == "placed", placed
     assert placed["total"] == 12.80, placed
     assert placed["wait_minutes"] == 15, placed
 
-    second = place_order(["crispy duck"], "collection", "Ada")
+    second = _place_order(["crispy duck"], "collection", "Ada")
     assert second["status"] == "rejected", second
 
     # The two offers the knowledge page sells, checked against the sum rather
     # than against the page: a discount described on a page and absent from the
     # total is a caller quoted one price and asked for another.
-    crackers = place_order(
+    crackers = _place_order(
         ["set meal for two", "spring rolls"], "delivery", "Ada"
     )
     assert crackers["status"] == "placed", crackers
     assert crackers["total"] == 31.00, crackers
     assert "prawn crackers" in crackers["offer"], crackers
 
-    collected = place_order(["set meal for four"], "collection", "Ada")
+    collected = _place_order(["set meal for four"], "collection", "Ada")
     assert collected["status"] == "placed", collected
     if _weekday() in ("Friday", "Saturday"):
         assert collected["total"] == 46.00, collected

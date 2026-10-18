@@ -109,10 +109,29 @@ func TestSpeechThatIsNotSlngComesFromTheCatalogue(t *testing.T) {
 	}
 }
 
-func TestALiveModelIsRefusedUntilCoreHasABackend(t *testing.T) {
-	resolved := ir.Target{Models: ir.Bindings{Live: map[string]ir.Binding{"counter_voice": {Provider: "openai", Model: "gpt-live-1"}}}}
-	if _, err := coreModels(resolved); err == nil || !strings.Contains(err.Error(), "no backend model a live model hands its work to") {
-		t.Fatalf("a live model compiled, or was refused for another reason: %v", err)
+func TestALiveModelHandsItsWorkToTheBackendItNames(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "takeaway-orders"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := buildWithState(t, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for provider, want := range map[ir.Provider]string{
+		ir.ProviderLiveKit: `delegation="responses", responses_options={"model": "gpt-5.6-terra"}`,
+		ir.ProviderPipecat: `OpenAIResponsesLLMService.Settings(model="gpt-5.6-terra")`,
+	} {
+		artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
+		if err != nil {
+			t.Fatalf("%s: %v", provider, err)
+		}
+		if speech := artifactFile(t, artifact, "speech.py"); !strings.Contains(speech, want) {
+			t.Errorf("%s: speech.py hands the live model's work to no backend:\n%s", provider, speech)
+		}
+		if spec := artifactFile(t, artifact, "agent.json"); !strings.Contains(spec, `"realtime": "counter_voice"`) {
+			t.Errorf("%s: the agent does not run on its live model:\n%s", provider, spec)
+		}
 	}
 }
 
