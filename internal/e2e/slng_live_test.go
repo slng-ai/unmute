@@ -115,7 +115,9 @@ func runSlngScenario(t *testing.T, caller, agentID, path string) {
 	voiceai(t, &session, "agents", "web-sessions", "create", agentID)
 
 	cmd := exec.Command("uv", "run", "--quiet", "--script", caller, path)
-	cmd.Env = append(os.Environ(), "LIVEKIT_URL="+session.URL, "LIVEKIT_TOKEN="+session.Token)
+	// The timeline of agent states and transcript segments, printed when a
+	// check fails, so a race shows its own evidence.
+	cmd.Env = append(os.Environ(), "LIVEKIT_URL="+session.URL, "LIVEKIT_TOKEN="+session.Token, "SLNG_CALLER_TRACE=1")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -150,6 +152,9 @@ func runSlngScenario(t *testing.T, caller, agentID, path string) {
 		if !strings.Contains(said, want) {
 			t.Errorf("the caller never heard %q", want)
 		}
+	}
+	if t.Failed() {
+		t.Logf("caller timeline (call %s):\n%s", session.CallID, stderr.String())
 	}
 }
 

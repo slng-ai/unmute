@@ -23,6 +23,8 @@ import json
 import os
 import sys
 
+import time
+
 import aiohttp
 from livekit import rtc
 from livekit.plugins import slng
@@ -33,6 +35,15 @@ STATE = "lk.agent.state"
 TRANSCRIPTION = "lk.transcription"
 # A real call's whole length, so a stuck agent fails the run instead of hanging it.
 CALL_LIMIT_SECONDS = 240
+_STARTED = time.monotonic()
+
+
+def trace(*parts: object) -> None:
+    """Write one timeline line to stderr when SLNG_CALLER_TRACE is set."""
+    if os.environ.get("SLNG_CALLER_TRACE"):
+        print(
+            f"{time.monotonic() - _STARTED:7.2f}", *parts, file=sys.stderr, flush=True
+        )
 
 
 class Caller:
@@ -45,7 +56,11 @@ class Caller:
         self.state_changed = asyncio.Condition()
         self.agent: rtc.RemoteParticipant | None = None
         self.agent_left = asyncio.Event()
-        self.said: list[str] = []
+        # What the agent said, each segment with the turn it began in. A turn
+        # starts when the caller has finished a line, and again each time the
+        # agent takes the caller's words as final.
+        self.said: list[tuple[int, str]] = []
+        self.turn = 0
 
     def agent_state(self) -> str:
         return self.agent.attributes.get(STATE, "") if self.agent else ""
@@ -56,7 +71,9 @@ class Caller:
 
     async def until(self, ready) -> None:
         async with self.state_changed:
-            await self.state_changed.wait_for(lambda: ready() or self.agent_left.is_set())
+            await self.state_changed.wait_for(
+                lambda: ready() or self.agent_left.is_set()
+            )
 
     async def microphone(self) -> None:
         """Send silence between lines, as an open microphone does."""
@@ -66,19 +83,39 @@ class Caller:
                 await self.source.capture_frame(silence)
 
     async def say(self, tts: slng.TTS, line: str) -> None:
+        """Say one line, and return once the room has heard all of it."""
+        trace("caller says", repr(line))
         async with self.speaking:
             async for audio in tts.synthesize(line):
                 await self.source.capture_frame(audio.frame)
+            await self.source.wait_for_playout()
 
-    async def agent_turn(self) -> str:
-        """Wait until the agent has said something and is listening again, and return it.
+    async def heard_caller(self) -> None:
+        """The agent took the caller's words as final: its reply starts after them."""
+        self.turn += 1
+        await self.notify()
+
+    def reply(self) -> list[str]:
+        return [text for turn, text in self.said if turn == self.turn]
+
+    async def agent_turn(self, after_caller: bool = True) -> str:
+        """Wait until the agent has replied and is listening again, and return the reply.
+
+        The greeting is the one turn that follows no line of the caller's, and
+        it may begin before this wait does, so it keeps turn 0.
 
         Listening alone is not the end of a turn: between two steps of a task
-        group the agent listens for a moment and has said nothing yet.
+        group the agent listens for a moment and has said nothing yet. Speech
+        alone is not a reply either: when the agent ends the caller's turn in a
+        pause, it starts a reply to the half it heard and drops it when the
+        caller goes on. That speech began before the agent took the caller's
+        last words, and its segment can close after them, so a segment counts
+        by the turn it began in.
         """
-        start = len(self.said)
-        await self.until(lambda: len(self.said) > start and self.agent_state() == "listening")
-        return " ".join(self.said[start:])
+        if after_caller:
+            self.turn += 1
+        await self.until(lambda: self.reply() and self.agent_state() == "listening")
+        return " ".join(self.reply())
 
 
 async def main(scenario_path: str) -> dict:
@@ -91,8 +128,9 @@ async def main(scenario_path: str) -> dict:
             caller.agent = participant
             asyncio.ensure_future(caller.notify())
 
-    def changed(_changed: dict, participant: rtc.Participant) -> None:
+    def changed(changed: dict, participant: rtc.Participant) -> None:
         if participant is caller.agent:
+            trace("attributes", changed)
             asyncio.ensure_future(caller.notify())
 
     def left(participant: rtc.RemoteParticipant) -> None:
@@ -101,18 +139,33 @@ async def main(scenario_path: str) -> dict:
             asyncio.ensure_future(caller.notify())
 
     async def read_transcript(reader: rtc.TextStreamReader, identity: str) -> None:
+        trace("stream open", identity, reader.info.attributes)
+        began = caller.turn
         text = await reader.read_all()
-        if caller.agent and identity == caller.agent.identity and text.strip():
-            if reader.info.attributes.get("lk.transcription_final", "true") == "true":
-                caller.said.append(text.strip())
-                await caller.notify()
+        trace("stream closed", identity, reader.info.attributes, repr(text))
+        if (
+            reader.info.attributes.get("lk.transcription_final", "true") != "true"
+            or not text.strip()
+        ):
+            return
+        if identity == room.local_participant.identity:
+            await caller.heard_caller()
+        elif caller.agent and identity == caller.agent.identity:
+            caller.said.append((began, text.strip()))
+            await caller.notify()
 
     room.on("participant_connected", joined)
     room.on("participant_attributes_changed", changed)
     room.on("participant_disconnected", left)
-    room.on("disconnected", lambda *_: (caller.agent_left.set(), asyncio.ensure_future(caller.notify())))
+    room.on(
+        "disconnected",
+        lambda *_: (caller.agent_left.set(), asyncio.ensure_future(caller.notify())),
+    )
     room.register_text_stream_handler(
-        TRANSCRIPTION, lambda reader, identity: asyncio.ensure_future(read_transcript(reader, identity))
+        TRANSCRIPTION,
+        lambda reader, identity: asyncio.ensure_future(
+            read_transcript(reader, identity)
+        ),
     )
 
     await room.connect(os.environ["LIVEKIT_URL"], os.environ["LIVEKIT_TOKEN"])
@@ -135,12 +188,14 @@ async def main(scenario_path: str) -> dict:
     try:
         async with asyncio.timeout(CALL_LIMIT_SECONDS):
             await caller.until(lambda: caller.agent is not None)
-            greeting = await caller.agent_turn()
+            greeting = await caller.agent_turn(after_caller=False)
             for turn in scenario["turns"]:
                 if caller.agent_left.is_set():
                     break
                 await caller.say(tts, turn["caller"])
-                turns.append({"caller": turn["caller"], "agent": await caller.agent_turn()})
+                turns.append(
+                    {"caller": turn["caller"], "agent": await caller.agent_turn()}
+                )
             await caller.agent_left.wait()
     except TimeoutError:
         pass
@@ -149,8 +204,11 @@ async def main(scenario_path: str) -> dict:
         await tts.aclose()
         await http.close()
         await room.disconnect()
-    return {"greeting": greeting if "greeting" in locals() else "", "turns": turns,
-            "agent_ended": caller.agent_left.is_set()}
+    return {
+        "greeting": greeting if "greeting" in locals() else "",
+        "turns": turns,
+        "agent_ended": caller.agent_left.is_set(),
+    }
 
 
 if __name__ == "__main__":
