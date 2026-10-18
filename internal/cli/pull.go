@@ -467,8 +467,8 @@ func editedPaths(files []pullFile) []string {
 // missingToolGuidance says what to do about a name the organisation does not
 // hold.
 //
-// unmute creates no tool, so this is the end of the road until somebody makes
-// one. The message says that rather than implying a flag would fix it. The fix
+// unmute creates no hosted tool, so this is the end of the road until somebody
+// makes one. The message says that rather than implying a flag would fix it. The fix
 // itself differs by reference form: a legacy block resolves by the tool
 // file's own name, so renaming the file is the fix; a scalar reference names
 // the hosted tool on its own line, so the fix is changing that line instead.

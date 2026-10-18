@@ -36,8 +36,7 @@ unmute compile examples/salon-concierge
 ```
 
 The generated projects land in `build/livekit/` and `build/pipecat/`. Each one
-carries its own `README.md`, which is the deployment and carrier runbook. Do not
-commit `build/`, it is disposable.
+has a `Dockerfile` and a `.env.example`. Do not commit `build/`, it is disposable.
 
 Talk to it in the browser:
 
@@ -260,9 +259,10 @@ and the transfer over a Twilio Elastic SIP Trunk (`sip`). The Pipecat target
 carries them over Pipecat Cloud's Twilio websocket (`cloud-websocket`). Both
 targets also do browser audio. There is no outbound route.
 
-Phone calls need a deployment. Both targets deploy to a managed platform, and
-the generated runbook has the carrier steps for the route you chose. There is no
-local phone loop.
+Phone calls need a deployment. Compile writes the Dockerfile, and you deploy it
+with the platform's own tool, `lk agent create` or `pcc deploy`. Unmute does not
+write the carrier files (`pcc-deploy.toml`, `sip-*.json`) yet, so you set up the
+route in the carrier console and the platform CLI. There is no local phone loop.
 
 **Tracing.** Both targets send traces to Langfuse.
 
@@ -383,13 +383,9 @@ The route's carrier credentials are missing from `.env`, or the package has not
 been deployed yet.
 
 **Fix:** set the four `SIP_*` values for the `livekit` target, or the three
-`TWILIO_*` values for the `pipecat` target, then follow the carrier steps in
-that target's generated runbook:
-
-```sh
-unmute compile examples/salon-concierge
-cat examples/salon-concierge/build/pipecat/README.md
-```
+`TWILIO_*` values for the `pipecat` target, then set up the route in the carrier
+console and deploy the compiled project with `lk agent create` or `pcc deploy`.
+Unmute does not write the deploy or SIP files for you yet.
 
 ## Where to go next
 

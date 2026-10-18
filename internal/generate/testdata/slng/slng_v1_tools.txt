@@ -65,15 +65,15 @@ tool itself reads, and either works.
 The key decides the organisation. An exported key wins over a stored profile,
 and the `credential from` line names the key a deploy used.
 
-Deployment requires `voiceai` 0.1.22 or later.
+Deployment requires `voiceai` 0.1.22 or later. A package with a `local:` tool needs 0.1.23 or later.
 Use `--dry-run` to preview checked versions and attachment changes without
 changing SLNG. Future session inputs remain runtime checks. The result is saved
 in `deploy-report.json` beside these files.
 
-`--run-samples` has nothing to act on here. A sample proves a tool works before
-the platform publishes it, and this push creates no tool: it writes references
-to tools your organisation already holds, each published before your package
-named it.
+`--run-samples` has nothing to act on here. `unmute deploy` publishes the
+package's own code tools before the push: it runs each one once on its sample,
+then publishes it. Every other tool is a reference to a tool your organisation
+already holds.
 
 **A push replaces.** A tool reference this package no longer names is detached,
 and a field that differs from the live agent is overwritten. `--dry-run` names
@@ -135,12 +135,11 @@ they are this agent's and do not change the shared tool.
 
 This package's curated references: `end_call`.
 
-**This target creates no tool.** Every tool the body names is one your
-organisation already holds, referenced by name, and the deploy resolves each
-name to its identifier and its latest published version. A name your
-organisation does not have is a refusal, not something the push makes for you. A
-new code tool starts from a Python file with `voiceai tool create`, and a new
-request tool in the SLNG dashboard.
+**Hosted tools are references.** Each name is a tool your organisation already
+holds, and the deploy resolves it to its identifier and its latest published
+version. A name your organisation does not have is a refusal, not something the
+push makes for you. The deploy publishes the package's own `local:` tools first
+as code tools. A new request tool starts in the SLNG dashboard.
 
 These are the hosted names; deployment selects and checks their published versions:
 

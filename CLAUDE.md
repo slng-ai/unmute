@@ -9,7 +9,7 @@ Unmute is written in Go, so you maintain **Go code**, but you also write some Py
 - Go 1.26 (pin in `go.mod`, and keep it on a Go line that still gets security patches, which is the newest two); `CGO_ENABLED=0` static binary; version stamped at link time, never hardcoded.
 - Direct deps — `cobra`, `goccy/go-yaml` (gives line/col on parse errors), `google/jsonschema-go` (**v0.x — pin the exact version, bump deliberately**), and the Charm TUI stack: `charmbracelet/bubbletea` + `bubbles` + `lipgloss` power the interactive console (custom MVU styled with Lip Gloss), while `charmbracelet/huh` v1.0.0 is scoped to the accessible/headless renderer only. **The interactive path imports no `huh`; Lip Gloss is expected there. All color lives in `internal/style` — no color literal anywhere else** (guarded by `internal/style/literal_test.go`, which walks every Go string literal in the tree). Everything else is stdlib. **No new dep for what a few lines of stdlib do — justify any addition in the PR.** No `viper` until a real global config file exists.
 - `golangci-lint` from day one (`.golangci.yml`).
-- Make targets: `build test smoke e2e contracts lint lint-emitted fmt install`. `lint-emitted` compiles every example and runs each generated project's own pinned ruff over it (needs uv, and ruff on PATH so compile formats). `contracts` re-fetches the published SLNG conformance fixtures and fails on a digest mismatch: network, no accounts.
+- Make targets: `build test smoke e2e e2e-slng contracts lint lint-emitted fmt install`. `lint-emitted` compiles every example and runs each generated project's own pinned ruff over it (needs uv, and ruff on PATH so compile formats). `contracts` re-fetches the published SLNG conformance fixtures and fails on a digest mismatch: network, no accounts.
 
 ## Command rules (cobra) — these are what make commands testable, not suggestions
 1. Build the tree with a `newRootCmd()` constructor; **no package-level `var rootCmd`** (fresh tree per call = flag isolation between tests).
@@ -51,10 +51,9 @@ Schema Pydantic writes for `State`, between `spec.Load` and `ir.Build`. Tests
 use the recorded fixtures under `internal/stateschema/testdata/recorded`, so
 `make test` needs no Python. Re-record them with
 `go test ./internal/stateschema -run TestRecord -update` (needs uv) after any
-edit to a `state.py`, then re-record the generate goldens. The emitted runtime
-is `internal/generate/call_state.go`: the author's `state.py` is copied as
-written, and a generated `call_state.py` adds `CallState(State)` and one
-`StepResult` model per step.
+edit to a `state.py`, then re-record the generate goldens. On livekit and pipecat the
+author's `state.py` is copied as written, and the unmute-core library
+(`unmute_core.state`) builds `CallState` from it at runtime.
 
 No saved value enters a prompt automatically. A prompt grants access by naming
 `{{state.x}}` or `{{state.x.y}}`. Omitted task and handoff history means
@@ -85,7 +84,7 @@ broken gate can be hundreds.
 
 - L1 unit (pure logic, table-driven) · L2 in-process command tests (real tree, capture output) · L3 golden files (`-update` to regenerate).
 - L4 smoke (`make smoke`, build tag `smoke`) proves emitted Python is valid — opt-in, needs Python, never in the default suite or PR gate.
-- L5 end to end (`make e2e`, build tag `e2e`, the `Nightly` workflow) compiles each package under `internal/voice-agents-tests/` that has a `scenarios/` folder, for each code target, and runs every scenario as a whole call on the real model through unmute-core's runner (`python -m unmute_core.testing converse`). The packages and scenarios are ported from unmute-core's examples, so a compiled agent must say the same lines, on the same model requests, as the hand-written one. Needs uv and the keys in `.env`. `make e2e PKG=kestrel FW=pipecat` runs one. `UNMUTE_E2E_CORE=<path>` runs an unreleased unmute-core checkout.
+- L5 end to end (`make e2e`, build tag `e2e`, the `Nightly` workflow) compiles each package under `internal/voice-agents-tests/` that has a `scenarios/` folder, for each code target, and runs every scenario as a whole call on the real model through unmute-core's runner (`python -m unmute_core.testing converse`). The packages and scenarios are ported from unmute-core's examples, so a compiled agent must say the same lines, on the same model requests, as the hand-written one. Needs uv and the keys in `.env`. `make e2e PKG=kestrel FW=pipecat` runs one. `UNMUTE_E2E_CORE=<path>` runs an unreleased unmute-core checkout. `make e2e-slng` runs `TestSlngLive` (`internal/e2e/slng_live_test.go`): it deploys each test package with an slng target (today `internal/voice-agents-tests/slng-live`) to SLNG, holds its scenarios as real web calls with `internal/e2e/slng_caller.py` as the caller, and checks the call record SLNG keeps. Needs `SLNG_API_KEY`, `voiceai` 0.1.23 or newer and uv. Locally, run `env -u SLNG_API_KEY make e2e-slng` so `.env` wins over a key in your shell.
 - Telephony is verified on a **deployed** agent, against a real carrier. There is no local phone loop, and no test level stands in for one: `unmute dev` is the browser loop and it stops where the phone leg starts.
 - Before asking for a live call, find the layer the defect lives in and reproduce it there. A provider defect is usually one HTTP request, so it needs no audio, no tunnel and no simulated caller: [`scripts/replay_router_scopes.py`](scripts/replay_router_scopes.py) is the worked example. A prompt or seam defect lives in the model's turns, and [`scripts/text_run_livekit.py`](scripts/text_run_livekit.py) drives the emitted LiveKit agent through a scripted text conversation with the real model and real local tools, no audio. [`scripts/text_run_pipecat.py`](scripts/text_run_pipecat.py) does the same for the emitted Pipecat bot, on a real WorkerRunner and FlowManager, and takes the same `--line` and `--from-number` flags. [`scripts/text_run_twilio.py`](scripts/text_run_twilio.py) drives a compiled twilio target's `app.py` as a signed fake ConversationRelay client: `--fake` runs the offline protocol cases, `--real` the real model.
 - After somebody runs `unmute dev` and talks to the agent, read the call back yourself with [`scripts/read_langfuse_trace.py`](scripts/read_langfuse_trace.py): transcript, tool calls and per-span latency, newest trace by default. Needs the package on `tracing.provider: langfuse`, which `examples/salon-concierge` is. Never describe a call from what you were told about it when the spans are one command away. A call is one trace and one session, with a `turn` span per exchange inside it. Add `--check-v4` after any change to tracing: it fails the run when the call splits into several traces, when its root carries no conversation, when a turn recorded the caller and not the reply, when a turn sits in the trace but outside its root, or when an observation is missing the session ID or trace name, none of which is visible in the Langfuse UI.
@@ -116,12 +115,11 @@ check carries its reason inline, the way `.golangci.yml` explains every
 There is no written list of the gates. The tests are the list: when one fails,
 read the test that failed.
 
-## Four places document emitted behaviour
-The generated `build/<target>/README.md` is the runbook, and almost nobody reads it before they have already read the example's page or the public docs. So **a change to emitted behaviour updates every surface it reaches in the same commit**:
-1. the emitted README template,
-2. the source example's own `README.md` under `examples/`,
-3. the relevant page in `docs-site/`, which is the public answer a reader lands on,
-4. **the skill** in `internal/skill/assets/`, which is what a coding assistant reads before it writes a package.
+## Three places document emitted behaviour
+A change to emitted behaviour updates every surface it reaches in the same commit:
+1. the source example's own `README.md` under `examples/`,
+2. the relevant page in `docs-site/`, which is the public answer a reader lands on,
+3. **the skill** in `internal/skill/assets/`, which is what a coding assistant reads before it writes a package.
 
 A fact that is only true in generated output is a fact the reader never sees, and a feature the skill does not know about is a feature no coding agent will use. The reverse rots too, and now fails: `internal/docsite/retired_output_test.go` refuses a page, a skill reference or an example README that quotes a line the CLI has stopped printing, because a reader who copies a stale sample and waits for it cannot tell a stale doc from a broken install. `docs/ARCHITECTURE.md` changes only when a system boundary, compiler stage, or runtime topology changes. Tests hold the parts that can be held: `internal/generate/examples_test.go` (example routes and links), `internal/skill/agreement_test.go` (the skill's factual lists), and `internal/cli/skill_bundle_test.go` (the commands and flags the skill names). Prose can still rot, so read the example page before you claim you are done.
 

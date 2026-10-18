@@ -192,16 +192,9 @@ func TestSlngRefusesABuiltinUnderAnotherFilesName(t *testing.T) {
 		"rename tools/hang_up.yaml to tools/end_call.yaml")
 }
 
-// GATE. The slng target refuses to author a tool, and each refusal says how to
-// get one onto the platform instead.
-//
-// This replaces two tests that are gone with the code they held: one refused a
-// network import in an uploaded handler, because custom code on SLNG has no
-// internet access, and the other refused an `async def` entry point, because
-// SLNG calls a handler synchronously. Both facts are still true about the
-// platform. Neither is unmute's to check any more, because unmute uploads no
-// handler: the platform CLI has no `tool create`, so a tool is born in the SLNG
-// dashboard and a package references it.
+// GATE. The slng target authors a code tool only from a typed version 2 handler
+// with a sample, and refuses a webhook, whose URL and credential SLNG stores.
+// Each refusal says how to get the tool onto the platform instead.
 func TestSlngRefusesAuthoredToolBodies(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -209,7 +202,7 @@ func TestSlngRefusesAuthoredToolBodies(t *testing.T) {
 		want []string
 	}{
 		{
-			name: "a local handler",
+			name: "a version 1 local handler with no sample",
 			tool: Tool{
 				Description: "Look one up.", Execution: ToolLocal,
 				Handler: "tools/check_order.py", HandlerSource: "def check_order() -> dict:\n    return {}\n",
@@ -217,14 +210,20 @@ func TestSlngRefusesAuthoredToolBodies(t *testing.T) {
 				Interruption: ToolProviderDefault, Effect: ToolReturnsData,
 			},
 			want: []string{
-				"does not create tools",
-				"SLNG owns a tool's code, version and gate pipeline",
-				"create the tool in the SLNG dashboard",
-				"reference it with `slng:`",
-				// It has to name the way out that keeps the handler, or the
-				// author reads it as "your handler is unusable".
-				"compile to livekit or pipecat",
+				"a version 1 handler",
+				"handler: tools/authored.py:authored",
+				"no sample",
+				"tools/authored.sample.json",
 			},
+		},
+		{
+			name: "an async handler",
+			tool: Tool{
+				Description: "Look one up.", Execution: ToolLocal, Sample: []byte(`{}`),
+				Handler: "tools/authored.py", HandlerFunction: "authored", HandlerSource: "async def authored() -> Order:\n    return Order()\n",
+				Interruption: ToolProviderDefault, Effect: ToolReturnsData,
+			},
+			want: []string{"async def authored", "SLNG calls a code tool synchronously"},
 		},
 		{
 			name: "a webhook block",
@@ -235,7 +234,7 @@ func TestSlngRefusesAuthoredToolBodies(t *testing.T) {
 				Interruption: ToolProviderDefault, Effect: ToolReturnsData,
 			},
 			want: []string{
-				"does not create tools",
+				"does not create API request tools",
 				"write the URL and its credential into a tool body",
 				"create the tool in the SLNG dashboard",
 				"reference it with `slng:`",
@@ -276,7 +275,7 @@ func TestCodeTargetsKeepAuthoredToolBodies(t *testing.T) {
 		}
 		report, _ := Validate(agent, []Target{resolved}, targetcap.Default())
 		for _, err := range reportFor(report, provider).Errors {
-			if strings.Contains(err, "does not create tools") {
+			if strings.Contains(err, "does not create API request tools") {
 				t.Errorf("%s inherited the slng refusal: %s", provider, err)
 			}
 		}
@@ -835,11 +834,24 @@ func TestSlngRefusesWhatItsTaskContractRefuses(t *testing.T) {
 		edit  func(*Agent)
 		wants []string
 	}{
-		{"a finish rule", func(a *Agent) {
+		{"two finish rules", func(a *Agent) {
 			task := a.Tasks["take_booking"]
-			task.Finish = []TerminalTool{{Tool: "check_availability", Success: map[string][]string{"status": {"free"}}}}
+			task.Finish = []TerminalTool{
+				{Tool: "check_availability", Success: map[string][]string{"status": {"free"}}},
+				{Tool: "end_call", Success: map[string][]string{"ended": {"true"}}},
+			}
 			a.Tasks["take_booking"] = task
-		}, []string{"cannot check a step's tool result", "compile to livekit or pipecat"}},
+		}, []string{`task "take_booking" ends on 2 tools`, "one tool for now"}},
+		{"a finish read-back", func(a *Agent) {
+			task := a.Tasks["take_booking"]
+			task.Finish = []TerminalTool{{Tool: "check_availability", Success: map[string][]string{"status": {"free"}}, Confirm: []string{"Shall I book it?"}}}
+			a.Tasks["take_booking"] = task
+		}, []string{"confirm:", "no read-back"}},
+		{"a finish line naming a field of a saved value", func(a *Agent) {
+			task := a.Tasks["take_booking"]
+			task.Finish = []TerminalTool{{Tool: "check_availability", Success: map[string][]string{"status": {"free"}}, Say: []string{"See you on {{state.profile.day}}."}}}
+			a.Tasks["take_booking"] = task
+		}, []string{"{{state.profile.day}}", "a whole saved value or a field of the tool's result"}},
 		{"a per-task model", func(a *Agent) {
 			task := a.Tasks["take_booking"]
 			task.Model = "reasoning"

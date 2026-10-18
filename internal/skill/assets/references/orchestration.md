@@ -403,8 +403,10 @@ Rules worth knowing before you write one:
 - Do not also write "call finish as soon as the tool succeeds" in the step's
   prompt. The generated tail says the opposite, and the two contradict.
 
-Denied on the `slng` target: a success rule reads the tool's `output:`, and
-SLNG takes a tool's result shape from the tool it hosts.
+On the `slng` target `finish:` works with one rule per task. Its `say:` lines
+are spoken by SLNG, and `confirm:` is refused. The tool needs a known output: a
+typed local tool, or a hosted `slng:` tool with a mirror. Twilio refuses `finish`
+`confirm` and `say`.
 
 ### Opening a step by listening
 

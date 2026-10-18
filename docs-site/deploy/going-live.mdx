@@ -72,13 +72,15 @@ number routing; LiveKit and Pipecat use their platform commands.
 `build/<target-instance>/`. No provider credentials are needed to compile.
 
 On LiveKit and Pipecat, that directory includes a `Dockerfile`,
-`pyproject.toml`, runtime code, `.env.example`, and `README.md`. Pipecat also
-gets `pcc-deploy.toml`. SLNG gets an agent body and a runbook, with no Python
-project or container to build.
+`pyproject.toml`, the runtime code, `agent.json`, and `.env.example`. The
+project imports the `unmute-core` library from PyPI. Unmute writes no deploy
+manifest for either platform yet, so you pass the destination to the platform's
+own command. SLNG gets an agent body and a runbook, with no Python project or
+container to build.
 
-Read the generated `README.md` for your build's commands and required values.
-`compile-report.json` records resolved models, dependencies, sizing, environment
-names, and target limits. Generated files hold names, never credential values.
+`.env.example` lists the values the build needs. `compile-report.json` records
+the `unmute-core` version and those environment names. Generated files hold
+names, never credential values.
 
 Recompilation replaces the selected build directory. Keep authored code outside
 `build/`. The compiler preserves `.env`, `livekit*.toml`, and `samples/*.json`;

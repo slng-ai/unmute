@@ -570,7 +570,8 @@ func ownRuntimeRefusals(agent *ir.Agent, provider ir.Provider) error {
 	for _, name := range sortedKeys(agent.Tasks) {
 		task := agent.Tasks[name]
 		for _, rule := range task.Finish {
-			if len(rule.Confirm) > 0 || len(rule.Say) > 0 {
+			// SLNG speaks a finish say: line itself. Twilio has no step to end.
+			if len(rule.Confirm) > 0 || (len(rule.Say) > 0 && provider != ir.ProviderSlng) {
 				keys = append(keys, "task "+name+" finish confirm or say")
 				break
 			}

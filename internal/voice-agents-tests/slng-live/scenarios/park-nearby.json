@@ -1,0 +1,8 @@
+{
+  "name": "A caller asks for a car park near the salon, answered from the API request tool",
+  "turns": [
+    {"caller": "Hi, is there a car park near the salon?"},
+    {"caller": "Great, that's all I needed. Bye."}
+  ],
+  "tools": ["search_places", "end_call"]
+}

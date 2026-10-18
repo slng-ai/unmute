@@ -29,6 +29,10 @@ two tasks, a group with a skipped step, typed values, and a hosted code tool
 only a task can call, with that tool's Python source beside it. Its README is
 the test plan for tasks on SLNG managed agents.
 
+[`slng-live`](slng-live/) is the slng target's live package: Python tools
+deploy publishes as code tools, an API request tool, `end_call`, a group, and a
+step one tool finishes. `make e2e-slng` deploys it and calls it.
+
 [`relay-desk`](relay-desk/) is the Twilio ConversationRelay acceptance
 package: one agent, one inbound phone channel, one read-only tool and
 `end_call`, compiled twice, once thinking on OpenAI and once on Gemini through

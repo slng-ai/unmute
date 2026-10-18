@@ -343,20 +343,20 @@ each exchange inside it is a `turn` span holding what the caller said and what
 the agent replied, which is the pair an evaluator reads. The session ID and
 trace name are on every observation, because Langfuse v4 filters and adds up
 over observations rather than over traces.
-Every backend is plain OpenTelemetry over HTTP from the emitted
-`utils/telemetry.py`, so no provider SDK is installed and Logfire needs no
+Every backend is plain OpenTelemetry over HTTP from the unmute-core library,
+so no provider SDK is installed and Logfire needs no
 `logfire.configure()`. A Logfire token like `pylf_v1_eu_...` picks the EU region
 on its own. On Logfire a call shows on the Agents page as one run per agent
 turn, with its model calls and tools inside it; on Pipecat each run is named
 after the package, not the agent that answered.
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
+On livekit and pipecat version 2, compile accepts `langfuse` only so far and refuses the other providers.
 
 With `coval`, each trace is attached to the Coval simulation that placed the
 call. The agent finds that simulation ID on the call itself, so the package
 author writes no correlation code. The route differs per target: LiveKit reads
-the SIP participant attribute `coval.simulation_id` (the emitted
-`sip-inbound-trunk.json` maps the `X-Coval-Simulation-Id` SIP header onto it) or
-its own dispatch metadata; Pipecat reads the WebSocket upgrade header, the
+the SIP participant attribute `coval.simulation_id` (the inbound trunk must map the `X-Coval-Simulation-Id` SIP header onto it, and
+compile writes no trunk file) or its own dispatch metadata; Pipecat reads the WebSocket upgrade header, the
 Pipecat Cloud dial-in SIP headers, or a carrier stream parameter. Both fall back
 to `COVAL_SIMULATION_ID` in the environment. A call that no simulation owns is
 traced too: when it ends the agent submits what was said to Coval as a
@@ -432,7 +432,9 @@ any of them on a target is refused, and the refusal names the new home.
 
 ## warm_instances, and when to write it
 
-`warm_instances` compiles to `[scaling] min_agents` in `pcc-deploy.toml`. With
+`warm_instances` is a Pipecat Cloud setting, `[scaling] min_agents`. Unmute no
+longer writes `pcc-deploy.toml`, so you write it yourself or pass
+`--min-agents` to `pcc deploy`. With
 none declared the platform scales to zero when idle, so the first call after every
 quiet period waits for a container to start, and on a phone route that wait can
 outrun the session: it expires and nobody is answered at all. A knowledge base
@@ -443,14 +445,11 @@ binds.
 say out loud that it bills for that instance whether or not anybody calls. Leave
 it off a browser-only package, where a few seconds of cold start costs nothing.
 
-Do not tell an operator to remember `pipecat cloud deploy --min-agents 1` instead.
-That flag applies to one deploy, and `unmute compile` rewrites the manifest, so a
-hand-added `[scaling]` block does not survive either. The field is the durable
-answer.
+The `--min-agents` flag applies to one deploy, so keep the value in your own
+`pcc-deploy.toml` where it lasts.
 
-LiveKit refuses the field: `livekit.toml` carries only the project subdomain and
-the agent id, and a warm production replica on LiveKit Cloud is a property of the
-billing plan. SLNG refuses it too, because it exposes no pool of yours.
+LiveKit refuses the field: a warm production replica on LiveKit Cloud is a
+property of the billing plan. SLNG refuses it too, because it exposes no pool of yours.
 
 ## LiveKit deployment regions
 
@@ -533,12 +532,15 @@ project:
 build/slng/
 ├── agent.json               the agent create body
 ├── compile-report.json      what was compiled, and which checks were left to deployment
-└── README.md                the runbook
+├── README.md                the runbook
+├── tools/<name>.json        one code tool body per typed local tool
+└── samples/<name>.json      the sample each code tool runs once before it is published
 ```
 
-This target writes no `tools/` directory at all: every tool reference,
-builtin, hosted or MCP, resolves by name against the organisation, so there
-is never a body of the package's own to write beside the agent body.
+`tools/` and `samples/` appear only when the package has typed `local:` tools.
+Every other tool reference (builtin, hosted, MCP) resolves by name against the
+organisation, so it writes no file. The sample comes from the package's
+`tools/<name>.sample.json`.
 `build/slng/samples/` and `.env` are the two things a recompile preserves inside
 `build/`.
 
@@ -596,8 +598,11 @@ validate, by name, with what to do instead:
 | Feature | Why |
 |---|---|
 | agent transfers | the create body carries one agent |
-| a task's `think:`, `finish:`, `history: summary` or `include_tool_calls: false` | one model per agent, no summary, and no `output:` for a success rule to read |
+| a task's `think:`, `history: summary` or `include_tool_calls: false` | one model per agent, and no summary |
+| a second `finish:` rule in one task, or `confirm:` on a `finish:` rule | SLNG supports one finishing tool per task today, and has no read-back |
 | a second `announce:` line, an optional `result.x?`, a group `then:` other than `return` | SLNG speaks one line, saves every assigned value, and returns to the agent |
+| `prefetch:` | slng compiles no session-start hook |
+| tool keys `assign`, `replies`, `precheck`, `hidden`, `announce_wait`; a task's `replies` or `opens_with`; `entry_by`; a prefetch `refuse_call`; a handoff's `saves` or `opens_with` | the slng runtime runs version 2 without unmute-core and cannot run them: remove them, or compile to livekit or pipecat |
 | a task that lists another task or a handoff | a SLNG task cannot start another one |
 | a typed `state.py` value the dispatch fills; `datetime`, `dict`, a pattern other than `Id` | SLNG checks types only on values a task saves, in a grammar without those words |
 | a `turn:` section, `semantic_endpointing`, `endpointing_delay` | SLNG owns its own turn taking |
@@ -615,12 +620,30 @@ A tool named `end_call`, `detected_answering_machine`, `get_current_datetime`,
 five names for its own curated capabilities. Writing `builtin: end_call` as the
 tool `end_call` is the correct way to reach one and is not a collision.
 
-**The slng target creates no tool.** `local:` and `webhook:` are refused
-there: SLNG owns a tool's code, version and gate pipeline, and unmute uploads
-nothing. Every tool an slng package names is one the organisation already
-holds.
+**A typed `local:` tool works on slng. `webhook:` does not.** `unmute compile`
+wraps the handler (`handler: tools/<file>.py:<function>`) into SLNG's code tool
+file: the handler module, the package's `state.py` inlined when the handler
+imports from it, and an adapter with `Input`, `Output` and `handler(input)`. It
+writes `build/slng/tools/<name>.json` and `build/slng/samples/<name>.json`.
+`unmute deploy` then creates or updates the code tool, runs it once on its
+sample and publishes it, before it reads the account. Rules:
 
-So there are three ways to name a tool on this target, and no fourth:
+- Write `tools/<name>.sample.json` beside the tool file: one JSON object of
+  arguments. A local tool with no sample is refused.
+- A version 1 handler (a file with no `:function`) is refused. An `async def`
+  handler is refused, because SLNG calls a code tool synchronously.
+- SLNG code has no internet access. Exact pins come from the tool's
+  `dependencies:`.
+- A `webhook:` block is refused. Create an API request tool in SLNG and
+  reference it with `slng:`.
+
+`finish:` works on slng with one rule per task. Its `tool`, `success:` values
+and up to 5 `say:` lines reach SLNG, which says the lines itself when the result
+matches. A say line may read `{{state.x}}`, or `{{state.x.y}}` only when the step
+or the tool saves `x` from `result.`. `confirm:` is refused. The tool needs a
+known output: a typed local tool, or a hosted `slng:` tool with a mirror.
+
+Besides `local:`, there are three ways to name a tool on this target:
 
 - `slng:` for a tool the organisation hosts. Write `slng: check_order`, one
   line, the tool's exact name on the platform: no hash, no mirror, no pull,
@@ -628,10 +651,10 @@ So there are three ways to name a tool on this target, and no fourth:
 - `builtin:` for a capability SLNG curates, such as `end_call`.
 - `mcp:` for a server the organisation registered.
 
-If the user wants a tool that does not exist yet, say that it starts in the
-SLNG dashboard, and that unmute cannot create it. Do not write a `local:` or
-`webhook:` block for an slng package and hope: it is refused at validate,
-before anything is written.
+If the user wants a request tool that does not exist yet, say that it starts in
+the SLNG dashboard, and that unmute cannot create it. Do not write a `webhook:`
+block for an slng package and hope: it is refused at validate, before anything
+is written.
 
 A hosted tool's Python dependencies are the platform's own. They are invisible
 to a slng-only package; a package that also pulls a mirror for `livekit` or
@@ -752,6 +775,11 @@ prefetch, webhook, MCP, knowledge and hosted tools, tool announce and
 `interruption: cancel`, inactivity and duration timers, `pace` and the other
 turn fields, tracing, realtime and live, fallbacks, custom endpoints,
 `version`, `pins`, `deployment_region` and `warm_instances`.
+
+The version 2 keys `assign`, `replies`, `precheck`, `hidden` and `announce_wait`
+on a tool, `entry_by`, and a handoff's `saves` or `opens_with` are refused too.
+The twilio runtime runs version 2 without unmute-core, so it cannot run them.
+A local tool is a typed handler, `tools/<n>.py:<n>`.
 
 `unmute compile` writes `build/<target>/app.py` (the entry point, FastAPI on
 uvicorn) with `call.py`, `brain.py`, `handoff.py`, `tool_runner.py`,

@@ -40,12 +40,13 @@ On this page:
       created my-agent/.env.example
       created my-agent/.gitignore
       created my-agent/instructions.md
+      created my-agent/state.py
       created my-agent/targets.yaml
       created my-agent/tools/end_call.yaml
       ```
 
       [`agent.yaml`](/reference/agent-yaml) is the agent,
-      `instructions.md` is its prompt, and
+      `instructions.md` is its prompt, `state.py` holds the values a call saves, and
       [`targets.yaml`](/reference/targets-yaml) picks the target this package
       compiles to. Unmute compiles to four targets: Pipecat, LiveKit,
       SLNG or Twilio (see [targets](/targets/overview)); this scaffold picks
