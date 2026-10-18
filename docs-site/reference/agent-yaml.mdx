@@ -106,7 +106,8 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
 
 <ParamField path="listen" type="string">
   Listen entry to use. Accepts declared `models.listen` name. Selects the sole listen
-  chain head; required when there are two or more.
+  chain head; required when there are two or more, unless every cascaded agent names its
+  own `listen:`.
 </ParamField>
 
 <ParamField path="turn" type="string">
@@ -602,7 +603,16 @@ agents:
 </ParamField>
 
 <ParamField path="speak" type="string" required>
-  Name of an entry in `models.speak`. No profile is inferred.
+  Name of an entry in `models.speak`. No profile is inferred. On livekit and pipecat
+  each agent speaks with its own voice after a handoff.
+</ParamField>
+
+<ParamField path="listen" type="string">
+  Name of an entry in `models.listen`, for an agent that hears another language. Omit to
+  use the package's listen model. Cascaded agents only: a realtime or live agent hears the
+  caller itself, so `listen:` there is refused. This entry cannot have a `fallback:` list.
+  The slng and twilio targets refuse one that differs from the package's; livekit and
+  pipecat hear each agent with its own.
 </ParamField>
 
 <ParamField path="tools" type="list of strings">
@@ -945,8 +955,9 @@ The conversation becomes another agent, and never comes back.
 </ParamField>
 
 <ParamField path="say" type="list of strings">
-  One fixed line spoken before handing over, written as a list with one item. Omit for a
-  silent handoff.
+  Any number of fixed lines. One is picked each time the handoff runs, never the one
+  said last, and the next agent's voice says it. A line takes no `{{ }}` placeholder and
+  a blank line is refused. Omit for a silent handoff.
 </ParamField>
 
 <ParamField path="save" type="list of one-key pairs">

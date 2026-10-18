@@ -95,6 +95,11 @@ An agent has four required keys and five optional lists. There are no others.
   [`models.speak`](/models/tts).
 </ParamField>
 
+<ParamField path="listen" type="model name">
+  Which transcriber this agent hears with, for an agent that speaks another language.
+  Names one entry under [`models.listen`](/models/stt). Omit it to use the package's.
+</ParamField>
+
 <ParamField path="tools" type="list of names">
   Tools this agent may call. Each name is a file under `tools/<name>.yaml`.
 </ParamField>

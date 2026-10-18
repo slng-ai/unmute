@@ -26,7 +26,7 @@ var pythonName = regexp.MustCompile(`[^A-Za-z0-9_]`)
 // buildCoreSpeech renders speech.py: LISTEN, the speech-to-text model when it
 // is not SLNG's, and SPEAK, each voice that is not SLNG's by its name in
 // agent.yaml. Each constructor is v1's, from the same catalogue row.
-func buildCoreSpeech(resolved ir.Target) (coreSpeech, error) {
+func buildCoreSpeech(agent *ir.Agent, resolved ir.Target) (coreSpeech, error) {
 	fw := targetcap.Provider(resolved.Provider)
 	env := newEnvSet()
 	imports := []string{}
@@ -48,14 +48,20 @@ func buildCoreSpeech(resolved ir.Target) (coreSpeech, error) {
 		return renderCall(call), nil
 	}
 	var body strings.Builder
-	listen := "None"
-	if binding := resolved.Models.Listen; binding != nil && binding.Provider != "slng" {
-		call, err := render(targetcap.Listen, *binding)
-		if err != nil {
-			return out, fmt.Errorf("listen: %w", err)
+	listens := listenBindings(agent, resolved)
+	var ears []string
+	for _, name := range sortedKeys(listens) {
+		binding := listens[name]
+		if binding.Provider == "slng" {
+			continue
 		}
-		fmt.Fprintf(&body, "\n\ndef listen() -> Any:\n    \"\"\"Return the speech-to-text model agent.yaml names.\"\"\"\n    return %s\n", call)
-		listen = "listen"
+		call, err := render(targetcap.Listen, binding)
+		if err != nil {
+			return out, fmt.Errorf("listen %q: %w", name, err)
+		}
+		function := "listen_" + pythonName.ReplaceAllString(name, "_")
+		fmt.Fprintf(&body, "\n\ndef %s() -> Any:\n    \"\"\"Return the speech-to-text model %s.\"\"\"\n    return %s\n", function, pyQuote(name), call)
+		ears = append(ears, fmt.Sprintf("%s: %s", pyQuote(name), function))
 	}
 	var voices []string
 	for _, name := range sortedKeys(resolved.Models.Speak) {
@@ -105,7 +111,7 @@ func buildCoreSpeech(resolved ir.Target) (coreSpeech, error) {
 		"import os  # noqa: F401 - a constructor may read a key from the environment\n" +
 		"from collections.abc import Callable\nfrom typing import Any\n\n" +
 		strings.Join(imports, "\n") + "\n" + body.String() +
-		fmt.Sprintf("\n\nLISTEN: Callable[[], Any] | None = %s\n\"\"\"The speech-to-text model when it is not SLNG's, else None.\"\"\"\n", listen) +
+		fmt.Sprintf("\n\nLISTEN: dict[str, Callable[[], Any]] = {%s}\n\"\"\"Each speech-to-text model that is not SLNG's, by its name in agent.yaml.\"\"\"\n", strings.Join(ears, ", ")) +
 		fmt.Sprintf("SPEAK: dict[str, Callable[[], Any]] = {%s}\n\"\"\"Each voice that is not SLNG's, by its name in agent.yaml.\"\"\"\n", strings.Join(voices, ", ")) +
 		fmt.Sprintf("REALTIME: dict[str, Callable[[], Any]] = {%s}\n\"\"\"Each realtime model, by its name in agent.yaml.\"\"\"\n", strings.Join(realtime, ", "))
 	out.Env = env.sorted()

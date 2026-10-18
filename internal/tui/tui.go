@@ -1752,7 +1752,7 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 			newChoice("Target agent  ·  "+handoff.To, "target"),
 			newChoice("Trigger  ·  "+oneLine(handoff.When), "trigger"),
 			newChoice("Context  ·  "+cmp.Or(handoff.History, "messages"), "context"),
-			newChoice("Announcement  ·  "+cmp.Or(oneLine(handoff.Announce), "silent"), "announce"),
+			newChoice("Announcement  ·  "+cmp.Or(oneLine(strings.Join(handoff.Say, " / ")), "silent"), "announce"),
 			newChoice("Delete handoff", "delete"),
 			newChoice("← Back", actionBack),
 		}, true)
@@ -1789,8 +1789,21 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 				return err
 			}
 		case "announce":
-			if _, err := runner.input("Announcement (optional)", "Exact sentence spoken before the handoff. Blank keeps it silent.", &handoff.Announce, func(string) error { return nil }); err != nil {
+			// The console edits the first line. Any other lines the author wrote stay.
+			var first string
+			if len(handoff.Say) > 0 {
+				first = handoff.Say[0]
+			}
+			if _, err := runner.input("Announcement (optional)", "Exact sentence spoken before the handoff. Blank keeps it silent.", &first, func(string) error { return nil }); err != nil {
 				return err
+			}
+			switch {
+			case strings.TrimSpace(first) == "":
+				handoff.Say = nil
+			case len(handoff.Say) == 0:
+				handoff.Say = []string{first}
+			default:
+				handoff.Say[0] = first
 			}
 		case "delete":
 			confirmed, err := confirmDelete(runner, "handoff", name)

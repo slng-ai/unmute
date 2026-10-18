@@ -316,6 +316,7 @@
       "instructions": "# Salon desk\n\nYou answer the phone for a small salon. Book appointments and help new callers check in.\n",
       "model": "reasoning",
       "voice": "voice",
+      "listen": "transcriber",
       "tools": [
         "manage_booking",
         "check_in"

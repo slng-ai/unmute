@@ -85,9 +85,9 @@ That is the shape `unmute init <name>` scaffolds, with an empty `State` class in
 | `version` | yes | the schema version. Write `2`: `livekit` and `pipecat` compile version 2 only. `1` compiles on `twilio` and `slng` only |
 | `manifest` | when a root manifest exists | the literal `manifest.yaml`, linking the company contract |
 | `name` | yes | what the deployed agent is called |
-| `entry_agent` | yes | which agent answers |
+| `entry_agent` | yes | which agent answers. A cascaded agent may add `speak:` and its own `listen:` (a `models.listen` entry, for another language; no `fallback:`; refused on a realtime or live agent, and on slng and twilio when it differs from the package's). On livekit and pipecat each agent keeps its voice and ears after a handoff |
 | `models` | yes | the model palette, grouped by kind |
-| `listen` | when `models.listen` has two or more entries | which listen entry to use |
+| `listen` | when `models.listen` has two or more entries, unless every cascaded agent names its own | which listen entry to use |
 | `turn` | when `models.turn` has two or more entries | which turn entry to use |
 | `variables` | no | a list of `source:` and `confirm:` entries for fields on `State` in `state.py`, the file that holds the types |
 | `secrets` | no | environment names the generated project reads |

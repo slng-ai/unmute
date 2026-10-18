@@ -390,7 +390,8 @@ class Handoff:
         name: The tool's name, like ``to_spanish``.
         to: The agent that takes the call.
         description: When the model calls it.
-        announce: A line said first, or None.
+        announce: The lines said first, in the next agent's voice. One is picked each
+            time, never the one said last. Empty for a silent handoff.
         context: What the next agent hears of the call so far.
         saves: State values saved as the call moves.
         opens_with: A tool of the next agent's own, run in code as it takes the call.
@@ -401,7 +402,7 @@ class Handoff:
         self.name = name
         self.to: str = spec["to"]
         self.description: str = spec["description"]
-        self.announce: str | None = spec.get("announce")
+        self.announce: tuple[str, ...] = tuple(spec.get("announce", ()))
         self.context = HandoffContext(
             history=spec["history"],
             max_messages=spec.get("max_messages"),

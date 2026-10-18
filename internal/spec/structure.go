@@ -183,14 +183,6 @@ func (p *Package) lowerStructure() error {
 			if err := define("handoff", handoff.Name, def.Name); err != nil {
 				return err
 			}
-			switch len(handoff.Say) {
-			case 0:
-			case 1:
-				line := handoff.Say[0]
-				handoff.Announce = &line
-			default:
-				return fmt.Errorf("%s: handoff %q has %d say: lines; a handoff says one line for now", p.Location("agent.yaml", "name: "+handoff.Name), handoff.Name, len(handoff.Say))
-			}
 			agent.Handoffs[handoff.Name] = handoff
 			def.Handoffs = append(def.Handoffs, handoff.Name)
 		}

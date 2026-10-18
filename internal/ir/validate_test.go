@@ -29,7 +29,7 @@ func TestValidateSafeCorePerTarget(t *testing.T) { // V5, V18
 
 func TestValidateAgentTransferAnnouncePerTarget(t *testing.T) {
 	agent := safeAgent(t)
-	agent.Controls["to_billing"].(*AgentTransfer).Announce = "I’ll connect you with billing."
+	agent.Controls["to_billing"].(*AgentTransfer).Announce = []string{"I’ll connect you with billing."}
 	for provider, wantError := range map[Provider]bool{
 		ProviderLiveKit: false,
 		ProviderPipecat: false,

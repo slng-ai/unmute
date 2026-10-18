@@ -19,6 +19,7 @@ On this page:
 - [Every key a listen binding takes](#every-key-a-listen-binding-takes) - the full shape
 - [One key, many models](#one-key-many-models) - hosted, proxied, and where it runs
 - [Pipecat](#pipecat) and [LiveKit](#livekit) - the vendors each target can construct
+- [One transcriber per agent](#one-transcriber-per-agent) - an agent that hears another language
 - [Fallback](#fallback) - what to try when the first call fails
 - [Troubleshooting](#troubleshooting) - the refusals that come up most
 
@@ -178,6 +179,13 @@ provider that is not here cannot be bound at all.
 ## The difference between the two
 
 Pipecat has `openai`, LiveKit has `sarvam`. Everything else matches.
+
+## One transcriber per agent
+
+An agent can name its own `listen:` entry, so it hears the language it speaks. Without
+it the agent uses the package's. Only a cascaded agent takes it, and that entry cannot
+have a `fallback:` list. On livekit and pipecat each agent hears with its own model
+after a handoff; slng and twilio refuse one that differs from the package's.
 
 ## Fallback
 

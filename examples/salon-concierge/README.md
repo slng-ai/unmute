@@ -198,7 +198,7 @@ is this salon written by hand on the library.
 | The model read the number and the booking back | Code reads them back (`confirm:`, from `{{input.x}}`) |
 | The model offered the free times | `find_slots` returns the offer, and code says it |
 | `Appointment.spoken` held the sentence to read | Code says the typed day and time in the receipt (an outcome `say:`) |
-| `to_complaints` was silent | It says "I'm sorry to hear that. Let me take this down properly." first |
+| `to_complaints` was silent | It says one of two lines first, like "I'm sorry to hear that. Let me take this down properly." |
 | 2 to 3 model requests on a booking turn | 1 |
 | `phonenumbers` and `pydantic-extra-types` for the phone type | unmute-core's `Phone` and `Id` |
 

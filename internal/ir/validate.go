@@ -145,6 +145,10 @@ func forwardedBindings(resolved Target) []ForwardedBinding {
 		appendBinding("realtime", name, &binding)
 	}
 	appendBinding("listen", "", resolved.Models.Listen)
+	for _, name := range slices.Sorted(maps.Keys(resolved.Models.AgentListens)) {
+		binding := resolved.Models.AgentListens[name]
+		appendBinding("listen", name, &binding)
+	}
 	for _, fallback := range resolved.Models.ListenFallbacks {
 		binding := fallback.Binding
 		appendBinding("listen", fallback.Name, &binding)
@@ -224,6 +228,11 @@ func sizing(agent *Agent, resolved Target) []Sizing {
 func resolvedHasLocal(resolved Target) bool {
 	if b := resolved.Models.Listen; b != nil && b.Placement == PlacementLocal {
 		return true
+	}
+	for _, b := range resolved.Models.AgentListens {
+		if b.Placement == PlacementLocal {
+			return true
+		}
 	}
 	for _, fallback := range resolved.Models.ListenFallbacks {
 		if fallback.Binding.Placement == PlacementLocal {
@@ -887,6 +896,14 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	if len(resolved.Models.ListenFallbacks) > 0 {
 		applyCapability(caps, targetcap.FieldListenFallback, provider, row)
 	}
+	for _, name := range slices.Sorted(maps.Keys(resolved.Models.AgentListens)) {
+		if resolved.Models.AgentListens[name].Placement == PlacementLocal {
+			applyCapability(caps, targetcap.FieldListenLocal, provider, row)
+		}
+	}
+	if len(resolved.Models.AgentListens) > 0 {
+		applyCapability(caps, targetcap.FieldAgentListen, provider, row)
+	}
 	// `eager` is a turn field. validateModelKind refuses it on an authored entry
 	// of any other kind, but a per-target `models:` override replaces a binding
 	// wholesale, so the same mistake can arrive here having never been an
@@ -1035,7 +1052,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 				applyCapability(caps, targetcap.FieldDelegateAnnounce, provider, row)
 			}
 		case *AgentTransfer:
-			if control.Announce != "" {
+			if len(control.Announce) > 0 {
 				applyCapability(caps, targetcap.FieldTransferAnnounce, provider, row)
 			}
 			validateContext(control.Context.TaskContext, provider, caps, row)

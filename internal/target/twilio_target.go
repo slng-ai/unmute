@@ -312,6 +312,7 @@ func twilioFields() map[Field]Capability {
 		FieldRealtimeModel:       no("twilio target has ConversationRelay listen and speak and the app think, so architecture: realtime has no slot: write architecture: cascade"),
 		FieldRealtimeTasks:       no("twilio target has no slot for architecture: realtime at all: write architecture: cascade"),
 		FieldFallback:            no("twilio target calls one think model and emits no fallback chain: remove fallback, or compile to livekit which emits one"),
+		FieldAgentListen:         no("twilio target transcribes with one ConversationRelay provider for the whole call: remove listen: from the agent, or compile to livekit or pipecat"),
 		FieldListenFallback:      no("twilio target has ConversationRelay transcribe with one provider and no fallback: remove the listen fallback, or compile to livekit"),
 		FieldTask:                no(twilioOnlyOne("a task")),
 		FieldTaskModel:           no(twilioOnlyOne("a per-task model")),

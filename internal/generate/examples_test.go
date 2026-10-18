@@ -224,10 +224,10 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		// Customer care says why the call moves. Back to the concierge, it moves silently.
 		want := ""
 		if name == "to_complaints" {
-			want = "I'm sorry to hear that. Let me take this down properly."
+			want = "I'm sorry to hear that. Let me take this down properly.|I'm sorry about that. Let me write down what happened."
 		}
-		if transfer.Announce != want {
-			t.Errorf("internal handoff %q says %q, want %q", name, transfer.Announce, want)
+		if got := strings.Join(transfer.Announce, "|"); got != want {
+			t.Errorf("internal handoff %q says %q, want %q", name, got, want)
 		}
 	}
 	for name, task := range resolved.Tasks {

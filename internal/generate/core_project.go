@@ -75,7 +75,7 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if spec["models"], err = coreModels(resolved); err != nil {
+	if spec["models"], err = coreModels(agent, resolved); err != nil {
 		return nil, err
 	}
 	transfers, err := coreTransfers(agent, resolved)
@@ -87,7 +87,7 @@ func GenerateCore(agent *ir.Agent, resolved ir.Target) ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	speech, err := buildCoreSpeech(resolved)
+	speech, err := buildCoreSpeech(agent, resolved)
 	if err != nil {
 		return nil, err
 	}

@@ -87,6 +87,7 @@ const (
 	FieldRealtimeTasks       Field = "models.realtime.tasks"
 	FieldFallback            Field = "models.fallback"
 	FieldListenFallback      Field = "models.listen.fallback"
+	FieldAgentListen         Field = "agents.listen"
 	FieldTask                Field = "tasks"
 	FieldTaskModel           Field = "tasks.model"
 	FieldTaskNestedResult    Field = "tasks.result.nested"
@@ -432,6 +433,11 @@ func Default() Table {
 			FieldListenFallback: field(
 				deny(Pipecat, "the Pipecat driver does not emit listen fallback yet"),
 				allow(Slng),
+			),
+			// An agent with its own speech-to-text model: LiveKit gives the
+			// agent its own STT, Pipecat switches an STTSwitcher at the handoff.
+			FieldAgentListen: field(
+				deny(Slng, "slng target binds one speech-to-text model for the whole agent: remove listen: from the agent, or compile to livekit or pipecat"),
 			),
 			// SLNG managed agents run tasks and task groups since 2026-09-29: the
 			// backend's agent_tasks.py contract, written from this package's own

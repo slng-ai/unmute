@@ -1013,7 +1013,7 @@ func TestHandoffAnnouncementEditsAndRoundTrips(t *testing.T) {
 	if err := editHandoffDetails(newRunner(strings.NewReader("5\nI’ll connect you to billing now.\n7\n"), &output, true), &data, "to_billing"); err != nil {
 		t.Fatal(err)
 	}
-	if got := data.Handoffs[0].Announce; got != "I’ll connect you to billing now." {
+	if got := strings.Join(data.Handoffs[0].Say, "|"); got != "I’ll connect you to billing now." {
 		t.Fatalf("announcement = %q", got)
 	}
 
@@ -1025,7 +1025,7 @@ func TestHandoffAnnouncementEditsAndRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := reloaded.data.Handoffs[0].Announce; got != data.Handoffs[0].Announce {
+	if got := reloaded.data.Handoffs[0].Say; !slices.Equal(got, data.Handoffs[0].Say) {
 		t.Fatalf("round-trip announcement = %q", got)
 	}
 }

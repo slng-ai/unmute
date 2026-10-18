@@ -379,7 +379,7 @@ type Handoff struct {
 	Source           string
 	To               string
 	When             string
-	Announce         string
+	Say              []string
 	History          string
 	MaxMessages      int
 	Summarizer       string
@@ -1395,9 +1395,7 @@ func (d Data) AgentHandoffItems(agent string) []any {
 				continue
 			}
 			block := spec.Handoff{Name: h.Name, To: h.To, When: h.When}
-			if h.Announce != "" {
-				block.Say = []string{h.Announce}
-			}
+			block.Say = h.Say
 			if (h.History != "" && h.History != "messages") || h.MaxMessages > 0 || h.Summarizer != "" || h.IncludeToolCalls != nil {
 				block.Context = &spec.TransferContext{History: h.History, MaxMessages: h.MaxMessages, Summarizer: h.Summarizer, IncludeToolCalls: h.IncludeToolCalls}
 			}

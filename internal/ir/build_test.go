@@ -98,16 +98,16 @@ func TestBuildSafeCore(t *testing.T) {
 
 func TestBuildAgentTransferAnnounce(t *testing.T) {
 	pkg := loadSafeCore(t)
-	want := "I’ll connect you with billing."
+	want := []string{"I’ll connect you with billing.", "Let me put you through to billing."}
 	control := pkg.Agent.Handoffs["to_billing"]
-	control.Announce = &want
+	control.Say = want
 	pkg.Agent.Handoffs["to_billing"] = control
 
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := agent.Controls["to_billing"].(*AgentTransfer).Announce; got != want {
+	if got := agent.Controls["to_billing"].(*AgentTransfer).Announce; !slices.Equal(got, want) {
 		t.Fatalf("announce = %q, want %q", got, want)
 	}
 }
@@ -124,20 +124,20 @@ func TestBuildRejectsInvalidAgentTransferAnnounce(t *testing.T) {
 			value: " \t ",
 			mutate: func(pkg *packagespec.Package, value *string) {
 				control := pkg.Agent.Handoffs["to_billing"]
-				control.Announce = value
+				control.Say = []string{*value}
 				pkg.Agent.Handoffs["to_billing"] = control
 			},
-			want: "announce must not be blank",
+			want: "a say: line must not be blank",
 		},
 		{
 			name:  "template",
 			value: "I’ll connect you with {{destination}}.",
 			mutate: func(pkg *packagespec.Package, value *string) {
 				control := pkg.Agent.Handoffs["to_billing"]
-				control.Announce = value
+				control.Say = []string{*value}
 				pkg.Agent.Handoffs["to_billing"] = control
 			},
-			want: "announce does not support templates",
+			want: "a say: line takes no {{ }} placeholder",
 		},
 		// `announce` on a delegate and `announce` on an escalation used to be
 		// caught here, by an allow-matrix keyed on `kind:`. Neither is a value a
