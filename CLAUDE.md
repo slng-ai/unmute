@@ -138,11 +138,7 @@ compile, deploy and talk to, to find what only a real call finds: not shipped,
 nobody pointed at it, and held to one bar (validates clean and generates on every
 target it declares) so a test agent that stops running fails the suite. Putting a
 test agent in `examples/` is what this split exists to stop, because it makes the
-public set grow with work nobody outside is meant to read. Two of those agents
-are a pair: `salon-concierge-v2` is frozen at the state that closed typed
-session state and is the control, and `salon-concierge-v3` exercises explicit
-saved-value sharing across reset tasks, so a regression is measured against a
-package known to work.
+public set grow with work nobody outside is meant to read.
 
 ## Feature work
 Plan before editing. Plan mode (`Shift+Tab`) writes the plan to a file that is

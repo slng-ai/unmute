@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -126,6 +127,7 @@ func newInitCmd() *cobra.Command {
 
 func runConsole(cmd *cobra.Command, createOnly bool) error {
 	in := cmd.InOrStdin()
+	consoleAction := consoleActionIn(cmd.Context())
 	run := func(in io.Reader, out io.Writer, accessible bool) (tui.Result, error) {
 		store, err := manifestStore()
 		if err != nil {
@@ -166,17 +168,22 @@ func writeConsoleResult(cmd *cobra.Command, result tui.Result) error {
 	return nil
 }
 
-func consoleAction(action, path string, out io.Writer) error {
-	cmd := &cobra.Command{}
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	switch action {
-	case "validate":
-		return runValidate(cmd, path, nil)
-	case "compile":
-		return runCompile(cmd, path, nil)
-	default:
-		return fmt.Errorf("unknown console action %q", action)
+// consoleActionIn runs a console's validate or compile under ctx, which carries
+// the reader state.py is read with.
+func consoleActionIn(ctx context.Context) func(action, path string, out io.Writer) error {
+	return func(action, path string, out io.Writer) error {
+		cmd := &cobra.Command{}
+		cmd.SetContext(ctx)
+		cmd.SetOut(out)
+		cmd.SetErr(out)
+		switch action {
+		case "validate":
+			return runValidate(cmd, path, nil)
+		case "compile":
+			return runCompile(cmd, path, nil)
+		default:
+			return fmt.Errorf("unknown console action %q", action)
+		}
 	}
 }
 

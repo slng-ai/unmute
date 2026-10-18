@@ -1,7 +1,6 @@
 package generate
 
 import (
-	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -18,11 +17,6 @@ import (
 // fills in.
 //
 // internal/target owns the provider facts. This file owns their Python.
-
-// slngVariableLimit is the router's per-value ceiling. An over-long value is
-// truncated with a warning rather than dropped, because FR-018 forbids ending a
-// live call over a variable.
-const slngVariableLimit = 4000
 
 // slngSite is what one router LLM construction needs that the binding cannot
 // carry: two expressions whose spelling belongs to the target, and the names the
@@ -100,173 +94,6 @@ type slngSite struct {
 	VariablesPerRequest bool
 }
 
-// slngConfigFunc names the emitted configuration helper for one think profile.
-// Profile names are already snake_case, so the name needs no transform.
-func slngConfigFunc(profile string) string { return "_slng_config_" + profile }
-
-// slngRouterClass is the emitted service subclass Pipecat needs: its only seam
-// for a response hook is overriding how the service builds its client. Here
-// rather than in a template because the driver assigns it as a call's class.
-//
-// The provenance line's own text lives in the two templates that write it, as
-// literal Python. It was briefly a table here, which bought nothing: no Go code
-// reads the field names, both templates already carry the hook verbatim, and
-// TestSlngRouterProvenanceLineHasOneOwner holds the field set and its order by
-// reading what the drivers wrote. The contract is in
-// specs/016-router-template-variables/contracts/provenance-log.md.
-const slngRouterClass = "_SlngRouterLLMService"
-
-// slngConfigHelper is one emitted configuration function.
-type slngConfigHelper struct {
-	Func string // the function name
-	Body string // the dict literal it returns
-}
-
-// slngHelpers is everything a package with a router binding emits at module
-// level. Empty on a package with no router binding, which is FR-019 by
-// construction: a driver with nothing here writes nothing.
-type slngHelpers struct {
-	// Configs is one entry per router think profile, in profile order.
-	Configs []slngConfigHelper
-	// Variables is set when any router prompt references a template variable, so
-	// the snapshot helper is worth emitting.
-	Variables     bool
-	TemplatePaths string
-	TemplateSites string
-	// Vertex is set when any router upstream is vertex, so the credential helper
-	// is worth emitting.
-	Vertex bool
-	// Limit is the truncation ceiling, so the emitted helper and the runbook
-	// cannot drift from each other.
-	Limit int
-	// The two header names, and the field the per-call identifier occupies on a
-	// LiveKit user data object. A template that builds the header dict itself
-	// still reads the names from internal/target, so a rename there reaches the
-	// emitted Python rather than only the Go-rendered half.
-	AgentIDHeader   string
-	SessionIDHeader string
-	SessionIDField  string
-	// BodyParams is every forwardable param this package's router bindings send,
-	// as "profile: key=json" lines. The runbook names them rather than describing
-	// the rule, because a reader checking why a request went where it went wants to
-	// see the value they authored, in the form it leaves in.
-	//
-	// The compiler knows nothing about what any of them mean. That is the point of
-	// a passthrough param, and it is why the runbook can only say a param reached
-	// the upstream, never what the upstream will do about it.
-	BodyParams []string
-	// PromptSuffix is the authored directive appended to every system prompt, per
-	// profile, as "profile: value" lines. Empty on a package that authors none.
-	PromptSuffix []string
-	// Scopes is every cache scope this package sends, in agent order then task
-	// order. The emitted runbook prints the list rather than describing the rule,
-	// because a reader checking a log line wants to recognise the value they are
-	// looking at.
-	Scopes []string
-	// ClientBaseURL is the endpoint the emitted client is built with, and the
-	// flag that a target builds its own client at all, which is the only way to
-	// attach a response hook. Set on LiveKit, empty on Pipecat, which overrides
-	// how its service builds one instead.
-	ClientBaseURL string
-	// ClientKeyEnv is the credential's environment variable name. Threaded from
-	// internal/target rather than spelled in the template, because that package
-	// owns provider facts and a rename there has to reach emitted Python. The
-	// emitted helper and class names above are ours, not a provider's, so they
-	// are written literally.
-	ClientKeyEnv string
-	// RouterClass names the emitted service subclass, on the target that needs
-	// one. Set on Pipecat, empty on LiveKit, which takes a client instead.
-	RouterClass string
-	// RequestBody is the body extension as a Python dict literal, set only on a
-	// target that sends it per request. The template writes it into its own
-	// request path, where the variable snapshot is read again for every turn
-	// instead of once for the call.
-	//
-	// One value per package rather than one per profile, and validation is what
-	// makes that safe: on livekit every router profile has to be the entry
-	// agent's, so a package has exactly one.
-	RequestBody string
-}
-
-// Any reports whether the package needs the router machinery at all.
-func (h slngHelpers) Any() bool { return len(h.Configs) > 0 }
-
-// slngHelpersFor collects the module-level helpers one target needs. It reads
-// the resolved bindings rather than agent.Models, because a per-target override
-// can turn a binding into a router binding or away from one.
-func slngHelpersFor(agent *ir.Agent, tgt ir.Target) (slngHelpers, error) {
-	helpers := slngHelpers{
-		Limit:           slngVariableLimit,
-		AgentIDHeader:   targetcap.SlngAgentIDHeader,
-		SessionIDHeader: targetcap.SlngSessionIDHeader,
-		SessionIDField:  livekitSessionIDField,
-	}
-	for _, profile := range slices.Sorted(maps.Keys(tgt.Models.Reason)) {
-		binding := tgt.Models.Reason[profile]
-		if !binding.Router() {
-			continue
-		}
-		body, err := slngConfigBody(binding)
-		if err != nil {
-			return slngHelpers{}, fmt.Errorf("think.%s: %w", profile, err)
-		}
-		helpers.Configs = append(helpers.Configs, slngConfigHelper{Func: slngConfigFunc(profile), Body: body})
-		helpers.Variables = true
-		if binding.Upstream != nil && binding.Upstream.Provider == "vertex" {
-			helpers.Vertex = true
-		}
-		_, params := splitParams(slngConsumedParams(binding.Params), targetcap.SlngRequestBodyArg)
-		for _, key := range slices.Sorted(maps.Keys(params)) {
-			encoded, err := json.Marshal(params[key])
-			if err != nil {
-				return slngHelpers{}, fmt.Errorf("think.%s param %s: %w", profile, key, err)
-			}
-			helpers.BodyParams = append(helpers.BodyParams,
-				fmt.Sprintf("%s: %s=%s", profile, key, encoded))
-		}
-		if binding.PromptSuffix != "" {
-			helpers.PromptSuffix = append(helpers.PromptSuffix,
-				fmt.Sprintf("%s: %s", profile, binding.PromptSuffix))
-		}
-	}
-	helpers.Scopes = slngPackageScopes(agent, tgt)
-	paths := map[string]any{}
-	for scope, refs := range slngTemplatePaths(agent, tgt) {
-		paths[scope] = anyStrings(refs)
-	}
-	helpers.TemplatePaths = pyLiteral(paths)
-	sites := map[string]any{}
-	for name, task := range agent.Tasks {
-		if profile, ok := slngRouterBinding(agent, tgt, task.Model); ok {
-			scope := targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, targetcap.SlngSite{Kind: targetcap.SlngSiteTask, Name: name})
-			sites[scope] = "task:" + name
-		}
-	}
-	helpers.TemplateSites = pyLiteral(sites)
-	return helpers, nil
-}
-
-// slngPackageScopes lists every cache scope this package sends on this target, in
-// agent order then task order. A site whose think profile is not a router binding
-// contributes nothing, the same way the drivers give it no scope.
-func slngPackageScopes(agent *ir.Agent, tgt ir.Target) []string {
-	var scopes []string
-	add := func(model string, site targetcap.SlngSite) {
-		profile, router := slngRouterBinding(agent, tgt, model)
-		if !router {
-			return
-		}
-		scopes = append(scopes, targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, site))
-	}
-	for _, name := range slices.Sorted(maps.Keys(agent.Agents)) {
-		add(agent.Agents[name].Model, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name})
-	}
-	for _, name := range slices.Sorted(maps.Keys(agent.Tasks)) {
-		add(agent.Tasks[name].Model, targetcap.SlngSite{Kind: targetcap.SlngSiteTask, Name: name})
-	}
-	return scopes
-}
-
 // slngConfigBody renders the inline slng_config literal: one tier, one entry,
 // weight 100, and an endpoint holding exactly the resolved upstream's fields.
 //
@@ -320,51 +147,6 @@ func slngBindingCredentialEnvs(binding ir.Binding) []string {
 	return names
 }
 
-// slngTemplatePaths uses the same scope as the active prompt's cache identity.
-func slngTemplatePaths(agent *ir.Agent, tgt ir.Target) map[string][]string {
-	paths := map[string][]string{}
-	add := func(model, body string, site targetcap.SlngSite) {
-		profile, router := slngRouterBinding(agent, tgt, model)
-		if !router {
-			return
-		}
-		refs := ir.TemplateRefs(ir.FlattenPaths(body))
-		if refs == nil {
-			refs = []string{}
-		}
-		paths[targetcap.SlngScope(tgt.Models.Reason[profile].AgentID, site)] = refs
-	}
-	for name, def := range agent.Agents {
-		add(def.Model, def.Instructions, targetcap.SlngSite{Kind: targetcap.SlngSiteAgent, Name: name})
-	}
-	for name, task := range agent.Tasks {
-		add(task.Model, task.Instructions, targetcap.SlngSite{Kind: targetcap.SlngSiteTask, Name: name})
-	}
-	return paths
-}
-
-// slngProfileOf resolves which think profile a prompt site runs on: its own if
-// it names one, otherwise the entry agent's. It answers "" when that profile is
-// not a router binding on this target, so a package holding a router profile and
-// a direct one comes out right.
-func slngProfileOf(tgt ir.Target, model, entry string) string {
-	profile := model
-	if profile == "" {
-		profile = entry
-	}
-	if binding, ok := tgt.Models.Reason[profile]; ok && binding.Router() {
-		return profile
-	}
-	return ""
-}
-
-// slngRouterBinding reports whether a prompt site's think profile is a router
-// binding, which is the one question the prompt lowering seam asks.
-func slngRouterBinding(agent *ir.Agent, tgt ir.Target, model string) (string, bool) {
-	profile := slngProfileOf(tgt, model, agent.Agents[agent.EntryAgent].Model)
-	return profile, profile != ""
-}
-
 // slngRequestHeaders is the identity header dict one prompt site sends: its own
 // cache scope, and the call's session id which scopes nothing and only groups one
 // conversation's requests together.
@@ -378,26 +160,6 @@ func slngRequestHeaders(site slngSite) map[string]any {
 		targetcap.SlngAgentIDHeader:   site.Scope,
 		targetcap.SlngSessionIDHeader: pyExpr(site.SessionExpr),
 	}
-}
-
-// slngClientArgs replaces a router construction's credential and endpoint
-// arguments with the client the package builds itself.
-//
-// Both values move into that helper rather than being passed twice. The plugin
-// ignores api_key and base_url entirely once it is given a client, so leaving
-// them here would emit two arguments that do nothing and a reader would have to
-// work out which pair the request actually used.
-//
-// Only the two named arguments go. Everything else the catalogue put on the call,
-// the model above all, stays where it is.
-func slngClientArgs(args []pyKV, expr string) []pyKV {
-	if expr == "" {
-		return args
-	}
-	rest := slices.DeleteFunc(args, func(arg pyKV) bool {
-		return arg.Key == "api_key" || arg.Key == "base_url"
-	})
-	return append([]pyKV{{Key: "client", Value: expr}}, rest...)
 }
 
 // slngRequestBody is the body extension one router think request carries beyond
@@ -466,54 +228,6 @@ func slngRequestExtras(site slngSite, binding ir.Binding) map[string]any {
 		extras[targetcap.SlngRequestHeadersArg] = slngRequestHeaders(site)
 	}
 	return extras
-}
-
-// summaryPromptSuffix is the directive the emitted summarizer prompt carries: the
-// authored prompt_suffix on whichever think binding does the summarizing.
-//
-// The summarizer's prompt is a literal in the driver's own template rather than
-// an authored file, so ir.Build cannot reach it the way it reaches every agent and
-// task prompt. This is the one site that needs the value carried through instead.
-//
-// One value, because the emitted helper holds one prompt. A package whose
-// summarizer profiles authored different suffixes has asked for something that
-// shape cannot express, so it is refused with the reason named rather than served
-// whichever one happened to be walked last. No package in the repository can
-// reach it: a target is held to a single router think profile, and it takes two
-// summarizer profiles with two different directives to get here.
-func summaryPromptSuffix(agent *ir.Agent) (string, error) {
-	found := map[string]string{} // suffix -> the profile that authored it
-	consider := func(context ir.TaskContext) {
-		if context.History != ir.HistorySummary || context.Summarizer == "" {
-			return
-		}
-		if suffix := agent.Models[context.Summarizer].PromptSuffix; suffix != "" {
-			found[suffix] = context.Summarizer
-		}
-	}
-	for _, name := range slices.Sorted(maps.Keys(agent.Controls)) {
-		if transfer, ok := agent.Controls[name].(*ir.AgentTransfer); ok {
-			consider(transfer.Context.TaskContext)
-		}
-	}
-	for _, name := range slices.Sorted(maps.Keys(agent.Tasks)) {
-		consider(agent.Tasks[name].Context)
-	}
-	switch len(found) {
-	case 0:
-		return "", nil
-	case 1:
-		for suffix := range found {
-			return suffix, nil
-		}
-	}
-	profiles := make([]string, 0, len(found))
-	for suffix, profile := range found {
-		profiles = append(profiles, fmt.Sprintf("%s authors %q", profile, suffix))
-	}
-	slices.Sort(profiles)
-	return "", fmt.Errorf("two summarizer think profiles author different prompt_suffix values (%s): the emitted summarizer prompt is one literal shared by every summarizer site, so it can carry one directive. Give them the same value, or summarize both with one profile",
-		strings.Join(profiles, "; "))
 }
 
 // slngStateExpr is the state object the snapshot reads. A package with names to

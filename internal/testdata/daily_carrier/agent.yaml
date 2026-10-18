@@ -5,7 +5,7 @@
 # its code, its capability rows, and its guards, and stops shipping an example
 # that would recommend it over the route with nothing to host. Everything the
 # route's tests need is here.
-version: 1
+version: 2
 
 name: daily-carrier-fixture
 

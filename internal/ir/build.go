@@ -1879,16 +1879,6 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 // the portable half of a package, and a phone number is a deployment fact
 // (spec FR-004d).
 
-// DestinationEnv reports the environment variable name a destination defers to,
-// or "" when it carries a literal. Drivers use it to decide between emitting the
-// value and emitting a lookup, and to register the name in `.env.example`.
-func DestinationEnv(value string) string {
-	if envNamePattern.MatchString(value) {
-		return value
-	}
-	return ""
-}
-
 // resolveBindings converts each used effective model into a Binding: think
 // models land in Reason, speak models in Speak, the listen/turn selections in
 // their role slots.

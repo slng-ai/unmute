@@ -286,7 +286,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		case tool.Webhook != nil:
 			value.URLEnv, value.Auth = tool.Webhook.URLEnv, tool.Webhook.Auth
 		case tool.Local != nil:
-			handlerPath := tool.Local.Handler
+			handlerPath, _ := packagespec.SplitHandler(tool.Local.Handler)
 			if handlerPath == "" {
 				handlerPath = filepath.Join("tools", name+".py")
 			}
@@ -535,7 +535,8 @@ func roundTripLosses(original *packagespec.Package, data scaffold.Data) ([]strin
 			losses = append(losses, path+": content")
 		}
 	}
-	if !bytes.Equal(original.StateSource, rendered.StateSource) {
+	// A package with no state.py is written an empty one, which loses nothing.
+	if original.StateSource != nil && !bytes.Equal(original.StateSource, rendered.StateSource) {
 		losses = append(losses, packagespec.StateFile+": content")
 	}
 	for path, content := range original.Handlers {
@@ -678,6 +679,10 @@ func editTarget(runner *fieldRunner, data *scaffold.Data) error {
 	return err
 }
 
+// stateReader reads state.py and the local tools' types through Python. The
+// console's tests replace it, so they need no uv.
+var stateReader stateschema.Reader = stateschema.UV{}
+
 func validateMaintained(path string) error {
 	_, err := maintainedWarnings(path)
 	return err
@@ -688,7 +693,7 @@ func maintainedWarnings(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := pkg.ReadState(context.Background(), stateschema.UV{}); err != nil {
+	if err := pkg.ReadState(context.Background(), stateReader); err != nil {
 		return nil, err
 	}
 	agent, err := ir.Build(pkg)

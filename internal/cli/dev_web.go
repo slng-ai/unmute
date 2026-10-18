@@ -96,7 +96,9 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 	}
 	composeFile := filepath.Join(outDir, "compose.dev.yaml")
 	if _, err := os.Stat(composeFile); err != nil {
-		return fmt.Errorf("dev %s: generated project has no compose.dev.yaml: %w", root, err)
+		// Only the version 1 generators wrote one, and they are gone.
+		return fmt.Errorf("dev %s: `unmute dev` does not run a version 2 project yet. "+
+			"Run it directly instead: see build/%s/README.md", root, resolved.Name)
 	}
 	u := style.For(out)
 	fmt.Fprintln(out, u.Dim("compiled"), dimPath(u, outDir))

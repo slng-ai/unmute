@@ -179,12 +179,10 @@ func TestAuthorGuidanceRejectsRetiredSharingForms(t *testing.T) {
 
 func TestTaskTransferAndSharedResultDocsStayAligned(t *testing.T) {
 	transferDocs := map[string]string{
-		"references/orchestration.md":                      bundleFile(t, "references/orchestration.md"),
-		"docs-site/build/orchestration/tasks.mdx":          trackedFile(t, "docs-site/build/orchestration/tasks.mdx"),
-		"docs-site/build/orchestration/task-groups.mdx":    trackedFile(t, "docs-site/build/orchestration/task-groups.mdx"),
-		"docs-site/build/orchestration/handoffs.mdx":       trackedFile(t, "docs-site/build/orchestration/handoffs.mdx"),
-		"internal/generate/templates/livekit_v1/README.md": trackedFile(t, "internal/generate/templates/livekit_v1/README.md.tmpl"),
-		"internal/generate/templates/pipecat_v1/README.md": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
+		"references/orchestration.md":                   bundleFile(t, "references/orchestration.md"),
+		"docs-site/build/orchestration/tasks.mdx":       trackedFile(t, "docs-site/build/orchestration/tasks.mdx"),
+		"docs-site/build/orchestration/task-groups.mdx": trackedFile(t, "docs-site/build/orchestration/task-groups.mdx"),
+		"docs-site/build/orchestration/handoffs.mdx":    trackedFile(t, "docs-site/build/orchestration/handoffs.mdx"),
 	}
 	// The intermediate representation still calls this kind agent_transfer, and
 	// the emitted runbooks still say so, but the authoring word is `handoff`. A
@@ -208,9 +206,8 @@ func TestTaskTransferAndSharedResultDocsStayAligned(t *testing.T) {
 func TestPipecatCloudTransferFallbackDocsStayAligned(t *testing.T) {
 	const rule = "Pipecat `cloud-websocket` requires explicit `on_unavailable: hangup`; it cannot reconnect the original media stream."
 	for name, content := range map[string]string{
-		"references/transfers.md":                          bundleFile(t, "references/transfers.md"),
-		"docs-site/transfers/pipecat-twilio.mdx":           trackedFile(t, "docs-site/transfers/pipecat-twilio.mdx"),
-		"internal/generate/templates/pipecat_v1/README.md": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
+		"references/transfers.md":                bundleFile(t, "references/transfers.md"),
+		"docs-site/transfers/pipecat-twilio.mdx": trackedFile(t, "docs-site/transfers/pipecat-twilio.mdx"),
 	} {
 		if !strings.Contains(strings.Join(strings.Fields(content), " "), rule) {
 			t.Errorf("%s does not state the cloud transfer fallback rule", name)
@@ -239,11 +236,9 @@ func TestTracingPrivacyWarningStaysExplicit(t *testing.T) {
 	const dataWarning = "Traces can contain caller speech, model input and output, and tool arguments and results."
 	const fakeDataRule = "Use only fake identities and fake customer data for release tests."
 	for name, content := range map[string]string{
-		"references/package.md":                                 bundleFile(t, "references/package.md"),
-		"docs-site/reference/agent-yaml.mdx":                    trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
-		"docs-site/tracing/langfuse.mdx":                        trackedFile(t, "docs-site/tracing/langfuse.mdx"),
-		"internal/generate/templates/livekit_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/livekit_v1/README.md.tmpl"),
-		"internal/generate/templates/pipecat_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
+		"references/package.md":              bundleFile(t, "references/package.md"),
+		"docs-site/reference/agent-yaml.mdx": trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+		"docs-site/tracing/langfuse.mdx":     trackedFile(t, "docs-site/tracing/langfuse.mdx"),
 	} {
 		if !strings.Contains(content, dataWarning) {
 			t.Errorf("%s does not warn what tracing records", name)
@@ -257,10 +252,9 @@ func TestTracingPrivacyWarningStaysExplicit(t *testing.T) {
 func TestPipecatTracingProviderOwnershipStaysExplicit(t *testing.T) {
 	const rule = "Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first."
 	for name, content := range map[string]string{
-		"references/package.md":                                 bundleFile(t, "references/package.md"),
-		"docs-site/reference/agent-yaml.mdx":                    trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
-		"docs-site/tracing/langfuse.mdx":                        trackedFile(t, "docs-site/tracing/langfuse.mdx"),
-		"internal/generate/templates/pipecat_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
+		"references/package.md":              bundleFile(t, "references/package.md"),
+		"docs-site/reference/agent-yaml.mdx": trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+		"docs-site/tracing/langfuse.mdx":     trackedFile(t, "docs-site/tracing/langfuse.mdx"),
 	} {
 		if !strings.Contains(content, rule) {
 			t.Errorf("%s does not state Pipecat tracing provider ownership", name)
@@ -272,9 +266,8 @@ func TestPipecatMCPTracingDocsStayAligned(t *testing.T) {
 	const tracingRule = "With Langfuse tracing enabled, Pipecat MCP calls emit finite spans named after the tool, with its arguments and, when completed, the result."
 	const collisionRule = "Pipecat refuses to start when an agent tool, task function, or MCP source on the same agent exposes the same name."
 	for name, content := range map[string]string{
-		"references/tools.md":                                   bundleFile(t, "references/tools.md"),
-		"docs-site/build/tools/mcp.mdx":                         trackedFile(t, "docs-site/build/tools/mcp.mdx"),
-		"internal/generate/templates/pipecat_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
+		"references/tools.md":           bundleFile(t, "references/tools.md"),
+		"docs-site/build/tools/mcp.mdx": trackedFile(t, "docs-site/build/tools/mcp.mdx"),
 	} {
 		if !strings.Contains(content, tracingRule) {
 			t.Errorf("%s does not state the Pipecat MCP tracing contract", name)
@@ -1700,23 +1693,13 @@ func TestTracingProvidersMatchTheCode(t *testing.T) {
 // that offers Coval has to say how the simulation ID arrives.
 func TestCovalCorrelationRoutesStayDocumented(t *testing.T) {
 	for name, content := range map[string]string{
-		"references/package.md":                                 bundleFile(t, "references/package.md"),
-		"docs-site/tracing/coval.mdx":                           trackedFile(t, "docs-site/tracing/coval.mdx"),
-		"internal/generate/templates/livekit_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/livekit_v1/README.md.tmpl"),
-		"internal/generate/templates/pipecat_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
+		"references/package.md":       bundleFile(t, "references/package.md"),
+		"docs-site/tracing/coval.mdx": trackedFile(t, "docs-site/tracing/coval.mdx"),
 	} {
 		for _, fact := range []string{"X-Coval-Simulation-Id", "COVAL_SIMULATION_ID"} {
 			if !strings.Contains(content, fact) {
 				t.Errorf("%s does not state %q, so the reader cannot wire correlation", name, fact)
 			}
-		}
-	}
-	// LiveKit Cloud runs the customer's own token server, so the emitted runbook
-	// is the only place that can tell them what to forward.
-	livekitReadme := trackedFile(t, "internal/generate/templates/livekit_v1/README.md.tmpl")
-	for _, fact := range []string{"coval.simulation_id", "RoomAgentDispatch", "headers_to_attributes"} {
-		if !strings.Contains(livekitReadme, fact) {
-			t.Errorf("the LiveKit runbook does not tell the operator about %q", fact)
 		}
 	}
 }
@@ -1746,11 +1729,7 @@ func TestCovalCorrelationRoutesStayDocumented(t *testing.T) {
 //     representation's own kind names and this feature changed only the
 //     authoring words, so they are out of this walk entirely.
 //   - a generated file may still name them when it is describing generated code
-//     rather than telling a reader what to write.
-//     internal/generate/templates/pipecat_v1/bot.py.tmpl says "agent_transfer is
-//     activate_worker()", which is a runtime mapping, not authoring guidance.
-//     Only the emitted README templates are walked here, because those are the
-//     runbook a human reads.
+//     rather than telling a reader what to write, so no template is walked.
 func TestNoReaderFacingSurfaceTeachesARetiredKindName(t *testing.T) {
 	retired := regexp.MustCompile(`agent_transfer|human_transfer|delegat\w*`)
 
@@ -1800,13 +1779,6 @@ func TestNoReaderFacingSurfaceTeachesARetiredKindName(t *testing.T) {
 			continue
 		}
 		surfaces["bundle/"+name] = string(content)
-	}
-
-	for _, template := range []string{
-		"internal/generate/templates/livekit_v1/README.md.tmpl",
-		"internal/generate/templates/pipecat_v1/README.md.tmpl",
-	} {
-		surfaces[template] = trackedFile(t, template)
 	}
 
 	// The shipped packages too, for their comments. A package lint that reads

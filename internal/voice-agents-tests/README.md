@@ -24,16 +24,6 @@ finding out about.
 
 ## What is here
 
-[`salon-concierge-v2`](salon-concierge-v2/) is the same salon as
-`examples/salon-concierge` with each step's context chosen per step and one more
-value carried as a declared variable, so the two can be run against each other
-on a real call. It is frozen at the state that closed typed session state.
-
-[`salon-concierge-v3`](salon-concierge-v3/) is the intentional-sharing
-package: reset tasks receive only the saved variables named in their prompts.
-It also exercises omitted `history`, whose default is spoken messages. v2 is
-the control it is measured against.
-
 [`slng-tasks`](slng-tasks/) is the slng target's task acceptance package:
 two tasks, a group with a skipped step, typed values, and a hosted code tool
 only a task can call, with that tool's Python source beside it. Its README is
@@ -50,9 +40,9 @@ Same commands as any package. `build/` under here is ignored, like every other
 compiled project.
 
 ```sh
-unmute validate internal/voice-agents-tests/salon-concierge-v2
-unmute compile internal/voice-agents-tests/salon-concierge-v2
-unmute dev internal/voice-agents-tests/salon-concierge-v2 --target pipecat
+unmute validate internal/voice-agents-tests/kestrel
+unmute compile internal/voice-agents-tests/kestrel
+make e2e PKG=kestrel FW=pipecat
 ```
 
 Each package's own `README.md` says what it is for and what it needs.

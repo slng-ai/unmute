@@ -824,6 +824,12 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 			resolved.Provider, strings.Join(supported, ", ")))
 		return
 	}
+	if agent.Version != packagespec.Version2 && (provider == targetcap.LiveKit || provider == targetcap.Pipecat) {
+		// The version 1 generators are gone. Every other error would describe a
+		// package this target can no longer compile, so this one stands alone.
+		row.Errors = add(row.Errors, fmt.Sprintf("%s compiles agent.yaml version 2 only: set `version: 2`, add a state.py and type your local tools (see https://unmute.ai/reference/agent-yaml-v2)", resolved.Provider))
+		return
+	}
 	if targetcap.IsCode(provider) && resolved.Version == "" {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s code target requires version", resolved.Provider))
 	}
