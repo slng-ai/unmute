@@ -51,9 +51,11 @@ from unmute_core.pipecat import (
     DevObserver,
     IdleNudgeObserver,
     ModelCallLLMService,
+    STTSwitcher,
     TelemetryObserver,
     TwilioLine,
     UnmuteFlows,
+    VoiceSwitcher,
     end_call_tool,
     greeting_frames,
     interruption,
@@ -188,11 +190,11 @@ def dispatched(runner_args: RunnerArguments) -> dict[str, Any] | None:
     return None
 
 
-def build_stt(ids: TrackingIds) -> Any:
-    """Return the speech-to-text service: SLNG's with the call's tracking ids, else speech.py's."""
-    if speech.LISTEN is not None:
-        return speech.LISTEN()
-    listen = MODELS["listen"]
+def build_stt(name: str, ids: TrackingIds) -> Any:
+    """Return one speech-to-text service: SLNG's with the call's tracking ids, else speech.py's."""
+    if (make := speech.LISTEN.get(name)) is not None:
+        return make()
+    listen = MODELS["listen"][name]
     return SlngSTTService(
         api_key=required("SLNG_API_KEY"),
         model=listen["model"],
@@ -216,6 +218,12 @@ def build_tts(name: str, ids: TrackingIds) -> Any:
         world_part=voice.get("params", {}).get("world_part", "eu-north"),
         **ids,
     )
+
+
+def speech_names(first: str, key: str) -> list[str]:
+    """Return the ``voice`` or ``listen`` model of every agent, the first agent's first, once each."""
+    agents = spec.SPEC["agents"]
+    return list(dict.fromkeys([agents[first][key], *(agent[key] for agent in agents.values())]))
 
 
 def build_pipeline(
@@ -243,11 +251,24 @@ def build_pipeline(
     )
     llm = build_llm(first, state)
     ids = tracking_ids(state.call)
+    # Each agent's voice and speech-to-text service. With more than one, a switcher holds
+    # them all, the first agent's first, and a handoff switches to the next agent's.
+    voices: dict[str, Any] = {}
+    ears: dict[str, Any] = {}
+    voice_switch: VoiceSwitcher | None = None
+    ear_switch: STTSwitcher | None = None
     if realtime:
         # One model listens, thinks and speaks: no speech-to-text, no voice.
         steps = [transport.input(), aggregators.user(), llm, transport.output()]
     else:
-        stt, tts = build_stt(ids), build_tts(entry["voice"], ids)
+        voices = {name: build_tts(name, ids) for name in speech_names(first, "voice")}
+        ears = {name: build_stt(name, ids) for name in speech_names(first, "listen")}
+        if len(voices) > 1:
+            voice_switch = VoiceSwitcher(list(voices.values()))
+        if len(ears) > 1:
+            ear_switch = STTSwitcher(list(ears.values()))
+        stt = ear_switch or ears[entry["listen"]]
+        tts = voice_switch or voices[entry["voice"]]
         steps = [transport.input(), stt, aggregators.user(), llm, tts, transport.output()]
     pipeline = Pipeline([*steps, aggregators.assistant()])
     worker = PipelineWorker(
@@ -277,10 +298,13 @@ def build_pipeline(
             """Save what the handoff sets, then give the call to the next agent."""
             if handoff.saves:
                 state.save(handoff.saves)
+            to = spec.SPEC["agents"][handoff.to]
             await flows.hand_off(
                 params,
                 spec.agent_spec(handoff.to, line),
                 native_tools=tools_of(handoff.to),
+                tts=voices[to["voice"]] if voice_switch else None,
+                stt=ears[to["listen"]] if ear_switch else None,
                 announce=handoff.announce,
                 context=handoff.context,
                 opens_with=handoff.opens_with,
@@ -296,6 +320,8 @@ def build_pipeline(
         state=state,
         telemetry=telemetry,
         native_tools=tools_of(first),
+        tts=voice_switch,
+        stt=ear_switch,
     )
     flows.install()
     if telemetry is not None:

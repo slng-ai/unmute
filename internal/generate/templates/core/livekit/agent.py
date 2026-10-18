@@ -138,11 +138,11 @@ def slng_host(binding: dict[str, Any]) -> str:
     return f"{binding.get('params', {}).get('world_part', 'eu-north')}.api.slng.ai"
 
 
-def build_stt(ids: TrackingIds) -> Any:
-    """Return the speech-to-text model: SLNG's with the call's tracking ids, else speech.py's."""
-    if speech.LISTEN is not None:
-        return speech.LISTEN()
-    listen = MODELS["listen"]
+def build_stt(name: str, ids: TrackingIds) -> Any:
+    """Return one speech-to-text model: SLNG's with the call's tracking ids, else speech.py's."""
+    if (make := speech.LISTEN.get(name)) is not None:
+        return make()
+    listen = MODELS["listen"][name]
     return slng.STT(
         api_key=required("SLNG_API_KEY"),
         slng_base_url=slng_host(listen),
@@ -168,7 +168,54 @@ def build_tts(name: str, ids: TrackingIds) -> Any:
     )
 
 
-def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession:
+class CallSpeech:
+    """The call's voices and speech-to-text models, each built the first time an agent needs it.
+
+    An agent handed the call twice gets the same instances back. Every SLNG speech-to-text
+    model hears when the caller stops speaking, which is how it finishes a transcript.
+    """
+
+    def __init__(self, ids: TrackingIds) -> None:
+        """Hold the call's tracking ids, which SLNG's models carry."""
+        self._ids = ids
+        self._voices: dict[str, Any] = {}
+        self._ears: dict[str, Any] = {}
+        self._session: AgentSession | None = None
+
+    def voice(self, name: str) -> Any:
+        """Return the voice agent.yaml names ``name``."""
+        if name not in self._voices:
+            self._voices[name] = build_tts(name, self._ids)
+        return self._voices[name]
+
+    def ears(self, name: str) -> Any:
+        """Return the speech-to-text model agent.yaml names ``name``."""
+        if name not in self._ears:
+            self._ears[name] = build_stt(name, self._ids)
+            self._attach(self._ears[name])
+        return self._ears[name]
+
+    def attach(self, session: AgentSession) -> None:
+        """Hook every SLNG speech-to-text model, built now or later, to the call's session."""
+        self._session = session
+        for stt in self._ears.values():
+            self._attach(stt)
+
+    def _attach(self, stt: Any) -> None:
+        if self._session is not None and isinstance(stt, slng.STT):
+            stt.attach_to_session(self._session)
+
+    def of(self, name: str) -> dict[str, Any]:
+        """Return an agent's own ``tts`` and ``stt``, or nothing for a realtime one."""
+        entry = spec.SPEC["agents"][name]
+        if entry.get("realtime"):
+            return {}
+        return {"tts": self.voice(entry["voice"]), "stt": self.ears(entry["listen"])}
+
+
+def build_session(
+    state: CallState, vad: silero.VAD, first: str, voices: CallSpeech
+) -> AgentSession:
     """Return the call's session: the speech and the model agent.yaml names, at its pace.
 
     Interruption is set, not left to LiveKit, so a deployed worker treats the caller
@@ -181,13 +228,11 @@ def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession
         session = AgentSession(llm=speech.REALTIME[realtime](), vad=vad, user_away_timeout=None)
         yield_to_caller(session)
         return session
-    ids = tracking_ids(state.call)
-    stt = build_stt(ids)
     session = AgentSession(
         conn_options=SessionConnectOptions(llm_conn_options=APIConnectOptions(max_retry=1)),
-        stt=stt,
+        stt=voices.ears(entry["listen"]),
         llm=build_llm(MODELS["think"][entry["model"]], state),
-        tts=build_tts(entry["voice"], ids),
+        tts=voices.voice(entry["voice"]),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),
             endpointing=endpointing(WINDOW),
@@ -196,8 +241,7 @@ def build_session(state: CallState, vad: silero.VAD, first: str) -> AgentSession
         vad=vad,
         user_away_timeout=None,
     )
-    if isinstance(stt, slng.STT):
-        stt.attach_to_session(session)
+    voices.attach(session)
     yield_to_caller(session)
     return session
 
@@ -216,21 +260,33 @@ def end_call(name: str) -> list[EndCallTool]:
 
 
 def unmute_agent(
-    name: str, state: CallState, line: SipLine, telemetry: Telemetry | None = None
+    name: str,
+    state: CallState,
+    line: SipLine,
+    voices: CallSpeech,
+    telemetry: Telemetry | None = None,
 ) -> UnmuteAgent:
-    """Return one agent as a LiveKit agent, with its handoff tools and its end-call tool.
+    """Return one agent as a LiveKit agent, with its voice, its ears and its tools.
 
     Only the first agent gets the telemetry: an agent the call is handed to records into
     the first one's spans.
     """
     agent = spec.agent_spec(name, line)
-    handoffs = [handoff_tool(spec.HANDOFFS[handoff], state, line) for handoff in agent.handoffs]
+    handoffs = [
+        handoff_tool(spec.HANDOFFS[handoff], state, line, voices) for handoff in agent.handoffs
+    ]
     return UnmuteAgent(
-        agent, state=state, telemetry=telemetry, native_tools=[*handoffs, *end_call(name)]
+        agent,
+        state=state,
+        telemetry=telemetry,
+        native_tools=[*handoffs, *end_call(name)],
+        **voices.of(name),
     )
 
 
-def handoff_tool(handoff: spec.Handoff, state: CallState, line: SipLine) -> FunctionTool:
+def handoff_tool(
+    handoff: spec.Handoff, state: CallState, line: SipLine, voices: CallSpeech
+) -> FunctionTool:
     """Return one handoff as a LiveKit function tool that calls ``UnmuteAgent.hand_off``."""
 
     async def hand_off(context: RunContext) -> object:
@@ -241,7 +297,7 @@ def handoff_tool(handoff: spec.Handoff, state: CallState, line: SipLine) -> Func
         if not isinstance(current, UnmuteAgent):
             raise TypeError("a handoff runs only from an UnmuteAgent")
         return await current.hand_off(
-            unmute_agent(handoff.to, state, line),
+            unmute_agent(handoff.to, state, line, voices),
             announce=handoff.announce,
             context=handoff.context,
             opens_with=handoff.opens_with,
@@ -286,7 +342,8 @@ async def entrypoint(ctx: JobContext) -> None:
             Langfuse.from_env(), agent=spec.AGENT_ID, call_id=state.call.session_id
         )
     first = spec.entry(state)
-    session = build_session(state, ctx.proc.userdata["vad"], first)
+    voices = CallSpeech(tracking_ids(state.call))
+    session = build_session(state, ctx.proc.userdata["vad"], first, voices)
     if metrics_enabled():
         recorder = DevRecorder(ctx.room.name, target="livekit")
         recorder.watch_state(state)
@@ -295,7 +352,7 @@ async def entrypoint(ctx: JobContext) -> None:
         idle_nudges(session, spec.IDLE)
     with use_phone_region(lambda: call_phone_region(state.call)):
         await session.start(
-            agent=unmute_agent(first, state, SipLine(session), telemetry),
+            agent=unmute_agent(first, state, SipLine(session), voices, telemetry),
             room=ctx.room,
             room_options=room_io.RoomOptions(delete_room_on_close=True),
         )

@@ -363,9 +363,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.Handoffs)) {
 		handoff := pkg.Agent.Handoffs[name]
 		value := scaffold.Handoff{Name: name, Source: cmp.Or(owners[name], "assistant"), When: handoff.When, To: handoff.To}
-		if handoff.Announce != nil {
-			value.Announce = *handoff.Announce
-		}
+		value.Say = handoff.Say
 		if handoff.Context != nil {
 			value.History, value.MaxMessages, value.Summarizer = handoff.Context.History, handoff.Context.MaxMessages, handoff.Context.Summarizer
 			value.IncludeToolCalls = handoff.Context.IncludeToolCalls

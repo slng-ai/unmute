@@ -489,8 +489,11 @@ type AgentDef struct {
 	// Speak is legal alongside Realtime, and only there: it is the half cascade,
 	// where the realtime model listens and thinks and a synthesizer speaks. The
 	// entry's own `voice:` and this binding are mutually exclusive.
-	Think    string     `json:"think,omitempty" yaml:"think,omitempty"`
-	Speak    string     `json:"speak,omitempty" yaml:"speak,omitempty"`
+	Think string `json:"think,omitempty" yaml:"think,omitempty"`
+	Speak string `json:"speak,omitempty" yaml:"speak,omitempty"`
+	// Listen names the agent's own entry of models.listen, so an agent that
+	// speaks another language hears it too. Omitted: the package's listen.
+	Listen   string     `json:"listen,omitempty" yaml:"listen,omitempty"`
 	Realtime string     `json:"realtime,omitempty" yaml:"realtime,omitempty"`
 	Live     string     `json:"live,omitempty" yaml:"live,omitempty"`
 	Tools    []string   `json:"tools,omitempty" yaml:"tools,omitempty"`
@@ -647,11 +650,10 @@ type Handoff struct {
 	To   string `json:"to" yaml:"to"`
 	When string `json:"when,omitempty" yaml:"when,omitempty"`
 	Name string `json:"name" yaml:"name"`
-	// Say is the line said as the call moves. One line until handoffs take a
-	// list; Announce is it as the compiler reads it, filled by Load.
-	Say      []string         `json:"say,omitempty" yaml:"say,omitempty"`
-	Announce *string          `json:"-" yaml:"-"`
-	Context  *TransferContext `json:"context,omitempty" yaml:"context,omitempty"`
+	// Say is the lines said as the call moves, in the next agent's voice. One
+	// is picked each time, never the one said last.
+	Say     []string         `json:"say,omitempty" yaml:"say,omitempty"`
+	Context *TransferContext `json:"context,omitempty" yaml:"context,omitempty"`
 	// Saves sets State values as the call moves, like `- explanation: ES`, the
 	// language the next agent speaks.
 	Saves []Pair `json:"save,omitempty" yaml:"save,omitempty" since:"2"`

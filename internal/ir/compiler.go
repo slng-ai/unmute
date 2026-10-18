@@ -489,6 +489,9 @@ type AgentDef struct {
 	Instructions string `json:"instructions" yaml:"instructions"`
 	Model        string `json:"model" yaml:"model"`
 	Voice        string `json:"voice" yaml:"voice"`
+	// Listen is the agent's speech-to-text model: its own listen:, else the
+	// package's. Empty on a speech to speech agent, which listens itself.
+	Listen string `json:"listen,omitempty" yaml:"listen,omitempty"`
 	// Realtime and Live name the speech to speech model this agent runs on, in
 	// place of Model. At most one of the two is set, decided by the package's
 	// architecture. Voice stays set alongside Realtime for the half cascade,
@@ -713,10 +716,11 @@ func AssignedVars(assign []AssignTo) []string {
 }
 
 type AgentTransfer struct {
-	Kind     ControlKind     `json:"kind" yaml:"kind"`
-	When     string          `json:"when,omitempty" yaml:"when,omitempty"`
-	To       string          `json:"to" yaml:"to"`
-	Announce string          `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Kind ControlKind `json:"kind" yaml:"kind"`
+	When string      `json:"when,omitempty" yaml:"when,omitempty"`
+	To   string      `json:"to" yaml:"to"`
+	// Announce is the handoff's say: lines. One is said in the next agent's voice.
+	Announce []string        `json:"announce,omitempty" yaml:"announce,omitempty"`
 	Context  TransferContext `json:"context" yaml:"context"`
 	// Saves are the State values set as the call moves. Version 2.
 	Saves map[string]any `json:"saves,omitempty" yaml:"saves,omitempty"`
@@ -1165,10 +1169,13 @@ type Bindings struct {
 	Listen *Binding `json:"listen,omitempty" yaml:"listen,omitempty"`
 	// ListenFallbacks is the selected listen model's flattened fallback chain,
 	// in order, resolved per target (N15/T16). Empty without listen fallback.
-	ListenFallbacks []ListenFallback   `json:"listen_fallbacks,omitempty" yaml:"listen_fallbacks,omitempty"`
-	Turn            *Binding           `json:"turn,omitempty" yaml:"turn,omitempty"`
-	Speak           map[string]Binding `json:"speak,omitempty" yaml:"speak,omitempty"`
-	Reason          map[string]Binding `json:"reason,omitempty" yaml:"reason,omitempty"`
+	ListenFallbacks []ListenFallback `json:"listen_fallbacks,omitempty" yaml:"listen_fallbacks,omitempty"`
+	// AgentListens are the listen models agents name besides Listen, by name.
+	// Nil when every agent listens with the package's.
+	AgentListens map[string]Binding `json:"agent_listens,omitempty" yaml:"agent_listens,omitempty"`
+	Turn         *Binding           `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Speak        map[string]Binding `json:"speak,omitempty" yaml:"speak,omitempty"`
+	Reason       map[string]Binding `json:"reason,omitempty" yaml:"reason,omitempty"`
 	// Realtime and Live hold the used speech to speech models, by name. Both nil
 	// on every cascaded package, so the resolved shape of one is unchanged.
 	Realtime map[string]Binding `json:"realtime,omitempty" yaml:"realtime,omitempty"`

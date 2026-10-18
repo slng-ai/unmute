@@ -100,6 +100,15 @@ func TestSpeechThatIsNotSlngComesFromTheCatalogue(t *testing.T) {
 				t.Errorf("%s: speech.py builds no %s", provider, want)
 			}
 		}
+		// The eleven desk listens with its own model, by its name in agent.yaml.
+		for _, want := range []string{`"transcriber": listen_transcriber`, `"nova_two": listen_nova_two`, `model="nova-2"`} {
+			if !strings.Contains(speech, want) {
+				t.Errorf("%s: speech.py has no %s", provider, want)
+			}
+		}
+		if spec := artifactFile(t, artifact, "agent.json"); !strings.Contains(spec, `"listen": "nova_two"`) {
+			t.Errorf("%s: agent.json does not give the eleven desk its own listen model", provider)
+		}
 		report := artifactFile(t, artifact, "compile-report.json")
 		for _, name := range []string{"DEEPGRAM_API_KEY", "CARTESIA_API_KEY"} {
 			if !strings.Contains(report, `"`+name+`"`) {

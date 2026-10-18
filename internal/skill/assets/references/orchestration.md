@@ -168,8 +168,9 @@ own five lists of what it can do, and keeps the call once it arrives.
 instruction to call a tool.
 
 `say:` is optional. Give it a list holding the exact short sentence the caller
-should hear. A handoff `say:` holds one line for now. The active agent speaks it
-once and finishes before the next agent takes over. Leave it out for a silent
+should hear. A handoff `say:` takes any number of lines; one is picked each time,
+never the one said last, and the next agent's voice says it. A line takes no
+`{{ }}` placeholder and a blank line is refused. Leave it out for a silent
 handoff. Do not duplicate the cue in the prompt; the handoff owns its order.
 
 `save:` on a handoff sets State values as the call moves, one pair per item,

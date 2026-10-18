@@ -117,7 +117,7 @@ shows why control and diagnosis matter when the agent must complete real work.
 ## 1. Bind the three models
 
 The quickstart names the transcriber, reasoning model, and voice under `models`.
-The agent binds its reasoning and voice by name. A single transcriber is selected automatically for the package.
+The agent binds its reasoning and voice by name. A single transcriber is selected automatically for the package; a top-level `listen:` names one when there are several.
 
 <ParamField path="architecture" type="cascade | realtime | live">
   Set `cascade`, or omit the key for the same result. Cascade is supported on all four targets, subject to each target's model and feature limits. It is the only architecture the Twilio target takes.
@@ -132,7 +132,7 @@ The agent binds its reasoning and voice by name. A single transcriber is selecte
 </ParamField>
 
 <ParamField path="listen" type="a models.listen entry name">
-  Package-level selector. Omit it when there is one transcriber; name an entry when there is more than one. It does not belong under an agent.
+  Agent-level transcriber, for an agent that speaks another language. Omit it to use the package's: the top-level `listen:`, or the only `models.listen` entry. When every cascaded agent names its own, no top-level `listen:` is needed. Cascaded agents only, and its entry takes no `fallback:`. The slng and twilio targets refuse one that differs from the package's. On livekit and pipecat each agent speaks and listens with its own models after a handoff.
 </ParamField>
 
 | Role | Where to configure it |

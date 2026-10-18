@@ -7,6 +7,8 @@ name: speech-core
 
 entry_agent: desk
 
+listen: transcriber
+
 agents:
   - name: desk
     prompt: instructions.md
@@ -30,6 +32,8 @@ agents:
     prompt: instructions.md
     think: reasoning
     speak: eleven
+    # Its own speech-to-text model: a handoff to this desk switches both.
+    listen: nova_two
 
   - name: aura
     prompt: instructions.md
@@ -69,6 +73,10 @@ models:
     transcriber:
       provider: deepgram
       model: nova-3
+      language: en
+    nova_two:
+      provider: deepgram
+      model: nova-2
       language: en
   turn:
     detector:

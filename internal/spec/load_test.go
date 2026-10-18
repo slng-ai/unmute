@@ -140,19 +140,18 @@ func TestLoadRejectsRetiredPipelineBlock(t *testing.T) { // V3, V22 (N15)
 	}
 }
 
-// TestV24_AgentRefsAreThinkAndSpeakOnly freezes the agent shape (B5): listen
-// and turn are per-call plumbing selected at package level, never per agent.
-// If AgentDef ever grows such a field, this strict-decode rejection vanishes
-// and the B5 decision must be consciously revisited in SCHEMA.md first.
-func TestV24_AgentRefsAreThinkAndSpeakOnly(t *testing.T) {
+// TestV24_AgentTurnIsPackageLevel: an agent names its own listen model, so an
+// agent that speaks another language hears it too. Turn stays per call: the
+// strict decoder refuses it on an agent, with its position.
+func TestV24_AgentTurnIsPackageLevel(t *testing.T) {
 	dir := t.TempDir()
-	yaml := "version: 1\nentry_agent: a\nagents:\n  - name: a\n    prompt: i.md\n    think: m\n    speak: v\n    listen: transcriber\n"
+	yaml := "version: 1\nentry_agent: a\nagents:\n  - name: a\n    prompt: i.md\n    think: m\n    speak: v\n    listen: transcriber\n    turn: detector\n"
 	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(dir)
-	if err == nil || !strings.Contains(err.Error(), "agent.yaml") || !strings.Contains(err.Error(), "listen") {
-		t.Fatalf("want agent-level listen rejected with position, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "agent.yaml: [9:5]") || !strings.Contains(err.Error(), `unknown field "turn"`) {
+		t.Fatalf("want agent-level turn rejected with position, got %v", err)
 	}
 }
 

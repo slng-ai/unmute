@@ -90,6 +90,10 @@ See [SLNG's Soniox catalog](https://docs.slng.ai/voices/soniox) and
 [ElevenLabs language guidance](https://elevenlabs.io/docs/eleven-creative/playground/text-to-speech).
 Provider support for runtime changes does not mean Unmute exposes those changes.
 
+An agent speaks another language with its own `speak:` and `listen:`, each naming
+an entry of `models.speak` and `models.listen`. The `listen:` entry takes no
+`fallback:`.
+
 STT has its own language behavior. Do not assume that leaving `listen.language`
 out enables detection for every provider. For example, Deepgram multilingual
 recognition uses `language: multi`; see its

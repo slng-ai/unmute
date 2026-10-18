@@ -2,7 +2,7 @@
   "name": "A caller complains about a patchy colour, is handed to customer care, and the complaint is written down",
   "greeting": ["Sage and Stone"],
   "turns": [
-    {"caller": "Hi, my colour last week came out really patchy and I want to make a complaint.", "expect": ["I'm sorry to hear that. Let me take this down properly."]},
+    {"caller": "Hi, my colour last week came out really patchy and I want to make a complaint.", "expect": ["I'm sorry"]},
     {"caller": "It was a full head colour last Tuesday. It's patchy at the back, and I'd like it redone, please."},
     {"caller": "Yes, that's right."},
     {"caller": "It's plus three four, six one one, two two two, three three three.", "expect": ["+34 611"], "max_requests": 1},

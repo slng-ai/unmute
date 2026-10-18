@@ -139,8 +139,10 @@ agents:
       - name: to_complaints
         to: complaint_specialist
         when: The caller has a complaint or service problem.
+        # One line is said each time, never the one said last.
         say:
           - I'm sorry to hear that. Let me take this down properly.
+          - I'm sorry about that. Let me write down what happened.
     transfers:
       - name: to_manager
         to: MANAGER_PHONE_NUMBER

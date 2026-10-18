@@ -495,7 +495,7 @@ func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
 				Name: "billing", Instructions: "You are the billing specialist.", Reason: data.Reason, Speak: data.Speak,
 			}}
 			data.Handoffs = []Handoff{{
-				Name: "to_billing", Source: "assistant", To: "billing", When: "The caller needs billing help.", Announce: "I’ll connect you to billing now.", History: "full",
+				Name: "to_billing", Source: "assistant", To: "billing", When: "The caller needs billing help.", Say: []string{"I’ll connect you to billing now."}, History: "full",
 			}}
 			dir := filepath.Join(t.TempDir(), "agent")
 			if _, err := Write(dir, data); err != nil {

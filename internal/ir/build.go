@@ -56,7 +56,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	if err := checkModelReferences(pkg, models); err != nil {
 		return nil, err
 	}
-	listenName, err := selectRoleModel(pkg, pkg.Agent.Models.Listen, pkg.Agent.Listen, "listen")
+	listenName, err := selectRoleModel(pkg, pkg.Agent.Models.Listen, packageListen(pkg), "listen")
 	if err != nil {
 		return nil, err
 	}
@@ -226,8 +226,12 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		// per placeholder. checkTemplates reads the authored text.
 		instructions = FlattenPaths(instructions)
 		instructions = appendPromptSuffix(instructions, thinkPromptSuffix(pkg, raw.Think))
+		listen := ""
+		if raw.Think != "" {
+			listen = cmp.Or(raw.Listen, listenName)
+		}
 		out.Agents[name] = AgentDef{
-			Instructions: instructions, Model: raw.Think, Voice: raw.Speak,
+			Instructions: instructions, Model: raw.Think, Voice: raw.Speak, Listen: listen,
 			Live: raw.Live, Realtime: raw.Realtime,
 			Tools: attached(raw.Tools, callables(raw, pkg), raw.Handoffs, raw.Escalations),
 		}
@@ -633,6 +637,8 @@ func checkAgentBinding(pkg *packagespec.Package, name string, agent packagespec.
 			return wrongSection("live", "live")
 		case agent.Realtime == "":
 			return fmt.Errorf("%s: agent %q names no realtime model: write realtime: <name of a models.realtime entry>", at, name)
+		case agent.Listen != "":
+			return fmt.Errorf("%s: agent %q names realtime %q and also listen: a realtime model hears the caller itself, so remove listen", at, name, agent.Realtime)
 		case agent.Think != "":
 			return fmt.Errorf("%s: agent %q names realtime %q and also think: a realtime model does its own thinking, so remove think. A think entry is the live architecture's backend, not this one's", at, name, agent.Realtime)
 		}
@@ -646,8 +652,8 @@ func checkAgentBinding(pkg *packagespec.Package, name string, agent packagespec.
 			return wrongSection("realtime", "realtime")
 		case agent.Live == "":
 			return fmt.Errorf("%s: agent %q names no live model: write live: <name of a models.live entry>", at, name)
-		case agent.Think != "" || agent.Speak != "":
-			return fmt.Errorf("%s: agent %q names live %q and also think or speak: a live model listens, thinks and speaks itself. Remove both; the model a live entry hands its tools to is named by that entry's own backend key, not by the agent", at, name, agent.Live)
+		case agent.Think != "" || agent.Speak != "" || agent.Listen != "":
+			return fmt.Errorf("%s: agent %q names live %q and also think or speak or listen: a live model listens, thinks and speaks itself. Remove them; the model a live entry hands its tools to is named by that entry's own backend key, not by the agent", at, name, agent.Live)
 		}
 	}
 	return nil
@@ -685,6 +691,13 @@ func checkModelReferences(pkg *packagespec.Package, models map[string]ModelDef) 
 		}
 		if err := check(agent.Speak, KindSpeak, "speak"); err != nil {
 			return err
+		}
+		if err := check(agent.Listen, KindListen, "listen"); err != nil {
+			return err
+		}
+		if agent.Listen != "" && agent.Listen != packageListen(pkg) && len(models[agent.Listen].Fallback) > 0 {
+			return fmt.Errorf("%s: agent %q listens with %q, which has a fallback: list. Only the package's listen model takes a fallback for now. Remove the fallback, or make %q the package's listen model",
+				pkg.Location("agent.yaml", "listen: "+agent.Listen), agentName, agent.Listen, agent.Listen)
 		}
 		if err := check(agent.Live, KindLive, "live"); err != nil {
 			return err
@@ -752,6 +765,21 @@ func selectRoleModel(pkg *packagespec.Package, section map[string]packagespec.Mo
 	default:
 		return "", fmt.Errorf("agent.yaml: %d %s models defined (%s); select one with %s: <name>", len(heads), role, strings.Join(heads, ", "), role)
 	}
+}
+
+// packageListen is the package's listen model as written: its top-level
+// listen:, or, when every cascaded agent names its own, the entry agent's. ""
+// leaves the choice to selectRoleModel, which takes the only entry.
+func packageListen(pkg *packagespec.Package) string {
+	if pkg.Agent.Listen != "" {
+		return pkg.Agent.Listen
+	}
+	for _, agent := range pkg.Agent.Agents {
+		if agent.Think != "" && agent.Listen == "" {
+			return ""
+		}
+	}
+	return pkg.Agent.Agents[pkg.Agent.EntryAgent].Listen
 }
 
 // usedModelNames collects every model the package actually uses: agent and task
@@ -1187,19 +1215,20 @@ func buildHandoff(pkg *packagespec.Package, raw packagespec.Handoff, agent *Agen
 	if _, ok := agent.Agents[raw.To]; !ok {
 		return nil, missing(pkg, "agent.yaml", "to", raw.To)
 	}
-	announce := stringValue(raw.Announce)
-	if raw.Announce != nil && strings.TrimSpace(announce) == "" {
-		return nil, fmt.Errorf("announce must not be blank")
-	}
-	if HasTemplate(announce) {
-		return nil, fmt.Errorf("announce does not support templates")
+	for _, line := range raw.Say {
+		if strings.TrimSpace(line) == "" {
+			return nil, fmt.Errorf("a say: line must not be blank")
+		}
+		if HasTemplate(line) {
+			return nil, fmt.Errorf("a say: line takes no {{ }} placeholder: it is said as the call moves, before the next agent reads anything")
+		}
 	}
 	context, err := buildTransferContext(pkg, raw.Context, agent)
 	if err != nil {
 		return nil, err
 	}
 	return &AgentTransfer{
-		Kind: ControlAgentTransfer, When: raw.When, To: raw.To, Announce: announce,
+		Kind: ControlAgentTransfer, When: raw.When, To: raw.To, Announce: raw.Say,
 		Context: context,
 	}, nil
 }
@@ -1324,13 +1353,6 @@ func fitsAssign(entry AssignTo, source *stateschema.Type, agent *Agent) error {
 		return fmt.Errorf("save %s %q does not fit variable %q: %w", from, entry.Field, entry.Var, err)
 	}
 	return nil
-}
-
-func stringValue(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
 }
 
 func buildTransferContext(pkg *packagespec.Package, raw *packagespec.TransferContext, agent *Agent) (TransferContext, error) {
@@ -1952,6 +1974,15 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 		return def
 	}
 	bindings := Bindings{Speak: make(map[string]Binding), Reason: make(map[string]Binding)}
+	for _, def := range agent.Agents {
+		if def.Listen == "" || def.Listen == agent.Listen {
+			continue
+		}
+		if bindings.AgentListens == nil {
+			bindings.AgentListens = make(map[string]Binding)
+		}
+		bindings.AgentListens[def.Listen] = toBinding(effective(def.Listen))
+	}
 	if agent.Listen != "" {
 		binding := toBinding(effective(agent.Listen))
 		bindings.Listen = &binding

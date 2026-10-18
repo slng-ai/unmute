@@ -253,6 +253,7 @@ func coreAgent(agent *ir.Agent, name string) (map[string]any, error) {
 		own = []string{}
 	}
 	out := map[string]any{"instructions": def.Instructions, "tools": own, "model": def.Model, "voice": def.Voice}
+	putString(out, "listen", def.Listen)
 	putString(out, "realtime", cmp.Or(def.Realtime, def.Live))
 	if len(handoffs) > 0 {
 		out["handoffs"] = handoffs
@@ -459,7 +460,9 @@ func coreHandoffs(agent *ir.Agent) map[string]any {
 			continue
 		}
 		built := map[string]any{"to": transfer.To, "description": transfer.When, "history": string(transfer.Context.History)}
-		putString(built, "announce", transfer.Announce)
+		if len(transfer.Announce) > 0 {
+			built["announce"] = transfer.Announce
+		}
 		if transfer.Context.MaxMessages > 0 {
 			built["max_messages"] = transfer.Context.MaxMessages
 		}
@@ -628,7 +631,7 @@ func putString(out map[string]any, key, value string) {
 // coreModels lowers the target's model bindings for agent.py, and refuses a
 // provider agent.py does not build yet. Each agent names its think and speak
 // bindings by the names agent.yaml gives them.
-func coreModels(resolved ir.Target) (map[string]any, error) {
+func coreModels(agent *ir.Agent, resolved ir.Target) (map[string]any, error) {
 	models := resolved.Models
 	think := map[string]any{}
 	for name, binding := range models.Reason {
@@ -656,7 +659,20 @@ func coreModels(resolved ir.Target) (map[string]any, error) {
 	if models.Turn == nil && len(realtime) == 0 {
 		return nil, fmt.Errorf("turn: version 2 needs a turn model")
 	}
-	return map[string]any{"think": think, "speak": models.Speak, "listen": models.Listen, "turn": models.Turn, "realtime": realtime}, nil
+	return map[string]any{"think": think, "speak": models.Speak, "listen": listenBindings(agent, resolved), "turn": models.Turn, "realtime": realtime}, nil
+}
+
+// listenBindings is every speech-to-text model an agent listens with, by its
+// name in agent.yaml: the package's, and each one an agent names itself.
+func listenBindings(agent *ir.Agent, resolved ir.Target) map[string]ir.Binding {
+	out := maps.Clone(resolved.Models.AgentListens)
+	if out == nil {
+		out = map[string]ir.Binding{}
+	}
+	if resolved.Models.Listen != nil {
+		out[agent.Listen] = *resolved.Models.Listen
+	}
+	return out
 }
 
 // coreRouter lowers a SLNG Context Router think binding to what spec.py builds

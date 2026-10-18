@@ -62,8 +62,9 @@ defines is refused.
 </ParamField>
 
 <ParamField path="say" type="list of strings">
-  One fixed line spoken before handing over, written as a list with one item. Omit for a
-  silent handoff.
+  Any number of fixed lines. One is picked each time the handoff runs, never the one
+  said last, and the next agent's voice says it. A line takes no `{{ }}` placeholder and
+  a blank line is refused. Omit for a silent handoff.
 </ParamField>
 
 <ParamField path="save" type="list of one-key pairs">
