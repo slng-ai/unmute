@@ -2,6 +2,7 @@ package ir
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"regexp"
@@ -228,6 +229,27 @@ func validateSlngTool(name string, tool Tool, row *TargetValidation) {
 				"tool %q pins a setting on `slng: %s`, a capability SLNG curates, whose settings are not arguments: write `builtin: {id: %s}` instead, which sends them as the attachment's own configuration", name, hosted, hosted))
 		}
 	}
+	// A local tool becomes an SLNG code tool, which needs typed Python and one
+	// run before SLNG publishes it.
+	if tool.Execution == ToolLocal {
+		function := tool.HandlerFunction
+		if function == "" {
+			row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+				"tool %q has a version 1 handler, and SLNG builds a code tool from a typed function: write version: 2 and handler: tools/%s.py:%s", name, name, name))
+		} else if strings.Contains(tool.HandlerSource, "async def "+function+"(") {
+			row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+				"tool %q is async def %s, and SLNG calls a code tool synchronously: make it a plain def", name, function))
+		}
+		var sample map[string]any
+		switch {
+		case len(tool.Sample) == 0:
+			row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+				"tool %q has no sample, and SLNG publishes a code tool only after one run: write tools/%s.sample.json with one set of arguments", name, name))
+		case json.Unmarshal(tool.Sample, &sample) != nil:
+			row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
+				"tools/%s.sample.json is not one JSON object: write one set of arguments, as {\"day\": \"2026-11-02\"}", name))
+		}
+	}
 	// `webhook:` has no execution Field constant of its own, so its slng
 	// refusal lives here rather than in the capability table: webhook is the
 	// ungated default there and only FieldWebhookPath and FieldToolAuth gate
@@ -238,7 +260,7 @@ func validateSlngTool(name string, tool Tool, row *TargetValidation) {
 	// URL and credential are the part SLNG stores.
 	if tool.Execution == ToolWebhook {
 		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
-			"does not create tools: tool %q is a `webhook:` block, which would have to write the URL and its credential into a tool body, and SLNG owns those: create the tool in the SLNG dashboard and reference it with `slng:`, or compile to livekit or pipecat which call your endpoint themselves", name))
+			"does not create API request tools: tool %q is a `webhook:` block, which would have to write the URL and its credential into a tool body, and SLNG owns those: create the tool in the SLNG dashboard and reference it with `slng:`, or compile to livekit or pipecat which call your endpoint themselves", name))
 	}
 	// An MCP server on SLNG becomes one reference per tool: mcp_refs is a list of
 	// attachments, and there is no "the whole server" attachment to write. unmute

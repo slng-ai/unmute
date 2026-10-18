@@ -60,8 +60,8 @@ there is no plugin seam. Adding a prebuilt means a row in the compiler plus a
 lowering for each target, which is a change to Unmute, not to your agent.
 
 `end_call` compiles on every target. The other three are capabilities SLNG
-curates and compile on the `slng` target only; a code target refuses them by
-name.
+curates and compile on the `slng` target only for now. Version 2 on livekit and
+pipecat refuses them by name.
 
 A capability's **settings** are written with `inject:`. On a builtin that block
 is the tool's own configuration, not an argument, because a curated capability
@@ -182,7 +182,7 @@ hand in the dashboard is removed by the next push, and
 fails rather than being quietly ignored:
 
 ```text
-livekit: tool "end_call" builtin "end_call" fixes effect to ends_conversation, cannot be
+tool "end_call" builtin "end_call" fixes effect to ends_conversation, cannot be
   "returns_data"
 ```
 
@@ -190,35 +190,11 @@ livekit: tool "end_call" builtin "end_call" fixes effect to ends_conversation, c
 nowhere to go:
 
 ```text
-livekit: tool "end_call" builtin execution takes no input, output, handler, or url_env
+tool "end_call" builtin execution takes no input, output, handler, or url_env
 ```
 
 **The description, unless you write one.** Leave `description` out and the registry
 default is used.
-
-<Accordion title="What the two targets emit for the bare file">
-  From a real compile of the bare file above, on each target:
-
-  <CodeGroup>
-  ```python LiveKit
-  tools=[
-      *EndCallTool(
-          extra_description="End the call when the caller is finished or says goodbye."
-      ).tools
-  ],
-  ```
-
-  ```python Pipecat
-  async def end_call(params: FunctionCallParams):
-      """End the call when the caller is finished or says goodbye."""
-      await params.result_callback({"ended": True})
-      await params.llm.push_frame(EndFrame())
-  ```
-  </CodeGroup>
-
-  Same tool, same description, two lowerings. `unmute init` scaffolds the LiveKit
-  one; the shipped examples that declare a Pipecat target get the other.
-</Accordion>
 
 Write your own `description` when the agent needs a narrower instruction, for
 example telling it to confirm before hanging up. Yours is added on top of the

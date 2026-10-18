@@ -139,14 +139,12 @@ every quiet period waits for a container to start. On a phone route that wait ca
 outrun the call: the session expires and nobody is answered at all. One instance
 held ready removes it, and bills for that instance whether or not anyone calls.
 
-The number lands in `pcc-deploy.toml` as `[scaling] min_agents`, which is why it
-belongs here rather than on the deploy command. `pipecat cloud deploy
---min-agents 1` does the same thing for one deploy, and the manifest is rewritten
-by every `unmute compile`, so a `[scaling]` block added to it by hand does not
-survive.
+Unmute does not write a Pipecat Cloud manifest yet, so this number reaches
+nothing in the build. Pass `pipecat cloud deploy --min-agents 1` yourself to hold
+an instance ready.
 
-**Pipecat only.** LiveKit refuses it: `livekit.toml` holds the project subdomain
-and the agent id and nothing else, and on LiveKit Cloud a warm production replica
+**Pipecat only.** LiveKit refuses it: LiveKit Cloud keeps the project subdomain and
+the agent id in `livekit.toml` and nothing else. A warm production replica
 is a property of the billing plan rather than something the compiler can write.
 See [Pipecat over Twilio](/telephony/pipecat-twilio#2-deploy-with-a-warm-instance)
 for a deployed example.

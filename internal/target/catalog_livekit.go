@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-// LiveKit entries. Contract: the livekit_v1 driver templates, the supported
+// LiveKit entries. Contract: the core speech.py emitter (internal/generate/core_speech.go), the supported
 // livekit-agents window owned by supportWindows, and Python. Per-vendor plugins
 // install as livekit-agents extras
 // (each wraps a livekit-plugins-<name> package); the SLNG plugin is pinned as

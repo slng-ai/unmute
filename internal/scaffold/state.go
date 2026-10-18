@@ -1,9 +1,11 @@
 package scaffold
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -14,19 +16,29 @@ import (
 // statePy is the state.py a package is written with. An author's own file is
 // copied as written, because it is theirs and the console cannot edit Python.
 // A package with no file of its own gets one made from the console's simple
-// variables: a plain field each, with its default and its description.
+// variables: a plain field each, with its default and its description. With
+// no variables it is an empty State, ready for the author's first field.
 func statePy(d Data) []byte {
 	if d.State != nil {
 		return d.State
 	}
-	if len(d.Variables) == 0 {
+	// Twilio and SLNG run their own runtime, which keeps no State.
+	if len(d.Variables) == 0 && d.Target != "livekit" && d.Target != "pipecat" {
 		return nil
 	}
+	described := slices.ContainsFunc(d.Variables, func(v Variable) bool { return v.Description != "" })
 	var b strings.Builder
 	b.WriteString(`"""The call state: every value the agents and tasks of one call share."""` + "\n\n")
-	b.WriteString("from pydantic import BaseModel, Field\n\n\n")
+	if described {
+		b.WriteString("from pydantic import BaseModel, Field\n\n\n")
+	} else {
+		b.WriteString("from pydantic import BaseModel\n\n\n")
+	}
 	b.WriteString("class State(BaseModel):\n")
-	b.WriteString(`    """What one call knows, shared by every agent and task in it."""` + "\n\n")
+	b.WriteString(`    """What one call knows, shared by every agent and task in it."""` + "\n")
+	if len(d.Variables) > 0 {
+		b.WriteString("\n")
+	}
 	for _, variable := range d.Variables {
 		anno := pythonTypes[variable.Type]
 		if anno == "" {
@@ -78,14 +90,48 @@ func (d Data) stateModel() *stateschema.Model {
 	return model
 }
 
-// readState gives a loaded package its state model: the one stateModel knows
-// for the console's own variables, or the author's file read through reader.
+// readState gives a loaded package its state model and its local tools' types.
+// What the console wrote itself is known without running Python, so the wizard
+// stays free of uv: its state.py and the handler stubs it made. An author's own
+// state.py or handler is read through reader.
 func (d Data) readState(ctx context.Context, pkg *spec.Package, reader stateschema.Reader) error {
-	if d.State == nil && len(d.Variables) > 0 {
-		pkg.State = d.stateModel()
-		return nil
+	return pkg.ReadState(ctx, consoleReader{data: d, next: reader})
+}
+
+// consoleReader answers for the files the console wrote, and asks next about
+// the rest.
+type consoleReader struct {
+	data Data
+	next stateschema.Reader
+}
+
+func (r consoleReader) Read(ctx context.Context, dir string, source []byte) (*stateschema.Model, error) {
+	console := r.data
+	console.State = nil
+	if r.data.State == nil || bytes.Equal(r.data.State, statePy(console)) {
+		return r.data.stateModel(), nil
 	}
-	return pkg.ReadState(ctx, reader)
+	return r.next.Read(ctx, dir, source)
+}
+
+func (r consoleReader) ReadTools(ctx context.Context, dir string, state []byte, refs []stateschema.ToolRef) (map[string]stateschema.ToolTypes, error) {
+	stubs := map[string]Tool{}
+	for _, tool := range r.data.Tools {
+		if tool.ExecutionKind() == "local" && (tool.HandlerSource == "" || tool.HandlerSource == tool.handlerStub()) {
+			stubs[tool.Name] = tool
+		}
+	}
+	types := make(map[string]stateschema.ToolTypes, len(refs))
+	for _, ref := range refs {
+		tool, ok := stubs[ref.Name]
+		if !ok {
+			// One handler the console did not write: read them all through
+			// Python, the stubs too, so every tool is read the same way.
+			return r.next.ReadTools(ctx, dir, state, refs)
+		}
+		types[ref.Name] = tool.stubTypes()
+	}
+	return types, nil
 }
 
 // pythonTypes are the console's four plain types as Python writes them.

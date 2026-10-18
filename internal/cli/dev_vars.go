@@ -93,11 +93,8 @@ func callStartPayload(agent *ir.Agent, flags []string) (string, error) {
 		}
 		// Two kinds of variable read the dispatch payload, and the flag takes
 		// both: `source: call_start`, and a variable that declares no source at
-		// all. Both drivers hydrate the same pair (`v.Source ==
-		// ir.VariableSourceCallStart || v.Source == ""` in livekit_v1_build.go
-		// and pipecat_v1_build.go), and both emitted runbooks print a
-		// `--var <name>=...` line for each of them, so refusing the sourceless
-		// half made the flag contradict the runbook it appears in.
+		// all. Both read the same dispatch payload, so refusing the sourceless
+		// half would make the flag refuse a value the call can carry.
 		//
 		// A runtime-owned source still arrives from the telephony route, so
 		// seeding it here would be accepted and then dropped in build_state,
