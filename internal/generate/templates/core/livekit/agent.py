@@ -42,6 +42,7 @@ from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import google, openai, silero, slng
 from unmute_core.call import CallStartError
 from unmute_core.livekit import (
+    DevObserver,
     ModelCallLLM,
     SipLine,
     UnmuteAgent,
@@ -53,6 +54,7 @@ from unmute_core.livekit import (
     sip_call_info,
     yield_to_caller,
 )
+from unmute_core.dev import DevRecorder, metrics_enabled
 from unmute_core.settings import env_value
 from unmute_core.slng import TrackingIds, tracking_ids
 from unmute_core.state import CallState, call_phone_region, use_phone_region
@@ -285,6 +287,10 @@ async def entrypoint(ctx: JobContext) -> None:
         )
     first = spec.entry(state)
     session = build_session(state, ctx.proc.userdata["vad"], first)
+    if metrics_enabled():
+        recorder = DevRecorder(ctx.room.name, target="livekit")
+        recorder.watch_state(state)
+        DevObserver(recorder, controls=list(spec.SPEC["transfers"])).attach(session)
     if spec.IDLE is not None:
         idle_nudges(session, spec.IDLE)
     with use_phone_region(lambda: call_phone_region(state.call)):

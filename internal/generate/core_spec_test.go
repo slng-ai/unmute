@@ -155,3 +155,31 @@ func TestTwilioRefusesTheVersion2KeysItsRuntimeCannotRun(t *testing.T) {
 		t.Fatalf("a reply compiled for twilio, or was refused for another reason: %v", err)
 	}
 }
+
+func TestAVersion2ProjectCarriesWhatUnmuteDevRuns(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "customer-intake"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := buildWithState(t, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
+		resolved := targetByProvider(t, agent, provider)
+		artifact, err := Generate(agent, resolved, target.Default())
+		if err != nil {
+			t.Fatalf("%s: %v", provider, err)
+		}
+		compose := artifactFile(t, artifact, "compose.dev.yaml")
+		for _, want := range []string{"UNMUTE_DEV_METRICS", "UNMUTE_CALL_FACTS", "OPENAI_API_KEY"} {
+			if !strings.Contains(compose, "- "+want) {
+				t.Errorf("%s: compose.dev.yaml does not pass %s to the agent", provider, want)
+			}
+		}
+		if provider == ir.ProviderLiveKit && !strings.Contains(compose, "LIVEKIT_AGENT_NAME="+agent.DeployName(resolved)) {
+			t.Errorf("livekit: the worker does not register as %s, the name unmute dev dispatches to", agent.DeployName(resolved))
+		}
+		artifactFile(t, artifact, "Dockerfile")
+	}
+}
