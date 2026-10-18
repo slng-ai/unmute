@@ -333,13 +333,11 @@ func TestMaintainKeepsAnMCPServerAndSelection(t *testing.T) {
 	}
 }
 
-// TestMaintainKeepsNonalphabeticalToolOrder is the ordering half of spec 007
-// US3: the package's top-level tools: catalogue and an agent's own tools:
-// list are both authored, ordered lists, and `unmute maintain` used to
-// alphabetise both on the way out (packageData walked pkg.Tools, a map, via
-// slices.Sorted(maps.Keys(...))). A catalogue authored zebra-before-alpha
-// round-tripping as alpha-before-zebra is silent, because both orders decode
-// to the same set and nothing but a byte comparison catches it.
+// TestMaintainKeepsNonalphabeticalToolOrder: an agent's own tools: list is an
+// authored, ordered list, and `unmute maintain` used to alphabetise it on the
+// way out. Both orders decode to the same set, so nothing but an order check
+// catches it. The tools/ folder has no order, so a tool no agent lists comes
+// after, by name.
 func TestMaintainKeepsNonalphabeticalToolOrder(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "pkg")
 	data := scaffold.Data{
@@ -364,10 +362,6 @@ func TestMaintainKeepsNonalphabeticalToolOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the package the console wrote does not load: %v", err)
 	}
-	want := []string{"zebra_tool", "alpha_tool", "middle_tool"}
-	if got := spec.ToolNames(pkg.Agent.Tools); !slices.Equal(got, want) {
-		t.Errorf("agent.yaml's tools: catalogue = %v, want the authored order %v", got, want)
-	}
 	wantBilling := []string{"zebra_tool", "alpha_tool"}
 	if !slices.Equal(pkg.Agent.Agents["billing"].Tools, wantBilling) {
 		t.Errorf("billing's tools: list = %v, want the authored order %v", pkg.Agent.Agents["billing"].Tools, wantBilling)
@@ -390,13 +384,6 @@ func TestMaintainKeepsNonalphabeticalToolOrder(t *testing.T) {
 		if strings.Contains(loss, "tool") || strings.Contains(loss, "Tool") {
 			t.Errorf("the console cannot preserve %q, so maintain would delete it", loss)
 		}
-	}
-	var gotNames []string
-	for _, tool := range agent.data.Tools {
-		gotNames = append(gotNames, tool.Name)
-	}
-	if !slices.Equal(gotNames, want) {
-		t.Errorf("scaffold.Data.Tools order = %v, want %v", gotNames, want)
 	}
 }
 

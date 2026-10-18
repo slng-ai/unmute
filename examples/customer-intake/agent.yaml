@@ -5,8 +5,8 @@ name: customer-intake
 entry_agent: intake
 
 agents:
-  intake:
-    instructions: instructions.md
+  - name: intake
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
@@ -20,7 +20,7 @@ agents:
           Run once, before anything is written down. It reads the number the
           call arrived on back to the caller and needs a yes. A caller ringing
           from somebody else's phone gives their own number here instead.
-        instructions: tasks/verify-contact.md
+        prompt: tasks/verify-contact.md
         save:
           - caller_phone: result.caller_phone
 
@@ -32,7 +32,7 @@ agents:
           Run after verify_contact, when the number is agreed. Takes the name,
           the email address, what the caller is ringing about, and a good time
           to ring them back if they name one.
-        instructions: tasks/take-details.md
+        prompt: tasks/take-details.md
         save:
           - contact: result.contact
           - caller_email: result.contact.email
@@ -47,7 +47,7 @@ agents:
         when: >-
           Run once the number is agreed and the details are taken. Writes the
           record and reads the reference number back.
-        instructions: tasks/open-record.md
+        prompt: tasks/open-record.md
         tools:
           - create_customer_record
         save:
@@ -67,7 +67,7 @@ prefetch:
     # want two zones. Not the container's clock, which is UTC and would name the
     # wrong day for anybody who is not on it.
     timezone: Europe/Madrid
-    assign:
+    save:
       - today_date: result.date
 
   # Best effort. Neither code target here names a phone route, so on a browser
@@ -76,7 +76,7 @@ prefetch:
   # for one instead.
   - name: caller
     source: from_number
-    assign:
+    save:
       - caller_phone: result.value
 
 secrets:
@@ -138,16 +138,12 @@ models:
       # turn where the caller really has finished.
       pace: patient
 
-tools:
-  - create_customer_record
-  - end_call
-
 conversation:
   greeting:
     speaks_first: agent
     # Names no saved value on purpose. A greeting is held to values settled
     # before the first word, and the only one this package has is the date.
-    text: "Hi, you're through to the intake desk. Can I take a couple of details from you?"
+    say: "Hi, you're through to the intake desk. Can I take a couple of details from you?"
   interruption:
     enabled: true
   inactivity:

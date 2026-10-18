@@ -1397,7 +1397,7 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	// still say which thing it means.
 	pkg = dailyCarrierPackage(t)
 	human = pkg.Agent.Escalations["send_to_billing"]
-	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
+	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: human.Cold.Destination}
 	pkg.Agent.Escalations["send_to_billing"] = human
 	phone = channelNamed(t, pkg, "phone")
 	phone.Outbound = &outbound

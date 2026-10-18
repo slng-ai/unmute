@@ -210,8 +210,8 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 			key   string
 			names []string
 		}{
-			{"tools", raw.Tools}, {"tasks", taskRefs(raw)}, {"task_groups", raw.TaskGroups},
-			{"handoffs", raw.Handoffs}, {"escalations", raw.Escalations},
+			{"tools", raw.Tools}, {"tasks", taskRefs(raw)}, {"flows", raw.TaskGroups},
+			{"handoffs", raw.Handoffs}, {"transfers", raw.Escalations},
 		} {
 			if err := checkAttachments(pkg, list.key, list.names); err != nil {
 				return nil, err
@@ -219,7 +219,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		}
 		instructions, ok := pkg.Markdown[raw.Instructions]
 		if !ok {
-			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
+			return nil, missing(pkg, "agent.yaml", "prompt", raw.Instructions)
 		}
 		// Stored in the emitted form, {{customer__status}} for an authored
 		// {{customer.status}}, so every consumer of the IR sees one flat name
@@ -253,7 +253,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		}
 		instructions, ok := pkg.Markdown[raw.Instructions]
 		if !ok {
-			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
+			return nil, missing(pkg, "agent.yaml", "prompt", raw.Instructions)
 		}
 		// Stored in the emitted form, {{customer__status}} for an authored
 		// {{customer.status}}, so every consumer of the IR sees one flat name
@@ -304,7 +304,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 				return nil, missing(pkg, "agent.yaml", "task", step.Task)
 			}
 			if err := checkSkipWhenConfirmed(step, out); err != nil {
-				return nil, fmt.Errorf("%s: task group %q: %w", pkg.Location("agent.yaml", name), name, err)
+				return nil, fmt.Errorf("%s: flow %q: %w", pkg.Location("agent.yaml", name), name, err)
 			}
 			if step.SkipWhenConfirmed != "" {
 				task := out.Tasks[step.Task]
@@ -345,7 +345,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		if err != nil {
 			kind := "task"
 			if raw.Group != "" {
-				kind = "task group"
+				kind = "flow"
 			}
 			return nil, fmt.Errorf("%s: %s %q: %w", pkg.Location("agent.yaml", name), kind, name, err)
 		}
@@ -361,7 +361,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	for _, name := range sortedKeys(pkg.Agent.Escalations) {
 		control, err := buildEscalation(pkg.Agent.Escalations[name], out)
 		if err != nil {
-			return nil, fmt.Errorf("%s: escalation %q: %w", pkg.Location("agent.yaml", name), name, err)
+			return nil, fmt.Errorf("%s: transfer %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
 		out.Controls[name] = control
 	}
@@ -397,9 +397,9 @@ func checkNames(pkg *packagespec.Package) error {
 	}{
 		{"model", modelNames},
 		{"agent", sortedKeys(pkg.Agent.Agents)},
-		{"task", sortedKeys(pkg.Tasks)}, {"task group", sortedKeys(pkg.Agent.TaskGroups)},
+		{"task", sortedKeys(pkg.Tasks)}, {"flow", sortedKeys(pkg.Agent.TaskGroups)},
 		{"handoff", sortedKeys(pkg.Agent.Handoffs)},
-		{"escalation", sortedKeys(pkg.Agent.Escalations)}, {"tool", sortedKeys(pkg.Tools)},
+		{"transfer", sortedKeys(pkg.Agent.Escalations)}, {"tool", sortedKeys(pkg.Tools)},
 	}
 	for _, set := range sets {
 		for _, name := range set.names {
@@ -422,9 +422,9 @@ func checkNames(pkg *packagespec.Package) error {
 		kind  string
 		names []string
 	}{
-		{"task", sortedKeys(pkg.Tasks)}, {"task group", sortedKeys(pkg.Agent.TaskGroups)},
+		{"task", sortedKeys(pkg.Tasks)}, {"flow", sortedKeys(pkg.Agent.TaskGroups)},
 		{"handoff", sortedKeys(pkg.Agent.Handoffs)},
-		{"escalation", sortedKeys(pkg.Agent.Escalations)},
+		{"transfer", sortedKeys(pkg.Agent.Escalations)},
 	} {
 		for _, name := range catalog.names {
 			if prior, ok := declared[name]; ok {
@@ -1398,9 +1398,9 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 			pkg.Location("targets.yaml", "carrier:"), name, raw.Carrier, connectionFileFor(raw.Connection))
 	}
 	if len(raw.Destinations) > 0 {
-		return Target{}, fmt.Errorf("%s: target %q declares destinations, which now belong at the top level of "+
-			"agent.yaml. A destination is who this agent escalates to, which is the same desk whichever carrier "+
-			"reaches it", pkg.Location("targets.yaml", "destinations:"), name)
+		return Target{}, fmt.Errorf("%s: target %q declares destinations, and a number belongs to a transfer now: "+
+			"write it as the transfer's to: in agent.yaml, which is the same desk whichever carrier reaches it",
+			pkg.Location("targets.yaml", "destinations:"), name)
 	}
 	destinations := pkg.Agent.Destinations
 	for _, destination := range sortedKeys(destinations) {
@@ -1409,9 +1409,9 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 			// The value is not repeated back. A destination that is not a name is
 			// a phone number, and the bundle's hardest rule is that no phone
 			// number appears in any output (Wave B, 2026-08-15).
-			return Target{}, fmt.Errorf("%s: destination %q is a literal. agent.yaml is the portable half of a "+
-				"package, so a destination names an environment variable holding the number: %s: BILLING_PHONE_NUMBER",
-				pkg.Location("agent.yaml", destination), destination, destination)
+			return Target{}, fmt.Errorf("%s: transfer %q has a literal to:. agent.yaml is the portable half of a "+
+				"package, so to: names an environment variable holding the number, for example to: BILLING_PHONE_NUMBER",
+				pkg.Location("agent.yaml", "name: "+destination), destination)
 		}
 	}
 	if raw.Connection != "" {
@@ -2086,10 +2086,7 @@ func buildConversation(raw *packagespec.Conversation) *Conversation {
 // checkToolRefs above proves every name an agent lists resolves. This is its
 // mirror image, and it is the half that was missing: a control nobody attached
 // was not filtered out of the generated project, it was simply never visited,
-// so it compiled at exit 0 and vanished. An unreferenced destination was worse
-// than dead — its environment name still reached .env.example and the generated
-// startup check, so the agent refused to start over a phantom secret nothing
-// would ever read.
+// so it compiled at exit 0 and vanished.
 //
 // It runs here rather than in ir.Validate because reachability is a property of
 // the package graph alone: no target can change the answer, so it fires once for
@@ -2101,7 +2098,7 @@ func buildConversation(raw *packagespec.Conversation) *Conversation {
 // nothing else.
 func checkReachability(pkg *packagespec.Package) error {
 	agents, controls, tools := map[string]bool{}, map[string]bool{}, map[string]bool{}
-	tasks, groups, destinations := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	tasks, groups := map[string]bool{}, map[string]bool{}
 
 	var visitAgent, visitTask, visitGroup func(string)
 	// An agent and a task attach the same way: by name, from typed lists. Which
@@ -2120,7 +2117,7 @@ func checkReachability(pkg *packagespec.Package) error {
 					}
 					controls[name] = true
 					visitTask(name)
-				case "task_groups":
+				case "flows":
 					if controls[name] {
 						continue
 					}
@@ -2132,9 +2129,8 @@ func checkReachability(pkg *packagespec.Package) error {
 					}
 					controls[name] = true
 					visitAgent(pkg.Agent.Handoffs[name].To)
-				case "escalations":
+				case "transfers":
 					controls[name] = true
-					destinations[pkg.Agent.Escalations[name].TransferDestination()] = true
 				}
 			}
 		}
@@ -2216,17 +2212,12 @@ func checkReachability(pkg *packagespec.Package) error {
 		names []string
 	}{
 		{"handoffs", sortedKeys(pkg.Agent.Handoffs)},
-		{"escalations", sortedKeys(pkg.Agent.Escalations)},
+		{"transfers", sortedKeys(pkg.Agent.Escalations)},
 	} {
 		for _, name := range catalog.names {
 			if !controls[name] {
 				return fmt.Errorf("%s: %s %q is declared but no agent reaches it%s", pkg.Location("agent.yaml", name), singular(catalog.list), name, attachable(catalog.list))
 			}
-		}
-	}
-	for _, name := range sortedKeys(pkg.Agent.Destinations) {
-		if !destinations[name] {
-			return fmt.Errorf("%s: destination %q is declared but no escalation resolves to it", pkg.Location("agent.yaml", name), name)
 		}
 	}
 	for _, name := range sortedKeys(pkg.Tools) {
@@ -2236,12 +2227,12 @@ func checkReachability(pkg *packagespec.Package) error {
 	}
 	for _, name := range sortedKeys(pkg.Agent.TaskGroups) {
 		if !groups[name] {
-			return fmt.Errorf("%s: task group %q is declared but no agent reaches it%s", pkg.Location("agent.yaml", name), name, attachable("task_groups"))
+			return fmt.Errorf("%s: flow %q is declared but no agent reaches it%s", pkg.Location("agent.yaml", name), name, attachable("flows"))
 		}
 	}
 	for _, name := range sortedKeys(pkg.Tasks) {
 		if !tasks[name] {
-			return fmt.Errorf("%s: task %q has no when: and no task group lists it in steps:, so nothing runs it. Give it a when: so its agent can decide to run it, or list it as a step of a task group that is reached", pkg.Location("agent.yaml", name), name)
+			return fmt.Errorf("%s: task %q has no when: and no flow lists it in steps:, so nothing runs it. Give it a when: so its agent can decide to run it, or list it as a step of a flow that is reached", pkg.Location("agent.yaml", name), name)
 		}
 	}
 	for _, name := range sortedKeys(pkg.Agent.Agents) {
@@ -2275,12 +2266,7 @@ func attached(lists ...[]string) []string {
 // its entries. A lookup rather than a suffix trim, because `task_groups`
 // singularises to "task group" and no rule about the letter s gets there.
 func singular(list string) string {
-	switch list {
-	case "task_groups":
-		return "task group"
-	default:
-		return strings.TrimSuffix(list, "s")
-	}
+	return strings.TrimSuffix(list, "s")
 }
 
 // article is the indefinite article for a kind name, so the one kind that
@@ -2301,11 +2287,11 @@ func catalogOf(pkg *packagespec.Package, name string) string {
 	case has(pkg.Tasks, name):
 		return "tasks"
 	case has(pkg.Agent.TaskGroups, name):
-		return "task_groups"
+		return "flows"
 	case has(pkg.Agent.Handoffs, name):
 		return "handoffs"
 	case has(pkg.Agent.Escalations, name):
-		return "escalations"
+		return "transfers"
 	}
 	return ""
 }
@@ -2377,7 +2363,7 @@ func checkAttachments(pkg *packagespec.Package, list string, names []string) err
 				continue
 			}
 			if _, ok := pkg.Callables[name]; !ok {
-				return fmt.Errorf("%s: task %q has no when:, so it is a task group's step rather than something an agent can decide to run. Give it a when: to make it a task this agent runs, or name the group that runs it",
+				return fmt.Errorf("%s: task %q has no when:, so it is a flow's step rather than something an agent can decide to run. Give it a when: to make it a task this agent runs, or name the group that runs it",
 					pkg.Location("agent.yaml", name), name)
 			}
 		case "":

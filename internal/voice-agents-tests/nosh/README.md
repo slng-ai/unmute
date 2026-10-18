@@ -12,7 +12,7 @@ lines, `max_requests` and final state.
 
 ## What it proves
 
-- An agent with only `tools:` and no tasks or task groups.
+- An agent with only `tools:` and no tasks or flows.
 - `save:` on a tool's entry in agent.yaml saves typed values from every result (`spot`,
   `offer`, `details`).
 - `outcomes:` (`if` / `say`) is the line code says for each result.

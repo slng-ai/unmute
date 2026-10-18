@@ -734,7 +734,7 @@ func coreTransfers(agent *ir.Agent, resolved ir.Target) (map[string]any, error) 
 		}
 		env, ok := resolved.Destinations[transfer.Destination]
 		if !ok {
-			return nil, fmt.Errorf("escalation %q: destination %q is missing from target %s", name, transfer.Destination, resolved.Name)
+			return nil, fmt.Errorf("transfer %q: destination %q is missing from target %s", name, transfer.Destination, resolved.Name)
 		}
 		built := map[string]any{
 			"description":     transfer.When,
@@ -746,7 +746,7 @@ func coreTransfers(agent *ir.Agent, resolved ir.Target) (map[string]any, error) 
 		if transfer.RingTimeout != "" {
 			seconds, err := coreSeconds(transfer.RingTimeout)
 			if err != nil {
-				return nil, fmt.Errorf("escalation %q: ring_timeout: %w", name, err)
+				return nil, fmt.Errorf("transfer %q: ring_timeout: %w", name, err)
 			}
 			built["ring_timeout_s"] = seconds
 		}

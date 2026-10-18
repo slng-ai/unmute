@@ -98,7 +98,7 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	}
 	if pkg.Agent.Conversation != nil && pkg.Agent.Conversation.Greeting != nil {
 		text := pkg.Agent.Conversation.Greeting.Text
-		if err := checkTemplateSite(pkg, agent, "agent.yaml", "text:", "conversation.greeting.text", text, true, true); err != nil {
+		if err := checkTemplateSite(pkg, agent, "agent.yaml", "say:", "conversation.greeting.say", text, true, true); err != nil {
 			return err
 		}
 	}

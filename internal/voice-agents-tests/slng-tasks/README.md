@@ -1,9 +1,9 @@
 # slng-tasks
 
-The slng target's task acceptance package. One agent with two tasks and a group:
+The slng target's task acceptance package. One agent with two tasks and a flow:
 
 - `verify_identity` runs from its own `when:` and confirms `phone_number`.
-- `take_booking` runs only inside the `book` group. It calls `check_availability`,
+- `take_booking` runs only inside the `book` flow. It calls `check_availability`,
   a hosted code tool that no agent lists, so SLNG attaches it hidden from the
   main agent.
 - `book` skips `verify_identity` once the number is confirmed.

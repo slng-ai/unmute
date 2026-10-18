@@ -321,7 +321,7 @@ func TestSecretsCheckRunsWithNoBlock(t *testing.T) {
 			})
 		})
 		warning := undeclaredSecretWarning(agent)
-		for _, want := range append(slices.Clone(dropped), "agent.yaml destinations", "connections/") {
+		for _, want := range append(slices.Clone(dropped), "agent.yaml transfer", "connections/") {
 			if !strings.Contains(warning, want) {
 				t.Errorf("warning must name %q, got %q", want, warning)
 			}

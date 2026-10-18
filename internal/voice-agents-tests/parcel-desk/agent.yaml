@@ -11,19 +11,27 @@ name: parcel-desk
 entry_agent: desk
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: router
     speak: voice
     tools:
       - end_call
-    task_groups:
-      - move_delivery
-      - request_callback
+    flows:
+      - name: move_delivery
+        when: The caller wants a parcel delivered on another day.
+        steps:
+          - track_parcel
+          - change_delivery
+      - name: request_callback
+        when: The caller wants a person to call them back.
+        steps:
+          - callback_note
+        then: end
     tasks:
       - name: track_parcel
         when: The caller asks where a parcel is.
-        instructions: tasks/track-parcel.md
+        prompt: tasks/track-parcel.md
         tools:
           - name: find_parcel
             outcomes:
@@ -35,7 +43,7 @@ agents:
           - parcel: result.parcel
 
       - name: change_delivery
-        instructions: tasks/change-delivery.md
+        prompt: tasks/change-delivery.md
         tools:
           - name: reschedule_delivery
             confirm:
@@ -52,7 +60,7 @@ agents:
           - parcel: result.parcel
 
       - name: callback_note
-        instructions: tasks/callback-note.md
+        prompt: tasks/callback-note.md
         tools:
           - name: save_callback_note
             outcomes:
@@ -65,28 +73,16 @@ agents:
         save:
           - callback_note: result.note
 
-task_groups:
-  move_delivery:
-    when: The caller wants a parcel delivered on another day.
-    steps:
-      - track_parcel
-      - change_delivery
-  request_callback:
-    when: The caller wants a person to call them back.
-    steps:
-      - callback_note
-    then: end
-
 prefetch:
   - name: today
     clock: now
     timezone: Europe/London
-    assign:
+    save:
       - today: result.date
 
   - name: caller
     source: from_number
-    assign:
+    save:
       - caller_phone: result.value
 
 secrets:
@@ -136,11 +132,9 @@ tools:
     start:
       say:
         - Let me book that in.
-  - save_callback_note
-  - end_call
 
 conversation:
   greeting:
     speaks_first: agent
-    text: Hi, this is Parcel Desk. How can I help?
+    say: Hi, this is Parcel Desk. How can I help?
   max_duration: 10m

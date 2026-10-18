@@ -27,7 +27,7 @@ flowchart LR
 - `search_places`: an API request tool SLNG hosts, referenced with `slng:`.
 - `end_call`: the builtin.
 - `verify_identity`, a task with its own `when:`, and `take_booking`, a step only
-  the `book` group runs. The group skips `verify_identity` once the number is
+  the `book` flow runs. The flow skips `verify_identity` once the number is
   confirmed.
 - `take_booking` finishes on `book_slot` when its status is `booked`, and SLNG
   says "Thanks for having us..." with the booked time and day.

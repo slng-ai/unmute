@@ -96,7 +96,7 @@ func TestBuildPrefetchResolvesEachSource(t *testing.T) {
 func TestBuildPrefetchReadsTwoZones(t *testing.T) {
 	dir := writePatchedPrefetchCore(t,
 		"  - name: caller\n    source: from_number\n",
-		"  - name: opening\n    clock: now\n    timezone: America/New_York\n    assign:\n"+
+		"  - name: opening\n    clock: now\n    timezone: America/New_York\n    save:\n"+
 			"      - customer_id: result.date\n\n  - name: caller\n    source: from_number\n")
 	pkg, err := loadRecorded(dir)
 	if err != nil {
@@ -244,29 +244,29 @@ func TestBuildPrefetchRefusesTheShape(t *testing.T) {
 			name: "rule 1: no source key",
 			from: "    clock: now\n",
 			to:   "",
-			want: []string{"agent.yaml:", `prefetch "today" names none of clock:, source: and tool:`, "clock: now for the date and time"},
+			want: []string{"agent.yaml:", `prefetch "today" names none of clock:, source: and call:`, "clock: now for the date and time"},
 		},
 		{
 			name: "rule 1: two source keys",
 			from: "    clock: now\n",
-			to:   "    clock: now\n    tool: lookup_customer\n",
-			want: []string{`names both clock: and tool:`, "split it"},
+			to:   "    clock: now\n    call: lookup_customer\n",
+			want: []string{`names both clock: and call:`, "split it"},
 		},
 		{
 			name: "rule 2: args on a clock entry",
 			from: "    clock: now\n",
-			to:   "    clock: now\n    args:\n      - phone: \"x\"\n",
-			want: []string{"reads the clock, which takes no arguments", "args: belongs to a tool: entry"},
+			to:   "    clock: now\n    with:\n      - phone: \"x\"\n",
+			want: []string{"reads the clock, which takes no arguments", "with: belongs to a call: entry"},
 		},
 		{
 			name: "rule 2: args on a source entry",
 			from: "  - name: caller\n    source: from_number\n",
-			to:   "  - name: caller\n    source: from_number\n    args:\n      - phone: \"x\"\n",
+			to:   "  - name: caller\n    source: from_number\n    with:\n      - phone: \"x\"\n",
 			want: []string{"reads a fact the call carries, which takes no arguments"},
 		},
 		{
 			name: "rule 3: empty assign",
-			from: "    assign:\n      - booking_date: result.date\n      - booking_weekday: result.day_of_week\n      - booking_year: result.year\n",
+			from: "    save:\n      - booking_date: result.date\n      - booking_weekday: result.day_of_week\n      - booking_year: result.year\n",
 			to:   "",
 			want: []string{"assigns nothing", "nowhere to put it"},
 		},
@@ -299,8 +299,8 @@ func TestBuildPrefetchRefusesTheShape(t *testing.T) {
 		},
 		{
 			name: "rule 6: two entries assign one variable",
-			from: "  - name: caller\n    source: from_number\n    assign:\n      - caller_phone: result.value\n",
-			to:   "  - name: caller\n    source: from_number\n    assign:\n      - booking_date: result.value\n",
+			from: "  - name: caller\n    source: from_number\n    save:\n      - caller_phone: result.value\n",
+			to:   "  - name: caller\n    source: from_number\n    save:\n      - booking_date: result.value\n",
 			want: []string{"both assign booking_date", "One value has one source"},
 		},
 		{
@@ -407,8 +407,8 @@ func TestBuildPrefetchRefusesTheSource(t *testing.T) {
 		},
 		{
 			name: "rule 10: a tool the package does not declare",
-			from: "    tool: lookup_customer",
-			to:   "    tool: lookup_custommer",
+			from: "    call: lookup_customer",
+			to:   "    call: lookup_custommer",
 			want: []string{`names tool "lookup_custommer"`, "does not declare", "get_invoice, lookup_customer"},
 		},
 		{
@@ -426,7 +426,7 @@ func TestBuildPrefetchRefusesTheSource(t *testing.T) {
 			from: "    clock: now\n",
 			to:   "    clock: now\n    writes: false\n",
 			want: []string{`prefetch "today" reads the clock, which runs no tool`,
-				"writes: answers nothing here", "writes: belongs to a tool: entry"},
+				"writes: answers nothing here", "writes: belongs to a call: entry"},
 		},
 		{
 			name: "rule 11: writes: on a source entry",
@@ -437,8 +437,8 @@ func TestBuildPrefetchRefusesTheSource(t *testing.T) {
 		},
 		{
 			name: "rule 13: args name an undeclared variable",
-			from: `      - phone: "{{state.caller_phone}}"`,
-			to:   `      - phone: "{{state.callr_phone}}"`,
+			from: `      - phone: state.caller_phone`,
+			to:   `      - phone: state.callr_phone`,
 			want: []string{"reads {{callr_phone}}", "State in state.py does not declare"},
 		},
 	} {
@@ -468,8 +468,8 @@ func TestBuildPrefetchRefusesABackwardsOrder(t *testing.T) {
 	})
 
 	t.Run("caller below profile is refused", func(t *testing.T) {
-		caller := "  - name: caller\n    source: from_number\n    assign:\n      - caller_phone: result.value\n\n"
-		profile := "  - name: profile\n    tool: lookup_customer\n    # This lookup reads. The key is required either way: the compiler cannot\n    # check either answer, so it makes the author state one.\n    writes: false\n    args:\n      - phone: \"{{state.caller_phone}}\"\n    assign:\n      - caller_name: result.name\n"
+		caller := "  - name: caller\n    source: from_number\n    save:\n      - caller_phone: result.value\n\n"
+		profile := "  - name: profile\n    call: lookup_customer\n    # This lookup reads. The key is required either way: the compiler cannot\n    # check either answer, so it makes the author state one.\n    writes: false\n    with:\n      - phone: state.caller_phone\n    save:\n      - caller_name: result.name\n"
 		err := patchPrefetchCore(t, caller+profile, profile+"\n"+caller)
 		if err == nil {
 			t.Fatal("a backwards list was accepted, so the file's visible order is not the agent's")
@@ -495,8 +495,8 @@ func TestBuildPrefetchRefusesConfirmation(t *testing.T) {
 
 	t.Run("an unconfirmed value may be referenced in the greeting", func(t *testing.T) {
 		err := patchPrefetchCore(t,
-			`    text: "Hi, you have reached Acme Support. How can I help you today?"`,
-			`    text: "Hi, calling from {{state.caller_phone}}?"`)
+			`    say: "Hi, you have reached Acme Support. How can I help you today?"`,
+			`    say: "Hi, calling from {{state.caller_phone}}?"`)
 		if err != nil {
 			t.Fatalf("a legal reference was refused: %v", err)
 		}
@@ -523,8 +523,8 @@ func TestBuildPrefetchRefusesConfirmation(t *testing.T) {
 
 	t.Run("rule 17: two inputs confirmed by different steps", func(t *testing.T) {
 		dir := writePatchedPrefetchCore(t,
-			"      - phone: \"{{state.caller_phone}}\"",
-			"      - phone: \"{{state.caller_phone}}\"\n      - account: \"{{state.customer_id}}\"")
+			"      - phone: state.caller_phone",
+			"      - phone: state.caller_phone\n      - account: state.customer_id")
 		pkg, err := loadRecorded(dir)
 		if err != nil {
 			t.Fatal(err)

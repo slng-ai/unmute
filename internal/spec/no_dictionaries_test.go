@@ -82,7 +82,9 @@ func TestDictionaryDebtNeverGrows(t *testing.T) {
 	// the one reflection reports, not a hand count.
 	// 18: AgentFile.Channels left when channels moved to targets.yaml as a
 	// list with name:.
-	const settled = 18
+	// 13: agents:, and the handoffs, transfers and flows inside each agent, are
+	// lists with name: now, and a transfer carries its own number.
+	const settled = 13
 	if len(dictionaryDebt) > settled {
 		t.Errorf("dictionaryDebt has %d entries, and it had %d when the rule was written. "+
 			"This section may shrink and never grow: write the new field as a list instead",
@@ -114,13 +116,8 @@ var dictionaryDebt = map[string]string{
 	"Package.Connections": "one file per connection, same shape. Migrate with Package.Tools.",
 	"Package.Targets":     "the target instance name is the deploy identity. Migrate when a target carries name:.",
 
-	"AgentFile.Variables":    "name-keyed. Migrate when a variable carries name:, which touches every example.",
-	"AgentFile.Destinations": "name to env var name. Migrate to a pair list; two examples author it.",
-	"AgentFile.Knowledge":    "name-keyed base. Migrate with AgentFile.Variables.",
-	"AgentFile.Agents":       "name-keyed, and the entry_agent: pointer reads the key. Migrate last.",
-	"AgentFile.Handoffs":     "name-keyed catalog, same reason.",
-	"AgentFile.Escalations":  "name-keyed catalog, same reason.",
-	"AgentFile.TaskGroups":   "name-keyed catalog; an agent's task_groups: list points at a key.",
+	"AgentFile.Variables": "name-keyed. Migrate when a variable carries name:, which touches every example.",
+	"AgentFile.Knowledge": "name-keyed base. Migrate with AgentFile.Variables.",
 
 	"ModelSections.Think":  "name-keyed model catalog; listen:/turn: point at a key.",
 	"ModelSections.Speak":  "same.",
@@ -129,7 +126,7 @@ var dictionaryDebt = map[string]string{
 
 	"Connection.Environment": "route setting to env var name. Migrate to a pair list.",
 	"Target.Models":          "per-target override, keyed like ModelSections. Migrate with them.",
-	"Target.Destinations":    "per-target override of AgentFile.Destinations. Migrate with it, or the two shapes disagree.",
+	"Target.Destinations":    "retired: Build refuses it and points at a transfer's to:. Delete with that refusal.",
 	"Target.Pins":            "dependency name to version. Migrate to a pair list.",
 }
 

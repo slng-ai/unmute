@@ -30,8 +30,8 @@ entry_by:
     - ES: faro_es
 
 agents:
-  faro_en:
-    instructions: instructions.md
+  - name: faro_en
+    prompt: instructions.md
     think: reasoning
     speak: voice_en
     tools:
@@ -42,14 +42,22 @@ agents:
       - read_progress
       - remember
       - end_call
+    # Each switch saves the language code speaks in, then re-reads the exercise
+    # waiting in that language, with no model request.
     handoffs:
-      - to_spanish
+      - name: to_spanish
+        to: faro_es
+        when: The caller asks you to explain in Spanish, or keeps speaking Spanish to you.
+        save:
+          - explanation: ES
+        start:
+          call: continue_lesson
     tasks:
       - name: other_number
         when: >-
           The caller says the number read back is wrong, or there was no number
           to read back.
-        instructions: tasks/other-number.md
+        prompt: tasks/other-number.md
         start:
           say:
             - What is your full phone number, starting with plus thirty-four?
@@ -57,7 +65,7 @@ agents:
           call: check_number
           with:
             - phone: state.phone
-        arguments:
+        fills:
           - phone
         tools:
           - name: check_number
@@ -79,7 +87,7 @@ agents:
 
       - name: sign_up
         when: A caller with no profile agrees to create one.
-        instructions: tasks/sign-up.md
+        prompt: tasks/sign-up.md
         start:
           say:
             - Great. What would you like me to call you?
@@ -103,8 +111,8 @@ agents:
           - learner_name: result.learner_name?
           - notes: result.notes?
 
-  faro_es:
-    instructions: instructions-es.md
+  - name: faro_es
+    prompt: instructions-es.md
     think: reasoning
     speak: voice_es
     tools:
@@ -116,13 +124,19 @@ agents:
       - remember
       - end_call
     handoffs:
-      - to_english
+      - name: to_english
+        to: faro_en
+        when: The caller asks you to explain in English, or keeps speaking English to you.
+        save:
+          - explanation: EN
+        start:
+          call: continue_lesson
     tasks:
       - name: other_number_es
         when: >-
           The caller says the number read back is wrong, or there was no number
           to read back.
-        instructions: tasks/other-number.md
+        prompt: tasks/other-number.md
         start:
           say:
             - ¿Me dices tu número de teléfono completo, empezando por más treinta y cuatro?
@@ -130,7 +144,7 @@ agents:
           call: check_number
           with:
             - phone: state.phone
-        arguments:
+        fills:
           - phone
         tools:
           - name: check_number
@@ -152,7 +166,7 @@ agents:
 
       - name: sign_up_es
         when: A caller with no profile agrees to create one.
-        instructions: tasks/sign-up.md
+        prompt: tasks/sign-up.md
         start:
           say:
             - Genial. ¿Cómo quieres que te llame?
@@ -175,36 +189,19 @@ agents:
           - learner_name: result.learner_name?
           - notes: result.notes?
 
-handoffs:
-  # Each switch saves the language code speaks in, then re-reads the exercise
-  # waiting in that language, with no model request.
-  to_spanish:
-    to: faro_es
-    when: The caller asks you to explain in Spanish, or keeps speaking Spanish to you.
-    saves:
-      - explanation: ES
-    start:
-      call: continue_lesson
-  to_english:
-    to: faro_en
-    when: The caller asks you to explain in English, or keeps speaking English to you.
-    saves:
-      - explanation: EN
-    start:
-      call: continue_lesson
 prefetch:
   - name: caller
     source: from_number
-    assign:
+    save:
       - phone: result.value
   # Before the greeting: which language to greet this number in, and the
   # number read back. Nothing about the learner is said or shown.
   - name: language
-    tool: language_of
+    call: language_of
     writes: false
     needs_confirmed:
       - phone
-    assign:
+    save:
       - explanation: result.explanation
       - phone_spaced: result.phone_spaced
       - number_question: result.number_question
@@ -279,7 +276,6 @@ tools:
               - ES
         say:
           - Faro solo acepta números españoles, que empiezan por más treinta y cuatro. ¿Cuál es tu número español?
-  - create_profile
   - name: continue_lesson
     save:
       - waiting: result.waiting
@@ -315,13 +311,11 @@ tools:
       - else:
         say:
           - "{{result.said}}"
-  - end_call
-  - language_of
 
 conversation:
   greeting:
     speaks_first: agent
-    text: >-
+    say: >-
       Hi, I'm Faro, your language companion. Si prefieres hablar en español,
       dímelo. {{state.number_question}}
     # With no caller ID there is no number to read back, so the model asks.

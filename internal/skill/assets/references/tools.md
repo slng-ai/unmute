@@ -592,7 +592,7 @@ a builtin id: an unknown one is refused by name.
 
 If what the user wants is not in that table, it is usually a webhook, a Python
 handler, or an MCP server. **One thing it is not is a tool at all:** handing the
-caller to a person is an entry under `escalations:` at the top level of
+caller to a person is an entry under an agent's `transfers:` in
 `agent.yaml`, not a file in `tools/`. See `transfers.md`, and check there first,
 because on a browser-only package a transfer is not possible at all.
 
@@ -657,14 +657,15 @@ dropping it.
 
 ## The tool entry in agent.yaml
 
-A `tools:` item is a bare name or a block. The block says what the tool does in
-a conversation, so the tool file stays the contract.
+Every file in `tools/` is a tool, read in name order, so the top-level `tools:`
+list does not repeat them. It keeps only entries with behaviour, `save:`,
+`outcomes:`, `hidden:` or `start:`. A bare name there is refused. The block says
+what the tool does in a conversation, so the tool file stays the contract.
 
 A **top-level** block holds the same for every agent and step:
 
 ```yaml agent.yaml
 tools:
-  - end_call
   - name: find_slots
     start:
       say:
@@ -696,10 +697,11 @@ A **step** block is the tool inside one step. It holds `confirm:` and
 
 ```yaml agent.yaml
 agents:
-  concierge:
+  - name: concierge
+    prompt: instructions.md
     tasks:
       - name: manage_booking
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         tools:
           - name: book_appointment
             confirm:
@@ -815,21 +817,20 @@ still decides what happens if the caller speaks over it.
 one execution block. A local handler lives beside it in `tools/<handler>.py`.
 Do not put any of those fields in `agent.yaml`.
 
-Every `tools:` entry under an agent is a string name, and so is a step's unless it needs `confirm:` or `outcomes:`:
+The tools/ folder is the list of tools. An agent's own `tools:` list still names
+the tools that agent may call, and a step's `tools:` the tools that step may
+call. Each is a string name, unless a step's entry needs `confirm:` or
+`outcomes:`:
 
-- the top-level list loads `tools/<name>.yaml`; an entry there may be a block
-  (see above),
-- `agents.<name>.tools` grants an agent access, and
-- `tasks.<name>.tools` grants a task access.
+- `tools/<name>.yaml` loads the tool; the top-level `tools:` list only adds
+  behaviour to one (see above),
+- an agent's `tools:` grants that agent access, and
+- a task's `tools:` grants that task access.
 
 ```yaml agent.yaml
-tools:
-  - check_slots
-  - end_call
-
 agents:
-  appointment_desk:
-    instructions: instructions.md
+  - name: appointment_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
@@ -837,15 +838,16 @@ agents:
       - end_call
 ```
 
-For a task-scoped tool, attach the same loaded name to the task instead,
-where the task is nested inside its agent:
+For a task-scoped tool, attach the same name to the task instead, where the
+task is nested inside its agent:
 
 ```yaml agent.yaml
 agents:
-  appointment_desk:
+  - name: appointment_desk
+    prompt: instructions.md
     tasks:
       - name: find_slot
-        instructions: tasks/find-slot.md
+        prompt: tasks/find-slot.md
         tools:
           - check_slots
 ```
@@ -857,12 +859,11 @@ name with an inline mapping of `description`, `input`, `output`, `local`, or
 
 **A step's `save:` and a tool's `output:` are different contracts.** A tool's optional
 `output:` describes one tool call and stays in `tools/<name>.yaml`. A step's
-finish fields come from the destination variables in its `save:` list, which
-older packages wrote `assign:`. A task
-that saves nothing needs neither an assignment nor an invented summary.
+finish fields come from the destination variables in its `save:` list. A task
+that saves nothing needs neither a `save:` nor an invented summary.
 
-A file in `tools/` that the package level list does not name is not loaded at
-all, and nothing complains. When a tool is never offered, check that list first.
+A file in `tools/` that no agent or step lists is refused as declared but
+unreached. When a tool is never offered, check the agent's `tools:` list first.
 
 Splitting tool lists is how you make a wrong action impossible rather than
 discouraged. In `examples/salon-concierge`, only the booking task holds

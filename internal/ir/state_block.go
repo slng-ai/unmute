@@ -5,9 +5,9 @@ import "fmt"
 // AgentPromptSite and TaskPromptSite are the two site strings, and they are the
 // strings the template validator already uses. Written once here so the
 // composer and the validator cannot spell the same site two ways.
-func AgentPromptSite(name string) string { return fmt.Sprintf("agent %q instructions", name) }
+func AgentPromptSite(name string) string { return fmt.Sprintf("agent %q prompt", name) }
 
-func TaskPromptSite(name string) string { return fmt.Sprintf("task %q instructions", name) }
+func TaskPromptSite(name string) string { return fmt.Sprintf("task %q prompt", name) }
 
 // StateEmptyText is what a declared value with no contents renders as. Held
 // here rather than in the emitted-code package so a compile-time test of a

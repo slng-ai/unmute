@@ -3,7 +3,9 @@
 # append, and a hosted tool only a task can call. Deployed to find what only a
 # real push and a real call find. hosted/ holds that tool's Python source.
 version: 2
+
 name: slng-tasks-test
+
 entry_agent: support
 
 models:
@@ -26,8 +28,8 @@ models:
       language: en
 
 agents:
-  support:
-    instructions: instructions.md
+  - name: support
+    prompt: instructions.md
     think: reasoning
     speak: front_desk
     tools:
@@ -35,13 +37,13 @@ agents:
     tasks:
       - name: verify_identity
         when: The caller needs to confirm who they are before a booking is looked up or changed.
-        instructions: tasks/verify.md
+        prompt: tasks/verify.md
         save:
           - phone_number: result.phone_number
 
       # No when: on purpose. The book group is the only way in.
       - name: take_booking
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         start:
           say:
             - Let me have a look.
@@ -53,28 +55,21 @@ agents:
         context:
           history: last_n
           max_messages: 6
-    task_groups:
-      - book
-
-task_groups:
-  book:
-    when: The caller wants to book an appointment.
-    steps:
-      - task: verify_identity
-        skip_when_confirmed: phone_number
-      - take_booking
+    flows:
+      - name: book
+        when: The caller wants to book an appointment.
+        steps:
+          - task: verify_identity
+            skip_when_confirmed: phone_number
+          - take_booking
 
 variables:
   - name: phone_number
     confirm: verify_identity
 
-tools:
-  - check_availability
-  - end_call
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi {{state.customer_name}}, you have reached the salon. How can I help?"
+    say: "Hi {{state.customer_name}}, you have reached the salon. How can I help?"
   interruption:
     enabled: true

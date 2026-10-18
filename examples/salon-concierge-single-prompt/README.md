@@ -7,7 +7,7 @@ The differences in context, state, routing and turn taking are listed below.
 
 It is not a straw man. The prompt is written the way a careful team writes a
 single prompt: the voice contract stated once, a clear routing section at the
-top, escalation before anything else, and every rule that came out of a call
+top, the transfer before anything else, and every rule that came out of a call
 going wrong. The problem it has is not sloppiness. It is that one prompt has to
 be four prompts at once, and it is all in front of the model on every turn.
 
@@ -119,10 +119,10 @@ cp examples/salon-concierge-single-prompt/build/livekit/.env.example examples/sa
 
 ### Asking for a manager does not transfer
 
-The escalation is a cold transfer to the `MANAGER_PHONE_NUMBER` destination,
+The manager transfer is cold, to the number in `MANAGER_PHONE_NUMBER`,
 which a carrier has to dial. A browser session stops where the phone leg starts.
 
-**Fix:** put the destination in `.env` in E.164, and make the transfer on a
+**Fix:** put the number in `.env` in E.164, and make the transfer on a
 phone call rather than in the browser.
 
 ```

@@ -5,8 +5,8 @@ name: salon-concierge-unoptimized
 entry_agent: concierge
 
 agents:
-  concierge:
-    instructions: instructions.md
+  - name: concierge
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
@@ -18,16 +18,12 @@ agents:
       - save_booking
       - record_complaint
       - end_call
-    escalations:
-      - to_manager
-
-escalations:
-  to_manager:
-    when: The caller explicitly asks for a manager or is clearly and strongly frustrated.
-    cold:
-      destination: manager_line
-      ring_timeout: 30s
-      on_unavailable: hangup
+    transfers:
+      - name: to_manager
+        to: MANAGER_PHONE_NUMBER
+        when: The caller explicitly asks for a manager or is clearly and strongly frustrated.
+        ring_timeout: 30s
+        on_unavailable: hangup
 
 secrets:
   - OPENAI_API_KEY
@@ -44,9 +40,6 @@ secrets:
   - SIP_AUTH_USERNAME
   - SIP_AUTH_PASSWORD
   - SIP_FROM_NUMBER
-
-destinations:
-  manager_line: MANAGER_PHONE_NUMBER
 
 knowledge:
   refunds:
@@ -89,22 +82,15 @@ models:
       pace: snappy
 
 tools:
-  - get_current_date
-  - find_or_create_customer
-  - find_slots
-  - save_booking
   - name: record_complaint
     start:
       say:
         - Let me get that written down.
-  - look_up_refund_policy
-  - look_up_salon_info
-  - end_call
 
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, you've reached Sage and Stone. Robin speaking, what can I do for you?"
+    say: "Hi, you've reached Sage and Stone. Robin speaking, what can I do for you?"
   interruption:
     enabled: true
   inactivity:

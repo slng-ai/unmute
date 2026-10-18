@@ -211,7 +211,7 @@ Get the caller booked into a slot that works for them, with the right stylist
 and the right service, and confirm it back to them before the call ends.
 ```
 
-One paragraph for a single agent. For a package with tasks or a task group, this
+One paragraph for a single agent. For a package with tasks or a flow, this
 is the base goal, and each step holds its own immediate goal in its own prompt.
 
 ### Guardrails
@@ -474,9 +474,9 @@ and create a record. If they will not give a name, return record_status failed
 and say you will carry on without their history.
 ```
 
-### A group step's instructions
+### A flow step's prompt
 
-A task inside a group, plus one more thing: say what this step assumes has
+A task inside a flow, plus one more thing: say what this step assumes has
 already happened.
 
 With `context_scope: shared`, the step can see the earlier steps and must not
@@ -492,7 +492,7 @@ everything it needs and the prompt must say so.
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
+    say: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
 ```
 
 One or two sentences, ending with an invitation to speak. It is fixed text, so

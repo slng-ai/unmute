@@ -128,8 +128,8 @@ when the tool is **called**, not when it succeeds, so a tool that can refuse the
 call will sometimes promise something it then does not do. The salon's booking
 tool refuses a save that arrives unconfirmed, and the caller heard "putting that
 through now" followed by a question asking their permission. And only one line
-belongs in a turn: a task group's own `announce:` and a tool's `start: say:` fire together when
-the group's first step calls that tool, which the caller hears as two promises to
+belongs in a turn: a flow's own `say:` and a tool's `start: say:` fire together when
+the flow's first step calls that tool, which the caller hears as two promises to
 go and look.
 
 ## Where it ends up
@@ -203,15 +203,11 @@ local:
   handler: tools/text_helpers.py:first_word
 ```
 
-Merge these names into both existing lists; keep the other agent fields:
+Merge these names into the agent's list; keep the other agent fields:
 
 ```yaml agent.yaml
-tools:
-  - count_words
-  - first_word
-
 agents:
-  assistant:
+  - name: assistant
     tools:
       - count_words
       - first_word

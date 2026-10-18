@@ -96,7 +96,32 @@ func Schema() (*jsonschema.Schema, error) {
 		return nil, err
 	}
 	options.TypeSchemas[reflect.TypeFor[StepItem]()] = step
+	for typ, schema := range map[reflect.Type]func() (*jsonschema.Schema, error){
+		reflect.TypeFor[Item[Handoff]]():   func() (*jsonschema.Schema, error) { return itemSchema[Handoff](options, "handoff") },
+		reflect.TypeFor[Item[Transfer]]():  func() (*jsonschema.Schema, error) { return itemSchema[Transfer](options, "transfer") },
+		reflect.TypeFor[Item[TaskGroup]](): func() (*jsonschema.Schema, error) { return itemSchema[TaskGroup](options, "flow") },
+	} {
+		derived, err := schema()
+		if err != nil {
+			return nil, err
+		}
+		options.TypeSchemas[typ] = derived
+	}
 	return jsonschema.For[Package](options)
+}
+
+// itemSchema publishes the two shapes an agent's handoffs:, transfers: or
+// flows: item may take: the block that defines one, or the name of one another
+// agent defines.
+func itemSchema[T any](options *jsonschema.ForOptions, kind string) (*jsonschema.Schema, error) {
+	block, err := jsonschema.For[T](options)
+	if err != nil {
+		return nil, err
+	}
+	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+		{Type: "string", Description: "The name of a " + kind + " another agent defines."},
+		block,
+	}}, nil
 }
 
 // stepItemSchema publishes the two shapes a group's `steps:` item may take: a

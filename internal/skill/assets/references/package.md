@@ -61,15 +61,15 @@ models:
       model: silero
 
 agents:
-  appointment_desk:
-    instructions: instructions.md
+  - name: appointment_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
 
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
+    say: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
   interruption:
     enabled: true
 ```
@@ -91,12 +91,9 @@ That is the shape `unmute init <name>` scaffolds, with an empty `State` class in
 | `turn` | when `models.turn` has two or more entries | which turn entry to use |
 | `variables` | no | a list of `source:` and `confirm:` entries for fields on `State` in `state.py`, the file that holds the types |
 | `secrets` | no | environment names the generated project reads |
-| `destinations` | when an escalation is used | symbol to the environment variable holding a number |
-| `agents` | yes | one or more agents, with their nested tasks |
-| `task_groups` | no | ordered sequences of tasks |
-| `handoffs` | no | the conversation becomes another agent |
-| `escalations` | no | the caller goes through to a person |
-| `tools` | no | which tool files to load |
+| `agents` | yes | a list of agents, each with its nested tasks, handoffs, transfers and flows |
+| `prefetch` | no | state filled before the first word |
+| `tools` | no | only tools with behaviour: `save:`, `outcomes:`, `hidden:` or `start:`. Every file in `tools/` is a tool already |
 | `conversation` | no | greeting, interruption, inactivity, limits |
 | `tracing` | no | tracing provider |
 
@@ -192,8 +189,8 @@ values verified in the provider's own documentation.
 
 ```yaml
 agents:
-  appointment_desk:
-    instructions: instructions.md
+  - name: appointment_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
@@ -202,15 +199,16 @@ agents:
 
 | Field | What it is |
 |---|---|
-| `instructions` | path to a Markdown prompt in the package |
+| `name` | the agent's name, one name across the package |
+| `prompt` | path to a Markdown prompt in the package |
 | `think` | a `models.think` entry name |
 | `speak` | a `models.speak` entry name |
 | `live` | a `models.live` entry name, in place of `think` and `speak`; LiveKit and Pipecat, one agent, no tasks |
 | `tools` | tool files this agent may call, by name |
 | `tasks` | tasks this agent can run: each item is a full definition, or a bare name for a task another agent already defines |
-| `task_groups` | entries under `task_groups:` this agent may run |
-| `handoffs` | entries under `handoffs:` this agent may take |
-| `escalations` | entries under `escalations:` this agent may take |
+| `flows` | ordered runs of tasks this agent can start: a block, or a bare name another agent defines |
+| `handoffs` | agents the conversation can move to: a block, or a bare name another agent defines |
+| `transfers` | people the caller can be put through to: a block, or a bare name another agent defines |
 
 The prompt lives in its own file so it reviews like prose rather than like YAML.
 
@@ -227,7 +225,7 @@ usable in a `{{template}}`.
 
 Declare every environment name the generated project reads: provider and
 tracing keys inferred from the package, tool `*_env` names, connection
-`environment:` values, destinations, and names read by local handlers. Names
+`environment:` values, transfer `to:` names, and names read by local handlers. Names
 the driver or platform supplies, such as `REDIS_URL` or `DAILY_API_KEY`, are not
 yours to declare and are left out.
 
@@ -248,7 +246,7 @@ an undeclared name still stops the container rather than failing on the first
 call.
 
 Write the list as you go anyway: every time you add an `*_env` field, a
-connection `environment:` name, or a `destinations:` entry, add the name here in
+connection `environment:` name, or a transfer `to:`, add the name here in
 the same edit. `unmute init` scaffolds the block for you with the model provider
 keys already in it.
 
@@ -427,7 +425,7 @@ That is the whole list. A `models` override is keyed by the entry name from
 `agent.yaml` and takes the same fields. Use it when a target cannot run an entry
 as defined, or runs its own better. Override the entry, never the agent.
 
-Transport, carrier, and destinations used to live here and no longer do. Writing
+Transport, carrier, and transfer destinations used to live here and no longer do. Writing
 any of them on a target is refused, and the refusal names the new home.
 
 ## warm_instances, and when to write it
@@ -584,7 +582,7 @@ them when it writes the body; a model name that already carries a slash is
 passed through whole. SLNG owns its model list, so no vendor or model name is
 checked on this target.
 
-Tasks and task groups compile to SLNG's own tasks: `when:`, `tools`,
+Tasks and flows compile to SLNG's own tasks: `when:`, `tools`,
 `save:` (with `+`), one `start:` `say:` line, `listen: true`, a history of
 `messages`, `full`, `last_n` or `reset`, `skip_when_confirmed`,
 `context_scope`, and `confirm:` on a value whose confirming task has its own
@@ -600,9 +598,9 @@ validate, by name, with what to do instead:
 | agent transfers | the create body carries one agent |
 | a task's `think:`, `history: summary` or `include_tool_calls: false` | one model per agent, and no summary |
 | a second `then: done` outcome in one task, `then: failed`, or `confirm:` on a step tool | SLNG supports one finishing tool per task today, and has no read-back |
-| a second `start:` `say:` line, an optional `result.x?`, a group `then:` other than `return` | SLNG speaks one line, saves every assigned value, and returns to the agent |
+| a second `start:` `say:` line, an optional `result.x?`, a flow `then:` other than `return` | SLNG speaks one line, saves every assigned value, and returns to the agent |
 | `prefetch:` | slng compiles no session-start hook |
-| a tool entry's `save:`, `outcomes:` and `hidden:`, `start:` with `wait: true`, and `precheck` in a tool file; a step's `start:` with `call:`; `entry_by`; a prefetch `refuse_call`; a handoff's `saves` or `start:` with `call:` | the slng runtime runs version 2 without unmute-core and cannot run them: remove them, or compile to livekit or pipecat |
+| a tool entry's `save:`, `outcomes:` and `hidden:`, `start:` with `wait: true`, and `precheck` in a tool file; a step's `start:` with `call:`; `entry_by`; a prefetch `refuse_call`; a handoff's `save:` or `start:` with `call:` | the slng runtime runs version 2 without unmute-core and cannot run them: remove them, or compile to livekit or pipecat |
 | a task that lists another task or a handoff | a SLNG task cannot start another one |
 | a typed `state.py` value the dispatch fills; `datetime`, `dict`, a pattern other than `Id` | SLNG checks types only on values a task saves, in a grammar without those words |
 | a `turn:` section, `semantic_endpointing`, `endpointing_delay` | SLNG owns its own turn taking |
@@ -762,22 +760,22 @@ What a twilio package may carry, and nothing else:
   milliseconds, 600 to 5000), `interruptSensitivity` (`high`, `medium`,
   `low`), `ignoreBackchannel` (`true` or `false`), and `eotThreshold` (0.5 to
   0.9, only when the listen model is `flux`). No provider or model;
-- a fixed `conversation.greeting.text` with `speaks_first: agent`, or
-  `speaks_first: user` with no text;
+- a fixed `conversation.greeting.say` with `speaks_first: agent`, or
+  `speaks_first: user` with no `say:`;
 - `conversation.interruption.enabled`, and `protect: [greeting]`;
 - local tools whose `input` and `output` are flat objects of `string`,
   `integer`, `number` and `boolean` fields (optional `enum` and
   `description`), plus the builtin `end_call` with no `instructions`.
 
 Everything else is refused before a file is written, with the reason:
-more agents, tasks, groups, handoffs, transfers, variables, `state.py`,
+more agents, tasks, flows, handoffs, transfers, variables, `state.py`,
 prefetch, webhook, MCP, knowledge and hosted tools, tool announce and
 `interruption: cancel`, inactivity and duration timers, `pace` and the other
 turn fields, tracing, realtime and live, fallbacks, custom endpoints,
 `version`, `pins`, `deployment_region` and `warm_instances`.
 
 The version 2 tool entry keys `save`, `outcomes`, `hidden` and `start` with `wait`, and `precheck` in a tool file,
-`entry_by`, and a handoff's `saves` or `start:` with `call:` are refused too.
+`entry_by`, and a handoff's `save:` or `start:` with `call:` are refused too.
 The twilio runtime runs version 2 without unmute-core, so it cannot run them.
 A local tool is a typed handler, `tools/<n>.py:<n>`.
 

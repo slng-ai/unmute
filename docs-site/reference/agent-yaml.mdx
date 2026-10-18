@@ -49,8 +49,8 @@ models:
       model: silero
 
 agents:
-  greeter:
-    instructions: instructions.md
+  - name: greeter
+    prompt: instructions.md
     think: reasoning
     speak: voice
 ```
@@ -132,40 +132,21 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
   declarations warn.
 </ParamField>
 
-<ParamField path="destinations" type="map of strings">
-  Phone destinations an escalation may use. Accepts lower snake case names to UPPER_SNAKE
-  env names. If omitted, there are no transfer destinations; required when an escalation
-  uses one.
-</ParamField>
-
 <ParamField path="knowledge" type="map">
   Folders of documents a tool can search. Accepts 3 to 64 characters of `[a-z0-9_]`. If
   omitted, there are no document bases.
 </ParamField>
 
-<ParamField path="agents" type="map" required>
-  Agent prompts, models, nested tasks, and other callable names. Accepts one or more lower
-  snake case names. Required; omission is refused.
+<ParamField path="agents" type="list" required>
+  Agents, each with a `name:`, a prompt, models, and the tasks, flows, handoffs and
+  transfers it owns. Accepts one or more lower snake case names. Required; omission is
+  refused.
 </ParamField>
 
-<ParamField path="task_groups" type="map">
-  Ordered task sequences, named by the agents that run them. Accepts lower snake case
-  names. If omitted, there are no task groups.
-</ParamField>
-
-<ParamField path="handoffs" type="map">
-  Agent to agent, and never returns. Accepts lower snake case names. If omitted, there are
-  no agent handoffs.
-</ParamField>
-
-<ParamField path="escalations" type="map">
-  Agent to a person. Accepts lower snake case names. If omitted, there are no human
-  transfers.
-</ParamField>
-
-<ParamField path="tools" type="list of strings or objects">
-  Tool files to load, each as a name or a block. Accepts loaded tool file names. If
-  omitted, no tool files are loaded.
+<ParamField path="tools" type="list of objects">
+  Behaviour for tools that need some: `save:`, `outcomes:`, `hidden:` or `start:`. Every
+  file in `tools/` is already a tool. A bare name here is refused. If omitted, no tool
+  has package-wide behaviour.
 </ParamField>
 
 <ParamField path="conversation" type="object">
@@ -465,13 +446,13 @@ prefetch:
   - name: today
     clock: now
     timezone: Europe/Madrid
-    assign:
+    save:
       - booking_date: result.date
       - booking_weekday: result.day_of_week
 ```
 
 One reading of the clock fills both variables above, at no extra cost: an
-entry assigns as many variables as the result has fields, from one call.
+entry saves as many variables as the result has fields, from one call.
 
 An ordered list of facts resolved once per call, before the greeting: the
 clock, a fact the call itself carries, or the result of one already-declared
@@ -483,7 +464,7 @@ required there, never defaulted, because a container's own clock is UTC, so a
 business elsewhere needs it to date a call correctly. It sits on the entry
 rather than on the package, because two entries may honestly want two zones.
 
-A `tool:` entry needs `writes: true` or `writes: false`. There is no default,
+A `call:` entry runs one tool, passes its inputs with `with:`, and needs `writes: true` or `writes: false`. There is no default,
 because a pre-fetch runs unasked on every call. `writes: true` compiles: it is
 named in `compile-report.json` and the runbook, rather than printing a
 warning.
@@ -511,32 +492,11 @@ in a `{{template}}`. That list is a worked example: two model keys, the four
 names a SIP connection maps, and the two desks the agent can transfer to.
 
 Declare every environment name the generated project reads. That means names
-written in tool and connection fields, destination values, literal `os.environ`
+written in tool and connection fields, transfer `to:` values, literal `os.environ`
 reads in local handlers, provider API keys inferred from the model catalogue,
 and the names your tracing provider needs. Names the driver or platform
 supplies, such as `REDIS_URL` or `DAILY_API_KEY`, stay out. See
 [secrets](/reference/secrets).
-
-## `destinations`
-
-```yaml
-destinations:
-  billing_line: BILLING_PHONE_NUMBER
-  supervisor_line: SUPERVISOR_PHONE_NUMBER
-```
-
-The symbols an escalation can name. A value is only the UPPER_SNAKE
-name of an environment variable holding an E.164 number or a `sip:` URI, read at
-call time. A number written here is refused, because `agent.yaml` is the portable
-half of a package:
-
-```text
-agent.yaml:60: destination "billing_line" is a literal. agent.yaml is
-  the portable half of a package, so a destination names an environment variable holding
-  the number: billing_line: BILLING_PHONE_NUMBER
-```
-
-The model never sees a number, and cannot dial one that is not listed here.
 
 ## `knowledge`
 
@@ -609,15 +569,19 @@ Full behaviour, every message, and what a lookup gives the model:
 
 ```yaml
 agents:
-  appointment_desk:
-    instructions: instructions.md
+  - name: appointment_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
       - check_slots
 ```
 
-<ParamField path="instructions" type="string" required>
+<ParamField path="name" type="string" required>
+  A lower snake case name, unique across the package.
+</ParamField>
+
+<ParamField path="prompt" type="string" required>
   Path to a Markdown prompt inside the package. No prompt is inferred.
 </ParamField>
 
@@ -650,17 +614,26 @@ agents:
   tasks. See [task fields](/build/orchestration/tasks#every-key-a-task-takes).
 </ParamField>
 
-<ParamField path="task_groups" type="list of strings">
-  Names from the top-level `task_groups` catalog. Omit for no groups.
+<ParamField path="flows" type="list of definitions or names">
+  Ordered task sequences. Each item is a block this agent defines or the bare name of a
+  flow another agent defines. Omit for no flows. See [`flows`](#flows).
 </ParamField>
 
-<ParamField path="handoffs" type="list of strings">
-  Names from the top-level `handoffs` catalog. Omit for no agent handoffs.
+<ParamField path="handoffs" type="list of definitions or names">
+  Agent to agent, and never returns. Each item is a block this agent defines or the bare
+  name of a handoff another agent defines. Omit for no agent handoffs. See
+  [`handoffs`](#handoffs).
 </ParamField>
 
-<ParamField path="escalations" type="list of strings">
-  Names from the top-level `escalations` catalog. Omit for no human transfers.
+<ParamField path="transfers" type="list of definitions or names">
+  Agent to a person. Each item is a block this agent defines or the bare name of a
+  transfer another agent defines. Omit for no human transfers. See
+  [`transfers`](#transfers).
 </ParamField>
+
+A handoff, transfer or flow is defined once, by the agent that writes its block.
+Any other agent names it with a bare name. A bare name nobody defines is refused,
+and so are two blocks with one name.
 
 ## `tasks`
 
@@ -670,11 +643,11 @@ a bare string naming a task another agent already defines:
 
 ```yaml
 agents:
-  appointment_desk:
+  - name: appointment_desk
     tasks:
       - name: customer_record
         when: Identify the caller before handling an appointment request.
-        instructions: tasks/customer-record.md
+        prompt: tasks/customer-record.md
         start:
           say:
             - One moment.
@@ -684,7 +657,7 @@ agents:
         save:
           - customer_id: result.customer_id
 
-  billing_desk:
+  - name: billing_desk
     # appointment_desk already defines customer_record. A bare name runs the
     # same task from here, so there is one definition and both agents offer it.
     tasks:
@@ -696,13 +669,13 @@ agents:
   task, write its bare name instead of defining it again.
 </ParamField>
 
-<ParamField path="instructions" type="string" required>
+<ParamField path="prompt" type="string" required>
   Path to the task’s Markdown prompt inside the package. No prompt is inferred.
 </ParamField>
 
 <ParamField path="when" type="string">
   The situation the model reads to decide whether to start the task. If omitted, the task
-  is a definition only and must be used in a task group; it cannot be attached elsewhere
+  is a definition only and must be used in a flow; it cannot be attached elsewhere
   by bare name.
 </ParamField>
 
@@ -743,7 +716,12 @@ agents:
 </ParamField>
 
 <ParamField path="handoffs" type="list of strings">
-  Names from the top-level `handoffs` catalog. Omit for no handoffs from this task.
+  Bare names of handoffs an agent defines. Omit for no handoffs from this task.
+</ParamField>
+
+<ParamField path="fills" type="list of strings">
+  `State` fields the model fills from the conversation when it starts the task. Omit to
+  fill none.
 </ParamField>
 
 <ParamField path="save" type="list of one-key pairs">
@@ -808,7 +786,7 @@ neither: its handler's types are the contract.
 
 ### `context`
 
-Used by tasks and by handoffs.
+Used by tasks, flows and handoffs.
 
 <ParamField path="history" type="string">
   Accepts `full`, `messages`, `last_n`, `summary`, or `reset`. Omitted means `messages`:
@@ -865,25 +843,28 @@ the owner's earlier conversation and adds only a status. Saved values reach
 either prompt only through explicit placeholders. See
 [Reduce context sharing step by step](/best-practices/context-scope).
 
-## `task_groups`
+## `flows`
 
-An agent runs a group by naming it in its own `task_groups:` list. The group
-carries its own `when:`, the situation the model reads to decide whether to
-run it:
+An agent runs a flow by defining it in its own `flows:` list. The flow carries
+its own `when:`, the situation the model reads to decide whether to run it. Another
+agent runs the same flow by writing its bare name:
 
 ```yaml
 agents:
-  appointment_desk:
-    task_groups:
-      - appointment_flow
-
-task_groups:
-  appointment_flow:
-    when: The caller wants to book, reschedule, or cancel an appointment.
-    steps:
-      - identify_customer
-      - select_appointment
+  - name: appointment_desk
+    flows:
+      - name: appointment_flow
+        when: The caller wants to book, reschedule, or cancel an appointment.
+        fills:
+          - requested_service
+        steps:
+          - identify_customer
+          - select_appointment
 ```
+
+<ParamField path="name" type="string" required>
+  A lower snake case name, unique across the package.
+</ParamField>
 
 <ParamField path="steps" type="list of strings or objects" required>
   One or more task names, in execution order. An object requires `task` and may set
@@ -892,12 +873,12 @@ task_groups:
 </ParamField>
 
 <ParamField path="when" type="string">
-  The situation the model reads to decide whether to run the group. Omission is accepted
+  The situation the model reads to decide whether to run the flow. Omission is accepted
   but supplies no trigger guidance, so write one.
 </ParamField>
 
-<ParamField path="announce" type="string or list of strings">
-  One fixed spoken line, with no `{{placeholders}}`, when the group starts. Omit for no
+<ParamField path="say" type="string or list of strings">
+  One fixed spoken line, with no `{{placeholders}}`, when the flow starts. Omit for no
   announcement.
   Write several as a list and the caller hears one of them each time the line fires.
   Never the one that site used last. A caller who comes back through the same flow
@@ -908,9 +889,14 @@ task_groups:
   runs belongs on that step's own `start:` `say:`, not here.
 </ParamField>
 
+<ParamField path="fills" type="list of strings">
+  `State` fields the model fills from the conversation when it picks the flow. The steps
+  read them. Omit to fill none.
+</ParamField>
+
 <ParamField path="context_scope" type="string" default="shared">
   Accepts `shared` or `isolated`. Omit it for `shared`. Each member still applies its own
-  `context.history`; an isolated group cannot be widened by a member’s `full`.
+  `context.history`; an isolated flow cannot be widened by a member's `full`.
 </ParamField>
 
 <ParamField path="then" type="string" default="return">
@@ -922,23 +908,31 @@ task_groups:
   there is no inferred destination.
 </ParamField>
 
+<ParamField path="non_blocking" type="list of strings">
+  Steps that run without holding the caller. Each name must be one of `steps`. Omit to
+  run every step in turn.
+</ParamField>
+
 <ParamField path="merge" type="string">
   Only `results` is accepted. Omission also means `results`.
 </ParamField>
 
-The group decides whether members share the group's running conversation. Each
-member still applies its own `context.history`. An isolated group cannot be
-widened by a member's `full`.
+The flow decides whether members share its running conversation. Each member
+still applies its own `context.history`. An isolated flow cannot be widened by
+a member's `full`.
 
-## `handoffs`, `escalations`
+## `handoffs` and `transfers`
 
-Everything the model can hand the caller to and not get back, in one block
-per kind. The block an entry is written in is what it is, so there is no
-`kind:` field.
+Everything the model can hand the caller to and not get back. Each one is a list
+in the agent that defines it, so there is no `kind:` field.
 
 ### `handoffs`
 
 The conversation becomes another agent, and never comes back.
+
+<ParamField path="name" type="string" required>
+  A lower snake case name, unique across the package.
+</ParamField>
 
 <ParamField path="to" type="string" required>
   An existing agent name. The conversation moves to that agent and does not return. No
@@ -950,8 +944,13 @@ The conversation becomes another agent, and never comes back.
   trigger guidance, so write one.
 </ParamField>
 
-<ParamField path="announce" type="string">
-  Exact text spoken before handing over. Omit for a silent handoff.
+<ParamField path="say" type="list of strings">
+  One fixed line spoken before handing over, written as a list with one item. Omit for a
+  silent handoff.
+</ParamField>
+
+<ParamField path="save" type="list of one-key pairs">
+  Pairs of `variable: result.field` saved as the handoff happens. Omit to save nothing.
 </ParamField>
 
 <ParamField path="start" type="object">
@@ -976,50 +975,38 @@ Saved state stays with the call, but the receiving model sees only values its
 prompt references. A reset handoff gets no automatic briefing or triggering
 sentence.
 
-`announce` is exact spoken text, not a model instruction: write the short
+`say` is exact spoken text, not a model instruction: write the short
 sentence the caller should hear. Omit it for a silent handoff.
 
-### `escalations`
+### `transfers`
 
-Puts the caller through to a person.
+Puts the caller through to a person. A transfer is cold by default. Writing
+`brief:` makes it warm: the agent briefs the person before connecting the caller.
+
+```yaml
+agents:
+  - name: front_desk
+    transfers:
+      - name: to_manager
+        to: MANAGER_PHONE_NUMBER
+        when: The caller asks for a manager.
+        ring_timeout: 30s
+        on_unavailable: hangup
+```
+
+<ParamField path="name" type="string" required>
+  A lower snake case name, unique across the package.
+</ParamField>
+
+<ParamField path="to" type="string" required>
+  The UPPER_SNAKE name of an environment variable holding an E.164 number or a `sip:` URI,
+  read at call time. Declare it in `secrets:`. A number written here is refused, because
+  `agent.yaml` is the portable half of a package. The model never sees a number.
+</ParamField>
 
 <ParamField path="when" type="string">
   The situation the model reads to decide whether to transfer. Omission supplies no
   trigger guidance, so write one.
-</ParamField>
-
-<ParamField path="cold" type="object">
-  A cold transfer using the destination and timeout fields below. Exactly one of `cold`
-  and `warm` is required; there is no default transfer form.
-</ParamField>
-
-<ParamField path="warm" type="object">
-  A warm transfer using the fields below, including optional `briefing`. Exactly one of
-  `cold` and `warm` is required. Supported only on LiveKit SIP.
-</ParamField>
-
-A human transfer names its shape with a block, so a warm only field cannot be
-written on a cold transfer:
-
-| Block | Fields |
-|---|---|
-| `cold` | `destination`, `ring_timeout`, `on_unavailable` |
-| `warm` | `destination`, `briefing`, `ring_timeout`, `on_unavailable` |
-
-`on_unavailable` is `return_to_caller` or `hangup`; omitted means
-`return_to_caller`. `ring_timeout` must be a positive Go duration. When omitted,
-Pipecat uses 25 seconds. LiveKit leaves the value unset, so the LiveKit platform
-default applies.
-Pipecat `cloud-websocket` requires explicit `on_unavailable: hangup`; it cannot
-reconnect the original media stream.
-`destination` is a symbol resolved in the top level
-[`destinations:`](#destinations) map above.
-
-### Transfer fields
-
-<ParamField path="destination" type="string" required>
-  A symbol declared in `destinations`, whose value names an environment variable holding
-  the destination. No destination is inferred. Valid inside both `cold` and `warm`.
 </ParamField>
 
 <ParamField path="ring_timeout" type="string">
@@ -1033,9 +1020,9 @@ reconnect the original media stream.
   reconnected.
 </ParamField>
 
-<ParamField path="briefing" type="string">
-  Instructions for briefing the person before connecting the caller. Legal only inside
-  `warm`. Omit for the runtime’s standard briefing instructions.
+<ParamField path="brief" type="string">
+  Instructions for briefing the person before connecting the caller. Makes the transfer
+  warm. Supported only on LiveKit SIP.
 </ParamField>
 
 Whether a route can carry the shape you asked for is decided by the connection.
@@ -1055,7 +1042,6 @@ pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twi
 
 ```yaml
 tools:
-  - check_slots
   - name: record_complaint
     start:
       say:
@@ -1067,20 +1053,18 @@ tools:
       - else:
         say:
           - "{{result.said}}"
-  - end_call
 ```
 
-Which `tools/<name>.yaml` files to load. Availability is decided by the `tools`
-list on each agent and task.
-
-Each item is a bare name, or a block that says what happens around the tool on
-every agent. The agent and task lists hold names only, except that a task's
-list may also carry a block for that step. **Define each tool once.** Put its
+Every file in `tools/` is a tool, read in name order. The top-level `tools:`
+list holds only the tools that need behaviour around them on every agent. A
+bare name there is refused. Availability is decided by the `tools` list on each
+agent and task, which hold names only, except that a task's list may also carry
+a block for that step. **Define each tool once.** Put its
 full contract in `tools/<name>.yaml`; never inline `description`, `input`,
 `output`, `with`, or an execution block under a `tools:` list in `agent.yaml`.
 
-<ParamField path="tools[]" type="string or object">
-  A bare tool name, or a block starting `- name: <tool>` with the keys below.
+<ParamField path="tools[]" type="object">
+  A block starting `- name: <tool>` with at least one of the keys below.
 </ParamField>
 
 <ParamField path="tools[].save" type="list of one-key pairs">
@@ -1230,14 +1214,14 @@ A zone survives daylight saving; an offset written into the prompt does not.
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, how can I help?"
+    say: "Hi, how can I help?"
   interruption:
     enabled: true
 ```
 
 <ParamField path="greeting" type="object">
-  Opening behavior using `speaks_first` and optional `text`. If omitted, LiveKit and
-  Pipecat generate an opening line. SLNG requires an explicit greeting with text.
+  Opening behavior using `speaks_first` and optional `say`. If omitted, LiveKit and
+  Pipecat generate an opening line. SLNG requires an explicit greeting with `say`.
 </ParamField>
 
 <ParamField path="greeting.speaks_first" type="string">
@@ -1245,9 +1229,9 @@ conversation:
   inside an authored block. SLNG requires `agent`.
 </ParamField>
 
-<ParamField path="greeting.text" type="string">
+<ParamField path="greeting.say" type="string">
   The exact opening line, with eligible variable placeholders. Requires `speaks_first:
-  agent`. If omitted on a code target, the model writes the greeting; SLNG requires text.
+  agent`. If omitted on a code target, the model writes the greeting; SLNG requires `say`.
 </ParamField>
 
 <ParamField path="interruption" type="object">
@@ -1340,14 +1324,14 @@ data until its access and retention rules are approved.
 ## Reachability
 
 Models are a palette, so an unused model entry is legal. Other declarations must
-be reachable from `entry_agent`. An unused handoff, escalation, destination,
-task group, or non-entry agent is a build error, and so is a tool no agent's
+be reachable from `entry_agent`. An unused handoff, transfer, flow,
+or non-entry agent is a build error, and so is a tool no agent's
 `tools:` list names. Attach it to the reachable graph or remove it.
 
 A task is reachable a different way, because it is defined inside the agent
-that lists it rather than in a top-level catalog. A task with no `when:` and no
-task group naming it in `steps:` is a build error too. Give it a `when:` so an
-agent can decide to run it, or list it as a step of a task group that is
+that lists it rather than in a top-level catalogue. A task with no `when:` and no
+flow naming it in `steps:` is a build error too. Give it a `when:` so an
+agent can decide to run it, or list it as a step of a flow that is
 reached.
 
 ## Where to go next

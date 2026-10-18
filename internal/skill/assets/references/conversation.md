@@ -9,7 +9,7 @@ silence, and when the call ends.
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
+    say: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
   interruption:
     enabled: true
     minimum_words: 2
@@ -25,7 +25,7 @@ conversation:
 | Field | Values |
 |---|---|
 | `greeting.speaks_first` | `agent` or `user` |
-| `greeting.text` | the opening line, requires `speaks_first: agent` |
+| `greeting.say` | the opening line, requires `speaks_first: agent` |
 | `interruption.enabled` | required whenever `interruption` is present |
 | `interruption.minimum_words` | how much speech counts as an interruption |
 | `interruption.ignore_phrases` | phrases that do not interrupt |

@@ -51,8 +51,8 @@ models:
       provider: openai
       model: gpt-5.6-terra
 agents:
-  counter:
-    instructions: instructions.md
+  - name: counter
+    prompt: instructions.md
     live: voice
 ```
 
@@ -137,7 +137,7 @@ Live serves one agent, with local and webhook tools, built-in tools, and knowled
 
 | Unsupported setting | Reason |
 |---|---|
-| Tasks and transfers | The session has no `tasks`, task groups, `handoffs`, or `escalations`. |
+| Tasks and transfers | The session has no `tasks`, `flows`, `handoffs`, or `transfers`. |
 | Listen, speak, and turn sections | The model listens, speaks and decides the turn itself. |
 | Variables and pre-fetch | This shape carries no call state. |
 | Tracing | This shape has no traced worker. |

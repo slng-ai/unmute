@@ -17,10 +17,10 @@ On this page:
 - [What you need](#what-you-need) - the values in `.env`
 - [Structure](#structure) - what each path holds
 - [The two agents and their tasks](#the-two-agents-and-their-tasks) - who does what
-- [The booking flow](#the-booking-flow) - one group, two steps, one request per turn
+- [The booking flow](#the-booking-flow) - one flow, two steps, one request per turn
 - [Typed values and context](#typed-values-and-context) - what crosses a handoff
 - [Before the greeting](#before-the-greeting) - the pre-fetch block
-- [The manager transfer and the knowledge bases](#the-manager-transfer-and-the-knowledge-bases) - escalation and documents
+- [The manager transfer and the knowledge bases](#the-manager-transfer-and-the-knowledge-bases) - the transfer and documents
 - [Routes, tracing and the speech gateway](#routes-tracing-and-the-speech-gateway) - two telephony planes
 - [Advanced](#advanced) - the dev page
 - [Troubleshooting](#troubleshooting) - what goes wrong
@@ -61,7 +61,7 @@ the package.
 | `GOOGLE_API_KEY` | the reasoning model, on Vertex AI |
 | `SLNG_API_KEY` | the voice and the transcription. One key for both |
 | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` | trace ingest. All three together, or startup fails |
-| `MANAGER_PHONE_NUMBER` | the transfer destination, in E.164. Needed only for a phone call |
+| `MANAGER_PHONE_NUMBER` | the transfer number, in E.164. Needed only for a phone call |
 
 Both targets reason on `gemini-3.1-flash-lite`, served by Vertex AI in `eu`,
 with `thinking_level: MINIMAL` so there is no thinking before the first token.
@@ -91,7 +91,7 @@ session.
 
 | Path | What it holds |
 |---|---|
-| `agent.yaml` | the package: agents and the tasks they run, handoffs, escalations, the `variables:` list, pre-fetch, knowledge and secrets |
+| `agent.yaml` | the package: agents and the tasks they run, handoffs, transfers, the `variables:` list, pre-fetch, knowledge and secrets |
 | `state.py` | the `State` class: every saved value's type, default and description, and the `Appointment` model. Read by `validate` and `compile` through `uv` |
 | `targets.yaml` | the two targets, one per telephony plane |
 | `instructions.md` | the concierge prompt |
@@ -158,16 +158,16 @@ flowchart TD
     J --> K[Write runs on the yes, code says the receipt]
 ```
 
-1. The concierge starts the `book` group once, with what the caller asked for as
-   typed `arguments:`: `requested_service`, `requested_day`, `requested_intent`.
+1. The concierge starts the `book` flow once, with what the caller asked for as
+   typed `fills:`: `requested_service`, `requested_day`, `requested_intent`.
 2. `verify_customer` runs only while the number is not confirmed
    (`skip_when_confirmed: customer_phone`). With no saved number it asks for one
    and listens (`start:` with `say:` and `listen: true`). With a saved number it opens on the lookup.
 3. The model calls `find_or_create_customer` with the number. Code reads it back
    (`confirm:`), and the lookup runs on the caller's yes. The model never asks
    for the yes itself.
-4. `manage_booking` opens by calling `find_slots` in code, with the group's
-   arguments (`start:` with `call:` and `with:`). The tool returns the offer as a sentence, and its outcome
+4. `manage_booking` opens by calling `find_slots` in code, with the flow's
+   `fills:` (`start:` with `call:` and `with:`). The tool returns the offer as a sentence, and its outcome
    says it (`say: {{result.offer}}`). No model request.
 5. The caller picks a time. The model calls `book_appointment`,
    `move_appointment` or `cancel_appointment`. Code reads the change back, and
@@ -374,7 +374,7 @@ make e2e PKG=salon-concierge
 
 ### Asking for a manager goes nowhere
 
-The escalation dials `MANAGER_PHONE_NUMBER`, and there is nothing to dial
+The transfer dials `MANAGER_PHONE_NUMBER`, and there is nothing to dial
 without it.
 
 **Fix:** set `MANAGER_PHONE_NUMBER` in `.env`, in E.164. It is read on a phone

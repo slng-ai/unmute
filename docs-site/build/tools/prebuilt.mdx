@@ -19,7 +19,7 @@ On this page:
 - [Settings](#settings) - what `with:` pins on each capability
 - [What the registry decides for you](#what-the-registry-decides-for-you) - effect, parameters, description
 - [Speaking before it runs](#speaking-before-it-runs) - `start: say:` on a prebuilt
-- [Turning it on](#turning-it-on) - the same two lists
+- [Turning it on](#turning-it-on) - the agent's list
 - [Advanced](#advanced) - resolving on SLNG
 - [Troubleshooting](#troubleshooting) - the refusals by name
 
@@ -241,19 +241,16 @@ its own SDK and has no seam in front of it, and the refusal says so.
 
 ## Turning it on
 
-The same two lists as any other tool:
+The agent names it, as with any other tool:
 
 ```yaml agent.yaml
 agents:
-  greeter:
-    instructions: instructions.md
+  - name: greeter
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
       - end_call
-
-tools:
-  - end_call
 ```
 
 ## Advanced

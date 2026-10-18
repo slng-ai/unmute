@@ -67,7 +67,7 @@ func TestDailyCarrierRouteNeedsNoNewAuthoringField(t *testing.T) {
 
 	carrier := write(t, map[string]string{
 		"instructions.md": "Help the caller.\n",
-		"agent.yaml":      "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n",
+		"agent.yaml":      "version: 1\nentry_agent: intake\nagents:\n  - name: intake\n    prompt: instructions.md\n",
 		"connections/twilio_sip_daily.yaml": "transport: daily-sip\ncarrier: twilio\nenvironment:\n" +
 			"  account_sid: TWILIO_ACCOUNT_SID\n  auth_token: TWILIO_AUTH_TOKEN\n" +
 			"  sip_address: SIP_TRUNK_HOSTNAME\n  from_number: SIP_FROM_NUMBER\n",
@@ -136,7 +136,7 @@ func TestCloudWebsocketRouteNeedsNoNewAuthoringField(t *testing.T) {
 
 	inbound := write(t, map[string]string{
 		"instructions.md": "Help the caller.\n",
-		"agent.yaml":      "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n",
+		"agent.yaml":      "version: 1\nentry_agent: intake\nagents:\n  - name: intake\n    prompt: instructions.md\n",
 		"targets.yaml": phoneChannel + "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.10.0\"\n" +
 			"    transport: cloud-websocket\n    carrier: twilio\n",
 	})
@@ -150,7 +150,7 @@ func TestCloudWebsocketRouteNeedsNoNewAuthoringField(t *testing.T) {
 
 	full := write(t, map[string]string{
 		"instructions.md": "Help the caller.\n",
-		"agent.yaml":      "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n",
+		"agent.yaml":      "version: 1\nentry_agent: intake\nagents:\n  - name: intake\n    prompt: instructions.md\n",
 		"connections/twilio_voice.yaml": "kind: telephony\nenvironment:\n" +
 			"  account_sid: TWILIO_ACCOUNT_SID\n  auth_token: TWILIO_AUTH_TOKEN\n" +
 			"  from_number: TWILIO_PHONE_NUMBER\n",
@@ -227,11 +227,8 @@ func TestAuthoringSchemaCarriesTheRouterFields(t *testing.T) {
 // itself from the structs and this is the check that the derivation actually
 // happened. A hand-authored schema file is what this replaces.
 //
-// handoffs and escalations are unchanged; task_groups is the third since the
-// tasks/delegates refactor: an agent's own task_groups: list now points
-// directly at it, the same way a handoffs: or escalations: list points at
-// their catalogs, so there is no need for a separate delegates: catalog to
-// reach it through.
+// They are written inside each agent now, as handoffs:, transfers: and
+// flows:, each entry a block or the name of one another agent defines.
 func TestAuthoringSchemaCarriesTheThreeCatalogs(t *testing.T) {
 	schema, err := Schema()
 	if err != nil {
@@ -245,7 +242,7 @@ func TestAuthoringSchemaCarriesTheThreeCatalogs(t *testing.T) {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"handoffs", "escalations", "task_groups"} {
+	for _, name := range []string{"handoffs", "transfers", "flows"} {
 		if searchSchema(decoded, name) == nil {
 			t.Errorf("derived authoring schema has no %q property", name)
 		}

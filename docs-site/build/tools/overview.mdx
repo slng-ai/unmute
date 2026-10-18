@@ -17,7 +17,7 @@ On this page:
 - [Fields inside each execution block](#fields-inside-each-execution-block) - every key, per block
 - [Which fields the block allows](#which-fields-the-block-allows) - the shared contract fields
 - [The three behavior fields](#the-three-behavior-fields) - start: say, effect, interruption
-- [Define once, attach by name](#define-once-attach-by-name) - one definition, two lists
+- [Define once, attach by name](#define-once-attach-by-name) - one definition, one list
 - [Troubleshooting](#troubleshooting) - the refusals you will meet
 
 ```yaml tools/find_slots.yaml expandable
@@ -350,20 +350,17 @@ optional `with`, and one execution block. A local handler lives beside it in a
 Python file, and the block names its function as `tools/<file>.py:<function>`.
 Do not put any of those fields in `agent.yaml`.
 
-Every `tools:` entry in an agent's or task's list in `agent.yaml` is a string name. The top-level list may also write a block, with `save:`, `outcomes:`, `hidden:` and `start:`:
+Every file in `tools/` is a tool, so there is no list that loads them. Every `tools:` entry in an agent's or task's list in `agent.yaml` is a string name:
 
-- the top-level list loads `tools/<name>.yaml`,
-- `agents.<name>.tools` grants an agent access, and
-- `agents.<name>.tasks[].tools` grants one nested task access.
+- `agents[].tools` grants an agent access, and
+- `agents[].tasks[].tools` grants one nested task access.
+
+A top-level `tools:` list in `agent.yaml` is only for a tool that needs behaviour on every agent. Each entry is a block with `save:`, `outcomes:`, `hidden:` or `start:`. A bare name there is refused.
 
 ```yaml agent.yaml
-tools:
-  - check_slots
-  - cancel_appointment
-
 agents:
-  appointment_desk:
-    instructions: instructions.md
+  - name: appointment_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
@@ -376,10 +373,10 @@ where the task is nested inside its agent:
 
 ```yaml agent.yaml
 agents:
-  appointment_desk:
+  - name: appointment_desk
     tasks:
       - name: find_slot
-        instructions: tasks/find-slot.md
+        prompt: tasks/find-slot.md
         tools:
           - check_slots
 ```
@@ -416,11 +413,9 @@ the blocks the second message lists.
 
 ### A tool you wrote is never offered
 
-A file in `tools/` that the package level list does not name is not loaded at all,
-and nothing complains.
+A file in `tools/` that no agent or task lists is loaded but nobody may call it.
 
-**Fix:** check the top-level `tools:` list in `agent.yaml` first, then the agent's
-or task's own list.
+**Fix:** check the agent's or task's own `tools:` list.
 
 ### `output:` is refused on an slng target
 

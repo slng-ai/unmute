@@ -79,7 +79,7 @@ Keep `cascade` if any required feature is unavailable on the destination archite
 | Capability | Cascade | Realtime | Live |
 |---|---|---|---|
 | Local tools and knowledge lookup | Yes | Yes | Yes, through a backend |
-| Multiple agents, tasks, task groups, handoffs | LiveKit and Pipecat | No | No |
+| Multiple agents, tasks, flows, handoffs | LiveKit and Pipecat | No | No |
 | Variables and pre-fetch | Yes | No | No |
 | Tracing and MCP tools | Yes on supported targets | No | No |
 | Phone routes and human transfers | On supported routes | No | No |
@@ -91,7 +91,7 @@ Changing its architecture line cannot preserve that workflow. Start with a singl
 ## 3. Replace the models and agent bindings
 
 Switch a simple agent called `desk` by replacing its `architecture:`, entire `models:` block, and model bindings.
-These are **replacement fragments**, not complete packages. Keep its `instructions`, tool attachments, and other supported settings.
+These are **replacement fragments**, not complete packages. Keep its `prompt`, tool attachments, and other supported settings.
 Do not paste a second `models:` or `agents:` block alongside the first.
 
 <CodeGroup>
@@ -105,8 +105,8 @@ models:
       voice: marin
       turn_detection: semantic
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     realtime: voice
 ```
 
@@ -124,8 +124,8 @@ models:
       provider: openai
       model: gpt-5.6-terra
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     live: voice
 ```
 </CodeGroup>

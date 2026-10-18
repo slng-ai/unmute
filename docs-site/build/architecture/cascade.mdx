@@ -57,8 +57,8 @@ models:
       model: "deepgram/aura:2"
       voice: aura-2-thalia-en
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
 ```
@@ -170,7 +170,7 @@ The call's `State` class in `state.py` holds values across steps. Each prompt na
 Separate steps give you places to check the behavior, but do not guarantee a correct tool call.
 Test successful updates, missing inputs, and failed actions.
 
-Tasks, task groups, and handoffs are supported on LiveKit and Pipecat cascade targets.
+Tasks, flows, and handoffs are supported on LiveKit and Pipecat cascade targets.
 SLNG has its own [target limits](/targets/slng#what-a-slng-package-may-not-ask-for).
 Both S2S architectures support tools, but their current Unmute integrations do not support these task and state controls.
 

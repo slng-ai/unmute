@@ -7,8 +7,8 @@ name: webhook-core
 entry_agent: desk
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
@@ -47,9 +47,7 @@ models:
       pace: balanced
 
 tools:
-  -
-
-    name: look_up_order
+  - name: look_up_order
     start:
       say:
         - Let me look that up.
@@ -59,4 +57,4 @@ tools:
 conversation:
   greeting:
     speaks_first: agent
-    text: Hi, this is the order desk. What's your order number?
+    say: Hi, this is the order desk. What's your order number?

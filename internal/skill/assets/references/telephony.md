@@ -162,7 +162,7 @@ A target names at most one connection, and a connection declares one transport.
 Two carriers, or two mechanisms, means two targets with a connection file each,
 and each compiles to its own `build/<target>/`.
 
-Transport, carrier, and destinations are refused on a target and the refusal
+Transport, carrier, and transfer destinations are refused on a target and the refusal
 names the new home.
 
 ## Inbound on LiveKit SIP, step by step

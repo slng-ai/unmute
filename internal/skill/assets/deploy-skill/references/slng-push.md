@@ -269,7 +269,7 @@ prompt or the greeting naming a variable declared `source: conversation`.
 reach a push:
 
 ```text
-agent.yaml:41: conversation.greeting.text references {{caller_email}}, a value the model
+agent.yaml:41: conversation.greeting.say references {{caller_email}}, a value the model
   records during the call, which no prompt receives: describe the value in the variable's
   description: and name it in prose here instead
 ```

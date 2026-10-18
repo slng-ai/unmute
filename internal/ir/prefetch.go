@@ -129,7 +129,7 @@ func buildPrefetchEntry(pkg *packagespec.Package, agent *Agent, raw packagespec.
 	for _, key := range []struct {
 		name  string
 		value string
-	}{{"clock", raw.Clock}, {"source", raw.Source}, {"tool", raw.Tool}} {
+	}{{"clock", raw.Clock}, {"source", raw.Source}, {"call", raw.Tool}} {
 		if key.value != "" {
 			present = append(present, key.name)
 		}
@@ -137,9 +137,9 @@ func buildPrefetchEntry(pkg *packagespec.Package, agent *Agent, raw packagespec.
 	switch len(present) {
 	case 1:
 	case 0:
-		return entry, fmt.Errorf("%s: prefetch %q names none of clock:, source: and tool:. An entry reads exactly one: "+
+		return entry, fmt.Errorf("%s: prefetch %q names none of clock:, source: and call:. An entry reads exactly one: "+
 			"clock: "+PrefetchClockNow+" for the date and time, source: <name> for a fact the call carries, or "+
-			"tool: <name> for a lookup", where, raw.Name)
+			"call: <name> for a lookup", where, raw.Name)
 	default:
 		return entry, fmt.Errorf("%s: prefetch %q names both %s: and %s:. An entry reads exactly one source; split it "+
 			"into two entries", where, raw.Name, present[0], present[1])
@@ -150,7 +150,7 @@ func buildPrefetchEntry(pkg *packagespec.Package, agent *Agent, raw packagespec.
 		if raw.Source != "" {
 			reads = "reads a fact the call carries, which takes no arguments"
 		}
-		return entry, fmt.Errorf("%s: prefetch %q %s, so args: reaches nothing here. args: belongs to a tool: entry",
+		return entry, fmt.Errorf("%s: prefetch %q %s, so with: reaches nothing here. with: belongs to a call: entry",
 			where, raw.Name, reads)
 	}
 
@@ -163,7 +163,7 @@ func buildPrefetchEntry(pkg *packagespec.Package, agent *Agent, raw packagespec.
 			reads = "reads a fact the call carries"
 		}
 		return entry, fmt.Errorf("%s: prefetch %q %s, which runs no tool, so writes: answers nothing here. "+
-			"writes: belongs to a tool: entry", where, raw.Name, reads)
+			"writes: belongs to a call: entry", where, raw.Name, reads)
 	}
 
 	// A zone on an entry that reads no clock reaches nothing, and an author who
@@ -178,7 +178,7 @@ func buildPrefetchEntry(pkg *packagespec.Package, agent *Agent, raw packagespec.
 	case raw.Clock != "":
 		if raw.Clock != PrefetchClockNow {
 			return entry, fmt.Errorf("%s: prefetch %q reads clock: %s, and the clock reads %s. Use clock: %s, and "+
-				"name the part you want in assign:, one of: %s",
+				"name the part you want in save:, one of: %s",
 				where, raw.Name, raw.Clock, PrefetchClockNow, PrefetchClockNow, strings.Join(PrefetchClockFields, ", "))
 		}
 		if zone == "" {
@@ -288,7 +288,7 @@ func checkPrefetchAssign(pkg *packagespec.Package, agent *Agent, raw packagespec
 	where string, assigned map[string]string) error {
 	if len(raw.Assign) == 0 {
 		return fmt.Errorf("%s: prefetch %q assigns nothing, so it would resolve a value with nowhere to put it. Name "+
-			"at least one variable in an assign: list under it", where, raw.Name)
+			"at least one variable in a save: list under it", where, raw.Name)
 	}
 	fields := prefetchResultFields(agent, *entry)
 	for _, pair := range raw.Assign {

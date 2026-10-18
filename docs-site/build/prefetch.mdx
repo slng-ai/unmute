@@ -38,7 +38,7 @@ prefetch:
   - name: today
     clock: now
     timezone: Europe/Madrid
-    assign:
+    save:
       - booking_date: result.date
 ```
 
@@ -84,10 +84,10 @@ during the call.
 |---|---|
 | `clock: now` | the date, the time, and more, all from one reading of the clock |
 | `source: from_number` | a fact the call carries, like the number it came from |
-| `tool: my_tool` | a result from a local or webhook tool; declare whether it changes data |
+| `call: my_tool` | a result from a local or webhook tool; declare whether it changes data |
 
 <Accordion title="One clock reading, six fields">
-  `clock: now` reads the clock once. Assign as many of the six fields as you
+  `clock: now` reads the clock once. Save as many of the six fields as you
   want, in one entry:
 
   | Field | Example |
@@ -103,8 +103,8 @@ during the call.
   `result.date`, `time` for `result.time`, and `str` for the weekday, year,
   combined datetime, or timezone.
 
-  All six come from the same reading. An entry assigning `result.date` and
-  `result.time` cannot straddle a second, and one assigning `result.date` and
+  All six come from the same reading. An entry saving `result.date` and
+  `result.time` cannot straddle a second, and one saving `result.date` and
   `result.day_of_week` cannot straddle midnight.
 </Accordion>
 
@@ -133,27 +133,27 @@ prefetch:
   - name: today
     clock: now
     timezone: Europe/Madrid
-    assign:
+    save:
       - booking_date: result.date
       - booking_weekday: result.day_of_week
 
   - name: caller
     source: from_number
-    assign:
+    save:
       - customer_phone: result.value
 
   - name: profile
-    tool: look_up_account
+    call: look_up_account
     writes: false
-    args:
-      - phone: "{{state.customer_phone}}"
-    assign:
+    with:
+      - phone: state.customer_phone
+    save:
       - account_name: result.name
       - account_on_file: result.status
 ```
 
-`profile` reads once and assigns twice. An entry can fill as many variables as
-the result has fields, and a second `assign:` line costs no second call.
+`profile` reads once and saves twice. An entry can fill as many variables as
+the result has fields, and a second `save:` line costs no second call.
 
 Declare the receiving fields on `State`. Every field needs a default. Here an
 empty string or `None` means the value is not known yet:
@@ -192,40 +192,39 @@ class State(BaseModel):
 </ParamField>
 
 <ParamField path="clock" type="string">
-  Only `now` is accepted. Choose exactly one of `clock`, `source`, and `tool`; omitting
+  Only `now` is accepted. Choose exactly one of `clock`, `source`, and `call`; omitting
   all three is refused.
 </ParamField>
 
 <ParamField path="timezone" type="string">
   Required with `clock`: an IANA zone such as `Europe/Madrid`. There is no default,
-  because the container clock is UTC. Refused on source and tool entries.
+  because the container clock is UTC. Refused on source and call entries.
 </ParamField>
 
 <ParamField path="source" type="string">
   One of the eight [system call facts](/reference/variables#sources). Choose exactly one
-  of `clock`, `source`, and `tool`. An unavailable fact skips the entry and leaves its
+  of `clock`, `source`, and `call`. An unavailable fact skips the entry and leaves its
   destination values unchanged.
 </ParamField>
 
-<ParamField path="tool" type="string">
-  A declared local or webhook tool. Choose exactly one of `clock`, `source`, and `tool`.
+<ParamField path="call" type="string">
+  A declared local or webhook tool. Choose exactly one of `clock`, `source`, and `call`.
   No tool runs when this key is absent.
 </ParamField>
 
 <ParamField path="writes" type="boolean">
-  Required with `tool`: `true` if this use changes data, or `false` if it only reads.
+  Required with `call`: `true` if this use changes data, or `false` if it only reads.
   There is no inferred answer. Refused with `clock` or `source`.
 </ParamField>
 
-<ParamField path="args" type="list of one-key pairs">
-  Arguments for a tool entry, as argument/value pairs. Values may use declared variable
-  placeholders. Omit when the tool needs no authored arguments; required inputs must still
+<ParamField path="with" type="list of one-key pairs">
+  Arguments for a `call:` entry, as argument/value pairs. A value is `state.x` or a literal. Omit when the tool needs no authored arguments; required inputs must still
   be supplied. Refused on clock and source entries.
 </ParamField>
 
-<ParamField path="assign" type="list of one-key pairs" required>
+<ParamField path="save" type="list of one-key pairs" required>
   One or more `variable: result.field` pairs. Every destination must be declared. Values
-  are checked together before any are saved. No assignment is inferred.
+  are checked together before any are saved. No save is inferred.
 </ParamField>
 
 ## Entries run in order
@@ -235,7 +234,7 @@ number and then `profile` uses it.
 
 Put them the other way round and the build stops, naming both entries and
 telling you which one to move up. An entry can only read what an entry above it
-has already assigned.
+has already saved.
 
 ## Always check a value with the caller
 
@@ -274,11 +273,11 @@ to the confirming task:
 
 ```yaml agent.yaml
 agents:
-  concierge:
+  - name: concierge
     tasks:
       - name: verify_customer
         when: Confirm the customer's number before using their account.
-        instructions: tasks/verify-customer.md
+        prompt: tasks/verify-customer.md
         save:
           - customer_phone: result.phone
 ```
@@ -301,16 +300,16 @@ number and save its result. Unrelated facts, such as today's date, remain.
 
 To avoid repeating verification in another task or agent, do not track a second
 "is this confirmed" variable of your own: `confirm:` already marks it. A
-[task group](/build/orchestration/task-groups#skip-a-step-whose-work-is-already-done)
+[flow](/build/orchestration/task-groups#skip-a-step-whose-work-is-already-done)
 step can name the variable in `skip_when_confirmed:` and the step is skipped
 once it is confirmed. The public
 [salon example](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
-shows this: its booking task group skips the verification step entirely once
+shows this: its booking flow skips the verification step entirely once
 `customer_phone` is already confirmed.
 
 ## Where it works
 
-`clock:` and `tool:` entries run on every target except `slng`, which refuses
+`clock:` and `call:` entries run on every target except `slng`, which refuses
 `prefetch:` and `confirm:` outright: it starts the session itself, so there is
 no gap before the greeting to fetch anything in.
 
@@ -352,7 +351,7 @@ being dialled. It is the same shape of entry, reading the other fact:
 prefetch:
   - name: dialing
     source: to_number
-    assign:
+    save:
       - customer_phone: result.value
 ```
 
@@ -431,7 +430,7 @@ prefetch:
     timezone: Europe/Madrid
 ```
 
-### The build asks a `tool:` entry to declare `writes:`
+### The build asks a `call:` entry to declare `writes:`
 
 There is no default. A pre-fetch runs on every single call, whether the inputs
 turn out to be right or wrong, so the build makes you say whether that is safe
@@ -443,7 +442,7 @@ check.
 ```yaml agent.yaml
 prefetch:
   - name: profile
-    tool: look_up_account
+    call: look_up_account
     writes: false
 ```
 
@@ -458,7 +457,7 @@ Neither runs a tool, so the key means nothing there.
 
 **Fix:** remove it.
 
-### `assign:` on a clock entry names a field that is not one of the six
+### `save:` on a clock entry names a field that is not one of the six
 
 **Fix:** use one of the six fields above. The refusal lists all six.
 
@@ -482,7 +481,7 @@ per call. There is no per-entry retry or automatic refresh during the call.
 |---|---|
 | An input is missing | The entry is skipped |
 | A lookup times out or raises an error | The entry is logged and skipped |
-| The result fails type validation | Its assignments are not saved |
+| The result fails type validation | Its saves are not made |
 | An entry saves several fields | All are validated before any are saved |
 | The shared budget runs out | Remaining work is skipped so the call can continue |
 

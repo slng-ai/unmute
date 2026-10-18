@@ -17,18 +17,27 @@ name: kestrel
 entry_agent: sam
 
 agents:
-  sam:
-    instructions: instructions.md
+  - name: sam
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
       - coverage_guide
       - end_call
-    task_groups:
-      - claim
+    flows:
+      - name: claim
+        when: >-
+          The caller gives a policy number or a date of birth, or wants to report an
+          accident or damage to their car.
+        steps:
+          - find_policy
+          - take_report
+        fills:
+          - policy_number
+          - birth_date
     tasks:
       - name: find_policy
-        instructions: tasks/find-policy.md
+        prompt: tasks/find-policy.md
         tools:
           - name: lookup_policy
             confirm:
@@ -62,7 +71,7 @@ agents:
           - birth_date: input.birth_date
 
       - name: take_report
-        instructions: tasks/take-report.md
+        prompt: tasks/take-report.md
         tools:
           - note_facts
           - name: file_claim
@@ -83,23 +92,11 @@ agents:
         save:
           - claim_number: result.claim_number
 
-task_groups:
-  claim:
-    when: >-
-      The caller gives a policy number or a date of birth, or wants to report an
-      accident or damage to their car.
-    steps:
-      - find_policy
-      - take_report
-    arguments:
-      - policy_number
-      - birth_date
-
 prefetch:
   - name: today
     clock: now
     timezone: Europe/London
-    assign:
+    save:
       - today: result.date
       - weekday: result.day_of_week
 
@@ -145,6 +142,7 @@ tools:
       say:
         - Let me find that.
         - One moment.
+
 # A number that is not KP and six digits is refused before it is read back.
     outcomes:
       - if:
@@ -156,6 +154,7 @@ tools:
     hidden:
       - report
       - read_back
+
 # Saved as soon as it returns, so the next answer merges into the report.
     save:
       - report: result.report
@@ -176,13 +175,11 @@ tools:
     start:
       say:
         - Filing that now.
-  - coverage_guide
-  - end_call
 
 conversation:
   greeting:
     speaks_first: agent
-    text: >-
+    say: >-
       Thanks for calling Kestrel Insurance claims, this is Sam. Can I take your
       policy number, please?
   inactivity:

@@ -117,7 +117,7 @@ func validateSlngTasks(agent *Agent, row *TargetValidation) {
 		fail("has %d tasks, and SLNG holds at most %d on one agent: merge some, or compile to livekit or pipecat", len(agent.Tasks), slngMaxTasks)
 	}
 	if len(agent.TaskGroups) > slngMaxGroups {
-		fail("has %d task groups, and SLNG holds at most %d on one agent: merge some, or compile to livekit or pipecat", len(agent.TaskGroups), slngMaxGroups)
+		fail("has %d flows, and SLNG holds at most %d on one agent: merge some, or compile to livekit or pipecat", len(agent.TaskGroups), slngMaxGroups)
 	}
 	for _, name := range slices.Sorted(maps.Keys(agent.Tasks)) {
 		task := agent.Tasks[name]
@@ -142,13 +142,13 @@ func validateSlngTasks(agent *Agent, row *TargetValidation) {
 	for _, name := range slices.Sorted(maps.Keys(agent.TaskGroups)) {
 		group := agent.TaskGroups[name]
 		if name == "finish" || name == "go_back_to_step" {
-			fail("task group %q has a name SLNG keeps for its own tool: rename the group", name)
+			fail("flow %q has a name SLNG keeps for its own tool: rename the flow", name)
 		}
 		if group.Then != GroupReturn {
-			fail("task group %q ends with then: %s, and SLNG only returns to the agent: write then: return, or compile to livekit or pipecat", name, group.Then)
+			fail("flow %q ends with then: %s, and SLNG only returns to the agent: write then: return, or compile to livekit or pipecat", name, group.Then)
 		}
 		if len(group.Steps) > slngMaxGroupSteps {
-			fail("task group %q has %d steps, and SLNG runs at most %d: split it", name, len(group.Steps), slngMaxGroupSteps)
+			fail("flow %q has %d steps, and SLNG runs at most %d: split it", name, len(group.Steps), slngMaxGroupSteps)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(agent.Controls)) {

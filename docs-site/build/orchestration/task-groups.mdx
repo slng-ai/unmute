@@ -1,26 +1,26 @@
 ---
-title: "Task groups"
+title: "Flows"
 description: "Run several tasks in a fixed order."
 ---
 
-A task group is an ordered sequence of tasks. Use one when the order must be a
-runtime guarantee. A task that runs inside a group is called a step of that
-group.
+A flow is an ordered sequence of tasks. Use one when the order must be a
+runtime guarantee. A task that runs inside a flow is called a step of that
+flow. The runtime calls a flow a task group.
 
 It also costs less than the same tasks run one at a time. The agent chooses the
-group once; each step after the first opens by itself. Two tasks the agent picks
+flow once; each step after the first opens by itself. Two tasks the agent picks
 between spend a model request on the choice between them, and that request
 speaks nothing and does nothing.
 
 On this page:
 
-- [Declare a group](#declare-a-group) - steps, in order
-- [Every key a group takes](#every-key-a-group-takes) - all seven
+- [Declare a flow](#declare-a-flow) - steps, in order
+- [Every key a flow takes](#every-key-a-flow-takes) - all ten
 - [Skip a step whose work is already done](#skip-a-step-whose-work-is-already-done) - `skip_when_confirmed:`
-- [What stops a group](#what-stops-a-group) - unserved, handoff, finish
+- [What stops a flow](#what-stops-a-flow) - unserved, handoff, finish
 - [Context between steps](#context-between-steps) - shared or isolated
 
-## Declare a group
+## Declare a flow
 
 ```python state.py
 from typing import Literal
@@ -36,55 +36,59 @@ class State(BaseModel):
 
 ```yaml agent.yaml
 agents:
-  appointment_desk:
-    instructions: instructions.md
+  - name: appointment_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tasks:
       - name: identify_customer
-        instructions: tasks/identify-customer.md
+        prompt: tasks/identify-customer.md
         tools:
           - lookup_customer
         save:
           - customer_id: result.customer_id
 
       - name: select_appointment
-        instructions: tasks/select-appointment.md
+        prompt: tasks/select-appointment.md
         tools:
           - check_slots
         save:
           - selected_slot: result.selected_slot
 
       - name: finalize_appointment
-        instructions: tasks/finalize-appointment.md
+        prompt: tasks/finalize-appointment.md
         tools:
           - book_appointment
         save:
           - booking_status: result.booking_status
 
-    task_groups:
-      - appointment_flow
-
-task_groups:
-  appointment_flow:
-    when: The caller wants to book, reschedule, or cancel an appointment.
-    steps:
-      - identify_customer
-      - select_appointment
-      - finalize_appointment
+    flows:
+      - name: appointment_flow
+        when: The caller wants to book, reschedule, or cancel an appointment.
+        steps:
+          - identify_customer
+          - select_appointment
+          - finalize_appointment
 ```
 
-These three tasks have no `when:`. The group decides when they run, so they
+The agent that writes the flow block defines it. Another agent runs the same
+flow by listing its bare name under its own `flows:`.
+
+These three tasks have no `when:`. The flow decides when they run, so they
 need no trigger of their own. A task an agent runs on its own does need one,
-and a task with no `when:` that no group lists is refused, because nothing
+and a task with no `when:` that no flow lists is refused, because nothing
 would ever run it.
 
 Each `steps` entry names a task defined in the package, under some agent's
-`tasks:`. It does not have to be the agent that runs the group: the group is
+`tasks:`. It does not have to be the agent that runs the flow: the flow is
 what makes each step reachable. `save:` derives each task's finish arguments
 and saves the values needed later.
 
-### Every key a group takes
+### Every key a flow takes
+
+<ParamField path="name" type="string" required>
+  A lower snake case name, unique across the package.
+</ParamField>
 
 <ParamField path="steps" type="list of strings or objects" required>
   One or more task names, in execution order. An object requires `task` and may set
@@ -93,18 +97,28 @@ and saves the values needed later.
 </ParamField>
 
 <ParamField path="when" type="string">
-  The situation the model reads to decide whether to run the group. Omission is accepted
+  The situation the model reads to decide whether to run the flow. Omission is accepted
   but supplies no trigger guidance, so write one.
 </ParamField>
 
-<ParamField path="announce" type="string">
-  One fixed spoken line, with no `{{placeholders}}`, when the group starts. Omit for no
-  announcement.
+<ParamField path="say" type="string or list of strings">
+  One fixed spoken line, with no `{{placeholders}}`, when the flow starts. Omit for no
+  announcement. Write several as a list and the caller hears one each time.
+</ParamField>
+
+<ParamField path="fills" type="list of strings">
+  `State` fields the model fills from the conversation when it picks the flow. The steps
+  read them. Omit to fill none.
+</ParamField>
+
+<ParamField path="non_blocking" type="list of strings">
+  Steps that run without holding the caller. Each name must be one of `steps`. Omit to
+  run every step in turn.
 </ParamField>
 
 <ParamField path="context_scope" type="string" default="shared">
   Accepts `shared` or `isolated`. Omit it for `shared`. Each member still applies its own
-  `context.history`; an isolated group cannot be widened by a member’s `full`.
+  `context.history`; an isolated flow cannot be widened by a member’s `full`.
 </ParamField>
 
 <ParamField path="then" type="string" default="return">
@@ -122,7 +136,7 @@ and saves the values needed later.
 
 ## Skip a step whose work is already done
 
-A step is a bare task name, or an item that says how the group treats it:
+A step is a bare task name, or an item that says how the flow treats it:
 
 ```yaml agent.yaml
     steps:
@@ -132,10 +146,10 @@ A step is a bare task name, or an item that says how the group treats it:
       - finalize_appointment
 ```
 
-The group skips that step when the named variable is confirmed at the moment
-the group starts, and runs it otherwise. A bare step always runs. This is what
+The flow skips that step when the named variable is confirmed at the moment
+the flow starts, and runs it otherwise. A bare step always runs. This is what
 makes a second booking on one call cost nothing extra: the caller is identified
-once, and the group knows it.
+once, and the flow knows it.
 
 `skip_when_confirmed:` names a variable the skipped step itself confirms, with
 [`confirm:`](/reference/variables#confirm-marks-a-value-the-caller-has-to-agree-to)
@@ -144,17 +158,17 @@ step named under `confirm:` saves a value. It is not the same as a prompt
 sentence saying the caller was verified: the compiler reads the mark, never the
 prose. Anything else is refused: a variable nobody confirms would leave the
 step running forever or never, and a variable another step confirms would let
-this group skip somebody else's work.
+this flow skip somebody else's work.
 
-There is a side effect, and it is the point. A step some group names this way
+There is a side effect, and it is the point. A step some flow names this way
 withdraws the confirmation of the values it confirms every time it is entered,
-including on its own outside the group. So a caller correcting their number
-re-verifies it, and the next group run does not skip the step on the strength
+including on its own outside the flow. So a caller correcting their number
+re-verifies it, and the next flow run does not skip the step on the strength
 of the number they just replaced. Values derived from a withdrawn one follow it.
 
-## What stops a group
+## What stops a flow
 
-A group stops when a step ends unserved, whichever `context_scope` it has: the
+A flow stops when a step ends unserved, whichever `context_scope` it has: the
 later steps do not run, and the owner is handed the unserved status. Running
 the next step would answer a question nobody asked.
 
@@ -171,12 +185,12 @@ in `unserved_request` and let the owner act on it.
 
 ## Context between steps
 
-`shared` lets later tasks inherit the group's running conversation. `isolated`
-starts every member without inherited group conversation.
+`shared` lets later tasks inherit the flow's running conversation. `isolated`
+starts every member without inherited flow conversation.
 
 Each task still applies its own `context.history`. Omitted history means
-`messages`. An isolated group also prevents a member's `full` policy from
-recovering conversation outside that group.
+`messages`. An isolated flow also prevents a member's `full` policy from
+recovering conversation outside that flow.
 
 Task results are private. The next task sees only neutral completion status,
 the conversation allowed by its history choice, and saved values explicitly
@@ -186,15 +200,15 @@ referenced in its prompt.
 Find an available slot for customer {{state.customer_id}}.
 ```
 
-The group owner gets its original context back plus `completed` or `unserved`.
+The flow owner gets its original context back plus `completed` or `unserved`.
 It reads saved values through its own placeholders.
 
 A member task may hand off directly to another agent. That ends the current
-task and skips the remaining group steps.
+task and skips the remaining flow steps.
 
 ## LiveKit status
 
-Task groups use a LiveKit API that upstream marks experimental. The package
+Flows use a LiveKit API that upstream marks experimental. The package
 still validates and compiles normally.
 
 ## Where to go next
@@ -204,7 +218,7 @@ still validates and compiles normally.
     The shape that does not return: a lasting change of role.
   </Card>
   <Card title="Choosing a structure" icon="git-branch" href="/build/orchestration/choosing-a-structure">
-    Compare tasks, task groups, and handoffs.
+    Compare tasks, flows, and handoffs.
   </Card>
   <Card title="Making a task actually run" icon="list-checks" href="/best-practices/step-scoping">
     Why a task you declared never runs, and how to fix it.

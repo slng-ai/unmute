@@ -47,15 +47,12 @@ Then the file name goes in an agent's list, the same way any tool file does:
 
 ```yaml agent.yaml
 agents:
-  researcher:
-    instructions: instructions.md
+  - name: researcher
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
       - web_search
-
-tools:
-  - web_search
 ```
 
 This is a worked example rather than a quote, with `auth:` added to show the

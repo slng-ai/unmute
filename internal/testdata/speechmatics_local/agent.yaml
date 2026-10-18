@@ -13,6 +13,7 @@
 version: 2
 
 name: speechmatics-local
+
 entry_agent: desk
 
 secrets:
@@ -46,17 +47,14 @@ models:
       pace: balanced
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
       - lookup_customer
 
-tools:
-  - lookup_customer
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, this is Sage and Stone Salon. How can I help?"
+    say: "Hi, this is Sage and Stone Salon. How can I help?"

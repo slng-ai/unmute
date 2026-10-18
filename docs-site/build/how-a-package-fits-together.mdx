@@ -1,6 +1,6 @@
 ---
 title: "How a package fits together"
-description: "One rule explains the whole file: every list on an agent has a matching top-level block."
+description: "One rule explains the whole file: an agent owns what it can do, and writes each one where it uses it."
 ---
 
 A package is one `agent.yaml` plus the prompts, tool files and knowledge
@@ -9,15 +9,16 @@ each agent may do, and what each of those things actually is.
 
 One rule explains the whole file:
 
-> **Every list on an agent has a matching top-level block with the same name.
-> The list holds names. The block holds the definitions.**
+> **An agent owns its own handoffs, transfers, flows and tasks. Each one is
+> written in full inside the agent that uses it first. Any other agent names
+> it with a bare name.**
 
 On this page:
 
 - [Quickstart](#quickstart) - the smallest package with two agents
 - [The five things an agent can do](#the-five-things-an-agent-can-do) - and which give the caller back
-- [Every key an agent takes](#every-key-an-agent-takes) - three required, five lists
-- [Build one in four steps](#build-one-in-four-steps) - the worked version
+- [Every key an agent takes](#every-key-an-agent-takes) - four required, five lists
+- [Build one in three steps](#build-one-in-three-steps) - the worked version
 - [How a value gets from one step to the next](#how-a-value-gets-from-one-step-to-the-next) - `variables:`, `save:`, `context:`
 - [What the compiler holds for you](#what-the-compiler-holds-for-you) - the errors you cannot write past
 
@@ -30,35 +31,31 @@ Two agents. `front_desk` answers, and can hand the caller to
 entry_agent: front_desk
 
 agents:
-  front_desk:
-    instructions: instructions.md
+  - name: front_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     handoffs:
-      - to_complaints
+      - name: to_complaints
+        to: complaint_specialist
+        when: The caller has a complaint.
 
-  complaint_specialist:
-    instructions: agents/complaints.md
+  - name: complaint_specialist
+    prompt: agents/complaints.md
     think: reasoning
     speak: voice
-
-handoffs:
-  to_complaints:
-    to: complaint_specialist
-    when: The caller has a complaint.
 ```
 
 ```sh
 unmute validate my-agent
 ```
 
-`front_desk` lists the **name** `to_complaints`. The top-level `handoffs:`
-block holds the **definition**. That is the rule, and every other list works
-the same way.
+`front_desk` writes the handoff block, so the definition sits beside the agent
+that uses it. Another agent that wants the same handoff writes its bare name,
+`- to_complaints`. A bare name nobody defines is refused, and so are two blocks
+with one name.
 
-Tasks are the one exception: a task is defined right inside the agent that uses
-it first, under that agent's own [`tasks:`](/build/orchestration/tasks) list. A
-second agent that runs the same task just names it.
+The same goes for tasks, flows and transfers.
 
 ## The five things an agent can do
 
@@ -69,18 +66,22 @@ kind has its own list:
 |---|---|---|
 | [`tools:`](/build/tools/overview) | do real work: look something up, call an API | yes, a tool just returns data |
 | [`tasks:`](/build/orchestration/tasks) | run a smaller job with its own prompt, and use its typed result | yes, the task finishes and reports back |
-| [`task_groups:`](/build/orchestration/task-groups) | run several tasks in a fixed order, then use the merged result | yes, the group finishes and reports back |
+| [`flows:`](/build/orchestration/task-groups) | run several tasks in a fixed order, then use the merged result | yes, the flow finishes and reports back |
 | [`handoffs:`](/build/orchestration/handoffs) | give the caller to another agent | no, the other agent takes over |
-| [`escalations:`](/transfers/overview) | give the caller to a human | no, the call leaves the system |
+| [`transfers:`](/transfers/overview) | give the caller to a human | no, the call leaves the system |
 
-If you remember one thing, remember the third column. Tools, tasks and task
-groups come back. Handoffs and escalations do not.
+If you remember one thing, remember the third column. Tools, tasks and flows
+come back. Handoffs and transfers do not.
 
 ### Every key an agent takes
 
-An agent has three required keys and five optional lists. There are no others.
+An agent has four required keys and five optional lists. There are no others.
 
-<ParamField path="instructions" type="file path" required>
+<ParamField path="name" type="string" required>
+  What the agent is called. Other agents and `entry_agent:` use this name.
+</ParamField>
+
+<ParamField path="prompt" type="file path" required>
   The Markdown file holding this agent's prompt, relative to the package root.
 </ParamField>
 
@@ -103,22 +104,22 @@ An agent has three required keys and five optional lists. There are no others.
   a bare name to run a task another agent already defined.
 </ParamField>
 
-<ParamField path="task_groups" type="list of names">
-  Task groups this agent may run. Each name is an entry under the top-level
-  `task_groups:`.
+<ParamField path="flows" type="list of flows or names">
+  Flows this agent may run. Write the flow in full to define it here, or write
+  a bare name to run a flow another agent defined.
 </ParamField>
 
-<ParamField path="handoffs" type="list of names">
-  Agents this one can hand the caller to. Each name is an entry under the
-  top-level `handoffs:`.
+<ParamField path="handoffs" type="list of handoffs or names">
+  Agents this one can hand the caller to. Write the handoff in full to define
+  it here, or write a bare name to use one another agent defined.
 </ParamField>
 
-<ParamField path="escalations" type="list of names">
-  People this agent can put the caller through to. Each name is an entry under
-  the top-level `escalations:`.
+<ParamField path="transfers" type="list of transfers or names">
+  People this agent can put the caller through to. Write the transfer in full to
+  define it here, or write a bare name to use one another agent defined.
 </ParamField>
 
-## Build one in four steps
+## Build one in three steps
 
 Say you want two agents, and each one can run a task.
 
@@ -128,15 +129,19 @@ Say you want two agents, and each one can run a task.
 entry_agent: front_desk
 ```
 
-**Step 2. Write the agents, with their tasks nested right inside.** A task
-carries both what it is and when to run it, so there is one name and one
-place to read it. You have not defined the handoffs and escalations yet.
-That is fine, you will in the next step.
+**Step 2. Write the agents, with their tasks, handoffs and transfers nested
+right inside.** A task carries both what it is and when to run it, so there is
+one name and one place to read it.
+
+Each handoff may choose how much conversation travels with the caller. Omitted
+history means `messages`. Saved values reach the receiving model only through
+placeholders in its prompt. A transfer's `to:` names the environment variable
+that holds the phone number, never the number.
 
 ```yaml agent.yaml
 agents:
-  front_desk:
-    instructions: instructions.md
+  - name: front_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
@@ -144,74 +149,64 @@ agents:
     tasks:
       - name: verify_customer
         when: Confirm who the caller is before anything personal.
-        instructions: tasks/verify-customer.md
+        prompt: tasks/verify-customer.md
         save:
           - customer_phone: result.customer_phone
       - name: manage_booking
         when: The caller wants to create, change, or cancel a booking, once the caller is identified.
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         save:
           - booking_id: result.booking_id
     handoffs:
-      - to_complaints
-    escalations:
-      - to_manager
+      - name: to_complaints
+        to: complaint_specialist
+        when: The verified caller has a complaint.
+        context:
+          history: full
+    transfers:
+      - name: to_manager
+        to: MANAGER_PHONE_NUMBER
+        when: The caller asks for a manager.
+        ring_timeout: 30s
+        on_unavailable: hangup
 
-  complaint_specialist:
-    instructions: agents/complaints.md
+  - name: complaint_specialist
+    prompt: agents/complaints.md
     think: reasoning
     speak: voice
     tools:
       - record_complaint
-    # front_desk already defines this task. A bare name runs the same one
+    # front_desk already defines these. A bare name uses the same one
     # from here, so there is one definition and both agents can offer it.
     tasks:
       - verify_customer
     handoffs:
-      - to_front_desk
-    escalations:
+      - name: to_front_desk
+        to: front_desk
+        when: The caller is done complaining and wants something else.
+        context:
+          history: full
+    transfers:
       - to_manager
 ```
 
 Read `front_desk` top to bottom. You already know everything it can do, and
 which kind of thing each one is. That glance is the point of the five lists.
 
-**Step 3. Define the handoffs and escalations.**
-
-Each handoff may choose how much conversation travels with the caller. Omitted
-history means `messages`. Saved values reach the receiving model only through
-placeholders in its prompt.
-
-```yaml agent.yaml
-handoffs:
-  to_complaints:
-    to: complaint_specialist
-    when: The verified caller has a complaint.
-    context:
-      history: full
-  to_front_desk:
-    to: front_desk
-    when: The caller is done complaining and wants something else.
-    context:
-      history: full
-
-escalations:
-  to_manager:
-    when: The caller asks for a manager.
-    cold:
-      destination: manager_line
-      ring_timeout: 30s
-      on_unavailable: hangup
-```
-
-**Step 4. Define the tools.** Tools are the one place the rule bends: a tool
-is its own file under `tools/<name>.yaml`, so the top-level `tools:` is a
-plain list of names rather than a block of definitions:
+**Step 3. Add the tools.** Every file under `tools/` is a tool, so there is no
+list to keep. Declare `MANAGER_PHONE_NUMBER` in `secrets:`. The top-level
+`tools:` list is only for a tool that needs behaviour around it on every agent,
+such as a line said as it starts:
 
 ```yaml agent.yaml
+secrets:
+  - MANAGER_PHONE_NUMBER
+
 tools:
-  - look_up_prices
-  - record_complaint
+  - name: record_complaint
+    start:
+      say:
+        - Let me get that written down.
 ```
 
 Done. Notice you never wrote `verify_customer` twice. It is defined once,
@@ -261,21 +256,20 @@ interviewed first.
 ## Tasks attach handoffs, and nothing else
 
 A task has `tools:` and `handoffs:` and no other list. There is no `tasks:`,
-no `task_groups:` and no `escalations:` key on a task, so a task cannot run
-another task or task group, or reach a person directly. That is not a rule
+no `flows:` and no `transfers:` key on a task, so a task cannot run
+another task or flow, or reach a person directly. That is not a rule
 you have to remember. The key does not exist, so the file cannot be written.
 
 ## What the compiler holds for you
 
-- Every name in an agent's list must exist in the matching top-level block,
-  or, for a task, be defined inline by some agent. A typo is a build error,
-  not a silent gap.
+- A bare name in an agent's list must be defined by some agent. A typo is a
+  build error, not a silent gap.
 - A name listed under the wrong kind is refused, and the message names the
   list it belongs on.
 - All five kinds share one namespace, because every name becomes a callable
   function at runtime. Two things cannot share a name, and two agents
-  defining a task under the same name is refused the same way.
-- A handoff, escalation, task group or tool that no agent reaches is also a
+  defining the same name is refused the same way.
+- A handoff, transfer, flow or tool that no agent reaches is also a
   build error. There is no dead config to forget about.
 - A task can list `tools:` and `handoffs:` only, enforced by the shape of the
   file.
@@ -288,17 +282,17 @@ agent.yaml:31: "verify_customer" is a task, so move it out of the tools: list
 ```
 
 ```text
-agent.yaml:47: escalation "to_manager" is declared but no agent reaches it; add it
-  to the escalations: of one of these agents: front_desk, complaint_specialist
+agent.yaml:47: transfer "to_manager" is declared but no agent reaches it; add it
+  to the transfers: of one of these agents: front_desk, complaint_specialist
 ```
 
 ## Order, and what it does not mean
 
 Nothing an agent lists runs in list order. The model picks what to use from the
 `when:` text. Two things in a package do run in a fixed order: the `steps:` of
-a task group, and the entries of [`prefetch:`](/build/prefetch). Pre-fetch
+a flow, and the entries of [`prefetch:`](/build/prefetch). Pre-fetch
 entries resolve top to bottom, and an entry that reads a value only a later
-entry assigns stops the build.
+entry saves stops the build.
 
 Order is not free everywhere, though: the order of names in a list is the
 order the tools are declared to the model in the generated code, so
@@ -310,12 +304,9 @@ as control flow.
 ```
 version, name, entry_agent
 agents
-handoffs
-escalations
-task_groups
 variables
 prefetch
-secrets, destinations, knowledge, models, tools
+secrets, knowledge, models, tools
 conversation, tracing
 ```
 
@@ -342,10 +333,10 @@ it accepts, is in the
   <Card title="Handoffs" icon="users" href="/build/orchestration/handoffs">
     When to split into two agents.
   </Card>
-  <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
+  <Card title="Flows" icon="list-ordered" href="/build/orchestration/task-groups">
     Tasks in a fixed order, sharing what they learn.
   </Card>
   <Card title="Human transfers" icon="phone-forwarded" href="/transfers/overview">
-    Cold and warm escalation to a person.
+    Cold and warm transfer to a person.
   </Card>
 </Columns>

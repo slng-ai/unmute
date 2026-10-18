@@ -5,14 +5,14 @@ description: "Run one step of a call with its own prompt and tools, save typed v
 
 A task is one step of a call. It has its own instructions and tools. When it
 finishes, control returns to the agent that called it. That agent is the owner.
-Inside a task group, each task is one step of the group.
+Inside a flow, each task is one step of the flow.
 
 To the model, a task is one more entry in its function list, next to the
 agent's tools. Calling it switches to the task's prompt and tools. When the
 task finishes, the owner's prompt and tools come back.
 
 Use a task when one bounded piece of work needs a smaller prompt or a smaller
-tool list. Use a [task group](/build/orchestration/task-groups) when several
+tool list. Use a [flow](/build/orchestration/task-groups) when several
 tasks must run in order. Use a [handoff](/build/orchestration/handoffs) when a
 different agent should own the rest of the call.
 
@@ -41,11 +41,11 @@ class State(BaseModel):
 
 ```yaml agent.yaml
 agents:
-  appointment_desk:
+  - name: appointment_desk
     tasks:
       - name: verify_customer
         when: Identify the caller before handling an appointment.
-        instructions: tasks/verify-customer.md
+        prompt: tasks/verify-customer.md
         tools:
           - lookup_customer
         save:
@@ -56,7 +56,7 @@ agents:
 unmute validate my-agent
 ```
 
-Four keys carry it: **what it is** (`name`, `instructions`), **when to run it**
+Four keys carry it: **what it is** (`name`, `prompt`), **when to run it**
 (`when`), **what it can use** (`tools`), and **what it saves** (`save`).
 
 ## Declare a task
@@ -69,12 +69,12 @@ class State(BaseModel):
 
 ```yaml agent.yaml
 agents:
-  appointment_desk:
+  - name: appointment_desk
     # the agent's other keys stay as they are
     tasks:
       - name: verify_customer
         when: Identify the caller before handling an appointment.
-        instructions: tasks/verify-customer.md
+        prompt: tasks/verify-customer.md
         tools:
           - lookup_customer
         save:
@@ -91,13 +91,13 @@ Two are required. The rest are how you shape the step.
   task, write its bare name instead of defining it again.
 </ParamField>
 
-<ParamField path="instructions" type="string" required>
+<ParamField path="prompt" type="string" required>
   Path to the task’s Markdown prompt inside the package. No prompt is inferred.
 </ParamField>
 
 <ParamField path="when" type="string">
   The situation the model reads to decide whether to start the task. If omitted, the task
-  is a definition only and must be used in a task group; it cannot be attached elsewhere
+  is a definition only and must be used in a flow; it cannot be attached elsewhere
   by bare name.
 </ParamField>
 
@@ -149,7 +149,12 @@ Two are required. The rest are how you shape the step.
 </ParamField>
 
 <ParamField path="handoffs" type="list of strings">
-  Names from the top-level `handoffs` catalog. Omit for no handoffs from this task.
+  Bare names of handoffs an agent defines. Omit for no handoffs from this task.
+</ParamField>
+
+<ParamField path="fills" type="list of strings">
+  `State` fields the model fills from the conversation when it starts the task, such as
+  the service the caller asked for. Omit to fill none.
 </ParamField>
 
 <ParamField path="context" type="object">
@@ -163,7 +168,7 @@ Two are required. The rest are how you shape the step.
   profile, even when another agent defines the task.
 </ParamField>
 
-There is no `tasks:`, no `task_groups:` and no `escalations:` key on a task. A
+There is no `tasks:`, no `flows:` and no `transfers:` key on a task. A
 task cannot run another task or reach a person directly, and that is structure
 rather than a rule to remember: there is no key to write it in.
 
@@ -198,7 +203,7 @@ made. The saving grows with the number of tasks a call runs through.
 
 ```yaml agent.yaml
       - name: manage_booking
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         tools:
           - find_slots
           - name: save_booking
@@ -296,7 +301,7 @@ Four things follow from a task that ends on its tool:
   not to be called after one of them succeeds. Your own instructions should not
   contradict it.
 - **The owner speaks.** The task says nothing after its tool unless the outcome
-  has a `say:`. The next step of a group opens, or the owner speaks once when
+  has a `say:`. The next step of a flow opens, or the owner speaks once when
   control returns, so the acknowledgement belongs in the owner's prompt.
 
 ## What the model gets for a task
@@ -337,7 +342,7 @@ can be skipped. They live in three places.
 | `save:` | which values the task saves, and into which variables | on the task | the task saves nothing, and can still finish | this page, and [Variables](/reference/variables#saving-a-task-result-to-a-variable) |
 | `outcomes:` with `then: done` | which tools end the task by their own result, matched by `if:` | on the tool entry in the task's `tools:` | the model decides the task is done, by calling `finish` | [Say what success looks like](#say-what-success-looks-like) |
 | `confirm:` | which task has to hear the caller agree before a value is used | on the variable, naming the task | the value is settled the moment it arrives, and any prompt may read it | [Variables](/reference/variables#confirm-marks-a-value-the-caller-has-to-agree-to) |
-| `skip_when_confirmed:` | which variable, once confirmed, lets a group skip this step | on the step entry in a task group's `steps:` | the step runs every time the group runs | [Task groups](/build/orchestration/task-groups#skip-a-step-whose-work-is-already-done) |
+| `skip_when_confirmed:` | which variable, once confirmed, lets a flow skip this step | on the step entry in a flow's `steps:` | the step runs every time the flow runs | [Flows](/build/orchestration/task-groups#skip-a-step-whose-work-is-already-done) |
 
 ## Read a saved value
 
@@ -379,7 +384,7 @@ except `summary`. Twilio refuses tasks, including every task history value.
 
 ```yaml agent.yaml
       - name: reschedule_booking
-        instructions: tasks/reschedule-booking.md
+        prompt: tasks/reschedule-booking.md
         tools:
           - save_booking
         context:
@@ -447,7 +452,7 @@ Better still, let the tool end the task. See
 [Say what success looks like](#say-what-success-looks-like).
 
 For requests that another agent can handle, a task may declare `handoffs:`.
-Taking one ends the task and any remaining task-group steps. See
+Taking one ends the task and any remaining flow steps. See
 [Handoffs](/build/orchestration/handoffs).
 
 ## Advanced
@@ -491,15 +496,15 @@ Define a task once. Another agent can attach it by name:
 
 ```yaml agent.yaml
 agents:
-  appointment_desk:
+  - name: appointment_desk
     tasks:
       - name: verify_customer
         when: Identify the caller before booking.
-        instructions: tasks/verify-customer.md
+        prompt: tasks/verify-customer.md
         save:
           - customer_id: result.customer_id
 
-  billing_desk:
+  - name: billing_desk
     tasks:
       - verify_customer
 ```
@@ -520,7 +525,7 @@ with something said or run in code. It takes four keys, and each is optional.
 ```yaml agent.yaml
       - name: take_stylist_note
         when: The caller wants a note left for the stylist.
-        instructions: tasks/stylist-note.md
+        prompt: tasks/stylist-note.md
         start:
           say:
             - What would you like me to pass on to your stylist?
@@ -537,7 +542,7 @@ A `call:` runs the tool before the model speaks:
 ```yaml agent.yaml
       - name: manage_booking
         when: The caller wants to manage a booking.
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         start:
           say:
             - Let me pull up the diary.
@@ -584,7 +589,7 @@ In the dev page the task shows as its own row, labelled `HANDOFF`, so you can
 see it was entered. [The dev loop](/dev/overview) explains the rest of that
 page.
 
-The salon is the shipped example with tasks, a task group and handoffs. These
+The salon is the shipped example with tasks, a flow and handoffs. These
 commands need a clone of the unmute repo:
 
 ```sh
@@ -631,7 +636,7 @@ located error with migration advice.
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
+  <Card title="Flows" icon="list-ordered" href="/build/orchestration/task-groups">
     Run several tasks in a fixed order. This is the next page.
   </Card>
   <Card title="Making a task actually run" icon="footprints" href="/best-practices/step-scoping">

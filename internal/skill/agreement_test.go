@@ -467,7 +467,7 @@ func TestLiveSurfacesAgree(t *testing.T) {
 	// models page for unrelated reasons, so matching those would pass on a
 	// surface that had dropped the refusal entirely.
 	refused := []string{
-		"serves one agent", "no `tasks`", "`handoffs`", "`escalations`",
+		"serves one agent", "no `tasks`", "`handoffs`", "`transfers`",
 		"listens, speaks and decides the turn itself",
 		"`conversation.interruption`",
 		"carries no call state", "no traced worker",
@@ -839,7 +839,7 @@ func TestOrchestrationDecisionTableMatchesPublicGuide(t *testing.T) {
 	publicChoices := nativeChoices(t, "docs-site/build/orchestration/choosing-a-structure.mdx",
 		trackedFile(t, "docs-site/build/orchestration/choosing-a-structure.mdx"))
 
-	want := []string{"agent handoff", "task", "task group", "tool", "variable"}
+	want := []string{"agent handoff", "flow", "task", "tool", "variable"}
 	if got := slices.Sorted(maps.Keys(skillChoices)); !slices.Equal(got, want) {
 		t.Errorf("references/orchestration.md native shapes = %v, want %v", got, want)
 	}

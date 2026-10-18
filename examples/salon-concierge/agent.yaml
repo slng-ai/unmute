@@ -5,8 +5,8 @@ name: salon-concierge
 entry_agent: concierge
 
 agents:
-  concierge:
-    instructions: instructions.md
+  - name: concierge
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
@@ -20,7 +20,7 @@ agents:
           the `book` flow runs this step itself when the saved number is not
           confirmed. A change of date, time or service is not a phone
           correction.
-        instructions: tasks/verify-customer.md
+        prompt: tasks/verify-customer.md
         # With no saved number, the step says this line and waits. With one,
         # code reads it back first, and the lookup runs on the caller's yes.
         start:
@@ -49,7 +49,7 @@ agents:
       # No `when:`: the only way in is the `book` flow, so a booking cannot
       # start before verification has been decided.
       - name: manage_booking
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         # The step reads the diary in code, with what the caller asked for,
         # and says the offer without asking the model.
         start:
@@ -119,15 +119,37 @@ agents:
                 then: done
         handoffs:
           - to_complaints
-    task_groups:
-      - book
+    # One booking request, start to finish. The concierge picks this once, with
+    # what the caller asked for; the flow runs verification and then booking.
+    flows:
+      - name: book
+        when: >-
+          The caller wants to create, move or cancel a booking. Includes a change to
+          an appointment just made.
+        fills:
+          - requested_service
+          - requested_day
+          - requested_intent
+        steps:
+          # Skipped once the caller has agreed to their number.
+          - task: verify_customer
+            skip_when_confirmed: customer_phone
+          - manage_booking
     handoffs:
-      - to_complaints
-    escalations:
-      - to_manager
+      - name: to_complaints
+        to: complaint_specialist
+        when: The caller has a complaint or service problem.
+        say:
+          - I'm sorry to hear that. Let me take this down properly.
+    transfers:
+      - name: to_manager
+        to: MANAGER_PHONE_NUMBER
+        when: The caller explicitly asks for a manager or is clearly and strongly frustrated.
+        ring_timeout: 30s
+        on_unavailable: hangup
 
-  complaint_specialist:
-    instructions: agents/complaint-specialist.md
+  - name: complaint_specialist
+    prompt: agents/complaint-specialist.md
     think: reasoning
     speak: voice
     tools:
@@ -141,44 +163,11 @@ agents:
     tasks:
       - verify_customer
     handoffs:
-      - to_concierge
-    escalations:
+      - name: to_concierge
+        to: concierge
+        when: The caller changes to a request owned by another specialist.
+    transfers:
       - to_manager
-
-handoffs:
-  to_complaints:
-    to: complaint_specialist
-    when: The caller has a complaint or service problem.
-    announce: I'm sorry to hear that. Let me take this down properly.
-
-  to_concierge:
-    to: concierge
-    when: The caller changes to a request owned by another specialist.
-
-escalations:
-  to_manager:
-    when: The caller explicitly asks for a manager or is clearly and strongly frustrated.
-    cold:
-      destination: manager_line
-      ring_timeout: 30s
-      on_unavailable: hangup
-
-# One booking request, start to finish. The concierge picks this once, with
-# what the caller asked for; the flow runs verification and then booking.
-task_groups:
-  book:
-    when: >-
-      The caller wants to create, move or cancel a booking. Includes a change to
-      an appointment just made.
-    arguments:
-      - requested_service
-      - requested_day
-      - requested_intent
-    steps:
-      # Skipped once the caller has agreed to their number.
-      - task: verify_customer
-        skip_when_confirmed: customer_phone
-      - manage_booking
 
 # How the values on State in state.py behave: where one comes from, and
 # which step confirms it. A value needs an entry only for one of those.
@@ -190,14 +179,14 @@ prefetch:
   - name: today
     clock: now
     timezone: Europe/Madrid
-    assign:
+    save:
       - booking_date: result.date
       - booking_weekday: result.day_of_week
       - salon_local_time: result.time
 
   - name: caller
     source: from_number
-    assign:
+    save:
       - customer_phone: result.value
 
 secrets:
@@ -215,9 +204,6 @@ secrets:
   - SIP_AUTH_USERNAME
   - SIP_AUTH_PASSWORD
   - SIP_FROM_NUMBER
-
-destinations:
-  manager_line: MANAGER_PHONE_NUMBER
 
 knowledge:
   refunds:
@@ -267,23 +253,15 @@ models:
       pace: snappy
 
 tools:
-  - find_or_create_customer
-  - find_slots
-  - book_appointment
-  - move_appointment
-  - cancel_appointment
   - name: record_complaint
     start:
       say:
         - Let me get that written down.
-  - look_up_refund_policy
-  - look_up_salon_info
-  - end_call
 
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, you've reached Sage and Stone. Robin speaking, what can I do for you?"
+    say: "Hi, you've reached Sage and Stone. Robin speaking, what can I do for you?"
   interruption:
     enabled: true
   inactivity:

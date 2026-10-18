@@ -10,7 +10,9 @@
 #   - tracing and capacity: unmute instruments and sizes no process here
 
 version: 2
+
 name: slng-core-fixture
+
 entry_agent: support
 
 models:
@@ -37,19 +39,16 @@ models:
       language: en
 
 agents:
-  support:
-    instructions: instructions.md
+  - name: support
+    prompt: instructions.md
     think: reasoning
     speak: front_desk
     tools:
       - end_call
 
-tools:
-  - end_call
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi {{state.customer_name}}, you have reached Acme Support. How can I help?"
+    say: "Hi {{state.customer_name}}, you have reached Acme Support. How can I help?"
   interruption:
     enabled: true

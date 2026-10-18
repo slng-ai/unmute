@@ -12,7 +12,7 @@ Try these tracking ids: `PD-1042` (in transit) and `PD-2077` (held at the depot)
 - **`with:`.** `reschedule_delivery` reads the tracking id from `{{state.parcel.tracking_id}}`. `save_callback_note` reads `{{call.session_id}}`. The model sends neither.
 - **`effect: ends_conversation`.** `end_call` ends the call.
 - **Finish, confirm and say.** `change_delivery` asks "Shall I move the delivery to ...?" before the write and says a receipt after it.
-- **A group that ends the call.** `request_callback` has `then: end`.
+- **A flow that ends the call.** `request_callback` has `then: end`.
 - **Prefetch clock.** Today on the Europe/London clock, before the greeting.
 - **The SLNG Context Router as the model.** `provider: slng`, `model: slng/auto`, `agent_id: parcel-desk`, EU north.
 

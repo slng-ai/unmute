@@ -7,38 +7,36 @@ the brief before you write files, then say what context crosses that boundary.
 
 One rule carries most of the surface:
 
-> Four of the five lists point at a same-named top-level catalog; attach by
-> name. The fifth, `tasks:`, has none: write the task right where it runs.
+> An agent writes what it can do inside its own block. `tools:` names files in
+> `tools/`; `tasks:`, `handoffs:`, `transfers:` and `flows:` are written right
+> where they run.
 
-| Agent list | Catalog | What it does | Does control come back? |
-|---|---|---|---|
-| `tools:` | `tools:` | does one piece of work and returns a value | yes |
-| `tasks:` | nested in the agent | runs a focused step, then control returns | yes |
-| `task_groups:` | `task_groups:` | runs several tasks in a fixed order, then control returns | yes |
-| `handoffs:` | `handoffs:` | the conversation becomes another agent, and never returns | no |
-| `escalations:` | `escalations:` | the caller goes through to a person | no |
+| Agent list | What it does | Does control come back? |
+|---|---|---|
+| `tools:` | does one piece of work and returns a value | yes |
+| `tasks:` | runs a focused step, then control returns | yes |
+| `flows:` | runs several tasks in a fixed order, then control returns | yes |
+| `handoffs:` | the conversation becomes another agent, and never returns | no |
+| `transfers:` | the caller goes through to a person | no |
 
-Which block a thing is written in is its kind, so nothing carries a `kind:`
+Which list a thing is written in is its kind, so nothing carries a `kind:`
 field. All five become callable function names at runtime, so they share one
 namespace and a name belongs to exactly one of them.
 
-`tools:` is the odd one in shape only: the package-level `tools:` is a list of
-names, because each tool is its own file under `tools/<name>.yaml`.
-`task_groups:`, `handoffs:` and `escalations:` are maps of definitions written
-inline in `agent.yaml`. `tasks:` is the one list whose items can be either
-shape: a mapping defines a task and attaches it to this agent in the same
-place; a bare string names a task another agent already defined, so two
-agents can offer one task without either owning a second copy of it.
+`agents:` is a list, each item starting `- name:`, and each agent's prompt is
+`prompt:`. A handoff, transfer or flow is defined once in the package, by the
+agent that writes its block. Any other agent names it with a bare name. A bare
+name nobody defines is refused, and so are two blocks with one name. `tasks:`
+works the same way: a mapping defines a task and attaches it to this agent in
+the same place; a bare string names a task another agent already defined, so
+two agents can offer one task without either owning a second copy of it.
 
-A task has `tools:` and `handoffs:` and no other list. There is no
-`task_groups:` and no `escalations:` key on a task, so a task cannot start
-another task or reach a person directly: those shapes are unwritable rather
-than rejected.
+The `tools/` folder is the list of tools, read in name order. An agent's own
+`tools:` list still names the tools that agent may call.
 
-A task with no `when:` is a definition only, valid solely as a step of a task
-group. An agent naming it by bare name (rather than listing it as a step of a
-`task_groups:` entry) is refused: there is no trigger for the agent to act
-on.
+A task has `tools:` and `handoffs:` and no other list. There is no `flows:` and
+no `transfers:` key on a task, so a task cannot start another task or reach a
+person directly: those shapes are unwritable rather than rejected.
 
 ## Choose the native shape
 
@@ -46,7 +44,7 @@ on.
 |---|---|---|
 | A real external or local action | `tool` | A task used only as an API wrapper |
 | One bounded step that returns | `task` | A second agent or progress flags |
-| Several steps in a fixed order | `task group` | Current-step variables or transition tools |
+| Several steps in a fixed order | `flow` | Current-step variables or transition tools |
 | A lasting role or permission change | `agent handoff` | A returning task |
 | A runtime value needed across a boundary | `variable` | Conversation memory or workflow state |
 
@@ -57,13 +55,13 @@ name an Unmute primitive.
 A server-directed sequence is dynamic, even when its response calls the field
 `nextStep`. Put the loop in one task that asks the returned question and calls
 the real domain tools. If fixed stages surround that loop, those stages can be
-tasks in a task group. Do not turn every possible server step into a group step:
+tasks in a flow. Do not turn every possible server step into a flow step:
 the server, not the package, owns that order.
 
 ## Do not rebuild the orchestrator
 
 - Do not create `current_step`, happy-path, completion, or routing variables.
-  Tasks, groups, handoffs, and an external server already hold that state.
+  Tasks, flows, handoffs, and an external server already hold that state.
 - Do not create `advance`, `proceed`, dispatcher, or transition tools. A tool
   performs real external or local work; a native control moves the conversation.
 - Do not copy every tool onto the entry agent. Each task or agent holds only the
@@ -76,15 +74,15 @@ the server, not the package, owns that order.
 | What the user is seeing | The shape that fixes it |
 |---|---|
 | the prompt keeps growing and starts contradicting itself | split it: tasks if the parts serve one caller goal, a handoff if they are separate roles |
-| the model does things out of order | a task group. The order is declared, not requested |
+| the model does things out of order | a flow. The order is declared, not requested |
 | the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
 | a step runs before you have the value it needs | give the step's own `when:` the clause that names what has to be true first, "once the caller is identified" |
 | you need a value out of a step and want to keep it | a task that saves it to a typed variable with `save:` |
 | two phases need different tools or different permissions | a handoff |
 | the caller changes intent while a task is active | put the destination's handoff on that task's own `handoffs:` list |
-| the caller needs a person | none of these. That is an escalation, and what it can do depends on the phone route. See `transfers.md` |
+| the caller needs a person | none of these. That is a transfer, and what it can do depends on the phone route. See `transfers.md` |
 
-A prompt that says "always identify the caller first" is a request. A task group
+A prompt that says "always identify the caller first" is a request. A flow
 is a guarantee. A `when:` clause naming the dependency is not a guarantee the
 same way, but it is cheap on one task: no extra step, no extra prompt, and
 nothing the caller is spoken through. See "Order steps with the prompt" below.
@@ -92,10 +90,10 @@ nothing the caller is spoken through. See "Order steps with the prompt" below.
 It stops being cheap the moment there are two of them in a row. Two tasks the
 agent picks between are the same two steps plus a model request at the seam,
 and that request speaks no words and does no work: it exists only to name the
-next task. A group spends one request on the way in and none between the steps.
+next task. A flow spends one request on the way in and none between the steps.
 So a `when:` clause is for one step that needs a value to be there first, and a
-group is for a sequence, whether or not the order is safety-critical. Writing a
-sequence as `when:`-bearing tasks to avoid "the weight of a group" buys nothing
+flow is for a sequence, whether or not the order is safety-critical. Writing a
+sequence as `when:`-bearing tasks to avoid "the weight of a flow" buys nothing
 and costs the caller a silence per seam.
 
 ## What each shape costs
@@ -104,7 +102,7 @@ and costs the caller a silence per seam.
 |---|---|---|---|---|
 | one agent and tools | stays with the agent for the whole call | the whole conversation | ask again | the prompt carries everything, and grows |
 | task | returns when the task finishes | what `context:` gives the task | run it again | one more prompt and one more tool list to keep straight, and a model request every time the agent chooses it |
-| task group | returns when the group finishes | shared across the steps, or not | steps can be revisited inside the group | an order you have to be sure about. One request on the way in, and none between the steps |
+| flow | returns when the flow finishes | shared across the steps, or not | steps can be revisited inside the flow | an order you have to be sure about. One request on the way in, and none between the steps |
 | handoff | leaves for good | chosen speech history plus explicitly referenced saved values | another handoff back | nothing returns, so there is no automatic way back |
 
 These are not exclusive. One agent can run a task in one phase and hand off in
@@ -116,8 +114,8 @@ another.
 entry_agent: appointment_desk
 
 agents:
-  appointment_desk:
-    instructions: instructions.md
+  - name: appointment_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
@@ -134,36 +132,33 @@ Context decision: none. The agent sees the whole conversation. Say that.
 entry_agent: booking_desk
 
 agents:
-  booking_desk:
-    instructions: instructions.md
+  - name: booking_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     handoffs:
-      - to_appointment_manager
+      - name: to_appointment_manager
+        to: appointment_manager
+        when: The caller wants to reschedule or cancel an existing appointment.
+        say:
+          - I’m connecting you with our appointment manager now.
+        context:
+          history: full
 
-  appointment_manager:
-    instructions: agents/appointment-manager.md
+  - name: appointment_manager
+    prompt: agents/appointment-manager.md
     think: reasoning
     speak: voice
     tools:
       - cancel_appointment
     handoffs:
-      - to_booking_desk
-
-handoffs:
-  to_appointment_manager:
-    to: appointment_manager
-    when: The caller wants to reschedule or cancel an existing appointment.
-    announce: "I’m connecting you with our appointment manager now."
-    context:
-      history: full
-
-  to_booking_desk:
-    to: booking_desk
-    when: The caller wants to make a new appointment instead.
-    announce: "I’m connecting you back to the booking desk for your new appointment."
-    context:
-      history: full
+      - name: to_booking_desk
+        to: booking_desk
+        when: The caller wants to make a new appointment instead.
+        say:
+          - I’m connecting you back to the booking desk for your new appointment.
+        context:
+          history: full
 ```
 
 `entry_agent` decides who answers. Each agent has its own prompt file and its
@@ -172,10 +167,13 @@ own five lists of what it can do, and keeps the call once it arrives.
 `when` is the condition the model reads. Write it as the situation, not as an
 instruction to call a tool.
 
-`announce` is optional. Give it the exact short sentence the caller should hear.
-The active agent speaks it once and finishes before the next agent takes over.
-Leave it out for a silent handoff. Do not duplicate the cue in the prompt; the
-handoff owns its order.
+`say:` is optional. Give it a list holding the exact short sentence the caller
+should hear. A handoff `say:` holds one line for now. The active agent speaks it
+once and finishes before the next agent takes over. Leave it out for a silent
+handoff. Do not duplicate the cue in the prompt; the handoff owns its order.
+
+`save:` on a handoff sets State values as the call moves, one pair per item,
+for example `- explanation: ES`.
 
 **A handoff does not come back.** Nothing returns and no result is passed back.
 That is why the example declares a handoff in each direction: coming back is
@@ -183,10 +181,10 @@ another handoff, not a return. If you want a step that runs and hands control
 back with an answer, that is a task. A handoff back to the entry agent continues
 the call and never repeats the call-start greeting.
 
-The same handoff may appear in a task's own `handoffs:` list. Calling it ends
-that task and any remaining task-group steps, then activates the target without
+A task may name a handoff in its own `handoffs:` list, by bare name. Calling it ends
+that task and any remaining flow steps, then activates the target without
 returning through the owner. A task has `tools:` and `handoffs:` and no other
-list, so a second task or an escalation on a task is unwritable rather than
+list, so a second task or a transfer on a task is unwritable rather than
 rejected.
 
 On LiveKit, a receiving agent cannot fire another agent transfer during its
@@ -220,14 +218,14 @@ gate. See "Order steps with the prompt" below.
 # state.py: class State(BaseModel) with customer_id: str = "" and customer_name: str = ""
 
 agents:
-  appointment_desk:
-    instructions: instructions.md
+  - name: appointment_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tasks:
       - name: customer_record
         when: Identify the caller before handling an appointment request.
-        instructions: tasks/customer-record.md
+        prompt: tasks/customer-record.md
         tools:
           - lookup_customer
           - create_customer
@@ -237,7 +235,7 @@ agents:
 ```
 
 A task is nested inside the agent that runs it. The mapping does two things at
-once: it defines the task (`instructions`, `tools`, `save`, `context`) and
+once: it defines the task (`prompt`, `tools`, `save`, `context`) and
 it attaches it, because `when:` is the trigger the model reads to decide to
 run it. There is no separate catalog to keep in step with the agent's own
 list.
@@ -272,7 +270,7 @@ prompt.
 ```yaml
       - name: manage_booking
         when: The caller wants to move a saved booking.
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         context:
           history: reset
 ```
@@ -294,15 +292,17 @@ the task by bare string instead:
 # state.py: class State(BaseModel) with customer_id: str = ""
 
 agents:
-  appointment_desk:
+  - name: appointment_desk
+    prompt: instructions.md
     tasks:
       - name: customer_record
         when: Identify the caller before handling an appointment request.
-        instructions: tasks/customer-record.md
+        prompt: tasks/customer-record.md
         save:
           - customer_id: result.customer_id
 
-  billing_desk:
+  - name: billing_desk
+    prompt: agents/billing-desk.md
     # appointment_desk defines this one. A bare name runs the same task from
     # here, so there is one definition and both agents can offer it.
     tasks:
@@ -320,11 +320,11 @@ agent.yaml:17: task "customer_record" is defined by agent "appointment_desk" and
 
 ### A definition with no `when:`
 
-A task with no `when:` is a definition only, valid solely as a step of a task
-group. An agent naming it by bare name (rather than listing it as a step in
-some `task_groups:` entry) is refused: there is no trigger for the agent to
-act on. Give it a `when:` to make it something an agent runs on its own, or
-list it as a step in [Task group](#task-group).
+A task with no `when:` is a definition only, valid solely as a step of a flow.
+An agent naming it by bare name (rather than listing it as a step in some
+`flows:` entry) is refused: there is no trigger for the agent to act on. Give it
+a `when:` to make it something an agent runs on its own, or list it as a step
+in [Flow](#flow).
 
 ### The step start
 
@@ -337,7 +337,7 @@ fixed sentence, or a list of alternatives, spoken as the step starts:
 ```yaml agent.yaml
       - name: manage_booking
         when: The caller wants to create, modify, or cancel a booking.
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         start:
           say: Let me pull up the diary.
 ```
@@ -351,16 +351,16 @@ caller hears two lines for one request. Both cases read as a stutter. The
 step's line covers two model requests and the tool's covers a request body, so
 the step's is usually the one worth keeping.
 
-**In a group, put the line on each step and none on the group.** A step's own
-`start:` fires as that step is entered, so a group of three steps covers all
-three seams with three lines that are each true where they play. The group's own
-`announce:` fires once on the way in, before anything has been decided, and it
-has to be true of whichever step runs first: a group that opens on a
+**In a flow, put the line on each step and none on the flow.** A step's own
+`start:` fires as that step is entered, so a flow of three steps covers all
+three seams with three lines that are each true where they play. The flow's own
+`say:` fires once on the way in, before anything has been decided, and it
+has to be true of whichever step runs first: a flow that opens on a
 verification question the first time and on a diary read every time after has
 no such sentence, and a skipped first step would hear a line about work that
 never happened.
 
-On the `slng` target a task or a group takes one line, not alternatives.
+On the `slng` target a task or a flow takes one line, not alternatives.
 
 `listen: true` opens a step by waiting. When a step opens with one fixed
 question, `say:` speaks it and `listen: true` waits, and neither costs a
@@ -369,7 +369,7 @@ request:
 ```yaml agent.yaml
       - name: take_stylist_note
         when: The caller wants a note left for the stylist.
-        instructions: tasks/stylist-note.md
+        prompt: tasks/stylist-note.md
         start:
           say: What would you like me to pass on to your stylist?
           listen: true
@@ -388,7 +388,7 @@ marks against the tool's input schema.
 
 ```yaml agent.yaml
       - name: manage_booking
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         start:
           say: Let me have a look.
           call: find_slots
@@ -421,7 +421,7 @@ request on a decision the tool already made. Give the tool an outcome with
 
 ```yaml agent.yaml
       - name: manage_booking
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         tools:
           - find_slots
           - name: save_booking
@@ -468,22 +468,23 @@ refuses `then:`, `confirm:` and `say:` outcomes.
 ## Order steps with the prompt
 
 There is no field that holds a task back until a variable exists. Put the
-order in the prompt: number the flow in the agent's own instructions, and
+order in the prompt: number the steps in the agent's own prompt, and
 give the later task a `when:` that names what has to be true first:
 
 ```yaml agent.yaml
 agents:
-  appointment_desk:
+  - name: appointment_desk
+    prompt: instructions.md
     tasks:
       - name: customer_record
         when: Identify the caller before handling an appointment request.
-        instructions: tasks/customer-record.md
+        prompt: tasks/customer-record.md
         save:
           - customer_phone: result.customer_phone
 
       - name: manage_appointment
         when: The caller wants to make, change, or cancel an appointment, once the caller is identified.
-        instructions: tasks/appointment.md
+        prompt: tasks/appointment.md
 ```
 
 Reference a saved value in a task prompt only when that task needs it. No
@@ -499,7 +500,7 @@ a request sent with a blank or an unconfirmed field.
 It drives the agent through a fixed script with the real model and the real
 tools, so you see which task ran, and in what order.
 
-**Never hold up the way to a person.** An escalation should carry no
+**Never hold up the way to a person.** A transfer should carry no
 dependency like this, and neither should a handoff to the agent that hears
 complaints. Someone who asks for a manager should not be interviewed first.
 
@@ -507,7 +508,7 @@ complaints. Someone who asks for a manager should not be interviewed first.
 what the task's own `tools:` and `handoffs:` lists name. The agent's lists are
 not offered again until the task returns. Put a handoff on the task when a
 caller must be able to change intent mid-task; invoking it exits the task and
-any remaining group steps. That is the useful half of nesting a task under an
+any remaining flow steps. That is the useful half of nesting a task under an
 agent, and also the part to plan for, because anything the task may need has
 to appear in its own list.
 
@@ -582,72 +583,70 @@ No `history:` value is a privacy control. Shortening the history does not
 unsay what the caller said out loud; the caller's words are still in the
 call's own record even when a step is not shown them.
 
-## Task group
+## Flow
 
 ```yaml agent.yaml
-tools:
-  - lookup_customer
-  - check_slots
-  - book_appointment
-
 # state.py: class State(BaseModel) with customer_id: str = "",
 # selected_slot: str = "" and
 # booking_status: Literal["booked", "cancelled"] | None = None
 
 agents:
-  appointment_desk:
-    instructions: instructions.md
+  - name: appointment_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tasks:
       - name: identify_customer
-        instructions: tasks/identify-customer.md
+        prompt: tasks/identify-customer.md
         tools:
           - lookup_customer
         save:
           - customer_id: result.customer_id
 
       - name: select_appointment
-        instructions: tasks/select-appointment.md
+        prompt: tasks/select-appointment.md
         tools:
           - check_slots
         save:
           - selected_slot: result.selected_slot
 
       - name: finalize_appointment
-        instructions: tasks/finalize-appointment.md
+        prompt: tasks/finalize-appointment.md
         tools:
           - book_appointment
         save:
           - booking_status: result.booking_status
-    task_groups:
-      - appointment_flow
-
-task_groups:
-  appointment_flow:
-    when: The caller wants to book, reschedule, or cancel an appointment.
-    steps:
-      - identify_customer
-      - select_appointment
-      - finalize_appointment
+    flows:
+      - name: appointment_flow
+        when: The caller wants to book, reschedule, or cancel an appointment.
+        steps:
+          - identify_customer
+          - select_appointment
+          - finalize_appointment
 ```
 
-The three member tasks are nested inside the agent that runs the group, the
+The three member tasks are nested inside the agent that runs the flow, the
 same way any other task is. None of them carries its own `when:`: a step's
-trigger is the group's, not its own, so the group runs them in order once it
+trigger is the flow's, not its own, so the flow runs them in order once it
 starts. Each name in `steps` is a task already declared inside some agent's
 own `tasks:` list. The order is a guarantee, not a request in a prompt. A
-group contains tasks, not other groups.
+flow contains tasks, not other flows.
 
-An agent runs a group by naming it in its own `task_groups:` list, the same
-way it names a handoff or an escalation. It costs one model request to enter,
-whatever the group then runs: each step after the first opens by itself. The
+The agent that writes the block defines the flow, and another agent runs it by
+naming it in its own `flows:` list, the same way it names a handoff or a
+transfer. It costs one model request to enter,
+whatever the flow then runs: each step after the first opens by itself. The
 same tasks written as separate `when:`-bearing tasks cost a request per step,
 and the extra request speaks nothing and does nothing but name the next task.
-The group's `context_scope` governs
-how the members relate while the group runs. It does not replace a member
+The flow's `context_scope` governs
+how the members relate while the flow runs. It does not replace a member
 task's `context:` block. A member may omit both `save:` and `context:` when it
 saves no value and the default spoken-message history is right.
+
+A flow can say a line as it starts, with `say:`. It can also hold `fills:`, the
+State values the agent fills in when it starts the flow, and `non_blocking:`,
+the steps whose failure is recorded while the flow goes on. A task takes
+`fills:` the same way.
 
 | Field | Values | What it does |
 |---|---|---|
@@ -656,12 +655,12 @@ saves no value and the default spoken-message history is right.
 | `then_target` | an agent name | required with `transfer`, illegal otherwise |
 | `merge` | `results` (default) | how the steps' results are combined |
 
-Write a field only to change its default. A group that shares context and
+Write a field only to change its default. A flow that shares context and
 returns to its owner writes none of them.
 
 **Choose the conversation each member receives:**
 
-A step is a bare task name, or an item that says how the group treats it:
+A step is a bare task name, or an item that says how the flow treats it:
 
 ```yaml agent.yaml
     steps:
@@ -671,24 +670,24 @@ A step is a bare task name, or an item that says how the group treats it:
 ```
 
 `skip_when_confirmed:` names a variable that step confirms, through `confirm:`
-on the variable. The group skips the step when the variable is confirmed as the
-group starts, which is what makes a second booking on one call cost nothing. A
+on the variable. The flow skips the step when the variable is confirmed as the
+flow starts, which is what makes a second booking on one call cost nothing. A
 variable nobody confirms, or one another step confirms, is refused.
 
-The side effect is the point: a step some group names this way withdraws what it
+The side effect is the point: a step some flow names this way withdraws what it
 confirms every time it is entered, standalone entry included, so a caller
 correcting the value re-verifies it and the next run does not skip on the
 strength of what they just replaced.
 
-A group also stops when a step ends unserved: the later steps do not run and the
+A flow also stops when a step ends unserved: the later steps do not run and the
 owner is handed the unserved status.
 
-- `context_scope: shared` lets later tasks inherit the group's running
+- `context_scope: shared` lets later tasks inherit the flow's running
   conversation, filtered by each task's own `context.history`.
-- `context_scope: isolated` starts each member without inherited group
+- `context_scope: isolated` starts each member without inherited flow
   conversation. Saved variables remain available through explicit prompt references.
 
-**A task or group that already ran is refused until the caller speaks again.**
+**A task or flow that already ran is refused until the caller speaks again.**
 Not authorable, and it applies to every step on both code targets. A completed
 result with no new caller turn above it is the model reading its own finished
 work as though it were a fresh request: a live call saved a booking, re-entered
@@ -709,8 +708,8 @@ or `unserved`, and reads saved values through its own prompt references.
 to the owner. `then: transfer` activates `then_target`; `then: end` ends the call.
 
 A member task may also list a handoff, under its own `handoffs:` key. Calling
-it ends that task and skips the group's remaining steps, then hands the caller
-directly to the receiving agent without returning through the group's owner.
+it ends that task and skips the flow's remaining steps, then hands the caller
+directly to the receiving agent without returning through the flow's owner.
 
 ## Every context decision, in one place
 
@@ -724,37 +723,34 @@ answer out loud for each boundary the package actually has.
 | a task or a handoff | which saved values can the receiver see? | only `{{references}}` in the receiver's own prompt |
 | a task | what does the task see when it starts? | `context.history` on the task |
 | a task | what is saved? | `save:` on the task; destination variables supply the types |
-| a task group | do the steps share context or each start clean? | `context_scope` |
-| a task group | what happens when the last step ends? | `then`, and `then_target` if it transfers |
-| a task group | what reaches later shared steps and returns to the caller? | completion status; saved values are visible only through explicit prompt references |
+| a flow | do the steps share context or each start clean? | `context_scope` |
+| a flow | what happens when the last step ends? | `then`, and `then_target` if it transfers |
+| a flow | what reaches later shared steps and returns to the caller? | completion status; saved values are visible only through explicit prompt references |
 
 Omitted history has a deliberate default: spoken messages without tool
 records. State other choices when they matter.
 
 Two things the table does not cover, because they trip people up:
 
-- **A catalog entry is not a tool file.** Names under `task_groups:`,
-  `handoffs:` and `escalations:` go in an agent's list of the same name; a
-  task is nested where it runs rather than named from a catalog. None of the
-  five belong in the package-level `tools:` list, which loads files from
-  `tools/`. A task may name a handoff and nothing else.
-- **Declaring a catalog entry without attaching it is a build error**, not dead
-  config. Write both halves in the same edit. The refusal names the file, the
-  line, and the agents you could attach it to:
+- **A handoff, transfer or flow is a block, not a tool file.** Write it in an
+  agent's `handoffs:`, `transfers:` or `flows:` list; a task is nested where it
+  runs. None of the five belong in the top-level `tools:` list, which holds only
+  tools with behaviour. A task may name a handoff and nothing else.
+- **A definition nobody reaches is a build error**, not dead config. The
+  refusal names the file, the line, and the agents you could attach it to:
 
   ```
   agent.yaml:73: handoff "to_front_desk" is declared but no agent reaches it; add it to the
     handoffs: of one of these agents: front_desk, disputes_specialist
   ```
 
-  The same check covers a task group nothing attaches, an agent no handoff
-  reaches, a `destinations:` entry no escalation resolves to, and a `tools:`
-  entry no agent lists. A tool named only by a `prefetch:` entry's
-  `tool:` field passes: the reachability walk marks it reachable on its own,
-  because it never reaches an agent's `tools:` list. A
-  task with no `when:` that no task group's `steps:` lists is refused too,
-  with its own message. An unreferenced `models:` entry is the one exception:
-  that map is a palette and unused entries are legal.
+  The same check covers a flow nothing attaches, an agent no handoff reaches,
+  and a file in `tools/` no agent lists. A tool named only by a `prefetch:`
+  entry's `call:` field passes: the reachability walk marks it reachable on its
+  own, because it never reaches an agent's `tools:` list. A task with no
+  `when:` that no flow's `steps:` lists is refused too, with its own message. An
+  unreferenced `models:` entry is the one exception: that map is a palette and
+  unused entries are legal.
 
 ## Where a target refuses a shape
 
@@ -786,7 +782,7 @@ Two things follow from that table.
 for one step and an expensive one for another, and the target is Pipecat, say
 so before you write it. On LiveKit it compiles.
 
-**Task groups stand on a LiveKit beta.** They compile and run, and unmute does
+**Flows stand on a LiveKit beta.** They compile and run, and unmute does
 not warn about it: a note about a framework's own maturity fired on every run of
 a working package and told the author nothing to do. Say it here instead, where
 somebody is choosing the shape, and point them at the LiveKit release notes if
@@ -819,12 +815,12 @@ prompt rule, so the prompt asks for the step at the point it is needed rather
 than forbidding it. `to_concierge` is the way back. Both tasks end on their own tool through
 `then: done` outcomes.
 
-The same package carries the task group, `book`: `verify_customer` with
-`skip_when_confirmed: customer_phone`, then `manage_booking`, on the group
+The same package carries the flow, `book`: `verify_customer` with
+`skip_when_confirmed: customer_phone`, then `manage_booking`, on the flow
 defaults: shared context, and the call returns to the concierge. `manage_booking` has no `when:`
-because the group runs it. `verify_customer` keeps a `when:` for one case
+because the flow runs it. `verify_customer` keeps a `when:` for one case
 only, a caller correcting their phone number; every other route into
-verification goes through the group. Read it before writing a group of your
+verification goes through the flow. Read it before writing a flow of your
 own, and repeat the LiveKit beta note in "Where a target refuses a shape"
 before a user ships one.
 

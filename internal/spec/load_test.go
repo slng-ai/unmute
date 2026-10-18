@@ -36,7 +36,7 @@ func TestLoadConnectionsStrictAndPathSafe(t *testing.T) { // telephony V1, V3
 			t.Fatal(err)
 		}
 		for name, content := range map[string]string{
-			"agent.yaml":   "version: 1\nentry_agent: intake\nmodels: {}\nagents: {}\n",
+			"agent.yaml":   "version: 1\nentry_agent: intake\nmodels: {}\nagents: []\n",
 			"targets.yaml": "channels: []\ntargets: {}\n",
 		} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
@@ -146,7 +146,7 @@ func TestLoadRejectsRetiredPipelineBlock(t *testing.T) { // V3, V22 (N15)
 // and the B5 decision must be consciously revisited in SCHEMA.md first.
 func TestV24_AgentRefsAreThinkAndSpeakOnly(t *testing.T) {
 	dir := t.TempDir()
-	yaml := "version: 1\nentry_agent: a\nagents:\n  a:\n    instructions: i.md\n    think: m\n    speak: v\n    listen: transcriber\n"
+	yaml := "version: 1\nentry_agent: a\nagents:\n  - name: a\n    prompt: i.md\n    think: m\n    speak: v\n    listen: transcriber\n"
 	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -182,8 +182,7 @@ func writeToolPackage(t *testing.T, body string) string {
 		"agent.yaml": "version: 1\nentry_agent: intake\n" +
 			"models:\n  think:\n    m: { provider: openai, model: gpt-4o-mini }\n" +
 			"  speak:\n    v: { provider: slng, model: \"slng/deepgram/aura:2-en\", voice: aura-2-thalia-en }\n" +
-			"agents:\n  intake:\n    instructions: instructions.md\n    think: m\n    speak: v\n    tools: [probe]\n" +
-			"tools: [probe]\n",
+			"agents:\n  - name: intake\n    prompt: instructions.md\n    think: m\n    speak: v\n    tools: [probe]\n",
 		"instructions.md":  "Be brief.\n",
 		"targets.yaml":     "channels:\n  - { name: web, kind: realtime_audio }\ntargets:\n  livekit:\n    provider: livekit\n    version: \"1.5.2\"\n    sdk_language: python\n",
 		"tools/probe.yaml": body,
@@ -382,7 +381,7 @@ func TestLoadKnowledgeDocuments(t *testing.T) {
 			"models:\n  think:\n    m: { provider: openai, model: gpt-4o-mini }\n" +
 			"  speak:\n    v: { provider: slng, model: \"slng/deepgram/aura:2-en\", voice: aura-2-thalia-en }\n" +
 			"knowledge:\n  refunds:\n    documents: kb/refunds\n  absent:\n    documents: kb/nowhere\n" +
-			"agents:\n  intake:\n    instructions: instructions.md\n    think: m\n    speak: v\n    tools: []\n" +
+			"agents:\n  - name: intake\n    prompt: instructions.md\n    think: m\n    speak: v\n    tools: []\n" +
 			"channels:\n  web: { kind: realtime_audio }\n"),
 		"instructions.md":        []byte("Be brief.\n"),
 		"targets.yaml":           []byte("targets:\n  livekit:\n    provider: livekit\n    version: \"1.5.2\"\n    sdk_language: python\n"),
@@ -437,10 +436,10 @@ func TestLoadRefusesATaskNameDefinedByTwoAgents(t *testing.T) {
 	dir := t.TempDir()
 	yaml := "version: 1\nentry_agent: front_desk\n" +
 		"agents:\n" +
-		"  front_desk:\n    instructions: instructions.md\n    think: m\n    speak: v\n" +
-		"    tasks:\n      - name: verify_customer\n        when: The caller has not been identified.\n        instructions: instructions.md\n" +
-		"  back_office:\n    instructions: instructions.md\n    think: m\n    speak: v\n" +
-		"    tasks:\n      - name: verify_customer\n        when: A back-office check is needed.\n        instructions: instructions.md\n"
+		"  - name: front_desk\n    prompt: instructions.md\n    think: m\n    speak: v\n" +
+		"    tasks:\n      - name: verify_customer\n        when: The caller has not been identified.\n        prompt: instructions.md\n" +
+		"  - name: back_office\n    prompt: instructions.md\n    think: m\n    speak: v\n" +
+		"    tasks:\n      - name: verify_customer\n        when: A back-office check is needed.\n        prompt: instructions.md\n"
 	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -471,13 +470,13 @@ func TestLoadRejectsRetiredFieldSpellings(t *testing.T) {
 		},
 		{
 			name:     "agent-level model",
-			yaml:     "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: i.md\n    model: m\n",
+			yaml:     "version: 1\nentry_agent: intake\nagents:\n  - name: intake\n    prompt: i.md\n    model: m\n",
 			field:    "model",
 			position: "6:5",
 		},
 		{
 			name:     "agent-level voice",
-			yaml:     "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: i.md\n    voice: v\n",
+			yaml:     "version: 1\nentry_agent: intake\nagents:\n  - name: intake\n    prompt: i.md\n    voice: v\n",
 			field:    "voice",
 			position: "6:5",
 		},
@@ -503,8 +502,8 @@ func TestLoadRejectsRetiredFieldSpellings(t *testing.T) {
 func TestLoadTaskItemAcceptsBareNameAndMapping(t *testing.T) {
 	dir := t.TempDir()
 	yaml := "version: 1\nentry_agent: intake\n" +
-		"agents:\n  intake:\n    instructions: instructions.md\n    think: m\n    speak: v\n" +
-		"    tasks:\n      - look_up_order\n      - name: verify_customer\n        when: The caller has not been identified.\n        instructions: instructions.md\n"
+		"agents:\n  - name: intake\n    prompt: instructions.md\n    think: m\n    speak: v\n" +
+		"    tasks:\n      - look_up_order\n      - name: verify_customer\n        when: The caller has not been identified.\n        prompt: instructions.md\n"
 	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}

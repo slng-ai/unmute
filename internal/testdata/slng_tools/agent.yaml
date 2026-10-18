@@ -14,7 +14,9 @@
 # request tool, so the runbook has both kinds of Vault name to group.
 
 version: 2
+
 name: slng-tools-fixture
+
 entry_agent: support
 
 secrets:
@@ -51,8 +53,8 @@ variables:
     source: call_start
 
 agents:
-  support:
-    instructions: instructions.md
+  - name: support
+    prompt: instructions.md
     think: reasoning
     speak: front_desk
     tools:
@@ -66,9 +68,6 @@ tools:
     start:
       say:
         - One moment while I look that up.
-  - refund
-  - internal_docs
-  - end_call
 
 conversation:
   greeting:
@@ -78,6 +77,6 @@ conversation:
     # substitutes one into an MCP server URL and nowhere else, and a greeting is
     # a template whose placeholder names carry no dollar, so a token here is
     # refused when the agent is pushed rather than when the call is placed.
-    text: "Hi {{state.customer_name}}, you have reached Acme support."
+    say: "Hi {{state.customer_name}}, you have reached Acme support."
   interruption:
     enabled: true

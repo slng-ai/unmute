@@ -149,11 +149,11 @@ func TestValidateSlngRefusesUnsupportedPackageShapes(t *testing.T) {
 		},
 		{
 			name: "no greeting", file: "agent.yaml",
-			replace: "  greeting:\n    speaks_first: agent\n    text: \"Hi {{state.customer_name}}, you have reached Acme Support. How can I help?\"\n",
+			replace: "  greeting:\n    speaks_first: agent\n    say: \"Hi {{state.customer_name}}, you have reached Acme Support. How can I help?\"\n",
 			with:    "  greeting:\n    speaks_first: user\n",
 			// speaks_first: user is the honest way to ask for no greeting, and SLNG
 			// requires one, so this is the refusal an author actually meets.
-			behaviour: "cannot wait for the caller to speak first", fix: "conversation.greeting.text",
+			behaviour: "cannot wait for the caller to speak first", fix: "conversation.greeting.say",
 		},
 		{
 			name: "a turn model", file: "agent.yaml",
@@ -164,7 +164,7 @@ func TestValidateSlngRefusesUnsupportedPackageShapes(t *testing.T) {
 		},
 		{
 			name: "langfuse tracing", file: "agent.yaml",
-			replace: "\ntools:", with: "\ntracing:\n  provider: langfuse\n\ntools:",
+			replace: "\nmodels:", with: "\ntracing:\n  provider: langfuse\n\nmodels:",
 			behaviour: "cannot install a Langfuse exporter", fix: "read the traces in the SLNG dashboard",
 		},
 	} {

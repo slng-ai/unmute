@@ -23,23 +23,41 @@ variables:
     confirm: identify
 
 agents:
-  lina:
-    instructions: instructions.md
+  - name: lina
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
       - payment_policy
       - end_call
-    task_groups:
-      - account
-      - callback
-      - wrong_number
+    flows:
+      - name: account
+        when: The person says they are the account holder, or asks what this is about.
+        steps:
+          - task: identify
+            skip_when_confirmed: birth_date
+          - talk_account
+      - name: callback
+        when: >-
+          Someone other than the holder answered, or the holder wants to talk
+          another time.
+        steps:
+          - take_callback
+        then: end
+        fills:
+          - callback_day
+          - callback_time
+      - name: wrong_number
+        when: Nobody of the holder's name can be reached at this number.
+        steps:
+          - take_off_list
+        then: end
     tasks:
       - name: identify
         when: >-
           Only when the holder wants to correct the date of birth they gave.
           Never before `account`: that flow checks the date of birth itself.
-        instructions: tasks/identify.md
+        prompt: tasks/identify.md
         start:
           say:
             - >-
@@ -83,7 +101,7 @@ agents:
           - due_spoken: result.due_spoken?
 
       - name: talk_account
-        instructions: tasks/talk-account.md
+        prompt: tasks/talk-account.md
         start:
           listen: true
         tools:
@@ -146,7 +164,7 @@ agents:
           - outcome: result.status
 
       - name: take_callback
-        instructions: tasks/callback.md
+        prompt: tasks/callback.md
         tools:
           - name: schedule_callback
             confirm:
@@ -170,7 +188,7 @@ agents:
           - outcome: result.status
 
       - name: take_off_list
-        instructions: tasks/wrong-number.md
+        prompt: tasks/wrong-number.md
         tools:
           - name: mark_wrong_number
             confirm:
@@ -192,44 +210,21 @@ agents:
         save:
           - outcome: result.status
 
-task_groups:
-  account:
-    when: The person says they are the account holder, or asks what this is about.
-    steps:
-      - task: identify
-        skip_when_confirmed: birth_date
-      - talk_account
-  callback:
-    when: >-
-      Someone other than the holder answered, or the holder wants to talk
-      another time.
-    steps:
-      - take_callback
-    then: end
-    arguments:
-      - callback_day
-      - callback_time
-  wrong_number:
-    when: Nobody of the holder's name can be reached at this number.
-    steps:
-      - take_off_list
-    then: end
-
 prefetch:
   - name: today
     clock: now
     timezone: Asia/Dubai
-    assign:
+    save:
       - today: result.date
       - weekday: result.day_of_week
   # Whose account it is, before the greeting. Nothing else of it.
   - name: account
-    tool: open_account
+    call: open_account
     writes: false
     # An id the ledger does not hold: the call never starts, so nobody is rung
     # about nothing.
     refuse_call: "call_start: account_id: no account {{state.account_id}}"
-    assign:
+    save:
       - first_name: result.first_name
       - last_name: result.last_name
       - deadline: result.deadline
@@ -272,8 +267,6 @@ models:
       pace: balanced
 
 tools:
-  - open_account
-  - verify_holder
   - name: good_time
     save:
       - said: result.said
@@ -305,17 +298,14 @@ tools:
               - after_deadline
         say:
           - "I can only note a day up to {{state.deadline_spoken}}. Which day by then works for you?"
-  - mark_wrong_number
   - name: note_concern
     save:
       - said: result.said
-  - payment_policy
-  - end_call
 
 conversation:
   greeting:
     speaks_first: agent
-    text: >-
+    say: >-
       Hello, this is Lina calling from Wasla. Am I speaking with
       {{state.first_name}} {{state.last_name}}?
   max_duration: 10m

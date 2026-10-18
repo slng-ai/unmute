@@ -186,9 +186,9 @@ connections/twilio_sip.yaml:1: kind is no longer written in a connection. Every 
   in the catalog is telephony, so transport: sip already says it
 ```
 
-**The numbers you dial** live in `agent.yaml` under
-[`destinations:`](/reference/agent-yaml), not here. A destination is who this
-agent escalates to, which is the same desk whichever carrier reaches it.
+**The numbers you dial** live in `agent.yaml` under a
+[transfer's `to:`](/reference/agent-yaml#transfers), not here. A transfer names who this
+agent puts the caller through to, which is the same desk whichever carrier reaches it.
 
 **A route the target's provider does not have** is refused with the routes it
 does have:
