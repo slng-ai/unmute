@@ -1,5 +1,5 @@
 {
-  "digest": "50914848d876b771f7501ad431cb95c68663426d642948f545b53500ce52255b",
+  "digest": "e1b802d62479032187303188cf17d4d39e32ab87bccf3d4e6ef2020ed201b430",
   "report": {
     "tools": {
       "find_or_create_customer": {
@@ -180,29 +180,6 @@
             "status"
           ],
           "title": "Diary",
-          "type": "object"
-        }
-      },
-      "get_current_date": {
-        "description": "Get today's date in the salon's own timezone.",
-        "input": {
-          "properties": {},
-          "title": "get_current_date_arguments",
-          "type": "object"
-        },
-        "output": {
-          "description": "What ``get_current_date`` returns.",
-          "properties": {
-            "date": {
-              "description": "Today's date in the salon's timezone, YYYY-MM-DD",
-              "title": "Date",
-              "type": "string"
-            }
-          },
-          "required": [
-            "date"
-          ],
-          "title": "Today",
           "type": "object"
         }
       },
@@ -502,5 +479,5 @@
       }
     }
   },
-  "source": "examples/salon-concierge-unoptimized"
+  "source": "examples/salon-concierge-single-prompt"
 }
