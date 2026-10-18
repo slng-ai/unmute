@@ -5,7 +5,7 @@ slng: hotel_info
 # The one parameter the tool takes is pinned to a fixed value. The model never
 # sees hotel_id, so it can neither ask the guest for it nor send the wrong one.
 # To serve a second property, change this one line and the defaults above.
-inject:
+with:
   - hotel_id: lumbre-sol
 
 effect: returns_data

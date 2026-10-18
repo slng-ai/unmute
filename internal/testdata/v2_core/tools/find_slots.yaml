@@ -1,15 +1,5 @@
 local:
   handler: tools/salon.py:find_slots
-assign:
-  - offered_slots: result.slots
-replies:
-  - when:
-      - status: [none_free, closed]
-    say:
-      - "Nothing is free on {{state.preferred_day}}. Would another day work?"
-      - That day is full, I'm afraid. Shall I try another?
 precheck: tools/salon.py:check_day
-hidden:
-  - read_back
 interruption: provider_default
 effect: returns_data

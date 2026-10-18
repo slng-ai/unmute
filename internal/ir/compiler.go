@@ -542,6 +542,8 @@ type Reply struct {
 	Tool string              `json:"tool,omitempty" yaml:"tool,omitempty"`
 	When map[string][]string `json:"when,omitempty" yaml:"when,omitempty"`
 	Say  []string            `json:"say" yaml:"say"`
+	// Assign is what the matching result saves, read from the result.
+	Assign []AssignTo `json:"assign,omitempty" yaml:"assign,omitempty"`
 }
 
 // OpensWith is a tool code runs as a step opens. Arguments maps each tool

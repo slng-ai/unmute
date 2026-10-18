@@ -1,5 +1,2 @@
 local:
   handler: tools/depot.py:find_parcel
-announce:
-  - Let me look that up.
-  - One moment.

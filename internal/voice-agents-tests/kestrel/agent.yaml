@@ -30,37 +30,33 @@ agents:
       - name: find_policy
         instructions: tasks/find-policy.md
         tools:
-          - lookup_policy
-        # When the main agent passed both values, the read-back plays with no
-        # model request.
-        opens_with:
-          tool: lookup_policy
-          arguments:
-            - policy_number: policy_number
-            - birth_date: birth_date
-        replies:
-          - tool: lookup_policy
-            when:
-              - found:
-                  - false
-              - status:
-                  - looked_up
-            say:
-              - >-
-                I'm sorry, I can't find a policy with that number and date of
-                birth. Could you check the number on your policy documents?
-        finish:
-          - tool: lookup_policy
-            success:
-              - found:
-                  - true
+          - name: lookup_policy
             confirm:
               - >-
                 Is your policy number {{state.policy_number}}, with a date of
                 birth of {{state.birth_date}}?
-            say:
-              - "Thank you, {{state.policy.first_name}}, I have your policy."
-        assign:
+            outcomes:
+              - if:
+                  - found:
+                      - true
+                say:
+                  - "Thank you, {{state.policy.first_name}}, I have your policy."
+                then: done
+              - if:
+                  - found:
+                      - false
+                  - status:
+                      - looked_up
+                say:
+                  - >-
+                    I'm sorry, I can't find a policy with that number and date of
+                    birth. Could you check the number on your policy documents?
+        start:
+          call: lookup_policy
+          with:
+            - policy_number: state.policy_number
+            - birth_date: state.birth_date
+        save:
           - policy: result.policy
           - policy_number: input.policy_number
           - birth_date: input.birth_date
@@ -69,24 +65,22 @@ agents:
         instructions: tasks/take-report.md
         tools:
           - note_facts
-          - file_claim
-        opens_with:
-          tool: note_facts
-          say:
-            - "{{state.next_question}}"
-        finish:
-          - tool: file_claim
-            success:
-              - filed:
-                  - true
+          - name: file_claim
             confirm:
               - "{{state.read_back}}"
-            say:
-              - >-
-                Your claim is filed. Your claim number is {{state.claim_number}}.
-                A claims handler will call you within one working day. Is there
-                anything else I can help with?
-        assign:
+            outcomes:
+              - if:
+                  - filed:
+                      - true
+                say:
+                  - >-
+                    Your claim is filed. Your claim number is {{state.claim_number}}.
+                    A claims handler will call you within one working day. Is there
+                    anything else I can help with?
+                then: done
+        start:
+          call: note_facts
+        save:
           - claim_number: result.claim_number
 
 task_groups:
@@ -146,9 +140,42 @@ models:
       pace: patient
 
 tools:
-  - lookup_policy
-  - note_facts
-  - file_claim
+  - name: lookup_policy
+    start:
+      say:
+        - Let me find that.
+        - One moment.
+# A number that is not KP and six digits is refused before it is read back.
+    outcomes:
+      - if:
+          - status:
+              - not_a_number
+        say:
+          - A policy number is KP and six digits. Could you read me yours again?
+  - name: note_facts
+    hidden:
+      - report
+      - read_back
+# Saved as soon as it returns, so the next answer merges into the report.
+    save:
+      - report: result.report
+      - read_back: result.read_back
+      - next_question: result.next_question
+    outcomes:
+      - if:
+          - status:
+              - future_day
+        say:
+          - That day hasn't happened yet. On which day did it happen?
+      - if:
+          - complete:
+              - false
+        say:
+          - "{{state.next_question}}"
+  - name: file_claim
+    start:
+      say:
+        - Filing that now.
   - coverage_guide
   - end_call
 

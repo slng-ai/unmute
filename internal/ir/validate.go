@@ -386,10 +386,10 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 				// capability that declares settings has anywhere to put one.
 				// validateBuiltinTool holds each to the keys it declares.
 				if prebuilt, known := targetcap.LookupPrebuilt(tool.Builtin); !known || len(prebuilt.Config) == 0 {
-					errors = add(errors, fmt.Sprintf("tool %q inject is legal for webhook, local and slng execution, and on a builtin for its own settings: builtin %q has none", name, tool.Builtin))
+					errors = add(errors, fmt.Sprintf("tool %q with: is legal for webhook, local and slng execution, and on a builtin for its own settings: builtin %q has none", name, tool.Builtin))
 				}
 			default:
-				errors = add(errors, fmt.Sprintf("tool %q inject is legal for webhook, local and slng execution only", name))
+				errors = add(errors, fmt.Sprintf("tool %q with: is legal for webhook, local and slng execution only", name))
 			}
 		}
 		// announce needs a body to speak before, so it follows inject's rule.
@@ -411,14 +411,14 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			// no seam in front of it.
 			case ToolWebhook, ToolLocal, ToolKnowledge, ToolSlngHosted, ToolBuiltin:
 			default:
-				errors = add(errors, fmt.Sprintf("tool %q announce is legal for webhook, local, knowledge, slng and builtin execution only", name))
+				errors = add(errors, fmt.Sprintf("tool %q start: say: is legal for webhook, local, knowledge, slng and builtin execution only", name))
 			}
 			// Fixed sentence, same rule as the transfer announcement: a
 			// rendered line would need the variable set to be in scope at the
 			// moment the tool fires, which is not a promise this field makes.
 			for _, line := range tool.Announce {
 				if HasTemplate(line) {
-					errors = add(errors, fmt.Sprintf("tool %q announce does not support templates", name))
+					errors = add(errors, fmt.Sprintf("tool %q start: say: does not support templates", name))
 					break
 				}
 			}
@@ -717,7 +717,7 @@ func warnOnStepsThatOfferNothing(agent *Agent) []string {
 			}
 			warnings = add(warnings, fmt.Sprintf(
 				"agent %q holds every tool of its step %q (%s), so it can do the step's work without entering it and the "+
-					"step's assign may never run: drop %s from agent %q tools and leave them on the step",
+					"step's save: may never run: drop %s from agent %q tools and leave them on the step",
 				agentName, delegate.Task, strings.Join(shared, ", "), strings.Join(shared, ", "), agentName))
 		}
 	}
@@ -1002,8 +1002,8 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		}
 		if task.Opening == OpeningListen && len(task.Announce) == 0 {
 			row.Warnings = append(row.Warnings, fmt.Sprintf(
-				"%s opens by listening and has no announce:, so the caller hears nothing until they speak; "+
-					"add an announce: line or drop opening: listen", name))
+				"%s opens with start: listen: true and no say:, so the caller hears nothing until they speak; "+
+					"add a say: line to start:, or drop listen: true", name))
 		}
 		if taskContexts[name] {
 			validateContext(task.Context, provider, caps, row)
@@ -1348,7 +1348,7 @@ func validatePrebuiltConfig(name string, tool Tool, prebuilt targetcap.Prebuilt,
 func validateSendSmsSender(name string, tool Tool, errors *[]string) {
 	sender, ok := tool.Inject["from_number"]
 	if !ok {
-		*errors = add(*errors, fmt.Sprintf("tool %q builtin send_sms needs `inject:` with one `from_number`, the sender in international format starting with a plus sign: SLNG requires the sender on the attachment and the model supplies the recipient and the body", name))
+		*errors = add(*errors, fmt.Sprintf("tool %q builtin send_sms needs `with:` with one `from_number`, the sender in international format starting with a plus sign: SLNG requires the sender on the attachment and the model supplies the recipient and the body", name))
 		return
 	}
 	for _, key := range sortedKeys(tool.Inject) {
@@ -2187,7 +2187,7 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 			// driver nowhere to speak before it runs. slng attaches it and the
 			// attachment carries the sentence like any other.
 			if targetcap.EmitsProject(provider) && len(tool.Announce) > 0 {
-				row.Errors = add(row.Errors, fmt.Sprintf("%s target cannot announce builtin %q: it is built from the SDK and there is no seam in front of it, so drop the `announce:` from tools/%s.yaml, or compile to slng which carries it on the attachment", provider, tool.Builtin, name))
+				row.Errors = add(row.Errors, fmt.Sprintf("%s target cannot announce builtin %q: it is built from the SDK and there is no seam in front of it, so drop the start: say: from %s's entry in agent.yaml, or compile to slng which carries it on the attachment", provider, tool.Builtin, name))
 			}
 		case ToolKnowledge:
 			applyCapability(caps, targetcap.FieldToolKnowledge, provider, row)

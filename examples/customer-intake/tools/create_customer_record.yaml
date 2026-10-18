@@ -7,11 +7,11 @@ description: >-
 # right: everything else was already said and saved, and asking the model to
 # retype it is how a digit changes between the turn it was agreed on and the
 # turn it was written down.
-inject:
-  - phone: "{{state.caller_phone}}"
-  - email: "{{state.caller_email}}"
-  - name: "{{state.contact.name}}"
-  - enquiry: "{{state.enquiry}}"
+with:
+  - phone: "state.caller_phone"
+  - email: "state.caller_email"
+  - name: "state.contact.name"
+  - enquiry: "state.enquiry"
 
 local:
   handler: tools/intake.py:create_customer_record

@@ -27,7 +27,7 @@ On this page:
 - [The block](#the-block) - the four keys
 - [The path renders per call](#the-path-renders-per-call) - variables in the URL
 - [Authentication](#authentication) - bearer or API key
-- [What the model fills in, and what it cannot](#what-the-model-fills-in-and-what-it-cannot) - input against inject
+- [What the model fills in, and what it cannot](#what-the-model-fills-in-and-what-it-cannot) - input against with
 - [Advanced](#advanced) - naming the base URL, describing the result
 - [Troubleshooting](#troubleshooting) - the refusals, and their fixes
 
@@ -38,9 +38,9 @@ input:
   type: object
   properties: {}
 
-inject:
-  - customer_id: "{{state.customer_id}}"
-  - dialed_number: "{{state.dialed_number}}"
+with:
+  - customer_id: "state.customer_id"
+  - dialed_number: "state.dialed_number"
   - channel: phone
 
 webhook:
@@ -51,7 +51,6 @@ webhook:
     type: bearer
     token_env: SALON_API_TOKEN
 
-announce: One moment while I confirm that.
 effect: returns_data
 interruption: provider_default
 ```
@@ -62,9 +61,19 @@ target refuses it, for the reason in the note above. `examples/hotel-concierge`
 ships no webhook tool: its places-search tool reaches SLNG through the
 hosted-tool block instead.
 
-`announce:` is the one line worth knowing about here, because a webhook is the
-tool most likely to keep the caller waiting. The agent speaks that exact sentence
-as the call starts and does not wait for it to finish, so the answer arrives no
+`start: say:` on the tool's entry in `agent.yaml` is the one line worth knowing
+about here, because a webhook is the tool most likely to keep the caller
+waiting:
+
+```yaml agent.yaml
+tools:
+  - name: confirm_appointment
+    start:
+      say:
+        - One moment while I confirm that.
+```
+
+The agent speaks that exact sentence as the call starts and does not wait for it to finish, so the answer arrives no
 later than it would in silence. It is a fixed sentence, and `{{variables}}` are
 refused. Full rules in [the behavior fields](/build/tools/overview#the-three-behavior-fields).
 
@@ -103,7 +112,7 @@ Pipecat and LiveKit read it at run time and never look at `base_url`.
 `{{state.customer_id}}` is a [variable](/build/variables), rendered when the tool is
 called, and the rendered value is URL-encoded for you. Because it renders per
 call rather than once at session start, a variable that only gets its value
-once a task assigns it partway through the call is fine here.
+once a task saves it partway through the call is fine here.
 
 If the variable has no value when the model calls the tool, the call is refused
 and the model is told what to ask the caller for, rather than sending a
@@ -140,31 +149,31 @@ there is no bearer-only rewrite to plan around any more.
 
 ## What the model fills in, and what it cannot
 
-`input` is the model's half of the request. `inject` is yours.
+`input` is the model's half of the request. `with` is yours.
 
 ```yaml
 input:
   type: object
   properties: {}
 
-inject:
-  - customer_id: "{{state.customer_id}}"
-  - dialed_number: "{{state.dialed_number}}"
+with:
+  - customer_id: "state.customer_id"
+  - dialed_number: "state.dialed_number"
   - channel: phone
 ```
 
-Injected values are merged into the call and **never shown to the model**, so it
+Values in `with:` are merged into the call and **never shown to the model**, so it
 can neither see them nor overwrite them. That is the place a customer id, a
 captured slot, or the number the call went out to rides along.
 
-The tool above takes no parameters at all: everything the API needs is injected.
+The tool above takes no parameters at all: everything the API needs comes from `with:`.
 The model can call it or not call it, and that is the whole of its authority. It
 cannot invent a customer id.
 
-A value that is exactly one `{{token}}` keeps that field's type from `state.py`, so a
+A value that is exactly one `state.x` or `{{token}}` keeps that field's type from `state.py`, so a
 number stays a number.
 
-Every injected value must be a scalar. Strings, numbers, booleans, and null are
+Every `with:` value must be a scalar. Strings, numbers, booleans, and null are
 legal; maps and lists are refused.
 
 ## Advanced
@@ -264,18 +273,18 @@ livekit: tool "confirm_appointment" auth header is not a bearer field: bearer al
 **Fix:** drop `header` from a `bearer` block, or switch `type` to `api_key` if
 the API really wants a named header.
 
-### A key is in both `input` and `inject`
+### A key is in both `input` and `with`
 
 A key cannot be in both lists, and the refusal explains the reason rather than
 just the rule:
 
 ```text wrap
-tools/confirm_appointment.yaml:5: tool "confirm_appointment" injects "customer_id", which
-  is also an input property; an injected value is hidden from the model, so it cannot
+tools/confirm_appointment.yaml:5: tool "confirm_appointment" passes "customer_id" in with:, which
+  is also an input property; a with: value is hidden from the model, so it cannot
   double as a parameter the model fills in
 ```
 
-**Fix:** decide who supplies it. Leave it in `inject:` for a value the model must
+**Fix:** decide who supplies it. Leave it in `with:` for a value the model must
 never see, or in `input:` for one the model fills in.
 
 ## Where to go next

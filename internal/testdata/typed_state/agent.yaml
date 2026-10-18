@@ -43,7 +43,7 @@ agents:
       - name: confirm_number
         when: Read the caller's number back and get a yes before anything acts on it.
         instructions: tasks/confirm_number.md
-        assign:
+        save:
           - caller_phone: result.caller_phone
         context:
           history: reset
@@ -53,7 +53,7 @@ agents:
         instructions: tasks/book.md
         tools:
           - inspect_state
-        assign:
+        save:
           - caller_reason+: result.reason
           - appointments+: result.appointment
           - last_appointment: result.appointment?
@@ -67,7 +67,7 @@ agents:
       - name: take_contact
         when: The caller wants the confirmation sent to them.
         instructions: tasks/contact.md
-        assign:
+        save:
           - booked_for: result.booked_for
           - reminder_email: result.booked_for.email
         context:
@@ -76,7 +76,7 @@ agents:
       - name: record_flags
         when: Record the count and agreement.
         instructions: tasks/flags.md
-        assign:
+        save:
           - count: result.count
           - accepted: result.accepted
         context:

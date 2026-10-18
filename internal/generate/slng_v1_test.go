@@ -576,7 +576,7 @@ func TestSlngEmitsTheHostedNameAndKeepsTheLocalOne(t *testing.T) {
 		}
 	}
 	if err := os.WriteFile(filepath.Join(dir, "tools", "order_status.yaml"),
-		[]byte("slng: check_order\nannounce: One moment while I look that up.\n"), 0o600); err != nil {
+		[]byte("slng: check_order\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	agentYAML := filepath.Join(dir, "agent.yaml")

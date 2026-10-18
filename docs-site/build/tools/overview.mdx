@@ -16,7 +16,7 @@ On this page:
 - [Choosing a kind](#choosing-a-kind) - stop at the first fit
 - [Fields inside each execution block](#fields-inside-each-execution-block) - every key, per block
 - [Which fields the block allows](#which-fields-the-block-allows) - the shared contract fields
-- [The three behavior fields](#the-three-behavior-fields) - announce, effect, interruption
+- [The three behavior fields](#the-three-behavior-fields) - start: say, effect, interruption
 - [Define once, attach by name](#define-once-attach-by-name) - one definition, two lists
 - [Troubleshooting](#troubleshooting) - the refusals you will meet
 
@@ -97,7 +97,7 @@ Both blocks have no fields, but YAML still needs an explicit body: write
 | `provider_hosted:` | no | no | no | no |
 
 Twilio runs `version: 2` typed handlers, and the only builtin it takes is `end_call`. The target runs one agent with no tasks, and it refuses
-`announce` and `interruption: cancel`. [The Twilio target](/targets/twilio#what-the-package-may-carry)
+`start: say` and `interruption: cancel`. [The Twilio target](/targets/twilio#what-the-package-may-carry)
 lists every refusal.
 
 This table is the capability table for `version: 1`. On version 2, livekit and pipecat compile only `local:`, `webhook:`, `knowledge:` and the `end_call` builtin: they refuse `mcp:`, `slng:` and every other builtin, so those are SLNG-only for now.
@@ -151,8 +151,8 @@ hidden from the main agent.
 
 | Field | SLNG | LiveKit | Pipecat |
 |---|---|---|---|
-| `announce` | yes | yes | yes |
-| `inject` | yes | yes | yes |
+| `start: say` | yes | yes | yes |
+| `with` | yes | yes | yes |
 | `auth` | yes | yes | yes |
 | `interruption` other than `provider_default` | **no** | warns | yes |
 
@@ -222,15 +222,15 @@ The contract fields are shared, with one exception that matters:
 
 <ParamField path="output" type="object">
   An author-side JSON Schema with `type: object`. Omit for no declared result schema. Used
-  by assignments and success checks; it is not a general runtime result validator or a
+  by `save:` rows and outcome matches; it is not a general runtime result validator or a
   model prompt. A version 2 local tool leaves it out, because its return model is the
   output. Refused on builtin, MCP, knowledge, and hosted `slng` tools.
 </ParamField>
 
-<ParamField path="inject" type="list of one-key pairs">
-  Hidden argument/value pairs. Values are scalars or strings with `{{state.variable}}`
-  placeholders. Omit to inject nothing. Legal on local, webhook, and hosted `slng` tools;
-  builtin `send_sms` requires its literal `from_number` setting.
+<ParamField path="with" type="list of one-key pairs">
+  Hidden argument/value pairs. A value is `state.variable`, a scalar, or a string with
+  `{{state.variable}}` placeholders. Omit to pass nothing. Legal on local, webhook, and
+  hosted `slng` tools; builtin `send_sms` requires its literal `from_number` setting.
 </ParamField>
 
 <ParamField path="interruption" type="string">
@@ -243,25 +243,33 @@ The contract fields are shared, with one exception that matters:
   builtins whose effect comes from the registry. Refused on MCP and knowledge tools.
 </ParamField>
 
-<ParamField path="announce" type="string">
-  A fixed spoken sentence with no `{{variables}}`. Omit for no announcement. Legal on
-  local, webhook, knowledge, and hosted `slng` tools.
+<ParamField path="tools[].start.say" type="list of strings">
+  Written on the tool's entry in `agent.yaml`, not in this file. A fixed spoken sentence
+  with no `{{variables}}`. Omit for no line. Legal on local, webhook, knowledge, and
+  hosted `slng` tools.
 </ParamField>
 
 An `mcp:` file carries none of them, because the server owns each tool's contract.
 A `builtin:` file takes no `input` or `output`. The registry supplies its contract
 and default description, and your `description` is added on top if you write one.
-A `knowledge:` file takes no `input`, `output`, `inject` or `effect` either: the
+A `knowledge:` file takes no `input`, `output`, `with` or `effect` either: the
 tool asks for one string and returns passages, so there is nothing to describe and
-nothing to merge into. It does take `description` and `announce`, and you should
-write both.
+nothing to merge into. It does take `description` and a `start: say:` line on its entry in `agent.yaml`, and
+you should write both.
 
 ## The three behavior fields
 
-```yaml
+```yaml tools/check_calendar.yaml
 interruption: provider_default
 effect: returns_data
-announce: Let me check the calendar.
+```
+
+```yaml agent.yaml
+tools:
+  - name: check_calendar
+    start:
+      say:
+        - Let me check the calendar.
 ```
 
 <ParamField path="interruption" type="string">
@@ -274,17 +282,13 @@ announce: Let me check the calendar.
   builtins whose effect comes from the registry. Refused on MCP and knowledge tools.
 </ParamField>
 
-<ParamField path="announce" type="string">
-  A fixed spoken sentence with no `{{variables}}`. Omit for no announcement. Legal on
-  local, webhook, knowledge, and hosted `slng` tools.
-</ParamField>
-
-All three are optional, and each is honored differently per target. Pipecat maps
+The `start: say:` line is the one of the three written on the tool's entry in
+`agent.yaml`, as in the file listing above. All three are optional, and each is honored differently per target. Pipecat maps
 `interruption` onto its own cancel-on-interruption setting, while LiveKit runs
 tools to completion, so a non-default value warns there. `effect` is fixed by the
 registry on a `builtin:` tool, and a conflicting value fails.
 
-### Using `announce:`
+### Using `start: say:`
 
 The line is spoken once, as the tool starts, before the tool's own work. Nothing
 waits for it to finish playing, so the caller hears the tool's answer no later
@@ -317,7 +321,7 @@ to cover.
 
   <Accordion title="The mistake worth avoiding">
     If your instructions already tell the agent to say it is checking something,
-    delete that line when you add `announce:`. Otherwise the model speaks its own
+    delete that line when you add `start: say:`. Otherwise the model speaks its own
     version, the tool speaks the fixed one, and the caller hears both.
   </Accordion>
 
@@ -342,11 +346,11 @@ to cover.
 
 **Define each tool once.** The full definition exists only in
 `tools/<name>.yaml`: `description`, `input` and optional `output` on a webhook tool,
-optional `inject`, and one execution block. A local handler lives beside it in a
+optional `with`, and one execution block. A local handler lives beside it in a
 Python file, and the block names its function as `tools/<file>.py:<function>`.
 Do not put any of those fields in `agent.yaml`.
 
-Every `tools:` entry in `agent.yaml` is a string name:
+Every `tools:` entry in an agent's or task's list in `agent.yaml` is a string name. The top-level list may also write a block, with `save:`, `outcomes:`, `hidden:` and `start:`:
 
 - the top-level list loads `tools/<name>.yaml`,
 - `agents.<name>.tools` grants an agent access, and
@@ -386,7 +390,7 @@ name with an inline mapping of `description`, `input`, `output`, `local`, or
 `webhook`.
 
 A tool's optional `output:` remains its own JSON Schema. A task does not copy
-that schema. Its `assign:` list derives finish fields from destination
+that schema. Its `save:` list derives finish fields from destination
 variables and saves only the values needed later.
 
 ## Troubleshooting

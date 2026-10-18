@@ -50,28 +50,28 @@ agents:
           The caller says the number read back is wrong, or there was no number
           to read back.
         instructions: tasks/other-number.md
-        opening: listen
-        announce:
-          - What is your full phone number, starting with plus thirty-four?
+        start:
+          say:
+            - What is your full phone number, starting with plus thirty-four?
+          listen: true
+          call: check_number
+          with:
+            - phone: state.phone
         arguments:
           - phone
         tools:
-          - check_number
-        opens_with:
-          tool: check_number
-          arguments:
-            - phone: phone
-        finish:
-          - tool: check_number
-            success:
-              - status:
-                  - known
-                  - new
+          - name: check_number
             confirm:
-              - "Let me check: is your number {{state.phone}}?"
-            say:
-              - "{{state.said}}"
-        assign:
+              - "Let me check: is your number {{input.phone}}?"
+            outcomes:
+              - if:
+                  - status:
+                      - known
+                      - new
+                say:
+                  - "{{result.said}}"
+                then: done
+        save:
           - phone: input.phone
           - learner_id: result.learner_id?
           - learner_name: result.learner_name?
@@ -80,28 +80,25 @@ agents:
       - name: sign_up
         when: A caller with no profile agrees to create one.
         instructions: tasks/sign-up.md
-        opening: listen
-        announce:
-          - Great. What would you like me to call you?
+        start:
+          say:
+            - Great. What would you like me to call you?
+          listen: true
         tools:
-          - create_profile
-        finish:
-          - tool: create_profile
-            success:
-              - status:
-                  - created
+          - name: create_profile
             confirm:
               - >-
-                Shall I create your profile as {{state.profile_name}}, learning
-                {{state.profile_learn}} for {{state.profile_goal}}, at level
-                {{state.profile_level}}?
-            say:
-              - "{{state.said}}"
-        assign:
-          - profile_name: input.name
-          - profile_learn: input.learn
-          - profile_goal: input.goal
-          - profile_level: input.level
+                Shall I create your profile as {{input.name}}, learning
+                {{input.learn}} for {{input.goal}}, at level
+                {{input.level}}?
+            outcomes:
+              - if:
+                  - status:
+                      - created
+                say:
+                  - "{{result.said}}"
+                then: done
+        save:
           - learner_id: result.learner_id?
           - learner_name: result.learner_name?
           - notes: result.notes?
@@ -126,28 +123,28 @@ agents:
           The caller says the number read back is wrong, or there was no number
           to read back.
         instructions: tasks/other-number.md
-        opening: listen
-        announce:
-          - ¿Me dices tu número de teléfono completo, empezando por más treinta y cuatro?
+        start:
+          say:
+            - ¿Me dices tu número de teléfono completo, empezando por más treinta y cuatro?
+          listen: true
+          call: check_number
+          with:
+            - phone: state.phone
         arguments:
           - phone
         tools:
-          - check_number
-        opens_with:
-          tool: check_number
-          arguments:
-            - phone: phone
-        finish:
-          - tool: check_number
-            success:
-              - status:
-                  - known
-                  - new
+          - name: check_number
             confirm:
-              - "A ver si lo tengo bien: ¿tu número es {{state.phone}}?"
-            say:
-              - "{{state.said}}"
-        assign:
+              - "A ver si lo tengo bien: ¿tu número es {{input.phone}}?"
+            outcomes:
+              - if:
+                  - status:
+                      - known
+                      - new
+                say:
+                  - "{{result.said}}"
+                then: done
+        save:
           - phone: input.phone
           - learner_id: result.learner_id?
           - learner_name: result.learner_name?
@@ -156,27 +153,24 @@ agents:
       - name: sign_up_es
         when: A caller with no profile agrees to create one.
         instructions: tasks/sign-up.md
-        opening: listen
-        announce:
-          - Genial. ¿Cómo quieres que te llame?
+        start:
+          say:
+            - Genial. ¿Cómo quieres que te llame?
+          listen: true
         tools:
-          - create_profile
-        finish:
-          - tool: create_profile
-            success:
-              - status:
-                  - created
+          - name: create_profile
             confirm:
               - >-
-                ¿Creo tu perfil como {{state.profile_name}}, con nivel
-                {{state.profile_level}}?
-            say:
-              - "{{state.said}}"
-        assign:
-          - profile_name: input.name
-          - profile_learn: input.learn
-          - profile_goal: input.goal
-          - profile_level: input.level
+                ¿Creo tu perfil como {{input.name}}, con nivel
+                {{input.level}}?
+            outcomes:
+              - if:
+                  - status:
+                      - created
+                say:
+                  - "{{result.said}}"
+                then: done
+        save:
           - learner_id: result.learner_id?
           - learner_name: result.learner_name?
           - notes: result.notes?
@@ -189,17 +183,15 @@ handoffs:
     when: The caller asks you to explain in Spanish, or keeps speaking Spanish to you.
     saves:
       - explanation: ES
-    opens_with:
-      tool: continue_lesson
-
+    start:
+      call: continue_lesson
   to_english:
     to: faro_en
     when: The caller asks you to explain in English, or keeps speaking English to you.
     saves:
       - explanation: EN
-    opens_with:
-      tool: continue_lesson
-
+    start:
+      call: continue_lesson
 prefetch:
   - name: caller
     source: from_number
@@ -262,14 +254,67 @@ models:
       pace: patient
 
 tools:
-  - use_this_number
-  - check_number
+  - name: use_this_number
+    save:
+      - learner_id: result.learner_id
+      - learner_name: result.learner_name
+      - notes: result.notes
+    outcomes:
+      - else:
+        say:
+          - "{{result.said}}"
+  - name: check_number
+    outcomes:
+      - if:
+          - status:
+              - foreign
+          - explanation:
+              - EN
+        say:
+          - Faro only takes Spanish numbers, starting with plus thirty-four. What is your Spanish number?
+      - if:
+          - status:
+              - foreign
+          - explanation:
+              - ES
+        say:
+          - Faro solo acepta números españoles, que empiezan por más treinta y cuatro. ¿Cuál es tu número español?
   - create_profile
-  - continue_lesson
-  - grade_answer
-  - give_hint
-  - read_progress
-  - remember
+  - name: continue_lesson
+    save:
+      - waiting: result.waiting
+      - helped: result.helped
+    outcomes:
+      - else:
+        say:
+          - "{{result.said}}"
+  - name: grade_answer
+    save:
+      - waiting: result.waiting
+      - helped: result.helped
+    outcomes:
+      - else:
+        say:
+          - "{{result.said}}"
+  - name: give_hint
+    save:
+      - helped: result.helped
+    outcomes:
+      - else:
+        say:
+          - "{{result.said}}"
+  - name: read_progress
+    outcomes:
+      - else:
+        say:
+          - "{{result.said}}"
+  - name: remember
+    save:
+      - notes: result.notes
+    outcomes:
+      - else:
+        say:
+          - "{{result.said}}"
   - end_call
   - language_of
 

@@ -25,6 +25,14 @@ var movedToolKeys = map[string]string{
 	// once for every use of it; the question is really about one use, so the
 	// prefetch entry that runs the tool answers it.
 	"read_only": "it moved to the caller, because the question is about one use of the tool rather than about the tool: write `writes: true` or `writes: false` on the prefetch entry that runs this one",
+	// What the caller hears and what the call remembers moved to agent.yaml, so
+	// one file shows it. The tool file keeps what the tool is.
+	"assign":        toolBehaviourMoved("assign", "outcomes: with an else: and save:"),
+	"replies":       toolBehaviourMoved("replies", "outcomes: with an if: and say:"),
+	"announce":      toolBehaviourMoved("announce", "start: with say:"),
+	"announce_wait": toolBehaviourMoved("announce_wait", "start: with wait: true"),
+	"hidden":        toolBehaviourMoved("hidden", "hidden:"),
+	"inject":        "it is called with: now, and takes state.<name> or a literal, as - customer_phone: state.customer_phone",
 }
 
 // contractToolKeys are the top-level fields that state one tool's contract with
@@ -35,10 +43,9 @@ var contractToolKeys = map[string]string{
 	"description":  "the server describes each of its tools",
 	"input":        "the server owns each tool's parameters",
 	"output":       "the server owns each tool's result",
-	"inject":       "an MCP call has the server's own shape, with nothing to merge into",
+	"with":         "an MCP call has the server's own shape, with nothing to merge into",
 	"interruption": "MCP tools take the platform's default interruption policy",
 	"effect":       "MCP tools return data; ending the call is a `builtin:` tool",
-	"announce":     "the server owns each tool's speech",
 }
 
 // knowledgeToolKeys are the top-level fields a `knowledge:` tool cannot carry,
@@ -51,7 +58,7 @@ var contractToolKeys = map[string]string{
 var knowledgeToolKeys = map[string]string{
 	"input":  "the tool owns its schema: one string, the caller's question",
 	"output": "the tool owns its result: passages with their sources and scores",
-	"inject": "a lookup has no request body to merge into",
+	"with":   "a lookup has no request body to merge into",
 	"effect": "a lookup returns data; ending the call is a `builtin:` tool",
 }
 

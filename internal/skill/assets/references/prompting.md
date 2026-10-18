@@ -188,7 +188,7 @@ General behaviour goes in the prompt. Per tool prose goes in the tool's own
   already been acknowledged. Carry straight on with what happened.
 ```
 
-**Those last two lines are only right when the tool declares an `announce:`.**
+**Those last two lines are only right when the tool declares a `start:` line.**
 Write them when it does, and delete them when it does not, or the agent goes
 silent through a wait the caller can hear. They belong here rather than with the
 realism rules, and they are why a filler never gets a turn of its own.
@@ -393,10 +393,10 @@ description of what the line has to achieve.
 The most common way a technically correct voice agent sounds wrong. Three
 versions, all found on real calls.
 
-**A turn after a tool acknowledges again.** A tool's `announce:` is spoken while
+**A turn after a tool acknowledges again.** A tool's `start:` line is spoken while
 the tool runs, so the caller has already been acknowledged by the time the model
 speaks. Nothing tells the model that, so the two stack up: "Okay, one sec." then
-"A haircut, lovely. What day suits you?". Keep the `announce:`, because it covers
+"A haircut, lovely. What day suits you?". Keep the `start:` line, because it covers
 real model latency, and take the second acknowledgment out of the prompt.
 
 ```markdown
@@ -407,7 +407,7 @@ real model latency, and take the second acknowledgment out of the prompt.
 ```
 
 `tools.md` has the other half of this: if the instructions also tell the agent to
-say it is checking something, remove that when you add `announce:`.
+say it is checking something, remove that when you add `start:`.
 
 **One value named two ways.** "Tomorrow, Saturday the 29th, I've got 9:00 AM" is
 one day said three times, and it makes every sentence it appears in sound like a
@@ -450,7 +450,7 @@ agents sharing one file is a sign they should be one agent.
 ### A task's instructions
 
 Shorter and narrower. A task has one job, its own tool list, and any typed
-finish fields derived from its `assign:` destinations.
+finish fields derived from its `save:` destinations.
 
 - **Skip identity and personality.** The caller is still hearing the same voice,
   and repeating a personality block in every task gives you five places to
@@ -600,7 +600,7 @@ These hold up:
 - No literal `{{ }}` string is ever spoken.
 - Numbers, prices and dates come out the way a person says them, and a phone
   number or a code is heard well enough to be checked.
-- No turn opens by acknowledging something an `announce:` line already
+- No turn opens by acknowledging something a `start:` line already
   acknowledged.
 - Two calls in a row do not open the same way, and no spoken example from the
   prompt comes back word for word.

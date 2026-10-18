@@ -118,7 +118,7 @@ func TestToolOwnershipRuleStaysExplicit(t *testing.T) {
 		}
 	}
 
-	resultRule := "Task `assign:` and tool `output:` are different contracts."
+	resultRule := "A step's `save:` and a tool's `output:` are different contracts."
 	for name, content := range map[string]string{
 		"SKILL.md":            bundleFile(t, "SKILL.md"),
 		"references/tools.md": bundleFile(t, "references/tools.md"),
@@ -886,8 +886,8 @@ func TestOrchestrationGuidanceMatchesCodeOwnedFacts(t *testing.T) {
 	if tasksSection == nil {
 		t.Fatal("docs-site/reference/agent-yaml.mdx has no tasks section")
 	}
-	for _, field := range []string{"`when`", "`assign`"} {
-		if !strings.Contains(tasksSection[1], field) {
+	for _, field := range []string{"when", "save", "tools[].outcomes", "start"} {
+		if !strings.Contains(tasksSection[1], "`"+field+"`") && !strings.Contains(tasksSection[1], `path="`+field+`"`) {
 			t.Errorf("docs-site/reference/agent-yaml.mdx tasks section does not document %s", field)
 		}
 	}

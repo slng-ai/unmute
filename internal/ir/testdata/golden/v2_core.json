@@ -390,6 +390,17 @@
       "opening": "generate",
       "replies": [
         {
+          "tool": "find_slots",
+          "when": {
+            "status": [
+              "free"
+            ]
+          },
+          "say": [
+            "I have {{result__slots}} free. Which suits you?"
+          ]
+        },
+        {
           "tool": "save_booking",
           "when": {
             "status": [
@@ -405,10 +416,7 @@
         "tool": "find_slots",
         "arguments": {
           "day": "preferred_day"
-        },
-        "say": [
-          "I have {{offered_slots}} free. Which suits you?"
-        ]
+        }
       },
       "arguments": [
         "preferred_day"

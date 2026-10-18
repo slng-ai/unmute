@@ -2062,7 +2062,7 @@ func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
 			agent.Tools["lookup_customer"] = tool
 			report, _ := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
 			joined := strings.Join(report.PerTarget[0].Errors, "\n")
-			const want = `tool "lookup_customer" announce is legal for webhook, local, knowledge, slng and builtin execution only`
+			const want = `tool "lookup_customer" start: say: is legal for webhook, local, knowledge, slng and builtin execution only`
 			if got := strings.Contains(joined, want); got != tc.wantError {
 				t.Errorf("announce refused = %v, want %v: %#v", got, tc.wantError, report.PerTarget[0].Errors)
 			}
@@ -2082,7 +2082,7 @@ func TestValidateToolAnnounceRejectsTemplates(t *testing.T) {
 	if err == nil {
 		t.Fatal("a templated announce must be refused")
 	}
-	if !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `tool "lookup_customer" announce does not support templates`) {
+	if !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `tool "lookup_customer" start: say: does not support templates`) {
 		t.Errorf("error must name the tool and the reason: %#v", report.PerTarget[0].Errors)
 	}
 }
@@ -3403,9 +3403,9 @@ func TestValidateWarnsOnASilentListenOpening(t *testing.T) {
 	row := reportFor(report, ProviderSlng)
 	joined := strings.Join(row.Warnings, "\n")
 	for _, want := range []string{
-		"take_note opens by listening and has no announce:",
+		"take_note opens with start: listen: true and no say:",
 		"the caller hears nothing until they speak",
-		"add an announce: line or drop opening: listen",
+		"add a say: line to start:, or drop listen: true",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("no warning says %q; got:\n%s", want, joined)

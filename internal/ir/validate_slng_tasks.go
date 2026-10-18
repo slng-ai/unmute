@@ -125,11 +125,11 @@ func validateSlngTasks(agent *Agent, row *TargetValidation) {
 			fail("task %q has a name SLNG keeps for its own tool: rename the task", name)
 		}
 		if len(task.Announce) > 1 {
-			fail("task %q has %d announce lines, and SLNG speaks one: keep one line", name, len(task.Announce))
+			fail("task %q has %d start: say: lines, and SLNG speaks one: keep one line", name, len(task.Announce))
 		}
 		for _, assign := range task.Assign {
 			if assign.Optional {
-				fail("task %q assigns result.%s? and SLNG has no optional marker: drop the ?, or compile to livekit or pipecat", name, assign.Field)
+				fail("task %q saves result.%s? and SLNG has no optional marker: drop the ?, or compile to livekit or pipecat", name, assign.Field)
 			}
 		}
 		for _, ref := range task.Tools {
@@ -176,7 +176,7 @@ func validateSlngTasks(agent *Agent, row *TargetValidation) {
 			// A dispatch value reaches SLNG as text, so a type on it would be
 			// checked by nothing.
 			if !variable.Schema.Plain() {
-				fail("variable %q is %s and is filled by the dispatch, which SLNG holds as plain text: make it str, or save it with a task's assign:", name, variable.Schema)
+				fail("variable %q is %s and is filled by the dispatch, which SLNG holds as plain text: make it str, or save it with a step's save:", name, variable.Schema)
 			}
 			continue
 		}
@@ -194,7 +194,7 @@ func validateSlngTasks(agent *Agent, row *TargetValidation) {
 // value. SLNG has no confirm: read-back.
 func validateSlngFinish(agent *Agent, name string, task Task, fail func(format string, args ...any)) {
 	if len(task.Finish) > 1 {
-		fail("task %q ends on %d tools, and SLNG ends a step on one tool for now: keep one finish: entry", name, len(task.Finish))
+		fail("task %q ends on %d outcomes, and SLNG ends a step on one for now: keep one outcome with then: done", name, len(task.Finish))
 	}
 	fromResult := map[string]bool{}
 	for _, assign := range task.Assign {
@@ -209,14 +209,21 @@ func validateSlngFinish(agent *Agent, name string, task Task, fail func(format s
 		if len(rule.Confirm) > 0 {
 			fail("task %q reads its change back with confirm:, and SLNG has no read-back: remove confirm:, or compile to livekit or pipecat", name)
 		}
+		if rule.Ends == EndsFailed {
+			fail("task %q has an outcome with then: failed, and SLNG ends a step only as done: remove then: failed, or compile to livekit or pipecat", name)
+		}
 		if len(rule.Say) > slngMaxFinishSay {
 			fail("task %q says %d lines when it finishes, and SLNG speaks at most %d: keep %d", name, len(rule.Say), slngMaxFinishSay, slngMaxFinishSay)
 		}
 		for _, line := range rule.Say {
 			for _, token := range templateToken.FindAllString(line, -1) {
-				root, rest, dotted := strings.Cut(strings.Trim(strings.TrimPrefix(strings.Trim(token, "{} "), "state."), " "), ".")
+				ref := strings.Trim(token, "{} ")
+				if strings.HasPrefix(ref, "result.") || strings.HasPrefix(ref, "result__") {
+					continue // a field of the tool's result, which SLNG reads
+				}
+				root, rest, dotted := strings.Cut(strings.Trim(strings.TrimPrefix(ref, "state."), " "), ".")
 				if dotted && !fromResult[root] {
-					fail("task %q says %s when it finishes, and SLNG reads only a whole saved value or a field of the tool's result: save %s.%s from result. in assign:, or say {{state.%s}}", name, token, root, rest, root)
+					fail("task %q says %s when it finishes, and SLNG reads only a whole saved value or a field of the tool's result: say {{result.%s.%s}}, or say {{state.%s}}", name, token, root, rest, root)
 				}
 			}
 		}

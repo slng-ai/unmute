@@ -244,21 +244,22 @@ is, and a figure in the hundreds means whatever you set was ignored.
 The tool is usually not the wait: a local handler returns in milliseconds. The
 caller is waiting through the second LLM round trip plus the speech after it.
 
-```yaml
-local:
-  handler: tools/salon.py:record_complaint
-
-announce: Let me get that written down.
+```yaml agent.yaml
+tools:
+  - name: record_complaint
+    start:
+      say: Let me get that written down.
 ```
 
 Write it as a **list** when the line can fire more than once in a call, and the
 caller hears one of them each time, never the one that site used last:
 
 ```yaml
-announce:
-  - Let me double check what I have available.
-  - Let me see what is free.
-  - Right, let me have a look at the diary.
+start:
+  say:
+    - Let me double check what I have available.
+    - Let me see what is free.
+    - Right, let me have a look at the diary.
 ```
 
 One sentence spoken twice in a minute is what an agent sounds like when it is a
@@ -287,13 +288,13 @@ A group's `announce:` fires on entry, before any step runs, so it is spoken
 whether or not a `skip_when_confirmed:` step is skipped, and there is often no
 sentence that is true on both halves.
 
-A tool's `announce:` is emitted inside the tool body, so it fires once per call
+A tool's `start:` line is emitted inside the tool body, so it fires once per call
 rather than once per request. A model that calls the same tool twice in one turn
 speaks twice, and no prompt rule reliably stops one chaining a tool: the salon
 had a rule saying not to and a live call read the diary twice 0.8 seconds apart,
 with a different sentence each time.
 
-A **task's** own `announce:` is spoken once as that step is entered, only when
+A **step's** own `start:` line is spoken once as that step is entered, only when
 it runs, and before the model has decided anything. That is the only one of the
 three where "exactly one line per request" is a shape rather than a rule, and it
 is also the earliest of the three by about half a second. The salon carries both

@@ -866,7 +866,7 @@ func slngNoKnowledge(what string) string {
 // `source: conversation`: neither emits a store the model writes to outside a
 // task, and the task's `assign:` already does that job there.
 func codeNoConversationVariable(provider string) string {
-	return provider + " target has no value a model records mid-call outside a task: declare the variable without a source and fill it with a task's `assign:`, or compile to slng, whose set_runtime_variables tool records it and returns it on the call record"
+	return provider + " target has no value a model records mid-call outside a task: declare the variable without a source and fill it with a step's `save:`, or compile to slng, whose set_runtime_variables tool records it and returns it on the call record"
 }
 
 func slngNoHandoff(what string) string {

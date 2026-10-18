@@ -16,7 +16,7 @@ input:
   required:
     - order_id
 
-inject:
+with:
   - call: "{{call.session_id}}"
 
 output:
@@ -34,7 +34,3 @@ output:
   required:
     - status
 
-assign:
-  - order_status: result.status
-
-announce: Let me look that up.

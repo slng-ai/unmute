@@ -133,13 +133,13 @@ func TestBuildLowersFinish(t *testing.T) {
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
-          - book_it
+          - name: book_it
+            outcomes:
+              - if:
+                  - status: booked
+                then: done
           - look_up
-        finish:
-          - tool: book_it
-            success:
-              - status: booked
-        assign:
+        save:
           - booking_reference: result.reference
 `, finishOKOutput)
 	agent, err := Build(pkg)
@@ -161,16 +161,7 @@ func TestBuildLowersFinish(t *testing.T) {
 	}
 }
 
-// A finish entry a package writes and the compiler drops is the worst shape
-// this key has: nothing fails, the step simply stops ending on two of its three
-// successes. Both spellings of it are refused, and both messages say what to
-// write instead.
-//
-// Found by driving a real conversation: a package naming booked, moved and
-// cancelled in three entries ended its step on cancelled alone, so an ordinary
-// booking left the step open and spent a model request calling `finish`.
-func TestBuildRefusesAFinishEntryItWouldDrop(t *testing.T) {
-	const twoSuccesses = `  type: object
+const bookedOrMoved = `  type: object
   properties:
     status:
       type: string
@@ -184,52 +175,60 @@ func TestBuildRefusesAFinishEntryItWouldDrop(t *testing.T) {
     - status
     - reference
 `
-	for _, tc := range []struct {
-		name   string
-		finish string
-		want   string
-	}{
-		{
-			name: "the same tool twice",
-			finish: `        finish:
-          - tool: book_it
-            success:
-              - status: booked
-          - tool: book_it
-            success:
-              - status: moved
-`,
-			want: `finish names "book_it" twice`,
-		},
-		{
-			name: "the same field twice in one entry",
-			finish: `        finish:
-          - tool: book_it
-            success:
-              - status: booked
-              - status: moved
-`,
-			want: `finish on "book_it" names status twice`,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			pkg := finishPackage(t, []stateschema.Field{bookingReference}, "", `      - name: take_booking
+
+// A field named twice in one if: used to keep the last value only, so the step
+// silently stopped ending on the first. It is refused, with what to write.
+func TestBuildRefusesAFieldTwiceInOneIf(t *testing.T) {
+	pkg := finishPackage(t, []stateschema.Field{bookingReference}, "", `      - name: take_booking
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
-          - book_it
+          - name: book_it
+            outcomes:
+              - if:
+                  - status: booked
+                  - status: moved
+                then: done
           - look_up
-`+tc.finish+`        assign:
+        save:
           - booking_reference: result.reference
-`, twoSuccesses)
-			_, err := Build(pkg)
-			if err == nil {
-				t.Fatal("build accepted a finish entry it would have dropped")
-			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("error = %q, want it to contain %q", err, tc.want)
-			}
-		})
+`, bookedOrMoved)
+	_, err := Build(pkg)
+	if err == nil || !strings.Contains(err.Error(), `an outcome of "book_it" names status twice in if:`) {
+		t.Fatalf("error = %v, want the field-twice refusal", err)
+	}
+}
+
+// Two outcomes of one tool each end the step, in the order written. Found by
+// a package naming booked, moved and cancelled: one rule per outcome is what
+// an author reads, so every one of them has to survive.
+func TestBuildKeepsEveryOutcomeOfOneTool(t *testing.T) {
+	pkg := finishPackage(t, []stateschema.Field{bookingReference}, "", `      - name: take_booking
+        when: The caller wants an appointment.
+        instructions: steps.md
+        tools:
+          - name: book_it
+            outcomes:
+              - if:
+                  - status: booked
+                then: done
+              - if:
+                  - status: moved
+                then: done
+          - look_up
+        save:
+          - booking_reference: result.reference
+`, bookedOrMoved)
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	task := agent.Tasks["take_booking"]
+	if len(task.Finish) != 2 || task.Finish[0].Success["status"][0] != "booked" || task.Finish[1].Success["status"][0] != "moved" {
+		t.Fatalf("finish = %+v, want booked then moved", task.Finish)
+	}
+	if got := task.EndsOnTools(); !slices.Equal(got, []string{"book_it"}) {
+		t.Errorf("EndsOnTools = %v, want book_it once", got)
 	}
 }
 
@@ -253,15 +252,15 @@ func TestBuildKeepsEveryAlternativeOnOneField(t *testing.T) {
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
-          - book_it
+          - name: book_it
+            outcomes:
+              - if:
+                  - status:
+                      - booked
+                      - moved
+                then: done
           - look_up
-        finish:
-          - tool: book_it
-            success:
-              - status:
-                  - booked
-                  - moved
-        assign:
+        save:
           - booking_reference: result.reference
 `, twoSuccesses)
 	agent, err := Build(pkg)
@@ -293,24 +292,6 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 		phrases []string
 	}{
 		{
-			name:  "a tool the task does not hold",
-			state: []stateschema.Field{bookingReference},
-			task: `      - name: take_booking
-        when: The caller wants an appointment.
-        instructions: steps.md
-        tools:
-          - look_up
-        finish:
-          - tool: book_it
-            success:
-              - status: booked
-        assign:
-          - booking_reference: result.reference
-`,
-			output:  finishOKOutput,
-			phrases: []string{"book_it", "take_booking", "does not list under tools:"},
-		},
-		{
 			// propertyResultField types an output as text unless the schema
 			// says integer, number or boolean, so an object read as text and
 			// passed, and the mismatch surfaced after the business tool ran.
@@ -320,12 +301,12 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
-          - book_it
-        finish:
-          - tool: book_it
-            success:
-              - status: booked
-        assign:
+          - name: book_it
+            outcomes:
+              - if:
+                  - status: booked
+                then: done
+        save:
           - booking_reference: result.reference
 `,
 			output: `  type: object
@@ -353,12 +334,12 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
-          - book_it
-        finish:
-          - tool: book_it
-            success:
-              - status: booked
-        assign:
+          - name: book_it
+            outcomes:
+              - if:
+                  - status: booked
+                then: done
+        save:
           - booking_reference: result.reference
 `,
 			output: `  type: object
@@ -385,12 +366,12 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
-          - book_it
-        finish:
-          - tool: book_it
-            success:
-              - reference: anything
-        assign:
+          - name: book_it
+            outcomes:
+              - if:
+                  - reference: anything
+                then: done
+        save:
           - booking_reference: result.reference
 `,
 			output:  finishOKOutput,
@@ -403,12 +384,12 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
-          - book_it
-        finish:
-          - tool: book_it
-            success:
-              - status: done
-        assign:
+          - name: book_it
+            outcomes:
+              - if:
+                  - status: done
+                then: done
+        save:
           - booking_reference: result.reference
 `,
 			output:  finishOKOutput,
@@ -421,12 +402,12 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
-          - book_it
-        finish:
-          - tool: book_it
-            success:
-              - status: booked
-        assign:
+          - name: book_it
+            outcomes:
+              - if:
+                  - status: booked
+                then: done
+        save:
           - booking_reference: result.reference
 `,
 			output: `  type: object
@@ -438,7 +419,7 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
   required:
     - status
 `,
-			phrases: []string{"book_it returns no reference", "every tool under finish:"},
+			phrases: []string{"book_it returns no reference", "no save: of its own saves the step's save: rows"},
 		},
 		{
 			name:  "a result field of the wrong type",
@@ -447,12 +428,12 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
-          - book_it
-        finish:
-          - tool: book_it
-            success:
-              - status: booked
-        assign:
+          - name: book_it
+            outcomes:
+              - if:
+                  - status: booked
+                then: done
+        save:
           - booking_reference: result.reference
 `,
 			output: `  type: object
@@ -476,12 +457,12 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
-          - book_it
-        finish:
-          - tool: book_it
-            success:
-              - status: booked
-        assign:
+          - name: book_it
+            outcomes:
+              - if:
+                  - status: booked
+                then: done
+        save:
           - booking: result.booking
 `,
 			output: `  type: object
@@ -526,12 +507,12 @@ func TestBuildAcceptsAShapedTerminalResult(t *testing.T) {
         when: The caller wants an appointment.
         instructions: steps.md
         tools:
-          - book_it
-        finish:
-          - tool: book_it
-            success:
-              - status: booked
-        assign:
+          - name: book_it
+            outcomes:
+              - if:
+                  - status: booked
+                then: done
+        save:
           - booking: result.booking
 `, `  type: object
   properties:
@@ -642,7 +623,7 @@ func skipPackage(t *testing.T, skip, on string) *packagespec.Package {
         instructions: steps.md
         tools:
           - book_it
-        assign:
+        save:
           - booking_reference: result.reference
           - confirmed_phone: result.reference
 

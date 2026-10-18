@@ -41,56 +41,68 @@ description: Read the diary for a day.
 local:
   handler: tools/salon.py:find_slots
 
-inject:
-  - customer_phone: "{{state.customer_phone}}"
+with:
+  - customer_phone: "state.customer_phone"
+```
 
-# Saved on any result, before a reply reads it.
-assign:
-  - offer: result.offer
+What happens around the tool is written once, on its entry in the top-level
+`tools:` list of `agent.yaml`:
 
-# Lines code says for a typed result. The first match speaks.
-replies:
-  - when:
-      - offered:
-          - true
-    say:
-      - "{{state.offer}}"
+```yaml agent.yaml
+tools:
+  - name: find_slots
+    # Saved on any result, before an outcome reads it.
+    save:
+      - offer: result.offer
+    # Lines code says for a typed result. The first match speaks.
+    outcomes:
+      - if:
+          - offered: true
+        say:
+          - "{{result.offer}}"
 ```
 
 <ParamField path="local.handler" type="string">
   `file.py:function`. Its signature is the tool's input, its return type the output.
 </ParamField>
 
-<ParamField path="assign" type="list of key: path">
-  State values the result saves, on any result. `+` appends, `?` allows absent.
-</ParamField>
-
-<ParamField path="replies" type="list of when and say">
-  Lines code says when the result matches `when`. A field matches any value listed.
+<ParamField path="with" type="list of key: value">
+  Arguments the model never sees. A value is `state.x`, a scalar, or a string with
+  `{{state.x}}`.
 </ParamField>
 
 <ParamField path="precheck" type="string">
   `file.py:function` run first. It returns an outcome to refuse, or `None` to go on.
 </ParamField>
 
-<ParamField path="hidden" type="list of string">
+<ParamField path="tools[].save" type="list of key: path">
+  State values the result saves, on any result. `+` appends, `?` allows absent.
+</ParamField>
+
+<ParamField path="tools[].outcomes" type="list of if or else, and say">
+  Lines code says when the result matches `if:`. A field matches any value listed. `else:`
+  takes every other result. The first match speaks.
+</ParamField>
+
+<ParamField path="tools[].hidden" type="list of string">
   Result fields the model never reads. Code can still save and say them.
 </ParamField>
 
-<ParamField path="announce_wait" type="boolean">
-  Run the tool once its `announce:` line has played, like a goodbye before hanging up.
+<ParamField path="tools[].start" type="say and wait">
+  `say:` is said as the tool starts. `wait: true` runs the tool once the line has
+  played, like a goodbye before hanging up.
 </ParamField>
 
-A **webhook** tool keeps `input:` and `output:` as JSON Schema, and takes no `replies:` or
-`precheck:`. Its URL is the `url_env` variable plus `path`. A **knowledge** tool and the
+A **webhook** tool keeps `input:` and `output:` as JSON Schema, and takes no `precheck:`.
+Its URL is the `url_env` variable plus `path`. A **knowledge** tool and the
 **`end_call` builtin** work as in version 1.
 
-## Lines read only State
+## Lines read what they have
 
-Every line code speaks, and every prompt, reads State: `{{state.x}}` and
-`{{state.x.y}}`, plus `{{call.x}}` for what the call carries. A line never reads
-`{{input.x}}` or `{{result.x}}`. Save the value to State first, and the compiler
-rewrites the line to read it where it comes from.
+A prompt and a greeting read State: `{{state.x}}` and `{{state.x.y}}`, plus
+`{{call.x}}` for what the call carries. A line code says next to a tool reads one
+more thing. A `confirm:` line reads the tool's `{{input.x}}`. An outcome's `say:` reads
+the tool's `{{result.x}}`. No helper `save:` is needed to say a value.
 
 ## Steps
 
@@ -98,55 +110,57 @@ rewrites the line to read it where it comes from.
       - name: manage_booking
         instructions: tasks/booking.md
         # Code calls the tool as the step opens, and says the offer.
-        opens_with:
-          tool: find_slots
-          arguments:
-            - service: requested_service
-            - date: requested_day
-          say:
-            - "{{state.offer}}"
+        start:
+          call: find_slots
+          with:
+            - service: state.requested_service?
+            - date: state.requested_day?
         tools:
-          - find_slots
-          - book_appointment
-        finish:
-          - tool: book_appointment
-            success:
-              - status:
-                  - booked
+          - name: find_slots
+            outcomes:
+              - if:
+                  - offered: true
+                say:
+                  - "{{result.offer}}"
+          - name: book_appointment
             # Code reads this back. The tool runs on the caller's yes.
             confirm:
-              - Shall I book your {{state.chosen_service}} for {{state.chosen_day}}?
-            # Code says this once it succeeds. The step ends.
-            say:
-              - Lovely, you're booked for {{state.appointment.date}}.
-        assign:
-          - appointment: result.appointment
-          - chosen_service: input.service
-          - chosen_day: input.date
+              - Shall I book your {{input.service}} for {{input.date}}?
+            outcomes:
+              # Code says this once it succeeds. The step ends.
+              - if:
+                  - status: booked
+                save:
+                  - appointment: result.appointment
+                say:
+                  - Lovely, you're booked for {{result.appointment.date}}.
+                then: done
+              - else:
+                say:
+                  - That did not go through. Shall I try another time?
+        handoffs:
+          - to_complaints
 ```
 
-<ParamField path="finish[].confirm" type="list of string">
+<ParamField path="tools[].confirm" type="list of string">
   Code reads the change back. The tool runs on the caller's yes.
 </ParamField>
 
-<ParamField path="finish[].say" type="list of string">
-  Code says it when the tool succeeds, and the step ends.
+<ParamField path="tools[].outcomes" type="list of objects">
+  What the step does with each result: `if:` or `else:`, then `save:`, `say:` and
+  `then:`. An outcome that says `then: done` ends the step, and `then: failed` fails it.
+  Without `then:` the step goes on. The rules are in
+  [Say what success looks like](/build/orchestration/tasks#say-what-success-looks-like).
 </ParamField>
 
-<ParamField path="replies" type="list of when and say">
-  Lines code says for a step tool's result, before the tool's own.
+<ParamField path="start" type="say, listen, call and with">
+  What the step does as it opens. `call:` runs a tool with State values from `with:`.
+  `listen: true` waits for the caller instead of asking a model first.
 </ParamField>
 
-<ParamField path="opens_with" type="tool, arguments and say">
-  A tool code runs as the step opens, with State values, and its `say:`.
-</ParamField>
-
-<ParamField path="opening: listen" type="listen">
-  The step waits for the caller instead of asking a model first.
-</ParamField>
-
-<ParamField path="assign: x: input.p" type="key: input.path">
-  Saves the closing tool's input, so a read-back can say it.
+<ParamField path="save" type="list of key: path">
+  What the step saves when it ends. A `then: done` outcome without its own `save:` saves
+  these from the tool's result. `x: input.p` saves the closing tool's input.
 </ParamField>
 
 <ParamField path="handoffs" type="list of string">
@@ -170,7 +184,7 @@ group. Each step saves what the caller confirmed, and hands it to the agent.
   State values the handoff sets as the call moves.
 </ParamField>
 
-<ParamField path="handoffs.*.opens_with" type="tool and arguments">
+<ParamField path="handoffs.*.start" type="call and with">
   A tool of the next agent's, run in code as it takes the call.
 </ParamField>
 
@@ -203,13 +217,13 @@ The `twilio` and `slng` targets read `version: 2` too, but they run it with thei
 runtimes and without unmute-core. They refuse these keys at compile time, and the error
 says to remove them or compile to livekit or pipecat:
 
-- tool file keys `assign`, `replies`, `precheck`, `hidden` and `announce_wait`;
-- a task's `replies` and `opens_with`, and a task `finish` rule with `confirm`;
+- a tool entry's `save`, `outcomes`, `hidden` and `start: wait`, and a tool file's `precheck`;
+- a step's outcomes without `then:`, a step `start:` with `call:`, and a step outcome with `confirm:`;
 - `entry_by`;
 - prefetch `refuse_call`;
-- a handoff's `saves` or `opens_with`.
+- a handoff's `saves` or `start`.
 
-A task `finish` rule with `say` is refused on Twilio only. SLNG speaks the line itself.
+A step outcome with `then: done` and `say:` is refused on Twilio only. SLNG speaks the line itself.
 Each target refuses more of its own: see [Twilio](/targets/twilio#what-the-package-may-carry)
 and [SLNG](/targets/slng).
 

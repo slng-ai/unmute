@@ -29,11 +29,6 @@ class State(BaseModel):
             instructions.
         waiting: The exercise put to them and not yet answered right.
         helped: Whether Faro gave a hint for the exercise waiting.
-        said: The line code says for the last tool's result.
-        profile_name: The name a new caller gave, read back before the profile is made.
-        profile_learn: The language they want to learn, read back with it.
-        profile_goal: What it is for, read back with it.
-        profile_level: Their level, read back with it.
     """
 
     phone: Phone | None = None
@@ -48,8 +43,3 @@ class State(BaseModel):
         description="The exercise put to the learner. continue_lesson puts one.",
     )
     helped: bool = False
-    said: str | None = None
-    profile_name: str | None = None
-    profile_learn: Literal["English", "Spanish"] | None = None
-    profile_goal: Literal["travel", "work", "daily-life"] | None = None
-    profile_level: Literal["A1", "A2", "B1", "B2"] | None = None

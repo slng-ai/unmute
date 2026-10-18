@@ -409,7 +409,7 @@ models:
 
 The tool is usually not the wait. A local handler returns in milliseconds; the
 caller is waiting through the second LLM round trip and the speech after it.
-`announce:` fills that gap with something to listen to.
+`start: say:` on the tool fills that gap with something to listen to.
 
 This is for a fact that genuinely has to be fetched now. If it was knowable
 before the call, pre-fetch it instead: a cover line shortens a round trip to sit
@@ -418,8 +418,14 @@ through, while a pre-fetch removes it.
 ```yaml tools/check_slots.yaml
 local:
   handler: tools/salon.py:find_slots
+```
 
-announce: Let me check.
+```yaml agent.yaml
+tools:
+  - name: check_slots
+    start:
+      say:
+        - Let me check.
 ```
 
 Keep the line **shorter than the gap it covers**. A long line runs into the

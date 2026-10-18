@@ -1,6 +1,5 @@
 local:
   handler: tools/depot.py:reschedule_delivery
 # The model never sends the tracking id: it is the parcel found earlier.
-inject:
-  - tracking_id: "{{state.parcel.tracking_id}}"
-announce: Let me book that in.
+with:
+  - tracking_id: "state.parcel.tracking_id"

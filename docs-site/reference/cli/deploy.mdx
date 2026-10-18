@@ -137,7 +137,7 @@ does not grow with how many secrets you declare.
 |---|---|---|
 | every `builtin:` tool | your organisation's tool list | create it in the SLNG dashboard, or rename the file |
 | every `slng:` reference | your organisation's tools, and its latest published version | missing entirely stops the run; a version behind a committed mirror only warns, because the agent calls the platform's latest either way |
-| every `inject:` argument on a `slng:` reference | that version's published parameters | the run stops, naming the tool, the argument, the version it checked, and the file that supplied it |
+| every `with:` argument on a `slng:` reference | that version's published parameters | the run stops, naming the tool, the argument, the version it checked, and the file that supplied it |
 | every MCP server | the servers attached to your organisation | attach it in the SLNG dashboard |
 | every MCP tool you expose | that server's last stored probe | correct the name, or expose a different tool |
 | every vault secret and variable, including one a hosted tool or MCP server needs that the package never declares | the vault, including whether it holds a value | `unmute deploy` offers to create it |
@@ -287,7 +287,7 @@ Unmute buys no numbers and configures no carrier routing. Set up the connection
 in SLNG and route the carrier number to its SIP destination. Attachment alone
 does not redirect a number from Twilio Dev Phone or another webhook. Follow
 [Receive phone calls](/deploy/slng#receive-phone-calls), then confirm a real
-call appears in SLNG. Required injected inputs need valid defaults for inbound
+call appears in SLNG. Required `with:` inputs need valid defaults for inbound
 calls, since the carrier supplies no web-session arguments.
 
 `--call` places one outbound call from the agent you just deployed, which is how
@@ -315,7 +315,7 @@ slng: compiled examples/hotel-concierge/build/slng (3 files)
 slng: hotel_info v<n>, from v<m>
 slng:   would change argument_overrides.trace_id, which the agent has now and this package does not supply, so a replacement removes it and the model supplies the argument
 slng:   would change description, which the agent has now and this package does not declare, so a replacement removes it and the published description is used instead
-slng:   would change execution_policy.pre_action_message, from "Hold on." to this package's `announce:`
+slng:   would change execution_policy.pre_action_message, from "Hold on." to this package's `start: say:`
 slng:   would change invocation, which is "system" on the agent now and "model" in this package
 slng:   would change system arguments `caller`, which the agent supplies to this tool now and this package cannot declare, so a replacement removes them
 slng:   would change trigger on `call_start`, which the agent has now and this package cannot declare, so a replacement removes it and the tool is called by the model instead
@@ -340,7 +340,7 @@ against the attachment it belongs to rather than left for the push to discard
 silently.
 
 A setting the package **can** declare is compared, not listed. The sentence
-spoken before a tool runs is `announce:` in the tool file, so a package whose
+spoken before a tool runs is `start: say:` on the tool's entry in `agent.yaml`, so a package whose
 announcement already matches the agent's shows no line for it, and one that
 differs shows the sentence being replaced. Only the parts of that setting a
 package has no key for, such as making the agent wait for the sentence, are

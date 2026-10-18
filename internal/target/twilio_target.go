@@ -349,11 +349,11 @@ func twilioFields() map[Field]Capability {
 		FieldToolKnowledgeTask:    no(twilioNoTool("a knowledge base")),
 		FieldToolAuth:             no(twilioNoTool("a webhook's auth block")),
 		FieldToolInterruption:     no("twilio target runs every tool to completion and never cancels one, so interruption: cancel is not honoured: remove it or write continue, or compile to pipecat which cancels"),
-		FieldToolAnnounce:         no("twilio target speaks no announcement before a tool yet: remove announce and let the model say a short line before the call, or compile to livekit or pipecat"),
+		FieldToolAnnounce:         no("twilio target speaks no line before a tool yet: remove the tool's start: say: and let the model say a short line before the call, or compile to livekit or pipecat"),
 		// Core for the reason the slng row gives: FieldTask already refuses
 		// the task, so a second message would name a consequence, not the cause.
 		FieldToolAnnounceTask:      yes,
-		FieldToolInject:            no("twilio target has no session values to inject into a tool: remove inject, or compile to livekit or pipecat"),
+		FieldToolInject:            no("twilio target has no session values to pass into a tool: remove with:, or compile to livekit or pipecat"),
 		FieldWebhookPath:           no(twilioNoTool("a webhook path")),
 		FieldToolDependencies:      yes,
 		FieldOutbound:              no("twilio target answers inbound calls only: set outbound: false, or compile to livekit which dials from the agent"),

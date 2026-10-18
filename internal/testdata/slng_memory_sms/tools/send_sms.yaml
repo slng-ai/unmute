@@ -3,7 +3,6 @@ description: Send a text message to the caller's confirmed mobile number.
 builtin:
   id: send_sms
 
-inject:
+with:
   - from_number: "+447700900123"
 
-announce: One moment, sending that now.

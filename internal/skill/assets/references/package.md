@@ -565,7 +565,7 @@ setting on that tool, recorded in the mirror under `config.egress`, and not
 something a package can ask for. A tool that must call a service is an
 `api_request` tool, created in the dashboard the same way. `examples/hotel-concierge`
 ships a hosted `code` tool, a hosted `api_request` tool, a builtin and an mcp
-server, plus template variables, an injected argument, a tool announcement, a
+server, plus template variables, a pinned argument, a tool start line, a
 model fallback, and deploys today.
 
 ```yaml targets.yaml
@@ -585,7 +585,7 @@ passed through whole. SLNG owns its model list, so no vendor or model name is
 checked on this target.
 
 Tasks and task groups compile to SLNG's own tasks: `when:`, `tools`,
-`assign:` (with `+`), one `announce:`, `opening: listen`, a history of
+`save:` (with `+`), one `start:` `say:` line, `listen: true`, a history of
 `messages`, `full`, `last_n` or `reset`, `skip_when_confirmed`,
 `context_scope`, and `confirm:` on a value whose confirming task has its own
 `when:`. A task names its tools by name and the push writes the attachment
@@ -599,10 +599,10 @@ validate, by name, with what to do instead:
 |---|---|
 | agent transfers | the create body carries one agent |
 | a task's `think:`, `history: summary` or `include_tool_calls: false` | one model per agent, and no summary |
-| a second `finish:` rule in one task, or `confirm:` on a `finish:` rule | SLNG supports one finishing tool per task today, and has no read-back |
-| a second `announce:` line, an optional `result.x?`, a group `then:` other than `return` | SLNG speaks one line, saves every assigned value, and returns to the agent |
+| a second `then: done` outcome in one task, `then: failed`, or `confirm:` on a step tool | SLNG supports one finishing tool per task today, and has no read-back |
+| a second `start:` `say:` line, an optional `result.x?`, a group `then:` other than `return` | SLNG speaks one line, saves every assigned value, and returns to the agent |
 | `prefetch:` | slng compiles no session-start hook |
-| tool keys `assign`, `replies`, `precheck`, `hidden`, `announce_wait`; a task's `replies` or `opens_with`; `entry_by`; a prefetch `refuse_call`; a handoff's `saves` or `opens_with` | the slng runtime runs version 2 without unmute-core and cannot run them: remove them, or compile to livekit or pipecat |
+| a tool entry's `save:`, `outcomes:` and `hidden:`, `start:` with `wait: true`, and `precheck` in a tool file; a step's `start:` with `call:`; `entry_by`; a prefetch `refuse_call`; a handoff's `saves` or `start:` with `call:` | the slng runtime runs version 2 without unmute-core and cannot run them: remove them, or compile to livekit or pipecat |
 | a task that lists another task or a handoff | a SLNG task cannot start another one |
 | a typed `state.py` value the dispatch fills; `datetime`, `dict`, a pattern other than `Id` | SLNG checks types only on values a task saves, in a grammar without those words |
 | a `turn:` section, `semantic_endpointing`, `endpointing_delay` | SLNG owns its own turn taking |
@@ -637,7 +637,7 @@ sample and publishes it, before it reads the account. Rules:
 - A `webhook:` block is refused. Create an API request tool in SLNG and
   reference it with `slng:`.
 
-`finish:` works on slng with one rule per task. Its `tool`, `success:` values
+A `then: done` outcome works on slng with one outcome per task. Its tool, `if:` values
 and up to 5 `say:` lines reach SLNG, which says the lines itself when the result
 matches. A say line may read `{{state.x}}`, or `{{state.x.y}}` only when the step
 or the tool saves `x` from `result.`. `confirm:` is refused. The tool needs a
@@ -776,8 +776,8 @@ prefetch, webhook, MCP, knowledge and hosted tools, tool announce and
 turn fields, tracing, realtime and live, fallbacks, custom endpoints,
 `version`, `pins`, `deployment_region` and `warm_instances`.
 
-The version 2 keys `assign`, `replies`, `precheck`, `hidden` and `announce_wait`
-on a tool, `entry_by`, and a handoff's `saves` or `opens_with` are refused too.
+The version 2 tool entry keys `save`, `outcomes`, `hidden` and `start` with `wait`, and `precheck` in a tool file,
+`entry_by`, and a handoff's `saves` or `start:` with `call:` are refused too.
 The twilio runtime runs version 2 without unmute-core, so it cannot run them.
 A local tool is a typed handler, `tools/<n>.py:<n>`.
 

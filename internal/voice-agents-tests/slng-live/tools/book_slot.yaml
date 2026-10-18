@@ -1,6 +1,6 @@
 local:
   handler: tools/salon.py:book_slot
-inject:
-  - phone_number: "{{state.phone_number}}"
+with:
+  - phone_number: "state.phone_number"
 interruption: provider_default
 effect: returns_data

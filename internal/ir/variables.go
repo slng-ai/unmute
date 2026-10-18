@@ -125,7 +125,7 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 			if !ok {
 				continue
 			}
-			site := fmt.Sprintf("tool %q inject %q", name, key)
+			site := fmt.Sprintf("tool %q with: %q", name, key)
 			if err := checkTemplateSite(pkg, agent, file, key, site, value, false, false); err != nil {
 				return err
 			}
@@ -281,7 +281,7 @@ func checkPathFields(root string, variable Variable, fields []string) error {
 	switch {
 	case typ.IsList():
 		return fmt.Errorf("%s is %s, and a path cannot name a field inside a list: nothing says which entry it "+
-			"means. Record the entry you need into its own variable with assign: on the step that records it, "+
+			"means. Record the entry you need into its own variable with save: on the step that records it, "+
 			"and name that variable here", root, typ)
 	case typ.Kind != stateschema.KindObject:
 		return fmt.Errorf("%s is %s, which has no fields to name; write {{state.%s}}", root, typ, root)
@@ -334,15 +334,15 @@ func checkInject(pkg *packagespec.Package) error {
 					id = raw.Builtin.ID
 				}
 				if prebuilt, known := targetcap.LookupPrebuilt(id); !known || len(prebuilt.Config) == 0 {
-					return fmt.Errorf("%s: tool %q is a builtin tool; inject is legal on webhook, local and slng tools, and on a builtin for its own settings, which %q has none of",
-						pkg.Location(file, "inject:"), name, id)
+					return fmt.Errorf("%s: tool %q is a builtin tool; with: is legal on webhook, local and slng tools, and on a builtin for its own settings, which %q has none of",
+						pkg.Location(file, "with:"), name, id)
 				}
 			default:
 				// An mcp tool's arguments are assembled by the MCP client from the
 				// server's schema; neither SDK exposes a per-call hook, so an
 				// injected value would be dropped rather than sent.
-				return fmt.Errorf("%s: tool %q is a %s tool; inject is legal on webhook, local and slng tools, the kinds whose call unmute assembles itself",
-					pkg.Location(file, "inject:"), name, raw.ExecutionKind())
+				return fmt.Errorf("%s: tool %q is a %s tool; with: is legal on webhook, local and slng tools, the kinds whose call unmute assembles itself",
+					pkg.Location(file, "with:"), name, raw.ExecutionKind())
 			}
 		}
 		properties, _ := raw.Input["properties"].(map[string]any)
@@ -351,21 +351,21 @@ func checkInject(pkg *packagespec.Package) error {
 		for _, pair := range raw.Inject {
 			key := pair.Key
 			if seen[key] {
-				return fmt.Errorf("%s: inject names %q twice", pkg.Location(file, "inject:"), key)
+				return fmt.Errorf("%s: with: names %q twice", pkg.Location(file, "with:"), key)
 			}
 			seen[key] = true
 			if slices.Contains(required, key) {
-				return fmt.Errorf("%s: injected key %q must be absent from input.required", pkg.Location(file, "inject:"), key)
+				return fmt.Errorf("%s: with: key %q must be absent from input.required", pkg.Location(file, "with:"), key)
 			}
 			if _, ok := properties[key]; ok {
-				return fmt.Errorf("%s: tool %q injects %q, which is also an input property; an injected value is hidden from the model, so it cannot double as a parameter the model fills in",
+				return fmt.Errorf("%s: tool %q passes %q in with:, which is also an input property; a with: value is hidden from the model, so it cannot double as a parameter the model fills in",
 					pkg.Location(file, key), name, key)
 			}
 			if value, ok := pair.Value.(map[string]any); ok && value != nil {
-				return fmt.Errorf("%s: tool %q inject %q must be a scalar", pkg.Location(file, key), name, key)
+				return fmt.Errorf("%s: tool %q with: %q must be a scalar", pkg.Location(file, key), name, key)
 			}
 			if value, ok := pair.Value.([]any); ok && value != nil {
-				return fmt.Errorf("%s: tool %q inject %q must be a scalar", pkg.Location(file, key), name, key)
+				return fmt.Errorf("%s: tool %q with: %q must be a scalar", pkg.Location(file, key), name, key)
 			}
 		}
 		if raw.Webhook != nil && raw.Webhook.Path != "" && !strings.HasPrefix(raw.Webhook.Path, "/") {

@@ -289,12 +289,12 @@ func attachmentChanges(attached slngLiveTool, reference resolvedTool, proposed p
 	case announced == "":
 		changes = append(changes, fmt.Sprintf("execution_policy.pre_action_message, the sentence the agent speaks before this tool runs (%q), which the agent has now and this package does not declare, so a replacement removes it", spoken))
 	case spoken == "":
-		changes = append(changes, "execution_policy.pre_action_message, the sentence this package's `announce:` speaks before this tool runs, which the agent does not have now")
+		changes = append(changes, "execution_policy.pre_action_message, the sentence this package's `start: say:` speaks before this tool runs, which the agent does not have now")
 	default:
-		changes = append(changes, fmt.Sprintf("execution_policy.pre_action_message, from %q to this package's `announce:`", spoken))
+		changes = append(changes, fmt.Sprintf("execution_policy.pre_action_message, from %q to this package's `start: say:`", spoken))
 	}
 	if announced != "" && spoken != "" && !enabled {
-		changes = append(changes, "execution_policy.pre_action_message.enabled, which is off on the agent now and this package's `announce:` turns on")
+		changes = append(changes, "execution_policy.pre_action_message.enabled, which is off on the agent now and this package's `start: say:` turns on")
 	}
 	if wait {
 		changes = append(changes, "execution_policy.pre_action_message.wait, which makes the agent wait for that sentence before the tool runs and this package cannot declare, so a replacement clears it")

@@ -14,7 +14,7 @@ func TestRetiredTaskFieldsGiveLocatedAdvice(t *testing.T) {
 		var task Task
 		err := yaml.UnmarshalWithOptions([]byte("name: choose\n"+key+": []\n"), &task, yaml.Strict())
 		var located *PairError
-		if !errors.As(err, &located) || located.Line != 2 || !strings.Contains(located.Msg, "assign") {
+		if !errors.As(err, &located) || located.Line != 2 || !strings.Contains(located.Msg, "save:") {
 			t.Fatalf("%s: want located sharing advice, got %v", key, err)
 		}
 	}
@@ -124,7 +124,7 @@ func TestHistoryIsOptionalInAuthoringSchema(t *testing.T) {
 
 func TestInjectUsesOrderedPairs(t *testing.T) {
 	var tool Tool
-	err := yaml.UnmarshalWithOptions([]byte("inject:\n  - number: 0\n  - flag: false\n"), &tool, yaml.Strict())
+	err := yaml.UnmarshalWithOptions([]byte("with:\n  - number: 0\n  - flag: false\n"), &tool, yaml.Strict())
 	if err != nil {
 		t.Fatal(err)
 	}

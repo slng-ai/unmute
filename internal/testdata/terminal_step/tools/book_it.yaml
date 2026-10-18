@@ -1,5 +1,5 @@
-inject:
-  - customer_phone: "{{state.customer_phone}}"
+with:
+  - customer_phone: "state.customer_phone"
 
 local:
   handler: tools/desk.py:book_it

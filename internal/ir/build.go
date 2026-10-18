@@ -274,7 +274,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
-		finish, err := terminalTools(name, raw, out, result)
+		finish, err := terminalTools(pkg, name, raw, out, result)
 		if err != nil {
 			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
@@ -1065,17 +1065,17 @@ func deriveResult(assign []AssignTo, agent *Agent) (map[string]ResultField, erro
 			continue
 		}
 		if seen[entry.Var] {
-			return nil, fmt.Errorf("assign writes variable %q twice", entry.Var)
+			return nil, fmt.Errorf("save writes variable %q twice", entry.Var)
 		}
 		seen[entry.Var] = true
 		variable, ok := agent.Variables[entry.Var]
 		if !ok {
-			return nil, fmt.Errorf("assign writes to %q, which State in state.py does not declare", entry.Var)
+			return nil, fmt.Errorf("save writes to %q, which State in state.py does not declare", entry.Var)
 		}
 		typ := variable.Schema
 		if entry.Append {
 			if !typ.IsList() {
-				return nil, fmt.Errorf("assign appends to %q: declare it a list[...] in state.py, or remove +", entry.Var)
+				return nil, fmt.Errorf("save appends to %q: declare it a list[...] in state.py, or remove +", entry.Var)
 			}
 			// One entry, which may be absent: a step that concludes nothing adds
 			// nothing, rather than inventing an entry on the turn the caller
@@ -1086,7 +1086,7 @@ func deriveResult(assign []AssignTo, agent *Agent) (map[string]ResultField, erro
 		}
 		root, rest, _ := strings.Cut(entry.Field, ".")
 		if !namePattern.MatchString(root) {
-			return nil, fmt.Errorf("assign result field %q is not a valid name", root)
+			return nil, fmt.Errorf("save result field %q is not a valid name", root)
 		}
 		if rest != "" {
 			continue
@@ -1097,7 +1097,7 @@ func deriveResult(assign []AssignTo, agent *Agent) (map[string]ResultField, erro
 		}
 		if prior, exists := result[root]; exists {
 			if stateschema.Fits(prior.Type, field.Type) != nil || stateschema.Fits(field.Type, prior.Type) != nil {
-				return nil, fmt.Errorf("assign result.%s has conflicting destination types", root)
+				return nil, fmt.Errorf("save result.%s has conflicting destination types", root)
 			}
 			prior.Required = prior.Required || field.Required
 			result[root] = prior
@@ -1108,7 +1108,7 @@ func deriveResult(assign []AssignTo, agent *Agent) (map[string]ResultField, erro
 	for _, entry := range assign {
 		root, _, _ := strings.Cut(entry.Field, ".")
 		if _, ok := result[root]; !ok && !entry.FromInput {
-			return nil, fmt.Errorf("assign result.%s needs a whole-field assignment to establish its type; assign result.%s to a variable of that type first", entry.Field, root)
+			return nil, fmt.Errorf("save result.%s needs a whole-field save to establish its type; save result.%s to a variable of that type first", entry.Field, root)
 		}
 	}
 	return result, nil
@@ -1158,7 +1158,7 @@ func assignments(pairs []packagespec.Pair, fromInput bool) ([]AssignTo, error) {
 	for _, pair := range pairs {
 		text, ok := pair.Value.(string)
 		if !ok {
-			return nil, fmt.Errorf("assign %q must use result.<field>, and %v is not a name", pair.Key, pair.Value)
+			return nil, fmt.Errorf("save %q must read result.<field>, and %v is not a name", pair.Key, pair.Value)
 		}
 		// A `+` on the key is an append. Stripped here, where the authored
 		// spelling stops and the resolved shape starts, so no driver has to
@@ -1172,9 +1172,9 @@ func assignments(pairs []packagespec.Pair, fromInput bool) ([]AssignTo, error) {
 		}
 		if !ok {
 			if fromInput {
-				return nil, fmt.Errorf("assign %q must use result.<field> or input.<field>", text)
+				return nil, fmt.Errorf("save %q must read result.<field> or input.<field>", text)
 			}
-			return nil, fmt.Errorf("assign %q must use result.<field>", text)
+			return nil, fmt.Errorf("save %q must read result.<field>", text)
 		}
 		// A `?` after the field lets the step finish without it.
 		field, optional := strings.CutSuffix(field, "?")
@@ -1269,20 +1269,20 @@ func checkAssignments(taskName string, assign []AssignTo, agent *Agent) error {
 		if _, ok := agent.Variables[entry.Var]; !ok {
 			// Name the file the author has to edit, because "does not resolve"
 			// says neither where to look nor what is wrong.
-			return fmt.Errorf("assign writes to %q, which State in state.py does not declare", entry.Var)
+			return fmt.Errorf("save writes to %q, which State in state.py does not declare", entry.Var)
 		}
 		// The first segment indexes the task's derived finish fields; anything
 		// after the first dot is a path into that field's type.
 		root, rest, _ := strings.Cut(entry.Field, ".")
 		field, ok := task.Result[root]
 		if !ok {
-			return fmt.Errorf("assign result field %q does not resolve", entry.Field)
+			return fmt.Errorf("save result field %q does not resolve", entry.Field)
 		}
 		source := field.Type
 		if rest != "" {
 			picked, err := field.Type.Path(strings.Split(rest, "."))
 			if err != nil {
-				return fmt.Errorf("assign result %q: %w", entry.Field, err)
+				return fmt.Errorf("save result %q: %w", entry.Field, err)
 			}
 			source = picked
 		}
@@ -1298,7 +1298,7 @@ func checkAssignments(taskName string, assign []AssignTo, agent *Agent) error {
 func fitsAssign(entry AssignTo, source *stateschema.Type, agent *Agent) error {
 	want, ok := agent.Variables[entry.Var]
 	if !ok {
-		return fmt.Errorf("assign writes to %q, which State in state.py does not declare", entry.Var)
+		return fmt.Errorf("save writes to %q, which State in state.py does not declare", entry.Var)
 	}
 	from := "result"
 	if entry.FromInput {
@@ -1307,7 +1307,7 @@ func fitsAssign(entry AssignTo, source *stateschema.Type, agent *Agent) error {
 	target := want.Schema
 	if entry.Append {
 		if !target.IsList() {
-			return fmt.Errorf("assign appends to %q with %q, and %q is %s rather than a list. "+
+			return fmt.Errorf("save appends to %q with %q, and %q is %s rather than a list. "+
 				"Drop the %q to replace the value, or declare it list[...] in state.py so an entry can be added to it",
 				entry.Var, entry.Var+"+:", entry.Var, target, "+")
 		}
@@ -1321,7 +1321,7 @@ func fitsAssign(entry AssignTo, source *stateschema.Type, agent *Agent) error {
 		}
 	}
 	if err := stateschema.Fits(source, target); err != nil {
-		return fmt.Errorf("assign %s %q does not fit variable %q: %w", from, entry.Field, entry.Var, err)
+		return fmt.Errorf("save %s %q does not fit variable %q: %w", from, entry.Field, entry.Var, err)
 	}
 	return nil
 }

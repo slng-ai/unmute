@@ -1,10 +1,4 @@
 local:
   handler: tools/lessons.py:give_hint
-inject:
-  - waiting: "{{state.waiting}}"
-assign:
-  - helped: result.helped
-  - said: result.said
-replies:
-  - say:
-      - "{{state.said}}"
+with:
+  - waiting: "state.waiting"

@@ -24,53 +24,50 @@ type TerminalTool struct {
 	// when the step ends on it. Version 2 only.
 	Confirm []string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
 	Say     []string `json:"say,omitempty" yaml:"say,omitempty"`
+	// Assign is what this outcome saves. Empty on an outcome that ends the
+	// step as completed means the step's own save: rows, read from the result.
+	Assign []AssignTo `json:"assign,omitempty" yaml:"assign,omitempty"`
+	// Ends is failed for an outcome with then: failed, and empty otherwise.
+	Ends string `json:"ends,omitempty" yaml:"ends,omitempty"`
 }
 
-// EndsOnTools names the tools this task ends on, sorted, for the report and the
-// runbook. Derived rather than stored: two copies of one fact drift. One tool
-// appears once, because terminalTools refuses a second entry naming it.
+// EndsFailed is the Ends of an outcome that fails the step.
+const EndsFailed = "failed"
+
+// EndsOnTools names the tools this task ends on, sorted and each once, for the
+// report and the runbook. Derived rather than stored: two copies of one fact
+// drift.
 func (t Task) EndsOnTools() []string {
 	names := make([]string, 0, len(t.Finish))
 	for _, entry := range t.Finish {
 		names = append(names, entry.Tool)
 	}
 	slices.Sort(names)
-	return names
+	return slices.Compact(names)
 }
 
-// terminalTools lowers a task's `finish:` and refuses everything the emitted
-// code could not honour: a tool the task does not hold, a success field the tool
-// does not declare a closed set for, a value outside that set, and a result
-// field the tool does not return in a shape the step can save.
+// terminalTools lowers a task's outcomes that end the step, and refuses
+// everything the emitted code could not honour: a match field the tool does not
+// declare a closed set for, a value outside that set, and a save the tool does
+// not return in a shape State can hold.
 //
 // Every refusal names the tool, what is wrong, and what to write instead,
 // because a compile-time refusal is the only place an author finds out: at
 // runtime the step would simply never end on its own, which reads as the model
 // being slow rather than as a package being wrong.
-func terminalTools(taskName string, raw packagespec.Task, agent *Agent, result map[string]ResultField) ([]TerminalTool, error) {
+func terminalTools(pkg *packagespec.Package, taskName string, raw packagespec.Task, agent *Agent, result map[string]ResultField) ([]TerminalTool, error) {
 	if len(raw.Finish) == 0 {
 		return nil, nil
 	}
 	out := make([]TerminalTool, 0, len(raw.Finish))
-	named := map[string]bool{}
 	for _, entry := range raw.Finish {
-		// One entry per tool. A second one used to be accepted and then reduced
-		// to whichever was written last, because the generator keys its success
-		// conditions by tool: a package naming booked, moved and cancelled in
-		// three entries ended its step on cancelled alone, and the two dropped
-		// values failed nothing and appeared nowhere.
-		if named[entry.Tool] {
-			return nil, fmt.Errorf("finish names %q twice in %q; write one entry for it and list the alternatives under the field, as `- status:` with a value per line",
-				entry.Tool, taskName)
-		}
-		named[entry.Tool] = true
 		if !slices.Contains(raw.Tools, entry.Tool) {
-			return nil, fmt.Errorf("finish names %q, which %q does not list under tools:; add it there or name one it has",
+			return nil, fmt.Errorf("an outcome names %q, which %q does not list under tools:; add it there or name one it has",
 				entry.Tool, taskName)
 		}
 		tool, ok := agent.Tools[entry.Tool]
 		if !ok {
-			return nil, fmt.Errorf("finish names %q, which is not a tool of this package", entry.Tool)
+			return nil, fmt.Errorf("an outcome names %q, which is not a tool of this package", entry.Tool)
 		}
 		properties, _ := tool.Output["properties"].(map[string]any)
 		defs, _ := tool.Output["$defs"].(map[string]any)
@@ -86,25 +83,65 @@ func terminalTools(taskName string, raw packagespec.Task, agent *Agent, result m
 						entry.Tool, pair.Field, value, strings.Join(declared, ", "))
 				}
 			}
-			// Same reason as the per-tool check above: a second pair on one
-			// field overwrote the first rather than widening it.
+			// A second pair on one field used to overwrite the first rather
+			// than widen it, so the narrower match silently won.
 			if _, twice := success[pair.Field]; twice {
-				return nil, fmt.Errorf("finish on %q names %s twice; list its alternatives under one `- %s:` instead, a value per line",
+				return nil, fmt.Errorf("an outcome of %q names %s twice in if:; list its values under one `- %s:` instead, a value per line",
 					entry.Tool, pair.Field, pair.Field)
 			}
 			success[pair.Field] = pair.Values
 		}
-		if len(success) == 0 {
-			return nil, fmt.Errorf("finish names %q with no success:; a step cannot end on a result nothing checks", entry.Tool)
+		ends := ""
+		if entry.Ends == EndsFailed {
+			ends = EndsFailed
 		}
-		for _, field := range sortedKeys(result) {
-			if err := terminalResultFits(entry.Tool, properties, defs, field, result[field]); err != nil {
-				return nil, err
+		if len(success) == 0 && ends == "" {
+			return nil, fmt.Errorf("an outcome of %q ends the step with no if:; a step cannot complete on a result nothing checks", entry.Tool)
+		}
+		own, err := assignments(entry.Save, pkg.Agent.Version == packagespec.Version2)
+		if err != nil {
+			return nil, fmt.Errorf("an outcome of %q: %w", entry.Tool, err)
+		}
+		if err := ownSaveFits(pkg, agent, entry.Tool, own); err != nil {
+			return nil, err
+		}
+		// An outcome that completes the step with no save: of its own saves the
+		// step's save: rows from this tool, so the tool has to return them.
+		if len(own) == 0 && ends == "" {
+			for _, field := range sortedKeys(result) {
+				if err := terminalResultFits(entry.Tool, properties, defs, field, result[field]); err != nil {
+					return nil, err
+				}
 			}
 		}
-		out = append(out, TerminalTool{Tool: entry.Tool, Success: success, Confirm: entry.Confirm, Say: entry.Say})
+		out = append(out, TerminalTool{Tool: entry.Tool, Success: success, Confirm: entry.Confirm, Say: entry.Say, Assign: own, Ends: ends})
 	}
 	return out, nil
+}
+
+// ownSaveFits holds an outcome's own save: rows to the tool they read: a
+// result field it returns, or an input it takes, in a shape the State value
+// can hold.
+func ownSaveFits(pkg *packagespec.Package, agent *Agent, tool string, rows []AssignTo) error {
+	for _, row := range rows {
+		model, err := outputModel(tool, agent.Tools[tool].Output)
+		kind := "result"
+		if row.FromInput {
+			model, err = inputModel(pkg, agent, tool)
+			kind = "input"
+		}
+		if err != nil {
+			return fmt.Errorf("save %s.%s: %w", kind, row.Field, err)
+		}
+		source, err := modelPath(model, row.Field)
+		if err != nil {
+			return fmt.Errorf("save %s.%s: %s %w", kind, row.Field, tool, err)
+		}
+		if err := fitsAssign(row, source, agent); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // declaredEnum is the success grammar: a success value has to be one the tool
@@ -150,7 +187,7 @@ func terminalResultFits(tool string, properties, defs map[string]any, field stri
 	}
 	property, ok := properties[field].(map[string]any)
 	if !ok {
-		return fmt.Errorf("%s returns no %s; every tool under finish: has to return what assign: saves", tool, field)
+		return fmt.Errorf("%s returns no %s; an outcome with then: done and no save: of its own saves the step's save: rows, so give it a save: or make %s return %s", tool, field, tool, field)
 	}
 	returned, err := stateschema.ParseProperty(property, defs)
 	if err == nil {

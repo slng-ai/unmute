@@ -626,7 +626,7 @@ func TestSlngRefusesAStructuredDispatchValue(t *testing.T) {
 			agent.Variables["caller_phone"] = variable
 
 			row := validateSlng(t, agent)
-			wantSlngError(t, row, `variable "caller_phone"`, "filled by the dispatch", "save it with a task's assign:")
+			wantSlngError(t, row, `variable "caller_phone"`, "filled by the dispatch", "save it with a step's save:")
 		})
 	}
 }
@@ -841,7 +841,7 @@ func TestSlngRefusesWhatItsTaskContractRefuses(t *testing.T) {
 				{Tool: "end_call", Success: map[string][]string{"ended": {"true"}}},
 			}
 			a.Tasks["take_booking"] = task
-		}, []string{`task "take_booking" ends on 2 tools`, "one tool for now"}},
+		}, []string{`task "take_booking" ends on 2 outcomes`, "one for now"}},
 		{"a finish read-back", func(a *Agent) {
 			task := a.Tasks["take_booking"]
 			task.Finish = []TerminalTool{{Tool: "check_availability", Success: map[string][]string{"status": {"free"}}, Confirm: []string{"Shall I book it?"}}}
@@ -866,12 +866,12 @@ func TestSlngRefusesWhatItsTaskContractRefuses(t *testing.T) {
 			task := a.Tasks["take_booking"]
 			task.Announce = []string{"One sec.", "Let me look."}
 			a.Tasks["take_booking"] = task
-		}, []string{`task "take_booking" has 2 announce lines`}},
+		}, []string{`task "take_booking" has 2 start: say: lines`}},
 		{"an optional assign", func(a *Agent) {
 			task := a.Tasks["take_booking"]
 			task.Assign = []AssignTo{{Var: "booking", Field: "booking", Optional: true}}
 			a.Tasks["take_booking"] = task
-		}, []string{"assigns result.booking?", "no optional marker"}},
+		}, []string{"saves result.booking?", "no optional marker"}},
 		{"a group that ends the call", func(a *Agent) {
 			group := a.TaskGroups["book"]
 			group.Then = GroupEnd
@@ -913,7 +913,7 @@ func TestSlngRefusesAnnounceAlternatives(t *testing.T) {
 	}
 
 	row := validateSlng(t, agent)
-	wantSlngError(t, row, "announce: alternatives", "one pre-action message", "compile to livekit or pipecat")
+	wantSlngError(t, row, "start: say: alternatives", "one pre-action message", "compile to livekit or pipecat")
 }
 
 // One line is what the target does carry, so it is not refused. The pair is the

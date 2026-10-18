@@ -68,7 +68,10 @@ variables:
 
 tools:
   - hotel_info
-  - search_places_text
+  - name: search_places_text
+    start:
+      say:
+        - Let me have a look around the neighbourhood.
   - web_search
   - send_sms
   - end_call

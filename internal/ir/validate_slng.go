@@ -281,7 +281,7 @@ func validateSlngTool(name string, tool Tool, row *TargetValidation) {
 	// and this is the shape of one rather than the key itself.
 	if len(tool.Announce) > 1 {
 		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(
-			"tool %q writes %d announce: alternatives and a SLNG attachment carries one pre-action message: keep one line, or compile to livekit or pipecat which pick between them as the tool fires", name, len(tool.Announce)))
+			"tool %q writes %d start: say: alternatives and a SLNG attachment carries one pre-action message: keep one line, or compile to livekit or pipecat which pick between them as the tool fires", name, len(tool.Announce)))
 	}
 }
 

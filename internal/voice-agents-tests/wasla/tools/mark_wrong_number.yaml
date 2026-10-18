@@ -1,6 +1,6 @@
 local:
   handler: tools/ledger.py:mark_wrong_number
-inject:
-  - account_id: "{{state.account_id}}"
+with:
+  - account_id: "state.account_id"
   - call: "{{call.session_id}}"
 interruption: continue

@@ -262,8 +262,12 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	// renders both the top-level catalogue and each agent's own `tools:` list
 	// straight from data.Tools's order (Data.AgentTools filters it, it does not
 	// re-sort it), so this loop's order is the whole story for both.
+	entries := make(map[string]packagespec.ToolEntry, len(pkg.Agent.Tools))
+	for _, entry := range pkg.Agent.Tools {
+		entries[entry.Name] = entry
+	}
 	seenTool := make(map[string]bool, len(pkg.Agent.Tools))
-	for _, name := range pkg.Agent.Tools {
+	for _, name := range packagespec.ToolNames(pkg.Agent.Tools) {
 		if seenTool[name] {
 			continue
 		}
@@ -275,7 +279,8 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		value := scaffold.Tool{
 			Name: name, Description: tool.Description, Execution: tool.ExecutionKind(),
 			Input: jsonText(tool.Input), Output: jsonText(tool.Output),
-			Inject: append([]packagespec.Pair(nil), tool.Inject...),
+			Inject: authoredWith(tool.Inject),
+			Entry:  entries[name],
 			// Announce is legal on webhook, local, knowledge and slng execution
 			// only (V36); carried unconditionally like Description above rather
 			// than gated per case, because a well-formed package never authors
@@ -336,10 +341,10 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			MaxMessages: task.Context.MaxMessages, Summarizer: task.Context.Summarizer,
 			IncludeToolCalls: task.Context.IncludeToolCalls,
 			Agent:            cmp.Or(definers[name], "assistant"),
-			When:             task.When, Announce: task.Announce,
-			Assign:  append([]packagespec.Pair(nil), task.Assign...),
-			Finish:  append([]packagespec.FinishEntry(nil), task.Finish...),
-			Opening: task.Opening,
+			When:             task.When,
+			Assign:           append([]packagespec.Pair(nil), task.Save...),
+			Start:            task.Start,
+			ToolEntries:      append([]packagespec.ToolEntry(nil), task.ToolEntries...),
 		})
 	}
 	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.TaskGroups)) {
@@ -921,4 +926,19 @@ func maintenanceWarningText(warnings []string) string {
 		return ""
 	}
 	return "\n\nWarnings:\n" + strings.Join(warnings, "\n")
+}
+
+// authoredWith gives a tool file's with: values back the way an author writes
+// them: Load turned state.x into {{state.x}}, and a rewrite should not.
+func authoredWith(pairs []packagespec.Pair) []packagespec.Pair {
+	out := make([]packagespec.Pair, len(pairs))
+	for i, pair := range pairs {
+		if text, ok := pair.Value.(string); ok {
+			if inner, found := strings.CutPrefix(text, "{{state."); found && strings.HasSuffix(inner, "}}") && !strings.ContainsAny(inner[:len(inner)-2], "{} ") {
+				pair.Value = "state." + strings.TrimSuffix(inner, "}}")
+			}
+		}
+		out[i] = pair
+	}
+	return out
 }

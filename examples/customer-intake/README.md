@@ -71,12 +71,12 @@ class in `state.py`.
 |---|---|---|
 | `caller_phone` | `Phone`, an E.164 phone number | the carrier's caller ID, then a step that hears the caller agree |
 | `contact` | `Contact`, a model with `name` and `email` | one answer, held as a name and an address |
-| `caller_email` | `EmailStr` | picked off `contact` with a dotted assign, not asked for twice |
+| `caller_email` | `EmailStr` | picked off `contact` with a dotted save, not asked for twice |
 | `enquiry` | `Literal[...]` | one of four words; a fifth is refused where it enters |
 | `callback_time` | `time \| None` | the caller says "half four", the model writes 16:30, or leaves it out |
 | `notes` | `list[str]` | appended, so a second remark does not replace the first |
 | `record` | `CustomerRecord`, a model | the tool's return, relayed by the model into `finish` |
-| `record_id` | `Id`, text with a pattern | picked off `record` with a dotted assign |
+| `record_id` | `Id`, text with a pattern | picked off `record` with a dotted save |
 | `today_date` | `date` | read once from the clock before the greeting |
 
 ## The three things it shows
@@ -87,11 +87,11 @@ in the field's description. An address the model heard wrong is refused with the
 in a message the model can correct itself from, and the previous value survives.
 Nothing downstream re-checks anything.
 
-**An injected value is not a parameter.** `create_customer_record` takes exactly
+**A pinned value is not a parameter.** `create_customer_record` takes exactly
 one argument from the model, a one-sentence summary. The number, the address,
-the name and the enquiry word come out of saved state through `inject:`, so they
+the name and the enquiry word come out of saved state through `with:`, so they
 are never advertised to the model and it cannot retype them. The compiler
-refuses an `inject:` key that names no parameter of the handler, which is what
+refuses a `with:` key that names no parameter of the handler, which is what
 stops a parameter quietly having two sources.
 
 **A pre-fetched value is a proposal, not a fact.** `caller_phone` carries
@@ -117,7 +117,7 @@ be opened against somebody else's number and nothing would say so.
 | `tasks/verify-contact.md` | the confirming step, and the only prompt that holds the number |
 | `tasks/take-details.md` | name, address and enquiry in one pass |
 | `tasks/open-record.md` | calls the tool and relays the record back |
-| `tools/create_customer_record.yaml` | one model argument, four injected values |
+| `tools/create_customer_record.yaml` | one model argument, four pinned values |
 | `tools/intake.py` | the typed handler, an in-process store, and a `_demo()` self-check. `agent.yaml` version 2 reads the tool's argument and result types from here |
 
 ## What it does not do
@@ -197,7 +197,7 @@ unmute dev examples/customer-intake --target pipecat --source from_number=YOUR_N
 ### `create_customer_record` refuses itself and names `caller_phone`
 
 The number is still a proposal. It carries `confirm: verify_contact`, so every
-tool that injects it refuses until that step has heard the caller agree.
+tool that pins it with `with:` refuses until that step has heard the caller agree.
 
 **Fix:** run `verify_contact` first and let the caller agree the number is
 theirs. In a scripted run that is a turn that says yes.

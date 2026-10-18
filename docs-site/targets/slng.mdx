@@ -250,8 +250,8 @@ in the dashboard. Preview the changes with `unmute deploy --dry-run`; follow
 [task groups](/build/orchestration/task-groups) compile to SLNG's own tasks,
 with the same meaning they have on LiveKit and Pipecat:
 
-- a task's `when:`, `instructions`, `tools`, `assign:`, one `announce:` line,
-  `opening: listen`, and a `context.history` of `messages`, `full`, `last_n` or
+- a task's `when:`, `instructions`, `tools`, `save:`, one `start: say:` line,
+  `start: listen: true`, an outcome with `then: done`, and a `context.history` of `messages`, `full`, `last_n` or
   `reset`
 - a group's `steps`, `skip_when_confirmed`, `context_scope` and `then: return`
 - `confirm:` on a variable, for a task with its own `when:`
@@ -319,13 +319,13 @@ None is dropped quietly.
 |---|---|
 | handoffs | the create body carries one agent |
 | prefetch | SLNG compiles no session-start hook |
-| tool keys `assign`, `replies`, `precheck`, `hidden`, `announce_wait` | the SLNG runtime runs version 2 without unmute-core. Compile to livekit or pipecat to use them |
-| a task's `replies` or `opens_with`, `entry_by`, prefetch `refuse_call`, a handoff's `saves` or `opens_with` | the same: they need unmute-core |
+| a tool entry's `save`, `outcomes`, `hidden` and `start: wait`, and a tool file's `precheck` | the SLNG runtime runs version 2 without unmute-core. Compile to livekit or pipecat to use them |
+| a step's outcomes without `then:`, a step's `start:` with `call:`, `entry_by`, prefetch `refuse_call`, a handoff's `saves` or `start` | the same: they need unmute-core |
 | a task's `think:`, `history: summary` or `include_tool_calls: false` | SLNG runs every task on the agent's one model and has no summary |
-| a second `finish:` rule in one task, or a `finish:` rule with `confirm:` | SLNG supports one finishing tool per task today and has no read-back |
-| a `finish:` rule on a tool with no known output | the rule needs the tool's output: use a typed local tool, or a hosted `slng:` tool with a mirror |
+| a second outcome with `then: done` in one task, an outcome with `then: failed`, or a `confirm:` line | SLNG supports one finishing tool per task today, ends a step only as done, and has no read-back |
+| an outcome on a tool with no known output | the outcome needs the tool's output: use a typed local tool, or a hosted `slng:` tool with a mirror |
 | a `webhook:` tool | create an API request tool in SLNG and reference it with `slng:` |
-| a second `announce:` line, an optional `result.x?`, a group with `then: end` or `then: transfer` | SLNG speaks one line, saves every assigned value, and returns from a group to the agent |
+| a second `start: say:` line, an optional `result.x?`, a group with `then: end` or `then: transfer` | SLNG speaks one line, saves every value a step lists, and returns from a group to the agent |
 | a task that lists another task or a handoff in its `tools:` | a SLNG task cannot start another task |
 | a `turn:` section, `semantic_endpointing`, `endpointing_delay`, `pace` | SLNG owns its own turn taking |
 | an `mcp:` tool with no `mcp.tools` list | unmute compiles offline and cannot expand "every tool on the server" into a reference list: name the tools you want |
@@ -338,7 +338,7 @@ None is dropped quietly.
 | a second `deployment_region` | SLNG takes exactly one |
 | outbound calling, `on_voicemail` | a package declares no carrier state on SLNG; `unmute deploy` attaches an existing trunk after a push |
 | a warm human transfer | SLNG's curated transfer places a single blind transfer |
-| a typed `state.py` field the dispatch fills, rather than a task | SLNG holds a dispatch value as plain text. Make it `str`, or save it with a task's `assign:` |
+| a typed `state.py` field the dispatch fills, rather than a task | SLNG holds a dispatch value as plain text. Make it `str`, or save it with a step's `save:` |
 | a `datetime`, a `dict`, or a pattern other than the `Id` one | SLNG's type grammar has no word for them |
 
 A package with a `state.py` needs `uv` on `PATH` to validate and compile, even

@@ -188,7 +188,7 @@ func TestCompileNeedsNoCredential(t *testing.T) {
 
 func TestCompileSlngPreservesAuthoredFalseAndNumbers(t *testing.T) {
 	dir := copyPackage(t, "slng_hosted")
-	tool := "slng: check_order\ninject:\n  - enabled: false\n  - limit: 0\n  - count: 42\n  - offset: -1\n  - ratio: 0.5\n"
+	tool := "slng: check_order\nwith:\n  - enabled: false\n  - limit: 0\n  - count: 42\n  - offset: -1\n  - ratio: 0.5\n"
 	if err := os.WriteFile(filepath.Join(dir, "tools", "check_order.yaml"), []byte(tool), 0o600); err != nil {
 		t.Fatal(err)
 	}

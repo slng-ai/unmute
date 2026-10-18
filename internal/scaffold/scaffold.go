@@ -262,6 +262,9 @@ type Variable struct {
 }
 
 type Tool struct {
+	// Entry is the tool's block in agent.yaml's top-level tools: (outcomes:,
+	// hidden:, start:), carried so maintenance never drops it.
+	Entry       spec.ToolEntry
 	Inject      []spec.Pair
 	Name        string
 	Description string
@@ -398,14 +401,46 @@ type Task struct {
 	IncludeToolCalls *bool
 	// Agent is the agent that defines this task, read from where the task is
 	// written rather than paired back through a naming convention.
-	Agent    string
-	When     string
-	Announce spec.Announce
-	Assign   []spec.Pair // ordered saved-variable assignments
-	// Finish and Opening are carried for one reason: a key this struct does not
-	// hold is a key `unmute maintain` deletes from the author's file at exit 0.
-	Finish  []spec.FinishEntry
-	Opening string
+	Agent  string
+	When   string
+	Assign []spec.Pair // the step's save: rows, in order
+	// Start and ToolEntries are carried for one reason: a key this struct does
+	// not hold is a key `unmute maintain` deletes from the author's file at
+	// exit 0. ToolEntries holds the tool blocks as written; a tool attached
+	// with no block of its own is written as its bare name.
+	Start       *spec.TaskStart
+	ToolEntries []spec.ToolEntry
+}
+
+// TaskToolEntries is the task's tools: list: each attached tool, as the block
+// the author wrote for it in this task, or as its bare name.
+func (d Data) TaskToolEntries(task Task) []spec.ToolEntry {
+	var out []spec.ToolEntry
+	for _, name := range d.TaskTools(task.Name) {
+		entry := spec.ToolEntry{Name: name}
+		for _, written := range task.ToolEntries {
+			if written.Name == name {
+				entry = written
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// TopToolEntries is the top-level tools: list: every tool, as its block when
+// it has behaviour on every agent, or as its bare name.
+func (d Data) TopToolEntries() []spec.ToolEntry {
+	out := make([]spec.ToolEntry, 0, len(d.Tools))
+	for _, tool := range d.Tools {
+		entry := tool.Entry
+		entry.Name = tool.Name
+		if len(tool.Announce) > 0 && entry.Start == nil {
+			entry.Start = &spec.ToolStart{Say: tool.Announce}
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func (t Task) PromptPath() string { return "tasks/" + t.Name + ".md" }
@@ -1237,12 +1272,30 @@ func parseTemplate(name string, raw []byte) (*template.Template, error) {
 		// finishBlock writes a task's terminal tools back through the same
 		// marshaller that read them, so a success value authored as one word
 		// comes back as one word rather than as a one-item list.
-		"finishBlock": func(indent int, entries []spec.FinishEntry) (string, error) {
-			content, err := yaml.Marshal(entries)
+		// yamlValue writes a value as block YAML under the key before it, in
+		// the struct's own field order, which blockYAML's map round trip loses.
+		"yamlValue": func(indent int, value any) (string, error) {
+			content, err := yaml.MarshalWithOptions(value, yaml.IndentSequence(true))
 			if err != nil {
 				return "", err
 			}
-			return blockYAML(indent, string(content))
+			// IndentSequence also indents a top-level list, so the common
+			// indent comes off before the key's own is put on.
+			lines := strings.Split(strings.TrimRight(string(content), "\n"), "\n")
+			common := -1
+			for _, line := range lines {
+				if trimmed := strings.TrimLeft(line, " "); trimmed != "" {
+					if n := len(line) - len(trimmed); common < 0 || n < common {
+						common = n
+					}
+				}
+			}
+			pad := strings.Repeat(" ", indent)
+			var out strings.Builder
+			for _, line := range lines {
+				out.WriteString("\n" + pad + line[min(common, len(line)):])
+			}
+			return out.String(), nil
 		},
 	}).Delims("[[", "]]").Parse(string(raw))
 }

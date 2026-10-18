@@ -59,6 +59,20 @@ handoffs:
   Exact text spoken before handing over. Omit for a silent handoff.
 </ParamField>
 
+<ParamField path="start" type="object">
+  A tool of the receiving agent, run in code as it takes the call, so its first turn
+  comes from the tool and not from a model request. Keys `call` and `with`.
+</ParamField>
+
+<ParamField path="start.call" type="string" required>
+  Name of the receiving agent's tool. Required inside `start`.
+</ParamField>
+
+<ParamField path="start.with" type="list of one-key pairs">
+  The tool's inputs, as `- day: state.requested_day`. A `?` after the value lets the call
+  run without it; a value without one is required.
+</ParamField>
+
 <ParamField path="context" type="object">
   The [history fields](/reference/agent-yaml#context). Omitted means `messages`. Saved
   values are visible only where the receiving prompt names them.

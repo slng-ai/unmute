@@ -6,5 +6,4 @@ description: Find places near the hotel for a guest, such as restaurants, bars, 
 slng: search_places_text
 
 # Spoken before the request goes out, so a slow lookup is not silence.
-announce: Let me have a look around the neighbourhood.
 effect: returns_data

@@ -57,7 +57,7 @@ func TestCodeTargetsRefuseAConversationVariableAndNameTheTask(t *testing.T) {
 			t.Fatalf("%s accepted a conversation variable", provider)
 		}
 		joined := strings.Join(reportFor(report, provider).Errors, "\n")
-		for _, want := range []string{"no value a model records mid-call", "task's `assign:`", "compile to slng"} {
+		for _, want := range []string{"no value a model records mid-call", "step's `save:`", "compile to slng"} {
 			if !strings.Contains(joined, want) {
 				t.Errorf("%s refusal does not say %q:\n%s", provider, want, joined)
 			}
@@ -83,7 +83,7 @@ func TestBuiltinSendSmsSenderRules(t *testing.T) {
 		inject map[string]any
 		want   string
 	}{
-		{"no inject at all", nil, "needs `inject:` with one `from_number`"},
+		{"no inject at all", nil, "needs `with:` with one `from_number`"},
 		{"a second key", map[string]any{"from_number": "+447700900123", "body": "hi"}, "takes only the sender"},
 		{"a template reference", map[string]any{"from_number": "{{customer_phone}}"}, "not a literal number"},
 		{"a national number", map[string]any{"from_number": "07700900123"}, "not a literal number"},

@@ -1,13 +1,5 @@
 local:
   handler: tools/lessons.py:use_this_number
-inject:
-  - phone: "{{state.phone}}"
-  - explanation: "{{state.explanation}}"
-assign:
-  - learner_id: result.learner_id
-  - learner_name: result.learner_name
-  - notes: result.notes
-  - said: result.said
-replies:
-  - say:
-      - "{{state.said}}"
+with:
+  - phone: "state.phone"
+  - explanation: "state.explanation"

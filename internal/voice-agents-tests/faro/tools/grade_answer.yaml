@@ -1,15 +1,8 @@
 local:
   handler: tools/lessons.py:grade_answer
-inject:
-  - learner_id: "{{state.learner_id}}"
-  - explanation: "{{state.explanation}}"
-  - waiting: "{{state.waiting}}"
-  - helped: "{{state.helped}}"
+with:
+  - learner_id: "state.learner_id"
+  - explanation: "state.explanation"
+  - waiting: "state.waiting"
+  - helped: "state.helped"
 interruption: continue
-assign:
-  - waiting: result.waiting
-  - helped: result.helped
-  - said: result.said
-replies:
-  - say:
-      - "{{state.said}}"

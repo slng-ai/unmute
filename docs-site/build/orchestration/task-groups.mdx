@@ -45,21 +45,21 @@ agents:
         instructions: tasks/identify-customer.md
         tools:
           - lookup_customer
-        assign:
+        save:
           - customer_id: result.customer_id
 
       - name: select_appointment
         instructions: tasks/select-appointment.md
         tools:
           - check_slots
-        assign:
+        save:
           - selected_slot: result.selected_slot
 
       - name: finalize_appointment
         instructions: tasks/finalize-appointment.md
         tools:
           - book_appointment
-        assign:
+        save:
           - booking_status: result.booking_status
 
     task_groups:
@@ -81,7 +81,7 @@ would ever run it.
 
 Each `steps` entry names a task defined in the package, under some agent's
 `tasks:`. It does not have to be the agent that runs the group: the group is
-what makes each step reachable. `assign:` derives each task's finish arguments
+what makes each step reachable. `save:` derives each task's finish arguments
 and saves the values needed later.
 
 ### Every key a group takes

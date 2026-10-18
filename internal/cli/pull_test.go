@@ -88,7 +88,6 @@ func scalarPullFixture(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(dir, "tools", "order_status.yaml"), []byte(
 		"description: Look up an order by its number and return its status and delivery date.\n\n"+
 			"slng: check_order\n\n"+
-			"announce: One moment while I look that up.\n"+
 			"interruption: provider_default\n"+
 			"effect: returns_data\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -212,7 +211,7 @@ func TestPullWritesTheMirrorAndStampsThePin(t *testing.T) {
 	}
 	for _, want := range []string{
 		"# A tool SLNG hosts",
-		"announce: One moment while I look that up.",
+		"interruption: provider_default",
 		"effect: returns_data",
 	} {
 		if !strings.Contains(string(authored), want) {

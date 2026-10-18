@@ -2,7 +2,7 @@
 
 The starting point. This is [`salon-concierge`](../salon-concierge/) with every
 unmute optimization taken out: one prompt, no tasks, no handoffs, no pre-fetch
-and no injected values.
+and no pinned values.
 
 It is here to measure what the optimizations are worth, not to be copied. Read
 it next to [`salon-concierge`](../salon-concierge/), the same salon with all of

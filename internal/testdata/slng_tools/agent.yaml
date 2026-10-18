@@ -62,7 +62,10 @@ agents:
       - end_call
 
 tools:
-  - check_order
+  - name: check_order
+    start:
+      say:
+        - One moment while I look that up.
   - refund
   - internal_docs
   - end_call

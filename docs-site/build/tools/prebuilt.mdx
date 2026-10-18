@@ -16,9 +16,9 @@ On this page:
 
 - [The block](#the-block) - two keys
 - [The registry, in full](#the-registry-in-full) - four ids, and it is closed
-- [Settings](#settings) - what `inject:` pins on each capability
+- [Settings](#settings) - what `with:` pins on each capability
 - [What the registry decides for you](#what-the-registry-decides-for-you) - effect, parameters, description
-- [Speaking before it runs](#speaking-before-it-runs) - `announce:` on a prebuilt
+- [Speaking before it runs](#speaking-before-it-runs) - `start: say:` on a prebuilt
 - [Turning it on](#turning-it-on) - the same two lists
 - [Advanced](#advanced) - resolving on SLNG
 - [Troubleshooting](#troubleshooting) - the refusals by name
@@ -63,7 +63,7 @@ lowering for each target, which is a change to Unmute, not to your agent.
 curates and compile on the `slng` target only for now. Version 2 on livekit and
 pipecat refuses them by name.
 
-A capability's **settings** are written with `inject:`. On a builtin that block
+A capability's **settings** are written with `with:`. On a builtin that block
 is the tool's own configuration, not an argument, because a curated capability
 publishes no argument schema for one to go in. The model never sees a pinned
 value either way.
@@ -76,12 +76,12 @@ description: Send a text message to the guest's confirmed mobile number.
 builtin:
   id: send_sms
 
-inject:
+with:
   - from_number: "+447700900123"
 ```
 
 `from_number` is a literal number in international format starting with a plus
-sign, and it is the only key `inject:` may carry here: SLNG requires the
+sign, and it is the only key `with:` may carry here: SLNG requires the
 sender on the attachment and lets the model supply the recipient and the body.
 SLNG reads the Twilio credentials from your vault under `TWILIO_ACCOUNT_SID`
 and `TWILIO_AUTH_TOKEN`, so `unmute deploy` checks both. Pair it with a
@@ -96,7 +96,7 @@ description: Read the clock. Call it once at the start of the call, before any d
 builtin:
   id: current_datetime
 
-inject:
+with:
   - timezone: "America/Los_Angeles"
 
 effect: returns_data
@@ -117,7 +117,7 @@ browse. If what you want is none of them, it is a
 
 ## Settings
 
-A prebuilt's settings are written with `inject:`, a list whose every item holds
+A prebuilt's settings are written with `with:`, a list whose every item holds
 one key. On a prebuilt that block is the capability's own configuration, not an
 argument the model could supply, because a curated capability publishes no
 argument schema. The model never sees a pinned value.
@@ -126,7 +126,7 @@ argument schema. The model never sees a pinned value.
 description: Read the clock. Call it once at the start of the call, before any day or time is discussed.
 builtin:
   id: current_datetime
-inject:
+with:
   - timezone: "America/Los_Angeles"
 effect: returns_data
 ```
@@ -171,8 +171,8 @@ number the caller confirmed is recorded on the call.
 Neither takes a setting. `user_phone_number` reads the number from the call leg.
 
 On `slng`, `end_call` always says a goodbye before it hangs up. Without
-`announce:` it is SLNG's default line, "Thanks for calling. Goodbye!". Write
-[`announce:`](#speaking-before-it-runs) to choose your own. A goodbye set by
+`start: say:` it is SLNG's default line, "Thanks for calling. Goodbye!". Write
+[`start: say:`](#speaking-before-it-runs) to choose your own. A goodbye set by
 hand in the dashboard is removed by the next push, and
 `unmute deploy --dry-run` says so before it happens.
 
@@ -214,28 +214,29 @@ It does not change the tool's id, parameters, or fixed
 ## Speaking before it runs
 
 On the `slng` target a prebuilt is an attachment like any other, so it can speak
-a fixed line as it starts:
+a fixed line as it starts. The line goes on the tool's entry in `agent.yaml`:
 
-```yaml tools/end_call.yaml
-description: End the call when the caller is finished or says goodbye.
-builtin:
-  id: end_call
-announce: Thanks for calling, goodbye.
+```yaml agent.yaml
+tools:
+  - name: end_call
+    start:
+      say:
+        - Thanks for calling, goodbye.
 ```
 
-<ParamField path="announce" type="string">
-  One fixed sentence the agent speaks as the tool starts. A list is refused here: an
-  attachment carries a single pre-action message. No `{{variables}}`.
+<ParamField path="tools[].start.say" type="list of strings">
+  One fixed sentence the agent speaks as the tool starts. More than one is refused here:
+  an attachment carries a single pre-action message. No `{{variables}}`.
 </ParamField>
 
 On `end_call` the line is the goodbye. It replaces SLNG's own goodbye, so the
 caller hears it once, then the call ends. Do not also tell the model to say
 goodbye before it calls `end_call`, or the caller hears two.
 
-Every other announcement runs alongside the tool, which is the point of it: a
+Every other line runs alongside the tool, which is the point of it: a
 sentence so a slow call is not silence.
 
-A code target refuses `announce:` on a prebuilt. It builds the capability from
+A code target refuses `start: say:` on a prebuilt. It builds the capability from
 its own SDK and has no seam in front of it, and the refusal says so.
 
 ## Turning it on

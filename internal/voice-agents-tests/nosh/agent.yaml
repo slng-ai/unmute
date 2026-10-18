@@ -64,11 +64,96 @@ models:
       pace: snappy
 
 tools:
-  - find_area
-  - find_places
-  - place_details
-  - end_call
+  - name: find_area
+    start:
+      say:
+        - Let me see.
+        - Hmm, let me look.
+# A new area takes back the places on offer and the details said.
+    save:
+      - spot: result.spot
+      - craving: result.craving
+      - offer: result.offer
+      - details: result.details
+    outcomes:
+      - if:
+          - found:
+              - true
+          - ask_craving:
+              - false
+        say:
+          - "So that's {{state.spot.formatted_address}}, right?"
+      - if:
+          - found:
+              - true
+          - ask_craving:
+              - true
+        say:
+          - "So that's {{state.spot.formatted_address}}. What are you in the mood for? A cuisine, a bar, or no preference?"
+      - if:
+          - found:
+              - false
+        say:
+          - >-
+            Hmm, I couldn't place that. Could you give me a nearby cross street, a
+            neighbourhood or the city?
+  - name: find_places
+    start:
+      say:
+        - Let me have a look.
+        - One sec, let me see what's around.
+    hidden:
+      - listed
+    save:
+      - craving: result.craving
+      - offer: result.offer
+      - details: result.details
+      - listed: result.listed
+    outcomes:
+      - if:
+          - ask_craving:
+              - true
+        say:
+          - What are you in the mood for? A cuisine, a bar, or no preference?
+      - if:
+          - found:
+              - true
+        say:
+          - "I found {{state.listed}}. Do any of those sound good?"
+      - if:
+          - found:
+              - false
+        say:
+          - >-
+            Hmm, I couldn't find anything like that right there. Want me to try a
+            bit wider, or a different kind of place?
+  - name: place_details
+    hidden:
+      - spoken
+    save:
+      - details: result.details
+      - spoken: result.spoken
+      - place_name: result.name
+    outcomes:
+      - if:
+          - found:
+              - true
+        say:
+          - "{{state.spoken}}"
+      - if:
+          - found:
+              - false
+        say:
+          - >-
+            Sorry, I can't pull up {{state.place_name}}'s details just now. Want to
+            hear about another one?
+  -
 
+    name: end_call
+    start:
+      say:
+        - Enjoy your meal! Bye for now.
+      wait: true
 conversation:
   greeting:
     speaks_first: agent

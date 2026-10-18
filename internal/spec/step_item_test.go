@@ -142,7 +142,7 @@ func TestSuccessPairWritesBackWhatWasAuthored(t *testing.T) {
 // It walks lists as well as mappings, which searchSchema does not: a task is
 // published under a `oneOf`, because a task item is a bare name or a mapping,
 // and a walk that stops at a list never reaches a single task field.
-func TestAuthoringSchemaPublishesFinish(t *testing.T) {
+func TestAuthoringSchemaPublishesOutcomes(t *testing.T) {
 	schema, err := Schema()
 	if err != nil {
 		t.Fatal(err)
@@ -155,13 +155,13 @@ func TestAuthoringSchemaPublishesFinish(t *testing.T) {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	finish := searchAnywhere(decoded, "finish")
-	if finish == nil {
-		t.Fatal("the derived authoring schema publishes no finish property")
+	outcomes := searchAnywhere(decoded, "outcomes")
+	if outcomes == nil {
+		t.Fatal("the derived authoring schema publishes no outcomes property")
 	}
-	for _, name := range []string{"tool", "success"} {
-		if searchAnywhere(finish, name) == nil {
-			t.Errorf("the derived authoring schema publishes no %q property under finish", name)
+	for _, name := range []string{"if", "else", "save", "say", "then"} {
+		if searchAnywhere(outcomes, name) == nil {
+			t.Errorf("the derived authoring schema publishes no %q property under outcomes", name)
 		}
 	}
 }

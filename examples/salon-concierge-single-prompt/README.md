@@ -62,7 +62,7 @@ What the one agent does differently:
 - Every tool is offered on every turn, where the optimized package offers each
   step only its own.
 - The model carries the caller's number itself. Nothing confirms the number
-  without a task, so `inject:` cannot read it from state. The prompt reads the
+  without a task, so `with:` cannot read it from state. The prompt reads the
   caller ID back, and the model passes the agreed number into each tool call.
 
 Everything else is held identical on purpose, and that is what makes the

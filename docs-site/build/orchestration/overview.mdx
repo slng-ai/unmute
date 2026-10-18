@@ -67,7 +67,7 @@ sequenceDiagram
 ### A task
 
 The owner enters the task. The task talks to the caller with its own prompt and
-tools. When the model calls `finish`, the values in `assign:` are saved and the
+tools. When the model calls `finish`, the values in `save:` are saved and the
 owner continues, reading them through its own placeholders.
 
 ```mermaid
@@ -84,10 +84,10 @@ sequenceDiagram
     Owner->>Caller: continues, reading the saved values
 ```
 
-### A task with `finish:`
+### A task that ends on a tool
 
-The same, except the tool decides. When the tool's result matches `success:`,
-the task saves and ends by itself. The model makes no `finish` call, and the
+The same, except the tool decides. When the tool's result matches an outcome
+with `then: done`, the task saves and ends by itself. The model makes no `finish` call, and the
 owner speaks next.
 
 ```mermaid
@@ -100,7 +100,7 @@ sequenceDiagram
     Task->>Caller: asks what it needs
     Caller->>Task: answers
     Task->>Tool: runs the tool
-    Tool-->>Task: result matches success
+    Tool-->>Task: result matches the outcome
     Note over Task: the task saves and ends, no finish call
     Task-->>Owner: status
     Owner->>Caller: acknowledges, and keeps the call

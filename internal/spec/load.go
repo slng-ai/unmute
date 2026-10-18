@@ -47,7 +47,7 @@ func Load(dir string) (*Package, error) {
 		return nil, err
 	}
 
-	for _, name := range pkg.Agent.Tools {
+	for _, name := range ToolNames(pkg.Agent.Tools) {
 		if filepath.Base(name) != name {
 			return nil, fmt.Errorf("agent.yaml: invalid tool name %q", name)
 		}
@@ -121,6 +121,9 @@ func Load(dir string) (*Package, error) {
 		return nil, err
 	}
 
+	if err := pkg.lowerToolBehaviour(); err != nil {
+		return nil, err
+	}
 	if err := pkg.flattenTasks(); err != nil {
 		return nil, err
 	}
