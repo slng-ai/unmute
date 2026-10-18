@@ -138,15 +138,12 @@ func TestValidateOmitsPrerequisiteWithoutTheCapabilityThatNeedsIt(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Cut the escalation, the list that attaches it, and the destination it
-	// resolves to. Written as whole-block substitutions rather than byte offsets,
+	// Cut the transfer. Written as whole-block substitutions rather than byte offsets,
 	// because an offset into a fixture is a stack trace waiting for whoever edits
 	// the fixture next.
 	trimmed := content
 	for _, block := range []string{
-		"    escalations:\n      - send_to_billing\n",
-		"escalations:\n  send_to_billing:\n    when: The caller asks about an invoice or a refund.\n    cold:\n      destination: billing_line\n\n",
-		"destinations:\n  billing_line: BILLING_PHONE_NUMBER\n\n",
+		"    transfers:\n      - name: send_to_billing\n        to: BILLING_PHONE_NUMBER\n        when: The caller asks about an invoice or a refund.\n",
 	} {
 		if !bytes.Contains(trimmed, []byte(block)) {
 			t.Fatalf("fixture no longer contains the block this test removes:\n%s", block)

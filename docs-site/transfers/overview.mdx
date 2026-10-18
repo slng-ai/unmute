@@ -4,7 +4,7 @@ description: "Handing the caller to a person: cold, warm, and why the route deci
 ---
 
 Sooner or later a caller needs a person. Unmute has one authoring shape for
-that, an entry under `escalations:`, and two forms.
+that, an entry under an agent's `transfers:`, and two forms.
 
 | Form | What the caller experiences |
 |---|---|
@@ -14,62 +14,55 @@ that, an entry under `escalations:`, and two forms.
 On this page:
 
 - [How you write it](#how-you-write-it) - the block, and every key it takes
-- [Destinations are symbolic](#destinations-are-symbolic) - the model never sees a number
+- [The number is an environment variable](#the-number-is-an-environment-variable) - the model never sees a number
 - [The route decides what is possible](#the-route-decides-what-is-possible) - which shape compiles where
-- [The escalation has to be attached](#the-escalation-has-to-be-attached) - the half that is enforced
+- [The transfer has to be reachable](#the-transfer-has-to-be-reachable) - the half that is enforced
 - [When the person does not pick up](#when-the-person-does-not-pick-up) - `ring_timeout` and `on_unavailable`
 - [Where to go next](#where-to-go-next) - the two routes that carry a transfer
 
 ## How you write it
 
-The shape you write is the shape you get. There is no `mode:` field, so a warm
-only setting cannot be written on a cold transfer:
+A transfer is a block in the `transfers:` list of the agent that offers it. Cold
+is the default. Writing `brief:` makes it warm, so a warm only setting cannot be
+written on a cold transfer:
 
 ```yaml agent.yaml
-escalations:
-  send_to_billing:
-    when: The caller asks about an invoice, a refund, or a charge they do not recognise.
-    cold:
-      destination: billing_line
+agents:
+  - name: front_desk
+    transfers:
+      - name: send_to_billing
+        to: BILLING_PHONE_NUMBER
+        when: The caller asks about an invoice, a refund, or a charge they do not recognise.
 
-  escalate_to_supervisor:
-    when: The caller is unhappy with how something was handled and asks for a manager.
-    warm:
-      destination: supervisor_line
-      briefing: |
-        Lead with the caller's name and which stylist they saw.
-        Say what they are unhappy about and what you already offered them.
-        Ask whether they can take the call now.
-      ring_timeout: 25s
-      on_unavailable: return_to_caller
+      - name: escalate_to_supervisor
+        to: SUPERVISOR_PHONE_NUMBER
+        when: The caller is unhappy with how something was handled and asks for a manager.
+        brief: |
+          Lead with the caller's name and which stylist they saw.
+          Say what they are unhappy about and what you already offered them.
+          Ask whether they can take the call now.
+        ring_timeout: 25s
+        on_unavailable: return_to_caller
 ```
 
-The escalation's name goes in the agent's own `escalations:` list. That half is
-enforced, not merely conventional. See [the control has to be
-attached](#the-escalation-has-to-be-attached) below.
+A transfer is defined once, by the agent that writes its block. Another agent
+offers it by listing the bare name, `- send_to_billing`. A bare name nobody
+defines is refused, and so are two blocks with one name.
 
-## Escalation fields
+## Transfer fields
+
+<ParamField path="name" type="string" required>
+  A lower snake case name, unique across the package.
+</ParamField>
+
+<ParamField path="to" type="string" required>
+  The UPPER_SNAKE name of an environment variable holding an E.164 number or a `sip:` URI,
+  read at call time. Declare it in `secrets:`. No destination is inferred.
+</ParamField>
 
 <ParamField path="when" type="string">
   The situation the model reads to decide whether to transfer. Omission supplies no
   trigger guidance, so write one.
-</ParamField>
-
-<ParamField path="cold" type="object">
-  A cold transfer using the destination and timeout fields below. Exactly one of `cold`
-  and `warm` is required; there is no default transfer form.
-</ParamField>
-
-<ParamField path="warm" type="object">
-  A warm transfer using the fields below, including optional `briefing`. Exactly one of
-  `cold` and `warm` is required. Supported only on LiveKit SIP.
-</ParamField>
-
-## Transfer fields
-
-<ParamField path="destination" type="string" required>
-  A symbol declared in `destinations`, whose value names an environment variable holding
-  the destination. No destination is inferred. Valid inside both `cold` and `warm`.
 </ParamField>
 
 <ParamField path="ring_timeout" type="string">
@@ -83,42 +76,32 @@ attached](#the-escalation-has-to-be-attached) below.
   reconnected.
 </ParamField>
 
-<ParamField path="briefing" type="string">
-  Instructions for briefing the person before connecting the caller. Legal only inside
-  `warm`. Omit for the runtime’s standard briefing instructions.
+<ParamField path="brief" type="string">
+  Instructions for briefing the person before connecting the caller. Makes the transfer
+  warm. Supported only on LiveKit SIP.
 </ParamField>
 
-## Destinations are symbolic
+## The number is an environment variable
 
-The model never sees a phone number. `destination` names a symbol, and the symbol
-is resolved at the top level of `agent.yaml`:
+The model never sees a phone number. `to:` names the variable that holds it, and
+the variable goes in `secrets:`:
 
 ```yaml agent.yaml
-destinations:
-  billing_line: BILLING_PHONE_NUMBER
-  supervisor_line: SUPERVISOR_PHONE_NUMBER
+secrets:
+  - BILLING_PHONE_NUMBER
+  - SUPERVISOR_PHONE_NUMBER
 ```
 
-### Every key a destination takes
-
-One line per symbol, and both halves are names.
-
-<ParamField path="<symbol>" type="UPPER_SNAKE environment variable name" required>
-  The left half is the symbol an escalation's `destination:` names. The right
-  half is the environment variable holding an E.164 number or a `sip:` URI, read
-  at call time. A symbol no escalation reaches is refused.
-</ParamField>
-
-A number written on the right is refused too:
+A number written in `to:` is refused. The refusal does not repeat the number:
 
 ```text
-agent.yaml:60: destination "billing_line" is a literal. agent.yaml is
-  the portable half of a package, so a destination names an environment variable holding
-  the number: billing_line: BILLING_PHONE_NUMBER
+agent.yaml:60: transfer "send_to_billing" has a literal to:. agent.yaml is the portable
+  half of a package, so to: names an environment variable holding the number, for
+  example to: BILLING_PHONE_NUMBER
 ```
 
-Destinations sit in `agent.yaml` rather than on the target because who this agent
-escalates to is the same desk whichever carrier reaches it.
+The variable sits in `agent.yaml` rather than on the target because who this agent
+transfers to is the same desk whichever carrier reaches it.
 
 ## The route decides what is possible
 
@@ -188,27 +171,26 @@ A Pipecat `daily-sip` transfer needs a Twilio connection and an active `channels
 A browser session has no SIP leg and gets a named
 failure before the agent announces a transfer.
 
-## The escalation has to be attached
+## The transfer has to be reachable
 
-Declaring an escalation under `escalations:` is half the job. Until some agent
-lists its name in its own `escalations:` list, no agent can reach it, and that is
-refused at build with the file, the line, and the agents you could attach it to:
+A transfer block sits in one agent's `transfers:` list. Another agent offers it by
+listing the bare name. A bare name that no agent defines is refused at build, with
+the file, the line, and the fix:
 
 ```text
-agent.yaml:47: escalation "send_to_billing" is declared but no agent reaches it; add it to the
-  escalations: of one of these agents: front_desk, billing
+agent.yaml:52: an agent names the transfer "send_to_billing", and no agent defines it;
+  write it as a block under one agent, - name: send_to_billing
 ```
 
-Before, it compiled at exit 0 and the control was simply absent from the
-generated project. Its destination's environment name still reached
-`.env.example` and the generated startup check, so the agent refused to start
-over a secret nothing would ever read.
+A transfer no agent the call can reach offers is refused too, because its number
+would reach `.env.example` and the startup check for something nothing could
+dial.
 
 ## When the person does not pick up
 
 ```yaml
-      ring_timeout: 25s
-      on_unavailable: return_to_caller
+ring_timeout: 25s
+on_unavailable: return_to_caller
 ```
 
 On the LiveKit `sip` route, no answer, a decline, voicemail, and a failed dial

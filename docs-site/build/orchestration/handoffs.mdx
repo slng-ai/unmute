@@ -12,38 +12,44 @@ return control to the same agent.
 
 On this page:
 
-- [Declare and attach a handoff](#declare-and-attach-a-handoff) - the two blocks
-- [Every key a handoff takes](#every-key-a-handoff-takes) - all four
+- [Declare a handoff](#declare-a-handoff) - one block on the agent
+- [Every key a handoff takes](#every-key-a-handoff-takes) - all seven
 - [Share only intentional saved values](#share-only-intentional-saved-values) - saving is not sharing
 - [Choose conversation history](#choose-conversation-history) - what travels with the caller
 - [A handoff does not return](#a-handoff-does-not-return) - the one thing to remember
 
-## Declare and attach a handoff
+## Declare a handoff
 
 ```yaml agent.yaml
 entry_agent: booking_desk
 
 agents:
-  booking_desk:
-    instructions: instructions.md
+  - name: booking_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     handoffs:
-      - to_appointment_manager
+      - name: to_appointment_manager
+        to: appointment_manager
+        when: The caller wants to change an existing appointment.
+        say:
+          - I’m connecting you with our appointment manager now.
 
-  appointment_manager:
-    instructions: agents/appointment-manager.md
+  - name: appointment_manager
+    prompt: agents/appointment-manager.md
     think: reasoning
     speak: voice
-
-handoffs:
-  to_appointment_manager:
-    to: appointment_manager
-    when: The caller wants to change an existing appointment.
-    announce: I’m connecting you with our appointment manager now.
 ```
 
+The agent that hands over writes the block. Another agent that wants the same
+handoff lists its bare name, `- to_appointment_manager`. A bare name nobody
+defines is refused.
+
 ### Every key a handoff takes
+
+<ParamField path="name" type="string" required>
+  A lower snake case name, unique across the package.
+</ParamField>
 
 <ParamField path="to" type="string" required>
   An existing agent name. The conversation moves to that agent and does not return. No
@@ -55,8 +61,13 @@ handoffs:
   trigger guidance, so write one.
 </ParamField>
 
-<ParamField path="announce" type="string">
-  Exact text spoken before handing over. Omit for a silent handoff.
+<ParamField path="say" type="list of strings">
+  One fixed line spoken before handing over, written as a list with one item. Omit for a
+  silent handoff.
+</ParamField>
+
+<ParamField path="save" type="list of one-key pairs">
+  Pairs of `variable: result.field` saved as the handoff happens. Omit to save nothing.
 </ParamField>
 
 <ParamField path="start" type="object">
@@ -109,12 +120,14 @@ walks through this choice and the return behavior of tasks.
 History defaults to `messages` when `context` or `history` is omitted.
 
 ```yaml agent.yaml
-handoffs:
-  to_appointment_manager:
-    to: appointment_manager
-    when: The caller wants to change an existing appointment.
-    context:
-      history: reset
+agents:
+  - name: booking_desk
+    handoffs:
+      - name: to_appointment_manager
+        to: appointment_manager
+        when: The caller wants to change an existing appointment.
+        context:
+          history: reset
 ```
 
 | `history` | The receiving agent gets |
@@ -137,7 +150,7 @@ redaction.
 The second agent owns the call from that point. Returning to the first agent is
 another declared handoff in the opposite direction.
 
-When a task invokes a handoff, that task and the remaining task-group steps end
+When a task invokes a handoff, that task and the remaining flow steps end
 before the receiving agent starts.
 
 On LiveKit, the receiving agent's own handoffs are hidden for its first
@@ -156,7 +169,7 @@ unmute dev examples/salon-concierge --target pipecat
 ```
 
 <Card title="Choosing a structure" icon="git-branch" href="/build/orchestration/choosing-a-structure">
-  Tools, tasks, task groups, or a second agent: which split to reach for, and what it costs.
+  Tools, tasks, flows, or a second agent: which split to reach for, and what it costs.
 </Card>
 
 ## Where to go next
@@ -166,7 +179,7 @@ unmute dev examples/salon-concierge --target pipecat
     When control should come back instead.
   </Card>
   <Card title="Choosing a structure" icon="git-branch" href="/build/orchestration/choosing-a-structure">
-    Task, task group or handoff, and what each one costs.
+    Task, flow or handoff, and what each one costs.
   </Card>
   <Card title="Context scope" icon="scissors" href="/best-practices/context-scope">
     Deciding what the receiving agent should be able to read.

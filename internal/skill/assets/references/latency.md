@@ -274,17 +274,17 @@ pull up your details and see what we have" does not. Put it only on tools that
 fetch or push data, and never on two tools that fire in the same turn, or the
 caller hears two lines for one request.
 
-A task group's own `announce:` counts as one of those two. The salon ran one on
-the `book` group and another on the tool its first step calls, and on the second
+A flow's own `say:` counts as one of those two. The salon ran one on
+the `book` flow and another on the tool its first step calls, and on the second
 booking of a call, where verification is skipped, they landed back to back with a
 single model request between them: "Sure, let me get that sorted for you." then
 "Hmm, let me check the diary." One line per request. The hesitation the caller
 hears before the answer itself belongs in the prompt, written onto the front of
 the sentence that does the work, where it costs no speech and no request.
 
-**Put the line on the step, not on the group above it or the tool below it.**
+**Put the line on the step, not on the flow above it or the tool below it.**
 
-A group's `announce:` fires on entry, before any step runs, so it is spoken
+A flow's `say:` fires on entry, before any step runs, so it is spoken
 whether or not a `skip_when_confirmed:` step is skipped, and there is often no
 sentence that is true on both halves.
 

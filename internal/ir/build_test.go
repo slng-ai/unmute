@@ -689,8 +689,8 @@ func TestBuildRefusesAFieldFromAnotherKind(t *testing.T) {
 	}{
 		{
 			name: "task on a handoff",
-			from: "  to_billing:\n    to: billing",
-			to:   "  to_billing:\n    task: collect\n    to: billing",
+			from: "      - name: to_billing\n        to: billing",
+			to:   "      - name: to_billing\n        task: collect\n        to: billing",
 			want: "task",
 		},
 		// `announce:` on a delegate used to sit here, refused as a field belonging
@@ -700,39 +700,39 @@ func TestBuildRefusesAFieldFromAnotherKind(t *testing.T) {
 		// TestDelegateAnnounceIsAFieldOfItsOwn below, and both drivers assert it
 		// is spoken on entry and not on the refusal path.
 		{
-			name: "assign on an escalation",
-			from: "\nhandoffs:\n  to_billing:",
-			to:   "\nescalations:\n  to_manager:\n    cold:\n      destination: manager_line\n    assign:\n      x: result.y\n\nhandoffs:\n  to_billing:",
+			name: "assign on a transfer",
+			from: "    handoffs:\n      - name: to_billing",
+			to:   "    transfers:\n      - name: to_manager\n        to: MANAGER_PHONE\n        assign:\n          x: result.y\n    handoffs:\n      - name: to_billing",
 			want: "assign",
 		},
 		{
 			name: "cold on a handoff",
-			from: "  to_billing:\n    to: billing",
-			to:   "  to_billing:\n    cold:\n      destination: manager_line\n    to: billing",
+			from: "      - name: to_billing\n        to: billing",
+			to:   "      - name: to_billing\n        cold:\n          destination: manager_line\n        to: billing",
 			want: "cold",
 		},
 		{
-			name: "kind on a catalog entry",
-			from: "  to_billing:\n    to: billing",
-			to:   "  to_billing:\n    kind: agent_transfer\n    to: billing",
+			name: "kind on a handoff",
+			from: "      - name: to_billing\n        to: billing",
+			to:   "      - name: to_billing\n        kind: agent_transfer\n        to: billing",
 			want: "kind",
 		},
 		{
 			name: "a retired controls: block",
-			from: "\nhandoffs:\n  to_billing:",
-			to:   "\ncontrols:\n  to_manager:\n    kind: human_transfer\n\nhandoffs:\n  to_billing:",
+			from: "\nagents:\n",
+			to:   "\ncontrols:\n  to_manager:\n    kind: human_transfer\n\nagents:\n",
 			want: "controls",
 		},
 		{
 			name: "delegates: inside a task definition",
-			from: "    tools:\n      - lookup_customer\n    handoffs:\n      - to_billing",
-			to:   "    tools:\n      - lookup_customer\n    tasks:\n      - name: collect\n        instructions: instructions.md\n        delegates:\n          - run_it\n    handoffs:\n      - to_billing",
+			from: "    tools:\n      - lookup_customer\n    handoffs:\n",
+			to:   "    tools:\n      - lookup_customer\n    tasks:\n      - name: collect\n        prompt: instructions.md\n        delegates:\n          - run_it\n    handoffs:\n",
 			want: "delegates",
 		},
 		{
 			name: "escalations: inside a task definition",
-			from: "    tools:\n      - lookup_customer\n    handoffs:\n      - to_billing",
-			to:   "    tools:\n      - lookup_customer\n    tasks:\n      - name: collect\n        instructions: instructions.md\n        escalations:\n          - to_manager\n    handoffs:\n      - to_billing",
+			from: "    tools:\n      - lookup_customer\n    handoffs:\n",
+			to:   "    tools:\n      - lookup_customer\n    tasks:\n      - name: collect\n        prompt: instructions.md\n        escalations:\n          - to_manager\n    handoffs:\n",
 			want: "escalations",
 		},
 	} {
@@ -984,7 +984,7 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 		{
 			name:   "unattached human_transfer, cold",
 			mutate: func(pkg *packagespec.Package) { detach(pkg, "billing", "to_human") },
-			want:   `escalation "to_human" is declared but no agent reaches it`,
+			want:   `transfer "to_human" is declared but no agent reaches it`,
 		},
 		{
 			name: "unattached human_transfer, warm",
@@ -994,19 +994,12 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 				pkg.Agent.Escalations["to_human"] = control
 				detach(pkg, "billing", "to_human")
 			},
-			want: `escalation "to_human" is declared but no agent reaches it`,
+			want: `transfer "to_human" is declared but no agent reaches it`,
 		},
 		{
 			name:   "unattached agent_transfer",
 			mutate: func(pkg *packagespec.Package) { detach(pkg, "intake", "to_billing") },
 			want:   `handoff "to_billing" is declared but no agent reaches it`,
-		},
-		{
-			name: "unreferenced destination",
-			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Destinations["front_desk_line"] = "FRONT_DESK_PHONE_NUMBER"
-			},
-			want: `destination "front_desk_line" is declared but no escalation resolves to it`,
 		},
 		{
 			name:   "unreferenced top-level tool",
@@ -1016,7 +1009,7 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 		{
 			name:   "unreachable task",
 			mutate: func(pkg *packagespec.Package) { addTask(pkg, "check_balance") },
-			want:   `task "check_balance" has no when: and no task group lists it in steps:`,
+			want:   `task "check_balance" has no when: and no flow lists it in steps:`,
 		},
 		{
 			name: "unreachable task group",
@@ -1027,7 +1020,7 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 					Steps: []packagespec.StepItem{{Task: "check_balance"}}, ContextScope: "shared", Then: "return",
 				}
 			},
-			want: `task group "closing" is declared but no agent reaches it`,
+			want: `flow "closing" is declared but no agent reaches it`,
 		},
 		{
 			name: "unreachable agent",
@@ -1641,7 +1634,7 @@ func TestBuildRefusesANameInTheWrongList(t *testing.T) {
 				def.TaskGroups = append(def.TaskGroups, "to_human")
 				pkg.Agent.Agents["billing"] = def
 			},
-			defines: "escalation", belongs: "escalations:",
+			defines: "transfer", belongs: "transfers:",
 		},
 		{
 			name: "a tool listed under task_groups",
@@ -1696,7 +1689,7 @@ func TestBuildRefusesUnattachedAndCollidingCatalogEntries(t *testing.T) {
 		}
 		pkg.Agent.Destinations = map[string]string{"billing_line": "BILLING_PHONE_NUMBER"}
 		_, err := Build(pkg)
-		if err == nil || !strings.Contains(err.Error(), `escalation "to_manager" is declared but no agent reaches it`) {
+		if err == nil || !strings.Contains(err.Error(), `transfer "to_manager" is declared but no agent reaches it`) {
 			t.Fatalf("got %v", err)
 		}
 	})

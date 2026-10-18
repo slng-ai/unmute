@@ -17,7 +17,7 @@ func livePackage(t *testing.T, liveEntry string) (*Package, error) {
 		"agent.yaml": "version: 1\nname: live-test\narchitecture: live\nentry_agent: desk\n" +
 			"models:\n  live:\n" + liveEntry +
 			"  think:\n    fast:\n      provider: openai\n      model: gpt-5.6-terra\n" +
-			"agents:\n  desk:\n    instructions: instructions.md\n    live: live\n",
+			"agents:\n  - name: desk\n    prompt: instructions.md\n    live: live\n",
 		"targets.yaml": "channels:\n  - name: web\n    kind: realtime_audio\n" +
 			"capacity:\n  peak_sessions: 2\n  max_sessions: 4\n  avg_session_duration: 3m\n" +
 			"targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.10.0\"\n",

@@ -239,13 +239,13 @@ with a pointer to `state.py`. So is a `shapes:` block, which is a model in
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
 | omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `save:` | never guaranteed, so write the prompt to read whole while it is still empty, or give its field a default in `state.py` |
-| `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only. It becomes one of the agent's runtime variables, filled through SLNG's own `set_runtime_variables` tool and returned on the call record under `memory_variables`. Its field in `state.py` is `= None` and has a `Field(description=...)`, which the model reads. It takes no `{{placeholder}}` in any prompt or the greeting. On `livekit` and `pipecat` a step's `assign:` records such a value instead |
+| `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only. It becomes one of the agent's runtime variables, filled through SLNG's own `set_runtime_variables` tool and returned on the call record under `memory_variables`. Its field in `state.py` is `= None` and has a `Field(description=...)`, which the model reads. It takes no `{{placeholder}}` in any prompt or the greeting. On `livekit` and `pipecat` a step's `save:` records such a value instead |
 
 A value the model records during the call reaches no prompt. It has no value
 when the prompt is built, and SLNG rejects a prompt that names one:
 
 ```text
-agent.yaml:41: conversation.greeting.text references {{caller_email}}, a value the model
+agent.yaml:41: conversation.greeting.say references {{caller_email}}, a value the model
   records during the call, which no prompt receives: describe the value in the variable's
   description: and name it in prose here instead
 ```
@@ -293,26 +293,26 @@ prefetch:
   - name: today
     clock: now
     timezone: Europe/Madrid
-    assign:
+    save:
       - booking_date: result.date
       - booking_weekday: result.day_of_week
 
   - name: caller
     source: from_number
-    assign:
+    save:
       - customer_phone: result.value
 
   - name: profile
-    tool: look_up_account
+    call: look_up_account
     writes: false
-    args:
-      - phone: "{{state.customer_phone}}"
-    assign:
+    with:
+      - phone: state.customer_phone
+    save:
       - account_name: result.name
       - account_on_file: result.status
 ```
 
-`profile` assigns two variables from one lookup. An entry can `assign:` as
+`profile` saves two variables from one lookup. An entry can `save:` as
 many variables as the result has fields, from the one call.
 
 Every entry carries a `name:` and exactly one source key.
@@ -321,18 +321,18 @@ Every entry carries a `name:` and exactly one source key.
 |---|---|---|
 | `clock: now` | the clock, in the entry's own `timezone:` | `result.date`, `result.time`, `result.datetime`, `result.day_of_week`, `result.year`, `result.timezone` |
 | `source: <name>` | one of the eight facts a call carries | `result.value` |
-| `tool: <name>` | one already-declared tool, with `writes:` declared on this entry | `result.<field>`, from the tool's `output:` |
+| `call: <name>` | one already-declared tool, with `writes:` declared on this entry | `result.<field>`, from the tool's `output:` |
 
-A `clock: now` entry reads the clock once and may `assign:` as many of the six
+A `clock: now` entry reads the clock once and may `save:` as many of the six
 fields as you want. All six come from that one reading, so an entry assigning
 `result.date` and `result.time` cannot straddle a second, and one assigning
 `result.date` and `result.day_of_week` cannot straddle midnight.
 
-`args:` belongs to a `tool:` entry only, and takes the same value grammar as a
+`with:` belongs to a `call:` entry only, and takes the same value grammar as a
 tool file's `with:`.
 
 <Note>
-`assign:` and `args:` are **lists of one-key items**, not mappings. Each pair gets
+`save:` and `with:` are **lists of one-key items**, not mappings. Each pair gets
 its own `- ` line. An item holding two pairs is a dropped indent and is refused
 with its line number.
 </Note>
@@ -344,43 +344,42 @@ with its line number.
 </ParamField>
 
 <ParamField path="clock" type="string">
-  Only `now` is accepted. Choose exactly one of `clock`, `source`, and `tool`; omitting
+  Only `now` is accepted. Choose exactly one of `clock`, `source`, and `call`; omitting
   all three is refused.
 </ParamField>
 
 <ParamField path="timezone" type="string">
   Required with `clock`: an IANA zone such as `Europe/Madrid`. There is no default,
-  because the container clock is UTC. Refused on source and tool entries.
+  because the container clock is UTC. Refused on source and call entries.
 </ParamField>
 
 <ParamField path="source" type="string">
   One of the eight [system call facts](/reference/variables#sources). Choose exactly one
-  of `clock`, `source`, and `tool`. An unavailable fact skips the entry and leaves its
+  of `clock`, `source`, and `call`. An unavailable fact skips the entry and leaves its
   destination values unchanged.
 </ParamField>
 
-<ParamField path="tool" type="string">
-  A declared local or webhook tool. Choose exactly one of `clock`, `source`, and `tool`.
+<ParamField path="call" type="string">
+  A declared local or webhook tool. Choose exactly one of `clock`, `source`, and `call`.
   No tool runs when this key is absent.
 </ParamField>
 
 <ParamField path="writes" type="boolean">
-  Required with `tool`: `true` if this use changes data, or `false` if it only reads.
+  Required with `call`: `true` if this use changes data, or `false` if it only reads.
   There is no inferred answer. Refused with `clock` or `source`.
 </ParamField>
 
-<ParamField path="args" type="list of one-key pairs">
-  Arguments for a tool entry, as argument/value pairs. Values may use declared variable
-  placeholders. Omit when the tool needs no authored arguments; required inputs must still
+<ParamField path="with" type="list of one-key pairs">
+  Arguments for a `call:` entry, as argument/value pairs. A value is `state.x` or a literal. Omit when the tool needs no authored arguments; required inputs must still
   be supplied. Refused on clock and source entries.
 </ParamField>
 
-<ParamField path="assign" type="list of one-key pairs" required>
+<ParamField path="save" type="list of one-key pairs" required>
   One or more `variable: result.field` pairs. Every destination must be declared. Values
-  are checked together before any are saved. No assignment is inferred.
+  are checked together before any are saved. No save is inferred.
 </ParamField>
 
-A tool entry reads fields from the tool's declared `output:` schema. Its
+A `call:` entry reads fields from the tool's declared `output:` schema. Its
 arguments may be fixed scalars or reference values saved by earlier entries.
 The receiving fields must already be declared on `State`, with no `source:` of
 their own. Prefetch fills scalar values, including `date`, `time`, a checked
@@ -388,7 +387,7 @@ phone number, an email address and a compatible `Literal`. A model, a list and a
 nullable bare scalar such as `str | None` must be saved through a task. For
 prefetched text, give the field `= ""` until the value is available.
 
-A reference to a variable assigned by a later prefetch entry is refused.
+A reference to a variable saved by a later prefetch entry is refused.
 Entries run in authored order. `writes: true` entries appear in the compile
 report and generated runbook; the declaration does not trigger a confirmation
 conversation before execution.
@@ -398,7 +397,7 @@ conversation before execution.
 The whole list shares a two-second budget. Missing inputs skip an entry;
 a failed lookup or invalid result is logged without failing the call.
 Assignments from one entry are validated together before any are saved.
-Skipped assignments leave the destination values unchanged. Later entries
+Skipped saves leave the destination values unchanged. Later entries
 can run only if their inputs are available, including any usable defaults.
 
 Prefetched text is limited to 512 characters per value; longer text is
@@ -485,14 +484,14 @@ lists. A bare `{{variable}}` naming a field on `State` is refused with the fix,
 
 | Site | When the value is read |
 |---|---|
-| `conversation.greeting.text` | Once, at session start |
+| `conversation.greeting.say` | Once, at session start |
 | An agent's instructions | On entry and when its tasks save values |
 | A task's instructions | When the task starts |
 | A tool's `with:` value | On every tool call |
 | A webhook tool's `path` | On every tool call; substituted values are URL encoded |
 
 The greeting may only name a variable with a session-start source, a default,
-or a prefetch assignment. A prefetch can still be skipped, so handle a missing
+or a prefetch save. A prefetch can still be skipped, so handle a missing
 value. Agent and task instructions may name values that will be filled later.
 Undeclared variable names are compile errors at every site.
 
@@ -613,11 +612,11 @@ cannot call book_appointment yet: requested_service not set. Ask the caller firs
 
 ```yaml agent.yaml
 agents:
-  appointment_desk:
+  - name: appointment_desk
     tasks:
       - name: check_customer
         when: Identify the caller before booking.
-        instructions: tasks/check-customer.md
+        prompt: tasks/check-customer.md
         save:
           - customer_id: result.customer_id
 ```
@@ -652,11 +651,11 @@ can be `result.<field>`, or a dotted path into a model from `state.py`,
 
 ```yaml agent.yaml
 agents:
-  appointment_desk:
+  - name: appointment_desk
     tasks:
       - name: manage_booking
         when: Save one appointment.
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         save:
           - appointments+: result.appointment
           - last_booking_day: result.appointment.scheduled_date

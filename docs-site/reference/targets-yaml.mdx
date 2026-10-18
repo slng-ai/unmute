@@ -323,9 +323,9 @@ targets.yaml:6: target "livekit" declares carrier: twilio, which now belongs in
 ```
 
 ```text
-targets.yaml:7: target "livekit" declares destinations, which now belong at the top
-  level of agent.yaml. A destination is who this agent escalates to, which is the same
-  desk whichever carrier reaches it
+targets.yaml:7: target "livekit" declares destinations, and a number belongs to a
+  transfer now: write it as the transfer's to: in agent.yaml, which is the same desk
+  whichever carrier reaches it
 ```
 
 Where the target names no connection, the first two messages say

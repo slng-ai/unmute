@@ -40,6 +40,9 @@ func Load(dir string) (*Package, error) {
 	if err := pkg.readYAML("agent.yaml", &pkg.Agent); err != nil {
 		return nil, err
 	}
+	if err := pkg.lowerStructure(); err != nil {
+		return nil, err
+	}
 	if err := pkg.readManifest(); err != nil {
 		return nil, err
 	}
@@ -47,10 +50,11 @@ func Load(dir string) (*Package, error) {
 		return nil, err
 	}
 
-	for _, name := range ToolNames(pkg.Agent.Tools) {
-		if filepath.Base(name) != name {
-			return nil, fmt.Errorf("agent.yaml: invalid tool name %q", name)
-		}
+	names, err := pkg.toolFiles()
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range names {
 		// The shape check runs before the decoder so an old flat file reads as a
 		// migration instruction instead of "unknown field" (V2).
 		file := filepath.Join("tools", name+".yaml")

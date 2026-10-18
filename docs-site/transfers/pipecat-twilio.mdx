@@ -27,13 +27,12 @@ environment:
 ```
 
 ```yaml agent.yaml
-destinations:
-  billing_line: BILLING_PHONE_NUMBER
+secrets:
+  - BILLING_PHONE_NUMBER
 ```
 
-`billing_line` is a symbol, never a number: the right half names an environment
-variable read at call time, a rule [Human transfers](/transfers/overview) states
-in full.
+`BILLING_PHONE_NUMBER` is a variable name, never a number: it is read at call
+time, a rule [Human transfers](/transfers/overview) states in full.
 
 Your number points at a small piece of static markup in the Twilio console, which
 streams the call to Pipecat Cloud. No server of yours is in the path, in
@@ -50,12 +49,13 @@ and where each Twilio value is found is in
 ## The transfer
 
 ```yaml agent.yaml
-escalations:
-  send_to_billing:
-    when: The caller asks about an invoice, a refund, or a charge they do not recognise.
-    cold:
-      destination: billing_line
-      on_unavailable: hangup
+agents:
+  - name: front_desk
+    transfers:
+      - name: send_to_billing
+        to: BILLING_PHONE_NUMBER
+        when: The caller asks about an invoice, a refund, or a charge they do not recognise.
+        on_unavailable: hangup
 ```
 
 The mechanism is different from every other route. One request replaces the
@@ -67,15 +67,15 @@ destination answered. The tool result is `transfer_started`.
 
 ### Every key this transfer takes
 
-`cold:` is the only shape this route compiles, and `on_unavailable:` is the one
+A cold transfer is the only shape this route compiles, and `on_unavailable:` is the one
 key you cannot leave out. Pipecat `cloud-websocket` requires explicit
 `on_unavailable: hangup`; it cannot reconnect the original media stream. The
-entry's own `when:`, and the choice of shape block, work the same on every
-route and are stated on [Human transfers](/transfers/overview).
+entry's own `when:` works the same on every
+route and is stated on [Human transfers](/transfers/overview).
 
-<ParamField path="destination" type="a destinations entry name" required>
-  Which desk to reach. The name is resolved in the `destinations:` block above,
-  so the model never sees a number.
+<ParamField path="to" type="an UPPER_SNAKE environment variable name" required>
+  Which desk to reach. The variable holds the number, so the model never sees
+  one.
 </ParamField>
 
 <ParamField path="ring_timeout" type="a positive Go duration, e.g. 25s">
@@ -91,7 +91,7 @@ route and are stated on [Human transfers](/transfers/overview).
   cannot reconnect the original media stream.
 </ParamField>
 
-There is no `briefing:` key to write. It belongs to a `warm:` block, and warm
+There is no `brief:` key to write. It makes a transfer warm, and warm
 transfer compiles on no Pipecat route.
 
 ## The transfer ends the call

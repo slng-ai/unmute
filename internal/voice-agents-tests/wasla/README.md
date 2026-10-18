@@ -12,10 +12,10 @@ The scenarios in `scenarios/` are unmute-core's, unchanged. The e2e suite expect
 | Prefetch before the greeting | `clock` (Dubai) and a `tool` (`open_account`) that saves the holder's name |
 | Greeting with placeholders | `{{state.first_name}} {{state.last_name}}` |
 | `start:` with `listen: true` and `say:` | `identify` asks the date of birth with no model request |
-| `confirm` and `skip_when_confirmed` | `birth_date` is confirmed by `identify`; the group skips it later |
+| `confirm` and `skip_when_confirmed` | `birth_date` is confirmed by `identify`; the flow skips it later |
 | An outcome with `then: done` per result | promise, concern, callback and wrong number each read back, then a receipt |
-| `start: call:` with group arguments | a callback day and time the caller gave are read back with no request |
-| Groups with `then: end` | `callback` and `wrong_number` end the call after the receipt |
+| `start: call:` with flow `fills:` | a callback day and time the caller gave are read back with no request |
+| Flows with `then: end` | `callback` and `wrong_number` end the call after the receipt |
 | `with:` in the tool file | the account and the call id are never sent by the model |
 | `precheck` and `outcomes` | a day in the past or after the deadline is refused in code's words |
 | Nothing about the account before the check | details come only from a matching `verify_holder` |

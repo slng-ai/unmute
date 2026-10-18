@@ -1826,12 +1826,8 @@ func TestDeployRefusesTwoReferencesToOneHostedTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The agent's own list is indented six spaces and the package catalogue two,
-	// so the deeper one is replaced first and the shallower replacement is
-	// anchored on its own indent.
 	body := strings.Replace(string(raw), "      - check_order\n", "      - check_order\n      - order_status\n", 1)
-	body = strings.Replace(body, "\ntools:\n", "\ntools:\n  - order_status\n", 1)
-	if strings.Count(body, "order_status") != 2 {
+	if strings.Count(body, "order_status") != 1 {
 		t.Fatalf("the fixture's shape changed, so this test no longer attaches the alias:\n%s", body)
 	}
 	if err := os.WriteFile(agentPath, []byte(body), 0o600); err != nil {

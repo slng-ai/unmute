@@ -30,7 +30,7 @@ tracing:
 [[- end]]
 
 # Each agent is a prompt plus the models it thinks and speaks with. The
-# instructions file is sent to the model verbatim as its system prompt, so
+# prompt file is sent to the model verbatim as its system prompt, so
 # everything in it is addressed to the agent and nothing in it is addressed to
 # you — put your own notes here, in a comment, where the model never sees them.
 #
@@ -39,13 +39,13 @@ tracing:
 # is spoken word for word without going through the model at all.
 #
 # What an agent can do is its own lists: tools do work and come back, tasks are
-# sub-conversations it runs and returns from, task groups are ordered runs of
-# task steps, handoffs make the conversation somebody else's, and escalations put
-# the caller through to a person. A task is written here, inside the agent that
+# sub-conversations it runs and returns from, flows are ordered runs of task
+# steps, handoffs make the conversation somebody else's, and transfers put the
+# caller through to a person. Each is written here, inside the agent that
 # defines it, so one block says what the agent can do and when it does it.
 agents:
-[[range .AllAgents]]  [[.Name]]:
-    instructions: [[.PromptPath]]
+[[range .AllAgents]]  - name: [[.Name]]
+    prompt: [[.PromptPath]]
 [[- if $.SpeechSection]]
     [[$.SpeechSection]]: [[$.SpeechName]]
 [[- if $.SpeechSpeak.Name]]
@@ -60,7 +60,7 @@ agents:
 [[end]][[end]][[$tasks := $.AgentTasks .Name]][[if $tasks]]    tasks:
 [[range $tasks]]      - name: [[.Name]]
         when: [[quote .When]]
-        instructions: [[.PromptPath]]
+        prompt: [[.PromptPath]]
 [[if .Start]]        start:[[yamlValue 10 .Start]]
 [[end]][[$taskTools := $.TaskToolEntries .]][[if $taskTools]]        tools:[[yamlValue 10 $taskTools]]
 [[end]][[$taskHandoffs := $.TaskHandoffs .Name]][[if $taskHandoffs]]        handoffs:
@@ -72,47 +72,10 @@ agents:
 [[end]][[if .MaxMessages]]          max_messages: [[.MaxMessages]]
 [[end]][[if .Summarizer]]          summarizer: [[.Summarizer]]
 [[end]][[if .IncludeToolCalls]]          include_tool_calls: [[boolValue .IncludeToolCalls]]
-[[end]][[end]][[end]][[end]][[$groups := $.AgentTaskGroups .Name]][[if $groups]]    task_groups:
-[[range $groups]]      - [[.]]
-[[end]][[end]][[$handoffs := $.AgentHandoffs .Name]][[if $handoffs]]    handoffs:
-[[range $handoffs]]      - [[.]]
-[[end]][[end]][[$escalations := $.AgentEscalations .Name]][[if $escalations]]    escalations:
-[[range $escalations]]      - [[.]]
-[[end]][[end]]
-[[end]][[if .Handoffs]]handoffs:
-[[range .Handoffs]]  [[.Name]]:
-    to: [[.To]]
-    when: [[quote .When]]
-[[if .Announce]]    announce: [[quote .Announce]]
+[[end]][[end]][[end]][[end]][[$flows := $.AgentFlowItems .Name]][[if $flows]]    flows:[[yamlValue 6 $flows]]
+[[end]][[$handoffs := $.AgentHandoffItems .Name]][[if $handoffs]]    handoffs:[[yamlValue 6 $handoffs]]
+[[end]][[$transfers := $.AgentTransferItems .Name]][[if $transfers]]    transfers:[[yamlValue 6 $transfers]]
 [[end]]
-    context:
-      history: [[if .History]][[.History]][[else]]messages[[end]]
-[[if .MaxMessages]]      max_messages: [[.MaxMessages]]
-[[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
-[[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]
-[[end]]
-[[end]]
-[[end]][[if .HumanTransfers]]escalations:
-[[range .HumanTransfers]]  [[.Name]]:
-[[if .When]]    when: [[quote .When]]
-[[end]]    [[.Mode]]:
-      destination: [[.Destination]]
-[[if .Briefing]]      briefing: [[quote .Briefing]]
-[[end]][[if .RingTimeout]]      ring_timeout: [[.RingTimeout]]
-[[end]][[if .OnUnavailable]]      on_unavailable: [[.OnUnavailable]]
-[[end]][[end]]
-[[end]][[if .TaskGroups]]task_groups:
-[[range .TaskGroups]]  [[.Name]]:
-    when: [[quote .When]]
-[[if .Announce]]    announce: [[announce 6 .Announce]]
-[[end]]    steps:
-[[range .Steps]][[if .SkipWhenConfirmed]]      - task: [[.Task]]
-        skip_when_confirmed: [[.SkipWhenConfirmed]]
-[[else]]      - [[.Task]]
-[[end]][[end]][[if and .ContextScope (ne .ContextScope "shared")]]    context_scope: [[.ContextScope]]
-[[end]][[if and .Then (ne .Then "return")]]    then: [[.Then]]
-[[end]][[if .ThenTarget]]    then_target: [[.ThenTarget]]
-[[end]][[end]]
 [[end]][[if .BehaviourVariables]]# How the values on State in state.py behave: where one comes from, and which
 # step confirms it. A value needs an entry only for one of those.
 variables:
@@ -126,12 +89,6 @@ variables:
 # references a name you have not listed here.
 secrets:
 [[range .DeclaredSecrets]]  - [[.]]
-[[end]]
-[[end]][[if .HumanTransfers]]# Who this agent escalates to. A value is the UPPER_SNAKE name of an environment
-# variable holding the number, read at call time: agent.yaml is the portable
-# half of a package, so a phone number does not belong in it.
-destinations:
-[[range .Destinations]]  [[.Destination]]: [[.Value]]
 [[end]]
 [[end]][[if .Knowledge]]# Folders of documents the agents can search. Each one is read, split and
 # embedded once when the agent starts, and held in memory, so content is fixed
@@ -258,12 +215,12 @@ knowledge:
       provider: livekit
       model: turn-detector-mini
 [[end]][[end]]
-[[if .Tools]]tools:[[yamlValue 2 .TopToolEntries]]
+[[$top := .TopToolEntries]][[if $top]]tools:[[yamlValue 2 $top]]
 
 [[end]]conversation:
   greeting:
     speaks_first: [[.SpeaksFirst]]
-[[if .Greeting]]    text: [[ quote .Greeting ]]
+[[if .Greeting]]    say: [[ quote .Greeting ]]
 [[end]][[if .Interruption]]  interruption:
     enabled: [[boolValue .Interruption]]
 [[if .MinimumWords]]    minimum_words: [[.MinimumWords]]

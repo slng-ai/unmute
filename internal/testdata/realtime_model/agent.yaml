@@ -9,7 +9,9 @@
 version: 2
 
 name: realtime-model
+
 architecture: realtime
+
 entry_agent: desk
 
 secrets:
@@ -24,21 +26,17 @@ models:
       turn_detection: local
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     realtime: voice
     tools:
       - lookup_customer
       - check_availability
 
-tools:
-  - lookup_customer
-  - check_availability
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, this is Sage and Stone Salon. How can I help?"
+    say: "Hi, this is Sage and Stone Salon. How can I help?"
   inactivity:
     nudge_after: 20s
     end_after: 60s

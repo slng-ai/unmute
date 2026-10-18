@@ -22,7 +22,7 @@ Open the first matching reference; load another only when needed.
 | `references/prompting.md` | writing prompts, greetings, tasks, or tool descriptions |
 | `references/tools.md` | calling an API, Python, MCP, or a builtin |
 | `references/orchestration.md` | the brief has phases, order, roles, permissions, or a next step |
-| `references/variables.md` | values, secrets, destinations, templates, or task assignment |
+| `references/variables.md` | values, secrets, transfer numbers, templates, or task assignment |
 | `references/conversation.md` | greeting, interruption, inactivity, turn taking, or call limits |
 | `references/latency.md` | the brief is make it faster, it feels slow, or optimize the agent |
 | `references/telephony.md` | answering or placing a phone call |
@@ -35,14 +35,14 @@ Open the first matching reference; load another only when needed.
 Read the whole brief first. If it names **required order**, **separate roles** or permissions, or a server's **next step**, open `references/orchestration.md`.
 Choose the smallest native shape and tell the user what you chose.
 
-**Two steps in a row are one task group, not two tasks with a `when:` each.** Smallest is not fewest keys: every task an agent can choose between costs a model request to choose it, and that request speaks nothing and does nothing. A group is entered once and the steps after the first cost no request to reach.
+**Two steps in a row are one flow, not two tasks with a `when:` each.** Smallest is not fewest keys: every task an agent can choose between costs a model request to choose it, and that request speaks nothing and does nothing. A flow is entered once and the steps after the first cost no request to reach.
 
 **Keep state small.** Keep only values needed across a task or handoff, by a later tool, or as prompt facts. Prefer one timestamp to separate date and time values; `references/variables.md` has the example.
 
-**Every agent-level list attaches something already declared, except `tasks:`, written where it runs.** Five kinds: `tools:`, `tasks:` and `task_groups:` come back, `handoffs:` and `escalations:` do not. No `kind:` field, and all five share one namespace. `references/orchestration.md` has the table.
-**Define each tool once.** Its contract (`description`, `input`, `output`, one execution block, `with:`) lives in `tools/<name>.yaml`. What a tool does in a conversation lives in `agent.yaml`: a top-level `tools:` entry is a bare name or a block with `save:`, `outcomes:`, `hidden:` and `start:`, and a step's `tools:` entry is a bare name or a block with `confirm:` and `outcomes:`. `references/tools.md` has the rules.
+**An agent writes what it can do inside its own block.** Five kinds: `tools:`, `tasks:` and `flows:` come back, `handoffs:` and `transfers:` do not. No `kind:` field, and all five share one namespace. `references/orchestration.md` has the table.
+**Define each tool once.** Its contract (`description`, `input`, `output`, one execution block, `with:`) lives in `tools/<name>.yaml`. What a tool does in a conversation lives in `agent.yaml`: every file in `tools/` is a tool, so a top-level `tools:` entry exists only to give one `save:`, `outcomes:`, `hidden:` or `start:`, and a step's `tools:` entry is a bare name or a block with `confirm:` and `outcomes:`. `references/tools.md` has the rules.
 
-**A step that ends on a tool result says so in its outcomes.** `then: done` on an outcome saves and moves on with no model request in between. `start:` says a line, listens, or runs a tool in code as the step opens. `skip_when_confirmed:` skips a group step whose confirmation holds. Code targets only; `references/orchestration.md` has the rules.
+**A step that ends on a tool result says so in its outcomes.** `then: done` on an outcome saves and moves on with no model request in between. `start:` says a line, listens, or runs a tool in code as the step opens. `skip_when_confirmed:` skips a flow step whose confirmation holds. Code targets only; `references/orchestration.md` has the rules.
 
 **A step's `save:` and a tool's `output:` are different contracts.** Task finish fields come from destination fields on `State` in `state.py`, listed under the step's `save:`; do not repeat their types.
 Omitted task and handoff history means `messages`: spoken turns without tool records. With `reset`, name each needed saved value in the receiver's prompt as `{{state.variable}}`.
@@ -95,5 +95,5 @@ Tell the user:
 
 1. the target and smallest structure chosen;
 2. every model bound by role;
-3. what context crosses each task, group, or handoff;
+3. what context crosses each task, flow, or handoff;
 4. what was validated, compiled, heard, or left for them to check.

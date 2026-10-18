@@ -30,7 +30,7 @@ prefetch:
   - name: local_clock
     clock: now
     timezone: Europe/Madrid
-    assign:
+    save:
       - current_datetime: result.datetime
       - current_weekday: result.day_of_week
 ```
@@ -46,7 +46,7 @@ Three parts write or read state:
 | Key | Think of it as | Lives | Read by |
 |---|---|---|---|
 | `State` in `state.py` | the call's typed state | the whole call | only prompts and tools that explicitly reference a value |
-| `prefetch:` + `assign:` | state filled before the first word | the whole call | the same |
+| `prefetch:` + `save:` | state filled before the first word | the whole call | the same |
 | step `save:` | fields a step saves when it finishes | the whole call from then on | the same |
 
 Values are supplied at session start, filled by `prefetch:`, or saved at step
@@ -228,7 +228,7 @@ is built, and SLNG rejects a prompt that names one, so writing `{{state.caller_e
 for a `source: conversation` variable is refused:
 
 ```text
-agent.yaml:41: conversation.greeting.text references {{caller_email}}, a value the model
+agent.yaml:41: conversation.greeting.say references {{caller_email}}, a value the model
   records during the call, which no prompt receives: describe the value in the variable's
   description: and name it in prose here instead
 ```
@@ -276,28 +276,28 @@ prefetch:
     # UTC, so without this the agent names the wrong day for anybody who is
     # not on it.
     timezone: Europe/Madrid
-    assign:
+    save:
       - booking_date: result.date
       - booking_weekday: result.day_of_week
 
   - name: caller
     source: from_number
-    assign:
+    save:
       - customer_phone: result.value
 
   - name: profile
-    tool: look_up_account
-    # Required on a tool: entry, never defaulted. Answers "does running this
+    call: look_up_account
+    # Required on a call: entry, never defaulted. Answers "does running this
     # unasked, on every call including wrong numbers, change anything".
     writes: false
-    args:
-      - phone: "{{state.customer_phone}}"
-    assign:
+    with:
+      - phone: state.customer_phone
+    save:
       - account_name: result.name
       - account_on_file: result.status
 ```
 
-`profile` assigns two variables from one lookup. An entry can `assign:` as
+`profile` saves two variables from one lookup. An entry can `save:` as
 many variables as the result has fields, from the one call: no second
 request, no second turn.
 
@@ -307,27 +307,28 @@ Every entry carries a `name:` and exactly one source key.
 |---|---|---|
 | `clock: now` | the clock, in the entry's own `timezone:` | `result.date`, `result.time`, `result.datetime`, `result.day_of_week`, `result.year`, `result.timezone` |
 | `source: <name>` | a fact the call itself carries | `result.value` |
-| `tool: <name>` | one already-declared tool, with `writes:` declared on this entry | `result.<field>` from its `output:` |
+| `call: <name>` | one tool from `tools/`, with `writes:` declared on this entry | `result.<field>` from its `output:` |
 
 `clock: now` is the only value `clock:` accepts. One reading of the clock
-produces all six fields above, and `assign:` may name as many of them as the
+produces all six fields above, and `save:` may name as many of them as the
 entry wants.
 
-`tool:` is the general case. Any read-only tool qualifies when every argument is
+`call:` is the general case. Any read-only tool qualifies when every argument is
 something the package already holds: a fixed value, a call fact, the clock, or a
 value an earlier entry assigned. An account record, a price list, a rota, a
 caller's last order: if the prompt would otherwise tell the model to call it
 first, pre-fetch it instead. A tool whose arguments depend on what the caller says
 cannot be pre-fetched.
 
-**Write these as lists, not maps.** `assign:` and `args:` take **one pair per
-item**: `- customer_phone: result.value`, each on its own `- ` line. Writing them
+**Write these as lists, not maps.** `save:` and `with:` take **one pair per
+item**: `- customer_phone: result.value`, each on its own `- ` line. A `with:`
+value is `state.x` or a literal, with no `{{ }}`. Writing them
 as a mapping is refused, and so is an item holding two pairs, which is what a
 dropped indent produces:
 
 ```yaml
 # Refused. Two keys in one item.
-assign:
+save:
   - customer_name: result.name
     customer_id: result.id
 ```
@@ -337,7 +338,7 @@ Three rules that catch most first attempts:
 - **Order matters and is not fixed for you.** An entry reading a value that a
   *later* entry assigns is refused, naming both entries and telling you which one
   to move up. Reading a value an *earlier* entry assigned is the intended shape.
-- **`tool:` needs `writes: true` or `writes: false` on the entry.** There is no
+- **`call:` needs `writes: true` or `writes: false` on the entry.** There is no
   default: a pre-fetch runs unasked on every call, so the build makes you say
   whether that is safe. Webhook and local tools only. `writes:` is refused on
   a `clock:` or `source:` entry, which run no tool.
@@ -425,7 +426,7 @@ to be put into the request that places the call:
 prefetch:
   - name: dialing
     source: to_number
-    assign:
+    save:
       - customer_phone: result.value
 ```
 
@@ -475,7 +476,7 @@ Use `{{state.name}}` at the site that needs the value:
 
 | Site | Renders | Can name |
 |---|---|---|
-| `conversation.greeting.text` | once, at session start | a variable that already has a value |
+| `conversation.greeting.say` | once, at session start | a variable that already has a value |
 | an agent's instructions | on entry, and again once one of its own steps records a value | any declared variable |
 | a task's instructions | when that task starts | any declared variable |
 | a tool's `with:` value | on every tool call | any declared variable |
@@ -550,11 +551,11 @@ site but one, an unset variable renders as nothing, never as the word `None`.
 The greeting is that one exception. It renders once, before the first word,
 with no later turn to catch up on a value that arrives after, so it may only
 name a variable that already has a value: `source: call_start`, a system
-source, a `default`, or a `prefetch:` entry that assigns it. Naming anything
+source, a `default`, or a `prefetch:` entry that saves it. Naming anything
 else there is an error, not a silent empty string:
 
 ```
-conversation.greeting.text references {{requested_service}}, which has no value when the
+conversation.greeting.say references {{requested_service}}, which has no value when the
 prompt is built; give it source: call_start, a system source, or a default
 ```
 
@@ -606,7 +607,8 @@ cannot call book_appointment yet: requested_service not set. Ask the caller firs
 
 ```yaml agent.yaml
 agents:
-  appointment_desk:
+  - name: appointment_desk
+    prompt: instructions.md
     tasks:
       - name: customer_record
         save:
@@ -692,7 +694,7 @@ always optional and drop an absent entry. A finish with a non-empty
 ## Ordering a step that needs an earlier value
 
 There is no field that holds a step back until a variable exists. Say the
-order instead: number the flow in the agent's own instructions, and give the
+order instead: number the steps in the agent's own prompt, and give the
 later step a `when:` clause that names what has to be true first, "once the
 caller is verified." See "Order steps with the prompt" in
 `references/orchestration.md` for the full pattern, including what a
@@ -763,7 +765,7 @@ and the compiler refuses one.
 
 A secret reaches a call only through an environment lookup. Declare every name
 the package owns: model provider keys, tracing keys, model `endpoint_env`, tool
-`*_env` fields, connection `environment:` values, `destinations:` values, and
+`*_env` fields, connection `environment:` values, transfer `to:` values, and
 names read with `os.environ` in a local handler. The compiler also knows some
 runtime or platform names that are not author declarations; the generated
 runbook says who supplies those.
@@ -773,7 +775,7 @@ into something spoken, prompted, traced, or logged, so a secret in one would end
 up in a transcript. Writing one is refused:
 
 ```
-agent.yaml:70: conversation.greeting.text references {{OPENAI_API_KEY}}, but secrets never
+agent.yaml:70: conversation.greeting.say references {{OPENAI_API_KEY}}, but secrets never
   flow through templates; a secret reaches a tool through its own *_env field
 ```
 
@@ -789,12 +791,17 @@ environment or their secret store.
 ## Phone numbers are secrets too
 
 ```yaml agent.yaml
-destinations:
-  billing_line: BILLING_PHONE_NUMBER
-  supervisor_line: SUPERVISOR_PHONE_NUMBER
+agents:
+  - name: front_desk
+    prompt: instructions.md
+    transfers:
+      - name: send_to_billing
+        to: BILLING_PHONE_NUMBER
+        when: The caller asks about an invoice or a refund.
 ```
 
-A destination is the name of an environment variable holding an E.164 number or
-a `sip:` URI, read at call time. A number written there is refused, because
-`agent.yaml` is the portable half of a package. The model never sees a number
+A transfer's `to:` is the name of an environment variable holding an E.164
+number or a `sip:` URI, read at call time. Declare that variable in `secrets:`.
+A number written there is refused, because `agent.yaml` is the portable half of
+a package. The model never sees a number
 and cannot dial one that is not listed.

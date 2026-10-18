@@ -12,8 +12,8 @@ name: slng-memory-sms-fixture
 entry_agent: desk
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
@@ -46,20 +46,18 @@ variables:
     source: conversation
 
 tools:
-  - current_datetime
   - name: send_sms
     start:
       say:
         - One moment, sending that now.
-  -
-
-    name: end_call
+  - name: end_call
     start:
       say:
         - Thanks for calling, goodbye.
+
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi {{state.customer_name}}, how can I help?"
+    say: "Hi {{state.customer_name}}, how can I help?"
   interruption:
     enabled: true

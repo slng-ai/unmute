@@ -112,11 +112,11 @@ func buildV2(pkg *packagespec.Package, out *Agent) error {
 	for _, name := range sortedKeys(pkg.Agent.TaskGroups) {
 		raw, group := pkg.Agent.TaskGroups[name], out.TaskGroups[name]
 		if err := stateNames(out, "arguments", raw.Arguments); err != nil {
-			return fmt.Errorf("%s: task group %q: %w", pkg.Location("agent.yaml", name), name, err)
+			return fmt.Errorf("%s: flow %q: %w", pkg.Location("agent.yaml", name), name, err)
 		}
 		for _, step := range raw.NonBlocking {
 			if !slices.ContainsFunc(raw.Steps, func(item packagespec.StepItem) bool { return item.Task == step }) {
-				return fmt.Errorf("%s: task group %q: non_blocking names %q, which is not one of its steps",
+				return fmt.Errorf("%s: flow %q: non_blocking names %q, which is not one of its steps",
 					pkg.Location("agent.yaml", "non_blocking:"), name, step)
 			}
 		}

@@ -111,10 +111,10 @@ cp examples/salon-concierge-unoptimized/build/livekit/.env.example examples/salo
 
 ### Asking for a manager does not transfer
 
-The escalation is a cold transfer to the `MANAGER_PHONE_NUMBER` destination,
+The manager transfer is cold, to the number in `MANAGER_PHONE_NUMBER`,
 which a carrier has to dial. A browser session stops where the phone leg starts.
 
-**Fix:** put the destination in `.env` in E.164, and make the transfer on a
+**Fix:** put the number in `.env` in E.164, and make the transfer on a
 phone call rather than in the browser.
 
 ```

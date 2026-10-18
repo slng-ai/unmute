@@ -320,25 +320,25 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 	}
 	for name, group := range agent.TaskGroups {
 		if len(group.Steps) == 0 {
-			errors = add(errors, fmt.Sprintf("task group %q steps must not be empty", name))
+			errors = add(errors, fmt.Sprintf("flow %q steps must not be empty", name))
 		}
 		if group.ContextScope != ContextShared && group.ContextScope != ContextIsolated {
-			errors = add(errors, fmt.Sprintf("task group %q context_scope must be shared or isolated", name))
+			errors = add(errors, fmt.Sprintf("flow %q context_scope must be shared or isolated", name))
 		}
 		switch group.Then {
 		case GroupReturn, GroupEnd:
 			if group.ThenTarget != "" {
-				errors = add(errors, fmt.Sprintf("task group %q then_target is legal with transfer only", name))
+				errors = add(errors, fmt.Sprintf("flow %q then_target is legal with transfer only", name))
 			}
 		case GroupTransfer:
 			if group.ThenTarget == "" {
-				errors = add(errors, fmt.Sprintf("task group %q then_target is required with transfer", name))
+				errors = add(errors, fmt.Sprintf("flow %q then_target is required with transfer", name))
 			}
 		default:
-			errors = add(errors, fmt.Sprintf("task group %q then must be return, transfer, or end", name))
+			errors = add(errors, fmt.Sprintf("flow %q then must be return, transfer, or end", name))
 		}
 		if group.Merge != GroupMergeResults {
-			errors = add(errors, fmt.Sprintf("task group %q merge must be results", name))
+			errors = add(errors, fmt.Sprintf("flow %q merge must be results", name))
 		}
 	}
 	for name, control := range agent.Controls {
@@ -620,7 +620,7 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 				errors = add(errors, "conversation.greeting.speaks_first must be agent or user")
 			}
 			if greeting.SpeaksFirst == SpeaksFirstUser && greeting.Text != "" {
-				errors = add(errors, "conversation.greeting.text requires speaks_first: agent")
+				errors = add(errors, "conversation.greeting.say requires speaks_first: agent")
 			}
 		}
 		switch agent.Conversation.ThinkingAudio {
@@ -2417,7 +2417,7 @@ func referencedEnvNames(agent *Agent) map[string]string {
 	// target, so any target carries the whole set (research R1).
 	for _, target := range sortedKeys(agent.Targets) {
 		for _, name := range sortedKeys(agent.Targets[target].Destinations) {
-			note(agent.Targets[target].Destinations[name], fmt.Sprintf("agent.yaml destinations %s", name))
+			note(agent.Targets[target].Destinations[name], fmt.Sprintf("agent.yaml transfer %s to:", name))
 		}
 	}
 	for _, name := range sortedKeys(agent.Targets) {
@@ -3504,7 +3504,7 @@ func validateLive(agent *Agent, caps targetcap.Table, resolved Target, names []s
 			refuse("architecture: live serves one agent: control %q hands the call to another agent or a task, which a live session cannot follow because its instructions are fixed. Remove it, or %s",
 				name, realtimeAdvice(caps, targetcap.Provider(resolved.Provider), "takes new instructions mid-call"))
 		case *HumanTransfer:
-			refuse("escalation %q is not emitted under architecture: live in this version: a transfer needs the carrier leg this shape does not carry yet. Remove it, or write architecture: cascade", name)
+			refuse("transfer %q is not emitted under architecture: live in this version: a transfer needs the carrier leg this shape does not carry yet. Remove it, or write architecture: cascade", name)
 		}
 	}
 
@@ -3634,7 +3634,7 @@ func validateRealtime(agent *Agent, caps targetcap.Table, provider targetcap.Pro
 	// limits. Only the architecture's name differs.
 	for _, name := range sortedKeys(agent.Controls) {
 		if _, ok := agent.Controls[name].(*HumanTransfer); ok {
-			refuse("escalation %q is not emitted under architecture: realtime in this version: a transfer needs the carrier leg this shape does not carry yet. Remove it, or write architecture: cascade", name)
+			refuse("transfer %q is not emitted under architecture: realtime in this version: a transfer needs the carrier leg this shape does not carry yet. Remove it, or write architecture: cascade", name)
 		}
 	}
 	if len(agent.Variables) > 0 || len(agent.Prefetch) > 0 {

@@ -2,8 +2,11 @@
 # channel, one read-only tool and end_call: the whole first-release surface of
 # the twilio target, and nothing it refuses.
 version: 2
+
 name: relay-desk
+
 architecture: cascade
+
 entry_agent: desk
 
 models:
@@ -43,22 +46,18 @@ models:
         ignoreBackchannel: true
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
       - opening_hours
       - end_call
 
-tools:
-  - opening_hours
-  - end_call
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hello, how can I help with the desk today?"
+    say: "Hello, how can I help with the desk today?"
   interruption:
     enabled: true
 

@@ -17,8 +17,8 @@ secrets:
   - SLNG_API_KEY
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: reasoning
     speak: desk
     tasks:
@@ -26,7 +26,7 @@ agents:
       # skips when that confirmation already holds.
       - name: verify
         when: The caller has not been identified, or corrects their number.
-        instructions: tasks/verify.md
+        prompt: tasks/verify.md
         tools:
           - name: look_up
             outcomes:
@@ -40,7 +40,7 @@ agents:
 
       # Ends on either of its two mutations, and can hand the caller out.
       - name: book
-        instructions: tasks/book.md
+        prompt: tasks/book.md
         tools:
           - name: book_it
             outcomes:
@@ -64,52 +64,46 @@ agents:
           say:
             - What would you like me to pass on?
           listen: true
-        instructions: tasks/take_note.md
+        prompt: tasks/take_note.md
         context:
           history: reset
         save:
           - note: result.note
-    task_groups:
-      - do_book
-      - do_book_alone
-    handoffs:
-      - to_care
-
-  care:
-    instructions: agents/care.md
-    think: reasoning
-    speak: desk
-
-handoffs:
-  to_care:
-    to: care
-    when: The caller raises a complaint or asks for a manager.
-    context:
-      history: messages
-
-task_groups:
-  do_book:
-    when: The caller wants to make, change or cancel a booking.
-    steps:
-      - task: verify
-        skip_when_confirmed: customer_phone
-      - book
-    context_scope: shared
-    then: return
+    flows:
+      - name: do_book
+        when: The caller wants to make, change or cancel a booking.
+        steps:
+          - task: verify
+            skip_when_confirmed: customer_phone
+          - book
+        context_scope: shared
+        then: return
 
   # The same two steps with each one starting fresh, so the group exits are
   # proven in both scopes rather than in the one the shipped example uses.
-  do_book_alone:
-    when: The caller wants to book without the earlier conversation in scope.
-    steps:
-      - task: verify
-        skip_when_confirmed: customer_phone
-      - book
-    context_scope: isolated
-    then: return
+      - name: do_book_alone
+        when: The caller wants to book without the earlier conversation in scope.
+        steps:
+          - task: verify
+            skip_when_confirmed: customer_phone
+          - book
+        context_scope: isolated
+        then: return
 
 # How the values on State in state.py behave: where one comes from, and
 # which step confirms it. A value needs an entry only for one of those.
+    handoffs:
+      - name: to_care
+        to: care
+        when: The caller raises a complaint or asks for a manager.
+        context:
+          history: messages
+
+  - name: care
+    prompt: agents/care.md
+    think: reasoning
+    speak: desk
+
 variables:
   - name: customer_phone
     confirm: verify
@@ -138,14 +132,9 @@ models:
       provider: livekit
       model: turn-detector-mini
 
-tools:
-  - look_up
-  - book_it
-  - cancel_it
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, this is the front desk. How can I help?"
+    say: "Hi, this is the front desk. How can I help?"
   interruption:
     enabled: true

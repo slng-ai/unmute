@@ -17,8 +17,8 @@ variables:
     call_start: required
 
 agents:
-  finder:
-    instructions: instructions.md
+  - name: finder
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
@@ -69,6 +69,7 @@ tools:
       say:
         - Let me see.
         - Hmm, let me look.
+
 # A new area takes back the places on offer and the details said.
     save:
       - spot: result.spot
@@ -147,17 +148,16 @@ tools:
           - >-
             Sorry, I can't pull up {{state.place_name}}'s details just now. Want to
             hear about another one?
-  -
-
-    name: end_call
+  - name: end_call
     start:
       say:
         - Enjoy your meal! Bye for now.
       wait: true
+
 conversation:
   greeting:
     speaks_first: agent
-    text: >-
+    say: >-
       Hey {{state.customer_name}}, it's Nosh! You wanted a hand finding
       somewhere good. Whereabouts are you looking? An address or an area is fine.
   max_duration: 10m

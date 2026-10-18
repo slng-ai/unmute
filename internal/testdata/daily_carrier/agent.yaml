@@ -12,21 +12,14 @@ name: daily-carrier-fixture
 entry_agent: front_desk
 
 agents:
-  front_desk:
-    instructions: instructions.md
+  - name: front_desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
-    escalations:
-      - send_to_billing
-
-escalations:
-  send_to_billing:
-    when: The caller asks about an invoice or a refund.
-    cold:
-      destination: billing_line
-
-destinations:
-  billing_line: BILLING_PHONE_NUMBER
+    transfers:
+      - name: send_to_billing
+        to: BILLING_PHONE_NUMBER
+        when: The caller asks about an invoice or a refund.
 
 models:
   think:
@@ -50,4 +43,4 @@ models:
 conversation:
   greeting:
     speaks_first: agent
-    text: "Front desk on the Daily carrier line. How can I help?"
+    say: "Front desk on the Daily carrier line. How can I help?"

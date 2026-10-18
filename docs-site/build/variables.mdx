@@ -44,7 +44,7 @@ prefetch:
   - name: local_clock
     clock: now
     timezone: Europe/Madrid
-    assign:
+    save:
       - current_datetime: result.datetime
       - current_weekday: result.day_of_week
 ```
@@ -70,11 +70,11 @@ class State(BaseModel):
 
 ```yaml agent.yaml
 agents:
-  concierge:
+  - name: concierge
     tasks:
       - name: choose_service
         when: Find out which service the caller wants.
-        instructions: tasks/choose-service.md
+        prompt: tasks/choose-service.md
         save:
           - requested_service: result.service
 ```
@@ -173,11 +173,11 @@ The common one is a task. Add `save:` to the task that learns the value:
 
 ```yaml agent.yaml
 agents:
-  concierge:
+  - name: concierge
     tasks:
       - name: choose_service
         when: Find out which service the caller wants.
-        instructions: tasks/choose-service.md
+        prompt: tasks/choose-service.md
         save:
           - requested_service: result.service
 ```
@@ -224,7 +224,7 @@ A bare `{{requested_service}}` is refused, with the fix: `write {{state.requeste
 
 The greeting renders once, before anyone speaks, so it can only name a value
 that is already settled: one supplied at session start, a default, or a
-prefetch assignment.
+prefetch save.
 
 ```python state.py
 class State(BaseModel):
@@ -239,7 +239,7 @@ variables:
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi {{state.caller_name}}, how can I help?"
+    say: "Hi {{state.caller_name}}, how can I help?"
 ```
 
 <Warning>
@@ -316,7 +316,7 @@ can honestly come back with nothing.
 <Note>
   LiveKit and Pipecat support every type on this page. On the SLNG target, a
   value a task saves, or one with `source: conversation`, can use most of them.
-  [Tasks and task groups](/targets/slng#tasks-and-task-groups) lists which. A
+  [Tasks and flows](/targets/slng#tasks-and-flows) lists which. A
   value the dispatch fills stays plain `str`, because SLNG holds it as text. The
   [Twilio target](/targets/twilio) refuses a `state.py`.
 </Note>
@@ -367,7 +367,7 @@ Three things you will not need on your first agent.
 
 A pre-fetch cannot fill a model or a list. Use a task to produce grouped fields;
 use separate scalar variables for clock and lookup pre-fetch results. A single
-pre-fetch may assign several scalar variables from one result.
+pre-fetch may save several scalar variables from one result.
 
 A model is a Pydantic class in `state.py`. Declare its fields, then use the
 class as a field's type on `State`.

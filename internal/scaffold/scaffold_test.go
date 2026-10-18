@@ -296,8 +296,8 @@ func TestWrite_customData(t *testing.T) {
 		t.Fatal(err)
 	}
 	greeting := parsed["conversation"].(map[string]any)["greeting"].(map[string]any)
-	if greeting["text"] != data.Greeting {
-		t.Errorf("greeting.text = %v, want %q", greeting["text"], data.Greeting)
+	if greeting["say"] != data.Greeting {
+		t.Errorf("greeting.say = %v, want %q", greeting["say"], data.Greeting)
 	}
 
 	instructions, err := os.ReadFile(filepath.Join(dir, "instructions.md"))
@@ -505,7 +505,7 @@ func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{"billing:", "to_billing:", `announce: "I’ll connect you to billing now."`, "history: full"} {
+			for _, want := range []string{"name: billing", "name: to_billing", "- I’ll connect you to billing now.", "history: full"} {
 				if !strings.Contains(string(agentYAML), want) {
 					t.Errorf("agent.yaml missing %q:\n%s", want, agentYAML)
 				}
@@ -539,7 +539,7 @@ func TestPreflightTaskAndOrderedGroup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{"tasks:", "name: collect", "task_groups:", "- collect", "triage:"} {
+			for _, want := range []string{"tasks:", "name: collect", "flows:", "- collect", "name: triage"} {
 				if !strings.Contains(string(agentYAML), want) {
 					t.Errorf("agent.yaml missing %q:\n%s", want, agentYAML)
 				}
@@ -835,10 +835,10 @@ func TestScaffoldMCPToolIsBlockOnly(t *testing.T) {
 	}
 }
 
-// The scaffold writes the shape block with the transfer's settings inside it,
-// `destination` included (SCHEMA N27). Checked by decoding rather than by
-// grepping, so an indentation slip is a failure and not a passing substring.
-func TestWriteHumanTransferPutsDestinationInTheBlock(t *testing.T) {
+// The scaffold writes each transfer as one block under its agent: the
+// environment variable in to:, and brief: for a warm one. Checked by loading
+// the package, so the lowered transfer is what is compared.
+func TestWriteHumanTransferPutsTheNumberInTheBlock(t *testing.T) {
 	dir := t.TempDir()
 	data := Data{Name: "agent"}
 	data.SetTarget("pipecat")
@@ -853,38 +853,18 @@ func TestWriteHumanTransferPutsDestinationInTheBlock(t *testing.T) {
 	if _, err := Write(dir, data); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
+	pkg, err := spec.Load(dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("scaffolded package does not load: %v", err)
 	}
-	var decoded struct {
-		Escalations map[string]struct {
-			Destination *string `yaml:"destination"`
-			Cold        *struct {
-				Destination string `yaml:"destination"`
-			} `yaml:"cold"`
-			Warm *struct {
-				Destination   string `yaml:"destination"`
-				Briefing      string `yaml:"briefing"`
-				RingTimeout   string `yaml:"ring_timeout"`
-				OnUnavailable string `yaml:"on_unavailable"`
-			} `yaml:"warm"`
-		} `yaml:"escalations"`
+	cold := pkg.Agent.Escalations["to_human"]
+	if cold.Cold == nil || pkg.Agent.Destinations[cold.Cold.Destination] != "SUPPORT_PHONE_NUMBER" {
+		t.Errorf("cold transfer = %+v, destinations = %v", cold.Cold, pkg.Agent.Destinations)
 	}
-	if err := yaml.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("scaffolded agent.yaml does not parse: %v\n%s", err, raw)
-	}
-	cold := decoded.Escalations["to_human"]
-	if cold.Destination != nil {
-		t.Error("destination must live inside the shape block, not above it")
-	}
-	if cold.Cold == nil || cold.Cold.Destination != "support_line" {
-		t.Errorf("cold block = %+v", cold.Cold)
-	}
-	warm := decoded.Escalations["to_manager"].Warm
-	if warm == nil || warm.Destination != "manager_line" || warm.Briefing != "Say who is calling." ||
+	warm := pkg.Agent.Escalations["to_manager"].Warm
+	if warm == nil || pkg.Agent.Destinations[warm.Destination] != "MANAGER_PHONE_NUMBER" || warm.Briefing != "Say who is calling." ||
 		warm.RingTimeout != "20s" || warm.OnUnavailable != "hangup" {
-		t.Errorf("warm block = %+v", warm)
+		t.Errorf("warm transfer = %+v", warm)
 	}
 }
 

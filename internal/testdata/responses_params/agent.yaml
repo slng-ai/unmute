@@ -4,6 +4,7 @@
 version: 2
 
 name: responses-params
+
 entry_agent: desk
 
 secrets:
@@ -38,12 +39,12 @@ models:
       model: silero
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
 
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, how can I help?"
+    say: "Hi, how can I help?"

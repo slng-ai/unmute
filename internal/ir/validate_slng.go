@@ -381,13 +381,13 @@ func validateVaultTokens(agent *Agent, provider targetcap.Provider, row *TargetV
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(agent.Agents)) {
-		report("agent "+name+" instructions", agent.Agents[name].Instructions)
+		report("agent "+name+" prompt", agent.Agents[name].Instructions)
 	}
 	for _, name := range slices.Sorted(maps.Keys(agent.Tasks)) {
-		report("task "+name+" instructions", agent.Tasks[name].Instructions)
+		report("task "+name+" prompt", agent.Tasks[name].Instructions)
 	}
 	if agent.Conversation != nil && agent.Conversation.Greeting != nil {
-		report("conversation.greeting.text", agent.Conversation.Greeting.Text)
+		report("conversation.greeting.say", agent.Conversation.Greeting.Text)
 	}
 	// The tool sites stay livekit and pipecat only, which is where they were
 	// before slng started checking anything here. On slng a `webhook:` block is

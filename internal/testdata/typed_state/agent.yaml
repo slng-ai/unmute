@@ -35,14 +35,14 @@ variables:
     confirm: confirm_number
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tasks:
       - name: confirm_number
         when: Read the caller's number back and get a yes before anything acts on it.
-        instructions: tasks/confirm_number.md
+        prompt: tasks/confirm_number.md
         save:
           - caller_phone: result.caller_phone
         context:
@@ -50,7 +50,7 @@ agents:
 
       - name: book
         when: The caller wants an appointment.
-        instructions: tasks/book.md
+        prompt: tasks/book.md
         tools:
           - inspect_state
         save:
@@ -66,7 +66,7 @@ agents:
       # field refuses the whole booking when one of them is missing.
       - name: take_contact
         when: The caller wants the confirmation sent to them.
-        instructions: tasks/contact.md
+        prompt: tasks/contact.md
         save:
           - booked_for: result.booked_for
           - reminder_email: result.booked_for.email
@@ -75,7 +75,7 @@ agents:
 
       - name: record_flags
         when: Record the count and agreement.
-        instructions: tasks/flags.md
+        prompt: tasks/flags.md
         save:
           - count: result.count
           - accepted: result.accepted
@@ -83,7 +83,7 @@ agents:
           history: messages
       - name: no_output
         when: Finish a task that saves nothing.
-        instructions: tasks/flags.md
+        prompt: tasks/flags.md
         context:
           history: messages
 
@@ -122,7 +122,5 @@ models:
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, this is the salon. How can I help?"
+    say: "Hi, this is the salon. How can I help?"
 
-tools:
-  - inspect_state

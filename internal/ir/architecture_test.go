@@ -359,7 +359,7 @@ func TestRealtimeRefusesEverythingLiveRefusesForTheSameReason(t *testing.T) {
 		{"a phone connection", func(_ *Agent, tgt *Target) { tgt.Connection = "twilio_voice" },
 			"architecture: %s compiles for the browser route in this version"},
 		{"an escalation", func(a *Agent, _ *Target) { a.Controls = map[string]Control{"person": &HumanTransfer{}} },
-			`escalation "person" is not emitted under architecture: %s in this version`},
+			`transfer "person" is not emitted under architecture: %s in this version`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, shape := range []struct {

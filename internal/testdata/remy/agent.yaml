@@ -17,16 +17,25 @@ name: remy-fixture
 entry_agent: greeter
 
 agents:
-  greeter:
-    instructions: instructions.md
+  - name: greeter
+    prompt: instructions.md
     think: reasoning
     speak: host
     handoffs:
-      - to_reservations
-      - to_events
+      - name: to_reservations
+        to: reservations
+        when: Caller wants to book a table for a normal dine-in visit.
+        context:
+          history: full
 
-  reservations:
-    instructions: agents/reservations.md
+      - name: to_events
+        to: events
+        when: Caller wants to plan a private event, party, or large group booking.
+        context:
+          history: full
+
+  - name: reservations
+    prompt: agents/reservations.md
     think: reasoning
     speak: desk
     # Both steps of do_reserve. Neither carries a when:, so neither is something
@@ -45,78 +54,59 @@ agents:
           say:
             - Let me see what is open.
             - One moment, let me look at the book.
-        instructions: tasks/find_slot.md
+        prompt: tasks/find_slot.md
         tools:
           - check_availability
         context:
           history: full
 
       - name: confirm_booking
-        instructions: tasks/confirm_booking.md
+        prompt: tasks/confirm_booking.md
         tools:
           - send_confirmation
         context:
           history: full
-    task_groups:
-      - do_reserve
+    flows:
+      - name: do_reserve
+        when: The caller is ready to book a table; run the reservation flow.
+        steps:
+          - find_slot
+          - confirm_booking
+        context_scope: shared  # each step sees the group context; on LiveKit -> TaskGroup (warns, experimental)
+        then: return           # control comes back to the reservations agent
+        merge: results
     handoffs:
-      - back_to_greeter
+      - name: back_to_greeter
+        to: greeter
+        when: Caller wants something else, or to start over.
+        context:
+          history: full
 
-  events:
-    instructions: agents/events.md
+  - name: events
+    prompt: agents/events.md
     think: reasoning
     speak: desk
     tasks:
       - name: qualify_event
-        instructions: tasks/qualify_event.md
+        prompt: tasks/qualify_event.md
         context:
           history: full
-    task_groups:
-      - do_event
-    handoffs:
-      - back_to_greeter
-
-handoffs:
-  to_reservations:
-    to: reservations
-    when: Caller wants to book a table for a normal dine-in visit.
-    context:
-      history: full
-
-  to_events:
-    to: events
-    when: Caller wants to plan a private event, party, or large group booking.
-    context:
-      history: full
-
-  back_to_greeter:
-    to: greeter
-    when: Caller wants something else, or to start over.
-    context:
-      history: full
-
-task_groups:
-  do_reserve:
-    when: The caller is ready to book a table; run the reservation flow.
-    steps:
-      - find_slot
-      - confirm_booking
-    context_scope: shared      # each step sees the group context; on LiveKit -> TaskGroup (warns, experimental)
-    then: return               # control comes back to the reservations agent
-    merge: results
-
-  do_event:
-    when: The caller is ready to plan their event; run the events flow.
-    steps:
-      - qualify_event
-      - confirm_booking
-    context_scope: shared
-    then: return
-    merge: results
+    flows:
+      - name: do_event
+        when: The caller is ready to plan their event; run the events flow.
+        steps:
+          - qualify_event
+          - confirm_booking
+        context_scope: shared
+        then: return
+        merge: results
 
 # Models are defined once, in the central map grouped by kind (N15). Agents
 # reference think and speak entries by name; the sole listen and turn entries
 # select themselves. targets.yaml carries infrastructure only.
+    handoffs:
+      - back_to_greeter
+
 models:
   think:
     reasoning:
@@ -150,14 +140,10 @@ models:
       provider: livekit
       model: turn-detector-mini
 
-tools:
-  - check_availability
-  - send_confirmation
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?"
+    say: "Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?"
   interruption:
     enabled: true
   inactivity:

@@ -91,6 +91,8 @@ var removedTaskKeys = func() map[string]string {
 	for key, msg := range stepToolKeys {
 		keys[key] = msg
 	}
+	keys["instructions"] = "instructions: is called prompt: now"
+	keys["arguments"] = "arguments: is called fills: now"
 	return keys
 }()
 
@@ -101,6 +103,9 @@ func (h *Handoff) UnmarshalYAML(node ast.Node) error {
 		return err
 	}
 	if err := removedKeys(node, handoffToolKeys); err != nil {
+		return err
+	}
+	if err := removedKeys(node, handoffMoved); err != nil {
 		return err
 	}
 	type plainHandoff Handoff

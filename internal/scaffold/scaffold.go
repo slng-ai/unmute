@@ -428,8 +428,8 @@ func (d Data) TaskToolEntries(task Task) []spec.ToolEntry {
 	return out
 }
 
-// TopToolEntries is the top-level tools: list: every tool, as its block when
-// it has behaviour on every agent, or as its bare name.
+// TopToolEntries is the top-level tools: list: the tools with behaviour on
+// every agent. The tools/ folder lists every tool, so a bare one is left out.
 func (d Data) TopToolEntries() []spec.ToolEntry {
 	out := make([]spec.ToolEntry, 0, len(d.Tools))
 	for _, tool := range d.Tools {
@@ -437,6 +437,9 @@ func (d Data) TopToolEntries() []spec.ToolEntry {
 		entry.Name = tool.Name
 		if len(tool.Announce) > 0 && entry.Start == nil {
 			entry.Start = &spec.ToolStart{Say: tool.Announce}
+		}
+		if entry.Bare() {
+			continue // the tools/ folder lists it
 		}
 		out = append(out, entry)
 	}
@@ -1351,4 +1354,103 @@ func yamlScalar(value string) (string, error) {
 	}
 	encoded, err := yaml.Marshal(value)
 	return strings.TrimSpace(string(encoded)), err
+}
+
+// definerOf names, for each handoff, transfer or flow, the first agent in
+// written order that lists it: that agent writes the block, and every other
+// agent names it.
+func (d Data) definerOf(kind string) map[string]string {
+	owner := map[string]string{}
+	for _, agent := range d.AllAgents() {
+		var names []string
+		switch kind {
+		case "handoff":
+			names = d.AgentHandoffs(agent.Name)
+		case "transfer":
+			names = d.AgentEscalations(agent.Name)
+		case "flow":
+			names = d.AgentTaskGroups(agent.Name)
+		}
+		for _, name := range names {
+			if _, taken := owner[name]; !taken {
+				owner[name] = agent.Name
+			}
+		}
+	}
+	return owner
+}
+
+// AgentHandoffItems is an agent's handoffs: list, each a block where this
+// agent defines it and a bare name where another does.
+func (d Data) AgentHandoffItems(agent string) []any {
+	owner := d.definerOf("handoff")
+	var out []any
+	for _, name := range d.AgentHandoffs(agent) {
+		if owner[name] != agent {
+			out = append(out, name)
+			continue
+		}
+		for _, h := range d.Handoffs {
+			if h.Name != name {
+				continue
+			}
+			block := spec.Handoff{Name: h.Name, To: h.To, When: h.When}
+			if h.Announce != "" {
+				block.Say = []string{h.Announce}
+			}
+			if (h.History != "" && h.History != "messages") || h.MaxMessages > 0 || h.Summarizer != "" || h.IncludeToolCalls != nil {
+				block.Context = &spec.TransferContext{History: h.History, MaxMessages: h.MaxMessages, Summarizer: h.Summarizer, IncludeToolCalls: h.IncludeToolCalls}
+			}
+			out = append(out, block)
+			break
+		}
+	}
+	return out
+}
+
+// AgentTransferItems is an agent's transfers: list, the same way.
+func (d Data) AgentTransferItems(agent string) []any {
+	owner := d.definerOf("transfer")
+	var out []any
+	for _, name := range d.AgentEscalations(agent) {
+		if owner[name] != agent {
+			out = append(out, name)
+			continue
+		}
+		for _, t := range d.HumanTransfers {
+			if t.Name == name {
+				out = append(out, spec.Transfer{Name: t.Name, To: t.Value, When: t.When, RingTimeout: t.RingTimeout, OnUnavailable: t.OnUnavailable, Brief: t.Briefing})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// AgentFlowItems is an agent's flows: list, the same way. A flow writes
+// context_scope: and then: only when they are not the defaults.
+func (d Data) AgentFlowItems(agent string) []any {
+	owner := d.definerOf("flow")
+	var out []any
+	for _, name := range d.AgentTaskGroups(agent) {
+		if owner[name] != agent {
+			out = append(out, name)
+			continue
+		}
+		for _, g := range d.TaskGroups {
+			if g.Name != name {
+				continue
+			}
+			block := spec.TaskGroup{Name: g.Name, When: g.When, Announce: g.Announce, Steps: g.Steps, ThenTarget: g.ThenTarget}
+			if g.ContextScope != "" && g.ContextScope != "shared" {
+				block.ContextScope = g.ContextScope
+			}
+			if g.Then != "" && g.Then != "return" {
+				block.Then = g.Then
+			}
+			out = append(out, block)
+			break
+		}
+	}
+	return out
 }

@@ -21,7 +21,7 @@ On this page:
 - [Other history options](#other-history-options) - `full`, `last_n`, `summary`
 
 The snippets below are additions or updates to an existing package. Merge them
-into its current `variables:`, `agents:`, and `handoffs:` blocks.
+into its current `variables:` and `agents:` blocks.
 
 There are two independent choices:
 
@@ -40,11 +40,11 @@ Omitting `context` or `history` means `messages`. You can write it explicitly:
 
 ```yaml agent.yaml
 agents:
-  concierge:
+  - name: concierge
     tasks:
       - name: reschedule_booking
         when: The caller wants to move a booking.
-        instructions: tasks/reschedule-booking.md
+        prompt: tasks/reschedule-booking.md
         tools:
           - save_booking
         context:
@@ -99,11 +99,11 @@ class State(BaseModel):
 
 ```yaml agent.yaml
 agents:
-  concierge:
+  - name: concierge
     tasks:
       - name: choose_booking
         when: Select the existing booking and its requested new time.
-        instructions: tasks/choose-booking.md
+        prompt: tasks/choose-booking.md
         save:
           - appointment_id: result.appointment_id
           - appointment_date: result.appointment_date
@@ -134,11 +134,11 @@ Update `reschedule_booking` under the same agent so it runs after selection:
 
 ```yaml agent.yaml
 agents:
-  concierge:
+  - name: concierge
     tasks:
       - name: reschedule_booking
         when: Move the selected appointment after its new date and time are saved.
-        instructions: tasks/reschedule-booking.md
+        prompt: tasks/reschedule-booking.md
         tools:
           - save_booking
         context:
@@ -204,8 +204,8 @@ Use it instead of older dates mentioned in the conversation.
 ```
 
 Verification reuses a different mechanism: mark the confirmed variable with
-`confirm:` on the verification task, then put that task as a task-group step
-with `skip_when_confirmed:` naming the variable. The group skips the step once
+`confirm:` on the verification task, then put that task as a flow step
+with `skip_when_confirmed:` naming the variable. The flow skips the step once
 it is confirmed, and runs it again once the caller corrects the value. See
 [Reuse verification deliberately](/best-practices/state-design#reuse-verification-deliberately).
 
@@ -219,12 +219,14 @@ unfinished booking work.
 A handoff applies its history choice to the receiving agent:
 
 ```yaml agent.yaml
-handoffs:
-  to_customer_care:
-    to: customer_care
-    when: The caller needs help with a complaint.
-    context:
-      history: reset
+agents:
+  - name: concierge
+    handoffs:
+      - name: to_customer_care
+        to: customer_care
+        when: The caller needs help with a complaint.
+        context:
+          history: reset
 ```
 
 Put any needed placeholders in `customer_care`'s instructions. For example,
@@ -285,7 +287,7 @@ target restriction. A summary or a short history is not a substitute for
   <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
     Declaring a task, saving its result, and saying what success looks like.
   </Card>
-  <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
+  <Card title="Flows" icon="list-ordered" href="/build/orchestration/task-groups">
     Tasks in a fixed order, and skipping a step whose work is already done.
   </Card>
 </Columns>

@@ -187,22 +187,27 @@ type AgentFile struct {
 	// an environment variable holding the number. A destination is who this agent
 	// escalates to, which is the same desk whichever carrier reaches it, so it
 	// lives here rather than on a target.
-	Destinations map[string]string `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	// Destinations, Agents, Handoffs, Escalations and TaskGroups are the
+	// name-keyed views the compiler reads, filled by Load from the agents: list
+	// and each agent's handoffs:, transfers: and flows: (lowerStructure).
+	Destinations map[string]string `json:"-" yaml:"-"`
 	// Knowledge maps a name onto a folder of documents the agents read from.
 	// Package-level, beside Models and Destinations, because a corpus belongs to
 	// the package: two tools over one folder is normal, and putting the folder on
 	// the tool would re-index the same documents once per tool reading them.
 	Knowledge map[string]KnowledgeDef `json:"knowledge,omitempty" yaml:"knowledge,omitempty"`
-	Agents    map[string]AgentDef     `json:"agents" yaml:"agents"`
+	Agents    map[string]AgentDef     `json:"-" yaml:"-"`
+	// AgentList is `agents:` as written: a list, each agent with its name.
+	AgentList []AgentDef `json:"agents" yaml:"agents"`
 	// The two catalogs. Every agent-level list of a name written elsewhere has a
 	// same-named top-level catalog, and the block an entry is written in IS its
 	// kind, so there is no `kind:` field that could disagree with where the entry
 	// sits. Tasks are the exception and are written inside the agent that defines
 	// them. Declared here, after Agents, because struct order is what the derived
 	// schema publishes and the canonical section order starts from the reader.
-	Handoffs    map[string]Handoff    `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
-	Escalations map[string]Escalation `json:"escalations,omitempty" yaml:"escalations,omitempty"`
-	TaskGroups  map[string]TaskGroup  `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
+	Handoffs    map[string]Handoff    `json:"-" yaml:"-"`
+	Escalations map[string]Escalation `json:"-" yaml:"-"`
+	TaskGroups  map[string]TaskGroup  `json:"-" yaml:"-"`
 	// Tools lists every tool, as a name or as a block saying what happens
 	// around it on every agent: outcomes:, hidden: and start:.
 	Tools        []ToolEntry   `json:"tools,omitempty" yaml:"tools,omitempty"`
@@ -430,7 +435,7 @@ type Prefetch struct {
 	// confidently name the wrong day.
 	Timezone string `json:"timezone,omitempty" yaml:"timezone,omitempty"`
 	Source   string `json:"source,omitempty" yaml:"source,omitempty"`
-	Tool     string `json:"tool,omitempty" yaml:"tool,omitempty"`
+	Tool     string `json:"call,omitempty" yaml:"call,omitempty"`
 	// Writes is the author's answer to "does running this unasked, on every call
 	// including wrong numbers, change anything". Required on a tool entry.
 	//
@@ -444,8 +449,8 @@ type Prefetch struct {
 	// refusal for an absent one is the whole feature: the compiler cannot check
 	// either answer, so it makes the author state one rather than inferring it.
 	Writes *bool  `json:"writes,omitempty" yaml:"writes,omitempty"`
-	Args   []Pair `json:"args,omitempty" yaml:"args,omitempty"`
-	Assign []Pair `json:"assign,omitempty" yaml:"assign,omitempty"`
+	Args   []Pair `json:"with,omitempty" yaml:"with,omitempty"`
+	Assign []Pair `json:"save,omitempty" yaml:"save,omitempty"`
 	// Background runs the entry beside the greeting rather than before it.
 	Background bool `json:"background,omitempty" yaml:"background,omitempty" since:"2"`
 	// NeedsConfirmed names State values the caller must have agreed to before
@@ -468,7 +473,11 @@ type Prefetch struct {
 // `think:` and `speak:` name entries in the same-named `models:` sections, so the
 // four model kinds are spelled one way everywhere they are referred to.
 type AgentDef struct {
-	Instructions string `json:"instructions" yaml:"instructions"`
+	Name string `json:"name" yaml:"name"`
+	// Prompt is the file the model reads as its system prompt.
+	Prompt string `json:"prompt" yaml:"prompt"`
+	// Instructions is Prompt as the compiler reads it, filled by Load.
+	Instructions string `json:"-" yaml:"-"`
 	// Think and Speak name the agent's models the way a cascaded package does:
 	// one entry of `models.think` and one of `models.speak`.
 	//
@@ -480,15 +489,21 @@ type AgentDef struct {
 	// Speak is legal alongside Realtime, and only there: it is the half cascade,
 	// where the realtime model listens and thinks and a synthesizer speaks. The
 	// entry's own `voice:` and this binding are mutually exclusive.
-	Think       string     `json:"think,omitempty" yaml:"think,omitempty"`
-	Speak       string     `json:"speak,omitempty" yaml:"speak,omitempty"`
-	Realtime    string     `json:"realtime,omitempty" yaml:"realtime,omitempty"`
-	Live        string     `json:"live,omitempty" yaml:"live,omitempty"`
-	Tools       []string   `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Tasks       []TaskItem `json:"tasks,omitempty" yaml:"tasks,omitempty"`
-	TaskGroups  []string   `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
-	Handoffs    []string   `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
-	Escalations []string   `json:"escalations,omitempty" yaml:"escalations,omitempty"`
+	Think    string     `json:"think,omitempty" yaml:"think,omitempty"`
+	Speak    string     `json:"speak,omitempty" yaml:"speak,omitempty"`
+	Realtime string     `json:"realtime,omitempty" yaml:"realtime,omitempty"`
+	Live     string     `json:"live,omitempty" yaml:"live,omitempty"`
+	Tools    []string   `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Tasks    []TaskItem `json:"tasks,omitempty" yaml:"tasks,omitempty"`
+	// HandoffItems, TransferItems and FlowItems are written here: a block
+	// defines one, and a bare name refers to one another agent defines.
+	HandoffItems  []Item[Handoff]   `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
+	TransferItems []Item[Transfer]  `json:"transfers,omitempty" yaml:"transfers,omitempty"`
+	FlowItems     []Item[TaskGroup] `json:"flows,omitempty" yaml:"flows,omitempty"`
+	// TaskGroups, Handoffs and Escalations are the names, filled by Load.
+	TaskGroups  []string `json:"-" yaml:"-"`
+	Handoffs    []string `json:"-" yaml:"-"`
+	Escalations []string `json:"-" yaml:"-"`
 }
 
 // Task is one entry of an agent's `tasks:` list. It carries both what the task is
@@ -503,14 +518,17 @@ type AgentDef struct {
 // to run. A task with no `When` is a definition only, valid solely as a step of a
 // task group.
 type Task struct {
-	Name         string `json:"name" yaml:"name"`
-	Instructions string `json:"instructions" yaml:"instructions"`
+	Name string `json:"name" yaml:"name"`
+	// Prompt is the file the step's model reads; Instructions is it as the
+	// compiler reads it, filled by Load.
+	Prompt       string `json:"prompt" yaml:"prompt"`
+	Instructions string `json:"-" yaml:"-"`
 	When         string `json:"when,omitempty" yaml:"when,omitempty"`
 	// Start is how the step opens: the line it says, whether it then waits for
 	// the caller, and a tool code runs first.
 	Start *TaskStart `json:"start,omitempty" yaml:"start,omitempty" since:"2"`
 	// Arguments are State values the agent passes when it starts the step.
-	Arguments []string `json:"arguments,omitempty" yaml:"arguments,omitempty" since:"2"`
+	Arguments []string `json:"fills,omitempty" yaml:"fills,omitempty" since:"2"`
 	// Save is what the step saves when it ends, as `- customer_name:
 	// result.customer_name`: the model fills `result` when it ends the step
 	// itself, and a tool's result fills it when an outcome with no save: of
@@ -541,19 +559,21 @@ type Task struct {
 // carries its own trigger, because an agent names a group and nothing else sits
 // between the two to hold one.
 type TaskGroup struct {
+	Name string `json:"name" yaml:"name"`
 	// Steps is the ordered run. Each item is a bare task name, or a mapping
 	// naming the task and how the group treats it.
 	Steps    []StepItem `json:"steps" yaml:"steps"`
 	When     string     `json:"when,omitempty" yaml:"when,omitempty"`
-	Announce Announce   `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Announce Announce   `json:"say,omitempty" yaml:"say,omitempty"`
 	// ContextScope and Then default to shared and return, which is what most
 	// flows write. build.go fills them in.
 	ContextScope string `json:"context_scope,omitempty" yaml:"context_scope,omitempty"`
 	Then         string `json:"then,omitempty" yaml:"then,omitempty"`
 	ThenTarget   string `json:"then_target,omitempty" yaml:"then_target,omitempty"`
 	Merge        string `json:"merge,omitempty" yaml:"merge,omitempty"`
-	// Arguments are State values the agent passes when it starts the group.
-	Arguments []string `json:"arguments,omitempty" yaml:"arguments,omitempty" since:"2"`
+	// Arguments are the group's fills: State values the agent fills when it
+	// starts the group.
+	Arguments []string `json:"fills,omitempty" yaml:"fills,omitempty" since:"2"`
 	// NonBlocking names steps whose failure is recorded and the group goes on.
 	NonBlocking []string `json:"non_blocking,omitempty" yaml:"non_blocking,omitempty" since:"2"`
 }
@@ -624,13 +644,17 @@ type Callable struct {
 // missing one is the empty string and is refused by the same check that refuses
 // a `to:` naming an agent that does not exist.
 type Handoff struct {
-	To       string           `json:"to" yaml:"to"`
-	When     string           `json:"when,omitempty" yaml:"when,omitempty"`
-	Announce *string          `json:"announce,omitempty" yaml:"announce,omitempty"`
+	To   string `json:"to" yaml:"to"`
+	When string `json:"when,omitempty" yaml:"when,omitempty"`
+	Name string `json:"name" yaml:"name"`
+	// Say is the line said as the call moves. One line until handoffs take a
+	// list; Announce is it as the compiler reads it, filled by Load.
+	Say      []string         `json:"say,omitempty" yaml:"say,omitempty"`
+	Announce *string          `json:"-" yaml:"-"`
 	Context  *TransferContext `json:"context,omitempty" yaml:"context,omitempty"`
 	// Saves sets State values as the call moves, like `- explanation: ES`, the
 	// language the next agent speaks.
-	Saves []Pair `json:"saves,omitempty" yaml:"saves,omitempty" since:"2"`
+	Saves []Pair `json:"save,omitempty" yaml:"save,omitempty" since:"2"`
 	// Start is a tool of the next agent's own, run in code as it takes the
 	// call. When its outcome's say: line fills, that line is the agent's first
 	// reply.
@@ -924,7 +948,7 @@ type Conversation struct {
 
 type Greeting struct {
 	SpeaksFirst string `json:"speaks_first" yaml:"speaks_first"`
-	Text        string `json:"text,omitempty" yaml:"text,omitempty"`
+	Text        string `json:"say,omitempty" yaml:"say,omitempty"`
 	// Instruction tells the model how to word a greeting with no text.
 	Instruction string `json:"instruction,omitempty" yaml:"instruction,omitempty" since:"2"`
 	// Interruptible false holds the caller's audio until the greeting played.

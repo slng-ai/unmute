@@ -41,17 +41,14 @@ secrets:
 
 `+variablesYAML(entries)+`
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
       - look_up
     tasks:
 `+task+`
-tools:
-  - book_it
-  - look_up
 
 models:
   think:
@@ -131,7 +128,7 @@ const finishOKOutput = `  type: object
 func TestBuildLowersFinish(t *testing.T) {
 	pkg := finishPackage(t, []stateschema.Field{bookingReference}, "", `      - name: take_booking
         when: The caller wants an appointment.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - name: book_it
             outcomes:
@@ -181,7 +178,7 @@ const bookedOrMoved = `  type: object
 func TestBuildRefusesAFieldTwiceInOneIf(t *testing.T) {
 	pkg := finishPackage(t, []stateschema.Field{bookingReference}, "", `      - name: take_booking
         when: The caller wants an appointment.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - name: book_it
             outcomes:
@@ -205,7 +202,7 @@ func TestBuildRefusesAFieldTwiceInOneIf(t *testing.T) {
 func TestBuildKeepsEveryOutcomeOfOneTool(t *testing.T) {
 	pkg := finishPackage(t, []stateschema.Field{bookingReference}, "", `      - name: take_booking
         when: The caller wants an appointment.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - name: book_it
             outcomes:
@@ -250,7 +247,7 @@ func TestBuildKeepsEveryAlternativeOnOneField(t *testing.T) {
 `
 	pkg := finishPackage(t, []stateschema.Field{bookingReference}, "", `      - name: take_booking
         when: The caller wants an appointment.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - name: book_it
             outcomes:
@@ -299,7 +296,7 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - name: book_it
             outcomes:
@@ -332,7 +329,7 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - name: book_it
             outcomes:
@@ -364,7 +361,7 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - name: book_it
             outcomes:
@@ -382,7 +379,7 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - name: book_it
             outcomes:
@@ -400,7 +397,7 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - name: book_it
             outcomes:
@@ -426,7 +423,7 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 			state: []stateschema.Field{bookingReference},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - name: book_it
             outcomes:
@@ -455,7 +452,7 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 			state: []stateschema.Field{bookingState},
 			task: `      - name: take_booking
         when: The caller wants an appointment.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - name: book_it
             outcomes:
@@ -505,7 +502,7 @@ func TestBuildRefusesEveryBrokenFinishDeclaration(t *testing.T) {
 func TestBuildAcceptsAShapedTerminalResult(t *testing.T) {
 	pkg := finishPackage(t, []stateschema.Field{bookingState}, "", `      - name: take_booking
         when: The caller wants an appointment.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - name: book_it
             outcomes:
@@ -616,11 +613,11 @@ func skipPackage(t *testing.T, skip, on string) *packagespec.Package {
 		Name: "confirmed_phone", Description: "The number the caller agreed to.", Type: stringType, Default: json.RawMessage(`""`),
 	}}
 	entries := "  - name: confirmed_phone\n    confirm: take_booking\n"
-	steps := "      - " + map[bool]string{true: "task: take_booking\n        skip_when_confirmed: " + skip, false: "take_booking"}[on == "take_booking"] + "\n" +
-		"      - " + map[bool]string{true: "task: second_step\n        skip_when_confirmed: " + skip, false: "second_step"}[on == "second_step"] + "\n"
+	steps := "          - " + map[bool]string{true: "task: take_booking\n            skip_when_confirmed: " + skip, false: "take_booking"}[on == "take_booking"] + "\n" +
+		"          - " + map[bool]string{true: "task: second_step\n            skip_when_confirmed: " + skip, false: "second_step"}[on == "second_step"] + "\n"
 	task := `      - name: take_booking
         when: The caller has not been identified.
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - book_it
         save:
@@ -628,28 +625,18 @@ func skipPackage(t *testing.T, skip, on string) *packagespec.Package {
           - confirmed_phone: result.reference
 
       - name: second_step
-        instructions: steps.md
+        prompt: steps.md
         tools:
           - look_up
 
-    task_groups:
-      - book
+    flows:
+      - name: book
+        when: The caller wants an appointment.
+        steps:
+` + steps + `        context_scope: shared
+        then: return
 `
-	pkg := finishPackage(t, state, entries, task, finishOKOutput)
-	source, err := os.ReadFile(filepath.Join(pkg.Root, "agent.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rewritten := strings.Replace(string(source), "\ntools:\n", "\ntask_groups:\n  book:\n    when: The caller wants an appointment.\n    steps:\n"+steps+"    context_scope: shared\n    then: return\n\ntools:\n", 1)
-	if err := os.WriteFile(filepath.Join(pkg.Root, "agent.yaml"), []byte(rewritten), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reloaded, err := loadRecorded(pkg.Root)
-	if err != nil {
-		t.Fatalf("the fixture itself does not load: %v", err)
-	}
-	withState(reloaded, state...)
-	return reloaded
+	return finishPackage(t, state, entries, task, finishOKOutput)
 }
 
 func TestABooleanSuccessFieldDeclaresTrueAndFalse(t *testing.T) {

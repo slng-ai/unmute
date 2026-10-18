@@ -163,8 +163,8 @@ to LiveKit and Pipecat speech pipelines. The keys they use:
   On a `think` binding. `"none"` asks for no thinking before the first token.
 </ParamField>
 
-<ParamField path="announce" type="string">
-  On a tool. A short line the agent says while the tool runs.
+<ParamField path="start.say" type="list of strings">
+  On a tool entry. Short lines, one said while the tool runs.
 </ParamField>
 
 ### Bind SLNG for listening and speaking
@@ -347,20 +347,20 @@ prefetch:
   - name: today
     clock: now
     timezone: Europe/Madrid
-    assign:
+    save:
       - booking_date: result.date
       - booking_weekday: result.day_of_week
 
   - name: caller
     source: from_number
-    assign:
+    save:
       - customer_phone: result.value
 ```
 
 One reading of the clock fills both variables above, at no extra cost: an
-entry assigns as many variables as the result has fields, from one call.
+entry saves as many variables as the result has fields, from one call.
 
-A `clock:` entry works on any route, and so does a `tool:` entry whose
+A `clock:` entry works on any route, and so does a `call:` entry whose
 arguments you already hold, once you say `writes: false` on it. A `source:`
 entry depends on the route: LiveKit's two routes supply every fact, and
 Pipecat's two Twilio routes supply a smaller set, each in one direction only

@@ -82,12 +82,12 @@ one block to read.
 | Named MCP tools | `tools/web_search.yaml` | `mcp.server` and two names under `mcp.tools` |
 | A curated builtin | `tools/end_call.yaml` | `builtin: {id: end_call}` |
 | A curated text message with a pinned sender | `tools/send_sms.yaml` | `builtin: {id: send_sms}` and `with: from_number`; the model writes the message, SLNG sends it to the caller's number, on phone calls only |
-| Template variables in the greeting and the prompt | `state.py`, `conversation.greeting.text`, `instructions.md` | four fields on `State`, each with a default |
+| Template variables in the greeting and the prompt | `state.py`, `conversation.greeting.say`, `instructions.md` | four fields on `State`, each with a default |
 | A value the model records during the call | `state.py` `caller_phone`, and `agent.yaml` `variables:` | `source: conversation`, `= None`, a `Field(description=...)` the model reads; returned on the call record as a memory variable |
 | A model fallback | `agent.yaml` `models.think` | `fallback:` naming `backup` on the primary |
 | An inbound phone number | `channels.phone` and the deploy | trunk chosen at the terminal after the push |
 
-This target compiles tasks, task groups, `then: done` outcomes, typed local tools and typed
+This target compiles tasks, flows, `then: done` outcomes, typed local tools and typed
 `state.py` fields too. What it does not take, it refuses at validate by name:
 handoffs, `prefetch:`, `webhook:` tools, and the keys that need unmute-core, such as
 a tool entry's `save:`, `outcomes:` and `hidden:`, a tool file's `precheck:`, `entry_by`, and a step tool's `confirm:`.

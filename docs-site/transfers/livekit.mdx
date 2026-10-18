@@ -31,9 +31,9 @@ targets:
 ```
 
 ```yaml agent.yaml
-destinations:
-  billing_line: BILLING_PHONE_NUMBER
-  supervisor_line: SUPERVISOR_PHONE_NUMBER
+secrets:
+  - BILLING_PHONE_NUMBER
+  - SUPERVISOR_PHONE_NUMBER
 ```
 
 The route is `connections/twilio_sip.yaml`, below. The two desks are in
@@ -44,22 +44,22 @@ Each one names an environment variable rather than a number, a rule
 ## Two transfers, side by side
 
 ```yaml agent.yaml
-escalations:
-  send_to_billing:
-    when: The caller asks about an invoice, a refund, or a charge they do not recognise.
-    cold:
-      destination: billing_line
+agents:
+  - name: front_desk
+    transfers:
+      - name: send_to_billing
+        to: BILLING_PHONE_NUMBER
+        when: The caller asks about an invoice, a refund, or a charge they do not recognise.
 
-  escalate_to_supervisor:
-    when: The caller is unhappy with how something was handled and asks for a manager.
-    warm:
-      destination: supervisor_line
-      briefing: |
-        Lead with the caller's name and which stylist they saw.
-        Say what they are unhappy about and what you already offered them.
-        Ask whether they can take the call now.
-      ring_timeout: 25s
-      on_unavailable: return_to_caller
+      - name: escalate_to_supervisor
+        to: SUPERVISOR_PHONE_NUMBER
+        when: The caller is unhappy with how something was handled and asks for a manager.
+        brief: |
+          Lead with the caller's name and which stylist they saw.
+          Say what they are unhappy about and what you already offered them.
+          Ask whether they can take the call now.
+        ring_timeout: 25s
+        on_unavailable: return_to_caller
 ```
 
 **Cold** is a SIP REFER. The agent asks the carrier to hand the caller's
@@ -69,7 +69,7 @@ applies.
 
 **Warm** uses LiveKit's own prebuilt warm transfer task. The caller waits on
 hold, the supervisor's line rings, the agent briefs them, and only then are the
-two connected. `briefing` is free text, not a mode: the call transcript is
+two connected. `brief` is free text, not a mode: the call transcript is
 passed along on its own, so write what the person needs on top of it. Every
 failure, no answer, decline, voicemail, failed dial, comes back as one error
 and `on_unavailable` decides.
@@ -79,20 +79,20 @@ hold, what they want, what was tried, then one question they can answer. If the
 conversation has too little detail, the agent says that plainly instead of
 inventing a briefing.
 
-### Every key a transfer block takes
+### Every key a transfer takes
 
-`destination:` is the only key either block requires. The entry's own `when:`,
-and the choice between `cold:` and `warm:`, work the same on every route and
-are stated on [Human transfers](/transfers/overview).
+`name:` and `to:` are the only keys required. The entry's own `when:`, and the
+choice between cold and warm, work the same on every route and are stated on
+[Human transfers](/transfers/overview).
 
-<ParamField path="destination" type="a destinations entry name" required>
-  Which desk to reach. The name is resolved in the `destinations:` block above,
-  so the model never sees a number.
+<ParamField path="to" type="an UPPER_SNAKE environment variable name" required>
+  Which desk to reach. The variable holds the number, so the model never sees
+  one.
 </ParamField>
 
-<ParamField path="briefing" type="string">
-  What to tell the person while the caller waits. It belongs to a `warm:` block
-  and is refused in a `cold:` one. Left out, the person still gets the
+<ParamField path="brief" type="string">
+  What to tell the person while the caller waits. Writing it makes the transfer
+  warm. A transfer without it is cold. Left out, the person still gets the
   transcript, which rides along on its own.
 </ParamField>
 

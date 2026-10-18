@@ -26,25 +26,35 @@ variables:
 
 prefetch:
   - name: account
-    tool: lookup_account
+    call: lookup_account
     writes: false
     background: true
     needs_confirmed:
       - caller_phone
-    assign:
+    save:
       - account_id: result.account_id
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
-    task_groups:
-      - check_in
+    flows:
+      - name: check_in
+        when: The caller is new to the salon.
+        steps:
+          - take_name
+          - note_reason
+        context_scope: shared
+        then: end
+        fills:
+          - caller_phone
+        non_blocking:
+          - note_reason
     tasks:
       - name: manage_booking
         when: The caller wants to book an appointment.
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         tools:
           # The step's own outcome comes before the tool's: code says the
           # offer here, and the tool's line when nothing is free.
@@ -67,7 +77,7 @@ agents:
                   - status: slot_taken
                 say:
                   - That time has just gone. Shall I try another?
-        arguments:
+        fills:
           - preferred_day
         start:
           call: find_slots
@@ -80,31 +90,18 @@ agents:
           history: messages
 
       - name: take_name
-        instructions: tasks/take_name.md
+        prompt: tasks/take_name.md
         save:
           - caller_name: result.caller_name
         context:
           history: messages
 
       - name: note_reason
-        instructions: tasks/note_reason.md
+        prompt: tasks/note_reason.md
         save:
           - reason: result.reason
         context:
           history: messages
-
-task_groups:
-  check_in:
-    when: The caller is new to the salon.
-    steps:
-      - take_name
-      - note_reason
-    context_scope: shared
-    then: end
-    arguments:
-      - caller_phone
-    non_blocking:
-      - note_reason
 
 models:
   think:
@@ -137,7 +134,7 @@ models:
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi {{state.caller_name}}, this is the salon. How can I help?"
+    say: "Hi {{state.caller_name}}, this is the salon. How can I help?"
     instruction: Greet the caller by name and ask how you can help.
     interruptible: false
   inactivity:
@@ -160,5 +157,3 @@ tools:
         say:
           - "Nothing is free on {{state.preferred_day}}. Would another day work?"
           - That day is full, I'm afraid. Shall I try another?
-  - save_booking
-  - lookup_account

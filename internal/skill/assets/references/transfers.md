@@ -1,7 +1,7 @@
 # Transfers to a person
 
-Sooner or later a caller needs a human. One authoring shape, an entry under
-`escalations:`, two forms, and the phone route decides which you can have.
+Sooner or later a caller needs a human. One authoring shape, an entry under an
+agent's `transfers:`, two forms, and the phone route decides which you can have.
 
 ## Cold and warm
 
@@ -10,64 +10,63 @@ Sooner or later a caller needs a human. One authoring shape, an entry under
 | **cold** | the agent says it is putting them through, the call moves to the person, and the agent drops out |
 | **warm** | the caller waits while the agent rings the person, tells them what the call is about, and only then connects the two |
 
+A transfer is cold. Writing `brief:` makes it warm: the agent briefs the person
+first.
+
 Warm is what people picture when they say "transfer me to a manager". It is also
 the harder one, and it compiles on exactly one route.
 
 ## How you write it
 
-The shape you write is the shape you get. There is no `mode:` field, so a warm
-only setting cannot be written on a cold transfer.
+The shape you write is the shape you get. There is no `mode:` field: a transfer
+with a `brief:` is warm and one without is cold.
 
 ```yaml agent.yaml
-escalations:
-  send_to_billing:
-    when: The caller asks about an invoice, a refund, or a charge they do not recognise.
-    cold:
-      destination: billing_line
+agents:
+  - name: front_desk
+    prompt: instructions.md
+    think: reasoning
+    speak: voice
+    transfers:
+      - name: send_to_billing
+        to: BILLING_PHONE_NUMBER
+        when: The caller asks about an invoice, a refund, or a charge they do not recognise.
 
-  escalate_to_supervisor:
-    when: The caller is unhappy with how something was handled and asks for a manager.
-    warm:
-      destination: supervisor_line
-      briefing: |
-        Lead with the caller's name and which stylist they saw.
-        Say what they are unhappy about and what you already offered them.
-        Ask whether they can take the call now.
-      ring_timeout: 25s
-      on_unavailable: return_to_caller
+      - name: escalate_to_supervisor
+        to: SUPERVISOR_PHONE_NUMBER
+        when: The caller is unhappy with how something was handled and asks for a manager.
+        brief: |
+          Lead with the caller's name and which stylist they saw.
+          Say what they are unhappy about and what you already offered them.
+          Ask whether they can take the call now.
+        ring_timeout: 25s
+        on_unavailable: return_to_caller
 ```
 
-| Block | Fields |
+| Field | Meaning |
 |---|---|
-| `cold` | `destination`, `ring_timeout`, `on_unavailable` |
-| `warm` | `destination`, `briefing`, `ring_timeout`, `on_unavailable` |
+| `name` | the transfer's name, one name across the package |
+| `to` | the environment variable holding the number |
+| `when` | the situation in which the model takes it |
+| `brief` | what the agent says to the person first; present makes it warm |
+| `ring_timeout` | how long to ring |
+| `on_unavailable` | `return_to_caller` or `hangup` |
 
-`on_unavailable` is `return_to_caller` or `hangup`.
+### Who defines it and who can use it
 
-### The name goes in an agent's `escalations:` list, and that half is enforced
+A transfer is defined once in the package, by the agent that writes its block.
+Any other agent names it with a bare name under its own `transfers:`. A bare
+name nobody defines is refused, and so are two blocks with one name. A transfer
+is not something a task can hold: a task has `tools:` and `handoffs:` and no
+other list, so there is no key to put one in.
 
-Declaring an escalation is half the job. Until a reachable agent lists its name
-in its own `escalations:`, no agent can reach it, and the build refuses with the
-file, the line, and the agents you could attach it to. An escalation is not
-something a task can hold: a task has `tools:` and `handoffs:` and no other list,
-so there is no key to put one in.
+A transfer no reachable agent lists is a build error, not dead config. The
+refusal names the file, the line, and the agents you could attach it to:
 
 ```
-agent.yaml:47: escalation "send_to_billing" is declared but no agent reaches it; add it to the
-  escalations: of one of these agents: front_desk, billing
+agent.yaml:47: transfer "send_to_billing" is declared but no agent reaches it; add it to the
+  transfers: of one of these agents: front_desk, billing
 ```
-
-The same refusal covers anything else the entry agent cannot reach: a
-`destinations:` entry no escalation resolves to, a top-level `tools:` entry no
-agent lists, a task group nothing attaches, and an agent no handoff points at.
-A task with no `when:` that no task group's `steps:` lists is refused too, with
-its own message. An unreferenced `models:` entry is the one exception and stays
-legal, because that map is a palette.
-
-Write the declaration and the attachment in the same edit. Before this was
-enforced, a forgotten attachment compiled at exit 0 and left the control out of
-the generated project, while its destination's environment name still reached
-`.env.example` and the startup check.
 
 ### A warm transfer needs `outbound: true`, even on an inbound-only line
 
@@ -96,34 +95,26 @@ tell the user why, because it is not a decision they asked for.
 A cold transfer moves the caller's existing leg rather than placing a call, so
 it does not need this.
 
-`briefing` is what the agent says to the person picking up, before the two are
+`brief` is what the agent says to the person picking up, before the two are
 connected. Write it as spoken instructions, in the order they should be said.
 The rules in `prompting.md` apply.
 
-## Destinations name a variable, never a number
+## `to:` names a variable, never a number
 
-```yaml agent.yaml
-destinations:
-  billing_line: BILLING_PHONE_NUMBER
-  supervisor_line: SUPERVISOR_PHONE_NUMBER
-```
-
-A destination is only the `UPPER_SNAKE` name of an environment variable holding
-an E.164 number or a `sip:` URI, read at call time. A number written there is
-refused:
+A transfer's `to:` is only the `UPPER_SNAKE` name of an environment variable
+holding an E.164 number or a `sip:` URI, read at call time. Declare that
+variable in `secrets:`. A number written there is refused:
 
 ```
-agent.yaml:60: destination "billing_line" is "+14155550123", a literal. agent.yaml is
-  the portable half of a package, so a destination names an environment variable holding
-  the number: billing_line: BILLING_PHONE_NUMBER
+agent.yaml:60: transfer "send_to_billing" has a literal to:. agent.yaml is the portable half of a package, so to: names an environment variable holding the number, for example to: BILLING_PHONE_NUMBER
 ```
 
 The model never sees a number and cannot dial one that is not listed. If the
-user gives you a real phone number, put its **name** in `destinations:` and its
-name in `secrets:`, and tell them to set the value in their environment.
+user gives you a real phone number, put its **name** in `to:` and in
+`secrets:`, and tell them to set the value in their environment.
 
-Destinations sit at the top level of `agent.yaml` rather than on the target,
-because who this agent escalates to is the same desk whichever carrier reaches
+The destination sits on the transfer in `agent.yaml` rather than on the target,
+because who this agent transfers to is the same desk whichever carrier reaches
 it.
 
 ## What each route can do
@@ -153,8 +144,8 @@ session proves a transfer works.
 
 One more thing worth saying out loud, because it wastes real time: **a model will
 announce a transfer the package never declared.** If an agent says it is putting
-somebody through and nothing happens, check for an entry under `escalations:`
-with a `cold:` or `warm:` block before looking anywhere else.
+somebody through and nothing happens, check for an entry under `transfers:`
+before looking anywhere else.
 
 Do not blur those two when you explain a limit.
 
@@ -226,7 +217,7 @@ Say this, in this order:
 4. `examples/salon-concierge` is the working package for the cold half. No
    shipped example declares a warm block; write it from the fields here.
 
-Do not write a warm block against a Pipecat target and let validate deliver the
+Do not write a `brief:` against a Pipecat target and let validate deliver the
 news.
 
 ## When the person does not pick up
@@ -252,7 +243,7 @@ the tool result is `transfer_started`.
 
 | Option | Refused on | Why |
 |---|---|---|
-| `briefing` | Pipecat, Deepgram | Pipecat has no warm transfer, so there is no briefing to lower |
+| `brief` | Pipecat, Deepgram | Pipecat has no warm transfer, so there is no briefing to lower |
 | `include_tool_calls: false` on transfer context | Pipecat | the Pipecat driver does not shape transfer context yet |
 
 ## The working packages

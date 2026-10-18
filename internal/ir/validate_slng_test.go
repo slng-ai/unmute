@@ -441,7 +441,7 @@ func TestVaultTokenInPromptTextIsRefusedOnEveryTarget(t *testing.T) {
 	if len(row.Errors) == 0 {
 		t.Fatal("a Vault token in a greeting passed on slng, and the platform refuses it at push")
 	}
-	for _, want := range []string{"slng target", "SLNG Vault variable", "MCP server URL", "conversation.greeting.text"} {
+	for _, want := range []string{"slng target", "SLNG Vault variable", "MCP server URL", "conversation.greeting.say"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the slng message does not contain %q:\n%s", want, joined)
 		}
@@ -485,7 +485,7 @@ func TestVaultTokenInAgentInstructionsIsRefusedOnSlng(t *testing.T) {
 	if len(row.Errors) == 0 {
 		t.Fatal("a Vault token in an agent's instructions passed on slng")
 	}
-	for _, want := range []string{"instructions", "ACME_ACCOUNT", "MCP server URL"} {
+	for _, want := range []string{"prompt", "ACME_ACCOUNT", "MCP server URL"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the message does not say %q:\n%s", want, joined)
 		}
@@ -876,7 +876,7 @@ func TestSlngRefusesWhatItsTaskContractRefuses(t *testing.T) {
 			group := a.TaskGroups["book"]
 			group.Then = GroupEnd
 			a.TaskGroups["book"] = group
-		}, []string{`task group "book" ends with then: end`}},
+		}, []string{`flow "book" ends with then: end`}},
 		{"a confirming step with no when", func(a *Agent) {
 			variable := a.Variables["phone_number"]
 			variable.Confirm = "take_booking"

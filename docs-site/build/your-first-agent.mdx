@@ -53,8 +53,8 @@ name: my-agent
 entry_agent: assistant
 
 agents:
-  assistant:
-    instructions: instructions.md
+  - name: assistant
+    prompt: instructions.md
     think: assistant_model
     speak: assistant_voice
     tools:
@@ -87,13 +87,10 @@ models:
       provider: livekit
       model: turn-detector-mini
 
-tools:
-  - end_call
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi there, I'm listening. What can I help you with?"
+    say: "Hi there, I'm listening. What can I help you with?"
 ```
 </Accordion>
 
@@ -136,13 +133,13 @@ call. The name has to be a key in the `agents:` map.
 
 ```yaml
 agents:
-  assistant:
-    instructions: instructions.md
+  - name: assistant
+    prompt: instructions.md
     think: assistant_model
     speak: assistant_voice
 ```
 
-An agent is a prompt plus the models it speaks and thinks with. `instructions`
+An agent is a name, a prompt and the models it speaks and thinks with. `prompt`
 is a path to a Markdown file in the package. Writing the prompt in its own file
 means it reviews like prose, not like YAML.
 
@@ -215,7 +212,7 @@ line naming the one to use.
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi there, I'm listening. What can I help you with?"
+    say: "Hi there, I'm listening. What can I help you with?"
 ```
 
 Who speaks first and what they say. The greeting is spoken word for word without
@@ -290,7 +287,11 @@ unmute dev my-agent
 
 ## Agent fields
 
-<ParamField path="instructions" type="string" required>
+<ParamField path="name" type="string" required>
+  A lower snake case name, unique across the package.
+</ParamField>
+
+<ParamField path="prompt" type="string" required>
   Path to a Markdown prompt inside the package. No prompt is inferred.
 </ParamField>
 
@@ -311,16 +312,18 @@ unmute dev my-agent
   tasks. See [task fields](/build/orchestration/tasks#every-key-a-task-takes).
 </ParamField>
 
-<ParamField path="task_groups" type="list of strings">
-  Names from the top-level `task_groups` catalog. Omit for no groups.
+<ParamField path="flows" type="list of definitions or names">
+  Ordered task sequences this agent defines or names. Omit for no flows.
 </ParamField>
 
-<ParamField path="handoffs" type="list of strings">
-  Names from the top-level `handoffs` catalog. Omit for no agent handoffs.
+<ParamField path="handoffs" type="list of definitions or names">
+  Agents this one can hand the caller to, defined here or named. Omit for no agent
+  handoffs.
 </ParamField>
 
-<ParamField path="escalations" type="list of strings">
-  Names from the top-level `escalations` catalog. Omit for no human transfers.
+<ParamField path="transfers" type="list of definitions or names">
+  People this agent can put the caller through to, defined here or named. Omit for no
+  human transfers.
 </ParamField>
 
 ## Where to go next

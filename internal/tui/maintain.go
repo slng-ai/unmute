@@ -256,23 +256,27 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		data.Agents = append(data.Agents, agent)
 	}
 
-	// Authored order, not sorted: pkg.Agent.Tools is the package's own `tools:`
-	// catalogue, written in the order the author put it in, and pkg.Tools (a
-	// map) has no order of its own for a walk to preserve instead. scaffold.go
-	// renders both the top-level catalogue and each agent's own `tools:` list
-	// straight from data.Tools's order (Data.AgentTools filters it, it does not
-	// re-sort it), so this loop's order is the whole story for both.
+	// In the order the agents list them, then the rest by name. The tools/
+	// folder has no order of its own, and scaffold.go writes each agent's
+	// tools: list from data.Tools's order (Data.AgentTools filters it), so
+	// this order is what keeps an agent's list as the author wrote it.
+	// pkg.Agent.Tools holds only the tools with behaviour on every agent.
 	entries := make(map[string]packagespec.ToolEntry, len(pkg.Agent.Tools))
 	for _, entry := range pkg.Agent.Tools {
 		entries[entry.Name] = entry
 	}
-	seenTool := make(map[string]bool, len(pkg.Agent.Tools))
-	for _, name := range packagespec.ToolNames(pkg.Agent.Tools) {
-		if seenTool[name] {
+	var toolOrder []string
+	for _, def := range pkg.Agent.AgentList {
+		toolOrder = append(toolOrder, def.Tools...)
+	}
+	toolOrder = append(toolOrder, slices.Sorted(maps.Keys(pkg.Tools))...)
+	seenTool := make(map[string]bool, len(pkg.Tools))
+	for _, name := range toolOrder {
+		tool, ok := pkg.Tools[name]
+		if seenTool[name] || !ok {
 			continue
 		}
 		seenTool[name] = true
-		tool := pkg.Tools[name]
 		// The execution block decides which fields exist; maintenance carries
 		// every one of them through, auth included, so a rewrite never drops a
 		// tool's credentials (compiler.md V36).
@@ -522,7 +526,7 @@ func roundTripLosses(original *packagespec.Package, data scaffold.Data) ([]strin
 		return nil, err
 	}
 	var losses []string
-	diffJSON("agent.yaml", normalized(original.Agent), normalized(rendered.Agent), &losses)
+	diffJSON("agent.yaml", loweredAgent(original.Agent), loweredAgent(rendered.Agent), &losses)
 	diffJSON("targets.yaml", normalized(original.Targets), normalized(rendered.Targets), &losses)
 	diffJSON("targets.yaml channels", normalized(original.Channels), normalized(rendered.Channels), &losses)
 	diffJSON("targets.yaml capacity", normalized(original.Capacity), normalized(rendered.Capacity), &losses)
@@ -553,6 +557,34 @@ func roundTripLosses(original *packagespec.Package, data scaffold.Data) ([]strin
 	}
 	slices.Sort(losses)
 	return slices.Compact(losses), nil
+}
+
+// loweredAgent is agent.yaml as the compiler reads it: agents, handoffs,
+// transfers and flows keyed by name. The console writes agents in name order
+// and each block under the first agent that lists it, so the written list is
+// not what a rewrite has to keep. What each name means is.
+func loweredAgent(agent packagespec.AgentFile) any {
+	view, _ := normalized(agent).(map[string]any)
+	agents := map[string]any{}
+	for name, def := range agent.Agents {
+		entry, _ := normalized(def).(map[string]any)
+		delete(entry, "handoffs")
+		delete(entry, "transfers")
+		delete(entry, "flows")
+		entry["handoff_names"] = def.Handoffs
+		entry["transfer_names"] = def.Escalations
+		entry["flow_names"] = def.TaskGroups
+		agents[name] = entry
+	}
+	if view == nil {
+		view = map[string]any{}
+	}
+	view["agents"] = agents
+	view["handoff_blocks"] = normalized(agent.Handoffs)
+	view["transfer_blocks"] = normalized(agent.Escalations)
+	view["flow_blocks"] = normalized(agent.TaskGroups)
+	view["transfer_numbers"] = normalized(agent.Destinations)
+	return view
 }
 
 func normalized(value any) any {

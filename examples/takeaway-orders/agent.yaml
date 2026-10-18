@@ -8,7 +8,9 @@
 version: 2
 
 name: takeaway-orders
+
 architecture: live
+
 entry_agent: counter
 
 secrets:
@@ -38,8 +40,8 @@ models:
       # here would be recorded in compile-report.json and never sent.
 
 agents:
-  counter:
-    instructions: instructions.md
+  - name: counter
+    prompt: instructions.md
     # `live:` replaces `think:` and `speak:` together: this one entry listens,
     # thinks and speaks.
     live: counter_voice
@@ -55,17 +57,12 @@ knowledge:
   kitchen:
     documents: knowledge/kitchen
 
-tools:
-  - look_up_dish
-  - place_order
-  - look_up_kitchen_info
-
 conversation:
   greeting:
     speaks_first: agent
     # The live model paraphrases this rather than reading it out, so write the
     # sense of the line and do not count on the words.
-    text: "Golden Wok, takeaway orders. What can I get you?"
+    say: "Golden Wok, takeaway orders. What can I get you?"
   inactivity:
     # A caller reading an order off a phone screen goes quiet for a while, so
     # the nudge waits longer than a conversation normally would.

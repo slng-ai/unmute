@@ -42,8 +42,8 @@ models:
       voice: marin
       turn_detection: semantic
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     realtime: voice
 ```
 
@@ -158,7 +158,7 @@ Those cascade sections are refused. `conversation.interruption.minimum_words` re
 ## 3. Add tools and knowledge
 
 Keep the same tool files and attachments described in [Add a local tool](/build/tools/python).
-Merge the tool name into the package's `tools:` list and `agents.desk.tools`, keeping the existing `instructions` and `realtime` binding.
+Add the tool name to the `tools:` list of the `desk` agent, keeping its existing `prompt` and `realtime` binding.
 The realtime model requests tool calls; the generated application runs them and returns the results.
 It has no separate `backend:` model.
 
@@ -192,7 +192,7 @@ models:
       model: "deepgram/aura:2"
       voice: aura-2-thalia-en
 agents:
-  desk:
+  - name: desk
     speak: spoken_voice
 ```
 
@@ -205,7 +205,7 @@ Choose other supported synthesizers from [Voices](/models/tts).
 Follow [Switch architecture](/build/architecture/overview#3-replace-the-models-and-agent-bindings) to replace the models and bindings together.
 The Realtime API can accept instruction updates during a call.
 Unmute currently supports one agent, browser audio, tools, and knowledge; it does not provide task and handoff transitions consistently across both code targets.
-Tasks, task groups, handoffs, variables, pre-fetch, tracing, MCP tools, and phone connections are unavailable.
+Tasks, flows, handoffs, variables, pre-fetch, tracing, MCP tools, and phone connections are unavailable.
 Use cascade if your workflow needs them.
 </Accordion>
 

@@ -504,10 +504,10 @@ func Default() Table {
 			// shapes that are not "the author wrote the line" deny, and each says
 			// which line to write.
 			FieldGreetingUserFirst: field(
-				deny(Slng, "slng target requires a greeting on every agent, so it cannot wait for the caller to speak first: write conversation.greeting.text, or compile to livekit or pipecat which can open silent"),
+				deny(Slng, "slng target requires a greeting on every agent, so it cannot wait for the caller to speak first: write conversation.greeting.say, or compile to livekit or pipecat which can open silent"),
 			),
 			FieldGreetingModelWritten: field(
-				deny(Slng, "slng target speaks the greeting it is given rather than composing one: write conversation.greeting.text, or compile to livekit or pipecat which let the model open the call"),
+				deny(Slng, "slng target speaks the greeting it is given rather than composing one: write conversation.greeting.say, or compile to livekit or pipecat which let the model open the call"),
 			),
 			FieldGreetingAbsent: field(
 				deny(Slng, "slng target requires a greeting and cannot invent one: add a conversation.greeting with a text, or compile to livekit or pipecat where the agent opens with a model-written line"),

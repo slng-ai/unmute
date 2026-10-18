@@ -201,7 +201,7 @@ func liveRefusals() []liveRefusal {
 			mutate: func(agent *Agent, _ *Target) {
 				agent.Controls = map[string]Control{"to_a_person": &HumanTransfer{}}
 			},
-			want: []string{`escalation "to_a_person" is not emitted under architecture: live`, "architecture: cascade"},
+			want: []string{`transfer "to_a_person" is not emitted under architecture: live`, "architecture: cascade"},
 		},
 		{
 			name: "a prefetch entry",

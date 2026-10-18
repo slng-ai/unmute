@@ -329,7 +329,7 @@ func twilioFields() map[Field]Capability {
 		// The two greeting shapes ConversationRelay can say: a fixed line in
 		// welcomeGreeting, or nothing while the caller speaks first.
 		FieldGreetingUserFirst:    yes,
-		FieldGreetingModelWritten: no("twilio target speaks a fixed welcomeGreeting and has no model-written opening yet: write conversation.greeting.text, or set speaks_first: user"),
+		FieldGreetingModelWritten: no("twilio target speaks a fixed welcomeGreeting and has no model-written opening yet: write conversation.greeting.say, or set speaks_first: user"),
 		FieldGreetingAbsent:       no("twilio target needs an explicit opening: add conversation.greeting with a text, or with speaks_first: user"),
 		FieldInterruptionMinWords: no(twilioSpeech("a minimum word count")),
 		FieldInterruptionIgnore:   no(twilioSpeech("a phrase list")),

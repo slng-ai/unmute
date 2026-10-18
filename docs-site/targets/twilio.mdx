@@ -121,7 +121,7 @@ The connection contains environment variable names, never secret values.
 | listen | `deepgram`, with a model such as `nova-3-general`, an optional `language`, and the `params` `hints` and `deepgramSmartFormat` |
 | speak | `elevenlabs`, with `model`, a bare voice id in `voice`, an optional `language`, and the `params` `elevenlabsTextNormalization` |
 | turn | optional, `params` only: `speechTimeout` (600 to 5000 ms), `interruptSensitivity` (`high`, `medium`, `low`), `ignoreBackchannel`, and `eotThreshold` (0.5 to 0.9, listen model `flux` only) |
-| greeting | a fixed `text` with `speaks_first: agent`, or `speaks_first: user` with no text |
+| greeting | a fixed `say` line with `speaks_first: agent`, or `speaks_first: user` with no text |
 | interruption | `enabled: true` or `false`, and `protect: [greeting]` |
 | tools | `version: 2` typed local handlers (`tools/<name>.py:<name>`) whose input and output are flat `string`, `integer`, `number` and `boolean` fields, and the builtin `end_call` |
 
@@ -199,14 +199,14 @@ Speech providers are Deepgram for transcription and ElevenLabs for synthesis.
 Everything else is refused before a file is written. Each refusal says what to
 do instead. The refused list:
 
-- more agents, tasks, task groups, handoffs and transfers;
+- more agents, tasks, flows, handoffs and transfers;
 - variables, a `state.py` and prefetch;
 - webhook, MCP, knowledge and hosted tools;
 - a tool's `start: say:`, `interruption: cancel`, and `effect: ends_conversation` on a local tool;
 - `instructions` on `end_call`;
 - inactivity and duration timers, `pace` and the other turn fields;
 - tracing, realtime and live architectures, fallbacks and custom endpoints;
-- these `version: 2` keys, because the Twilio runtime runs version 2 without unmute-core: a tool entry's `save`, `outcomes`, `hidden` and `start: wait`, and a tool file's `precheck`; a step's outcomes without `then:`, its `start:` with `call:`, and an outcome with `confirm:` or `say:`; `entry_by`; prefetch `refuse_call`; and a handoff's `saves` or `start`. To use them, compile to livekit or pipecat;
+- these `version: 2` keys, because the Twilio runtime runs version 2 without unmute-core: a tool entry's `save`, `outcomes`, `hidden` and `start: wait`, and a tool file's `precheck`; a step's outcomes without `then:`, its `start:` with `call:`, and an outcome with `confirm:` or `say:`; `entry_by`; prefetch `refuse_call`; and a handoff's `save` or `start`. To use them, compile to livekit or pipecat;
 - the target keys `version`, `pins`, `deployment_region` and `warm_instances`.
 
 ## What compiling writes

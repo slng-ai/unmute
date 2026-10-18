@@ -2,9 +2,13 @@
 # the builtin end_call. The route gates compile it on (twilio,
 # conversation-relay).
 version: 2
+
 name: twilio-relay
+
 architecture: cascade
+
 entry_agent: desk
+
 models:
   think:
     reasoning:
@@ -23,19 +27,20 @@ models:
       model: flash_v2_5
       voice: UgBBYS2sOqTuMpoF3BR0
       language: en-US
+
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: reasoning
     speak: voice
     tools:
       - end_call
-tools:
-  - end_call
+
 conversation:
   greeting:
     speaks_first: agent
-    text: 'Hello & welcome, say "desk" to start.'
+    say: 'Hello & welcome, say "desk" to start.'
+
 secrets:
   - OPENAI_API_KEY
   - TWILIO_ACCOUNT_SID

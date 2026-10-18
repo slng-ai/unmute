@@ -34,20 +34,20 @@ prefetch:
   - name: today
     clock: now
     timezone: Europe/Madrid
-    assign:
+    save:
       - booking_date: result.date
 
   - name: caller
     source: from_number
-    assign:
+    save:
       - customer_phone: result.value
 
   - name: profile
-    tool: look_up_account
+    call: look_up_account
     writes: false
-    args:
-      - phone: "{{state.customer_phone}}"
-    assign:
+    with:
+      - phone: state.customer_phone
+    save:
       - account_name: result.name
 ```
 
@@ -231,7 +231,7 @@ controls decide how far each value travels.
 
 None of this is a rule written in a prompt and hoped for. Reference a value that still requires confirmation in the greeting and
 you get a build error.
-A `prefetch:` tool entry without an explicit `writes: true` or
+A `prefetch:` `call:` entry without an explicit `writes: true` or
 `writes: false` is refused the same way. A value goes only where the file
 says it goes.
 
@@ -239,8 +239,8 @@ A `prefetch:` entry itself is not held to that bar. An entry whose input is
 empty for this call is skipped with a warning, and the call carries on with the
 field's default in `state.py`. What an entry does enforce is on
 [Troubleshooting](/build/prefetch#troubleshooting):
-a `tool:` entry needs `writes: true` or `writes: false`, and `assign:` and
-`args:` are lists, one pair per line, never a mapping.
+a `call:` entry needs `writes: true` or `writes: false`, and `save:` and
+`with:` are lists, one pair per line, never a mapping.
 
 Behind all of it is one plain fact. The model remembers nothing between turns,
 so every token in the prompt is paid again on every turn. Routing a value to

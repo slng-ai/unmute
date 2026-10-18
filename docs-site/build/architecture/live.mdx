@@ -47,8 +47,8 @@ models:
       provider: openai
       model: gpt-5.6-terra
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     live: voice
 ```
 
@@ -152,13 +152,11 @@ def opening_hours() -> OpeningHours:
 
 The handler's signature is the tool's input, and its return model is the output. The tool file has no `input:` or `output:`.
 
-Merge these attachments into `agent.yaml`. Keep the existing `instructions` and `live` binding under `desk`:
+Merge these attachments into `agent.yaml`. Keep the existing `prompt` and `live` binding under `desk`:
 
 ```yaml voice-desk/agent.yaml
-tools:
-  - opening_hours
 agents:
-  desk:
+  - name: desk
     tools:
       - opening_hours
 ```

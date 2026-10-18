@@ -139,7 +139,7 @@ belongs to another architecture is refused at the key, with its line.
 
 Both speech-to-speech shapes compile on the two code targets and are refused on
 slng, which binds listen, think and speak by name and has no slot for one model
-doing all three. **Neither carries tasks, task groups or handoffs**, so a package
+doing all three. **Neither carries tasks, flows or handoffs**, so a package
 that needs those is `architecture: cascade`. That limit is this release's rather
 than the vendors': a realtime session does take a new prompt mid-call, and one
 of the two frameworks cannot reshape a running conversation without reconnecting,
@@ -165,8 +165,8 @@ models:
       turn_detection: semantic    # server_vad | semantic | local
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     realtime: voice
     tools:
       - lookup_customer
@@ -214,8 +214,8 @@ models:
       model: gpt-5.6-terra
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     live: voice
     tools:
       - lookup_customer
@@ -233,8 +233,8 @@ user the sense of the line is kept and not its letters.
 Write a live package only when the user asks for speech to speech, and say what
 it cannot carry in this version, because each is refused at validate:
 
-- `architecture: live` **serves one agent**, with no `tasks`, no `task_groups`,
-  no `handoffs` and no `escalations`: the session fixes its instructions when it
+- `architecture: live` **serves one agent**, with no `tasks`, no `flows`,
+  no `handoffs` and no `transfers`: the session fixes its prompt when it
   starts, so nothing may change them mid-call;
 - no `listen`, `speak` or `turn` sections, and no `conversation.interruption`:
   the model listens, speaks and decides the turn itself;

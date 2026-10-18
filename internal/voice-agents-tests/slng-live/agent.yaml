@@ -4,7 +4,9 @@
 # request tool SLNG hosts, end_call, a task with its own when:, a step only a
 # group runs, a skipped group step, and one tool that finishes a step.
 version: 2
+
 name: slng-live-test
+
 entry_agent: desk
 
 models:
@@ -27,8 +29,8 @@ models:
       language: en
 
 agents:
-  desk:
-    instructions: instructions.md
+  - name: desk
+    prompt: instructions.md
     think: reasoning
     speak: front_desk
     tools:
@@ -37,13 +39,13 @@ agents:
     tasks:
       - name: verify_identity
         when: The caller needs to confirm who they are before a booking is made.
-        instructions: tasks/verify.md
+        prompt: tasks/verify.md
         save:
           - phone_number: result.phone_number
 
       # No when: on purpose. The book group is the only way in.
       - name: take_booking
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         start:
           say:
             - Let me have a look.
@@ -58,30 +60,21 @@ agents:
                 then: done
         save:
           - booking: result.booking
-    task_groups:
-      - book
-
-task_groups:
-  book:
-    when: The caller wants to book an appointment.
-    steps:
-      - task: verify_identity
-        skip_when_confirmed: phone_number
-      - take_booking
+    flows:
+      - name: book
+        when: The caller wants to book an appointment.
+        steps:
+          - task: verify_identity
+            skip_when_confirmed: phone_number
+          - take_booking
 
 variables:
   - name: phone_number
     confirm: verify_identity
 
-tools:
-  - find_free_slots
-  - book_slot
-  - search_places
-  - end_call
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, you have reached Sage and Stone. How can I help?"
+    say: "Hi, you have reached Sage and Stone. How can I help?"
   interruption:
     enabled: true

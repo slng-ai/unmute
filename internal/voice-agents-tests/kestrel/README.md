@@ -6,7 +6,7 @@ Code says every line of the flow. The model only turns what the caller said into
 
 ## What it proves
 
-- A task group, `claim`, takes `policy_number` and `birth_date` as arguments from the main agent.
+- A flow, `claim`, takes `policy_number` and `birth_date` as `fills:` from the main agent.
 - `find_policy` opens on `lookup_policy` with those values, so the read-back plays with no model request.
 - `confirm:` reads the number and the date of birth back before the lookup runs. They are saved from the tool's input (`- policy_number: input.policy_number`) once it succeeds.
 - `precheck:` refuses a number that is not KP and six digits, and the tool's own `outcomes:` ask again.

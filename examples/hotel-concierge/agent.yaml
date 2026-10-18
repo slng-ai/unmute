@@ -5,8 +5,8 @@ name: hotel-concierge
 entry_agent: concierge
 
 agents:
-  concierge:
-    instructions: instructions.md
+  - name: concierge
+    prompt: instructions.md
     think: reasoning
     speak: front_desk
     tools:
@@ -67,18 +67,14 @@ variables:
 # template whose placeholder names carry no dollar, so the push refuses it.
 
 tools:
-  - hotel_info
   - name: search_places_text
     start:
       say:
         - Let me have a look around the neighbourhood.
-  - web_search
-  - send_sms
-  - end_call
 
 conversation:
   greeting:
     speaks_first: agent
-    text: "Good day, this is the concierge desk at {{state.hotel_name}}. How can I help with your stay?"
+    say: "Good day, this is the concierge desk at {{state.hotel_name}}. How can I help with your stay?"
   interruption:
     enabled: true

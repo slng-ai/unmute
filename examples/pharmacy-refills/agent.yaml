@@ -10,7 +10,9 @@
 version: 2
 
 name: pharmacy-refills
+
 architecture: realtime
+
 entry_agent: refills
 
 # One key: the realtime model and the knowledge base both run on OpenAI. There
@@ -56,8 +58,8 @@ knowledge:
     documents: knowledge/policies
 
 agents:
-  refills:
-    instructions: instructions.md
+  - name: refills
+    prompt: instructions.md
     # `realtime:` instead of think, speak, listen and turn. One entry replaces
     # all four, which is what the architecture key above says.
     realtime: counter
@@ -67,16 +69,10 @@ agents:
       - look_up_pharmacy_policy
       - end_call
 
-tools:
-  - look_up_prescription
-  - request_refill
-  - look_up_pharmacy_policy
-  - end_call
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Elmtree Pharmacy, repeat prescriptions. How can I help?"
+    say: "Elmtree Pharmacy, repeat prescriptions. How can I help?"
   interruption:
     enabled: true
   inactivity:

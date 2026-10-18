@@ -66,7 +66,7 @@ func TestLoadManifestLink(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			agent := "version: 1\nmodels: {}\nagents: {}\n"
+			agent := "version: 1\nmodels: {}\nagents: []\n"
 			if tc.link != "" {
 				agent += "manifest: " + tc.link + "\n"
 			}
@@ -103,7 +103,7 @@ func TestLoadManifestLink(t *testing.T) {
 func TestLoadRefusesTheExtensionlessManifest(t *testing.T) {
 	for _, link := range []string{"", "manifest", "manifest.yaml"} {
 		dir := t.TempDir()
-		agent := "version: 1\nmodels: {}\nagents: {}\n"
+		agent := "version: 1\nmodels: {}\nagents: []\n"
 		if link != "" {
 			agent += "manifest: " + link + "\n"
 		}

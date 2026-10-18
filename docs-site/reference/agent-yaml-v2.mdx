@@ -108,7 +108,7 @@ the tool's `{{result.x}}`. No helper `save:` is needed to say a value.
 
 ```yaml agent.yaml
       - name: manage_booking
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         # Code calls the tool as the step opens, and says the offer.
         start:
           call: find_slots
@@ -167,8 +167,8 @@ the tool's `{{result.x}}`. No helper `save:` is needed to say a value.
   Handoff tools the step offers too.
 </ParamField>
 
-A group takes typed `arguments:`, State values the agent passes as it starts the
-group. Each step saves what the caller confirmed, and hands it to the agent.
+A flow takes `fills:`, State values the agent passes as it starts the
+flow. Each step saves what the caller confirmed, and hands it to the agent.
 
 ## Other keys
 
@@ -180,11 +180,11 @@ group. Each step saves what the caller confirmed, and hands it to the agent.
   Refuses the call when that lookup finds nothing, with this line.
 </ParamField>
 
-<ParamField path="handoffs.*.saves" type="list of key: value">
+<ParamField path="handoffs[].save" type="list of key: value">
   State values the handoff sets as the call moves.
 </ParamField>
 
-<ParamField path="handoffs.*.start" type="call and with">
+<ParamField path="handoffs[].start" type="call and with">
   A tool of the next agent's, run in code as it takes the call.
 </ParamField>
 
@@ -208,7 +208,7 @@ prefetch's `timezone:`. Code says dates in them.
 | `realtime` | OpenAI's realtime model |
 | `live` | OpenAI's live model, with the `think` model its `backend:` names |
 
-`escalations:` transfer the caller on a phone line. A browser session needs no phone
+`transfers:` transfer the caller on a phone line. A browser session needs no phone
 route variable to start. `tracing:` compiles `langfuse`.
 
 ## Twilio and SLNG read version 2
@@ -221,7 +221,7 @@ says to remove them or compile to livekit or pipecat:
 - a step's outcomes without `then:`, a step `start:` with `call:`, and a step outcome with `confirm:`;
 - `entry_by`;
 - prefetch `refuse_call`;
-- a handoff's `saves` or `start`.
+- a handoff's `save` or `start`.
 
 A step outcome with `then: done` and `say:` is refused on Twilio only. SLNG speaks the line itself.
 Each target refuses more of its own: see [Twilio](/targets/twilio#what-the-package-may-carry)

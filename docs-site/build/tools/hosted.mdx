@@ -11,7 +11,7 @@ On this page:
 - [The file name and the hosted name](#the-file-name-and-the-hosted-name-are-two-different-things) - two names, one reference
 - [Descriptions and parameters are inherited](#descriptions-and-parameters-are-inherited) - what the platform supplies
 - [What the block keeps](#what-the-block-keeps) - every key you write
-- [Attaching one](#attaching-one) - the same two lists
+- [Attaching one](#attaching-one) - the agent's list
 - [Deploying to SLNG needs no mirror](#deploying-to-slng-needs-no-mirror) - what deploy checks
 - [What each target does with it](#what-each-target-does-with-it) - slng, livekit, pipecat
 - [Advanced](#advanced) - the legacy form and the mirrors
@@ -152,21 +152,17 @@ have validated it.
 
 ## Attaching one
 
-No different from any other tool. The same two lists:
+No different from any other tool. The agent names it:
 
 ```yaml agent.yaml
 agents:
-  support:
-    instructions: instructions.md
+  - name: support
+    prompt: instructions.md
     think: reasoning
     speak: front_desk
     tools:
       - check_order
       - end_call
-
-tools:
-  - check_order
-  - end_call
 ```
 
 ## Deploying to SLNG needs no mirror

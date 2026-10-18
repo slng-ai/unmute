@@ -33,7 +33,7 @@ name: support-bot
 entry_agent: assistant
 
 # Each agent is a prompt plus the models it thinks and speaks with. The
-# instructions file is sent to the model verbatim as its system prompt, so
+# prompt file is sent to the model verbatim as its system prompt, so
 # everything in it is addressed to the agent and nothing in it is addressed to
 # you — put your own notes here, in a comment, where the model never sees them.
 #
@@ -42,13 +42,13 @@ entry_agent: assistant
 # is spoken word for word without going through the model at all.
 #
 # What an agent can do is its own lists: tools do work and come back, tasks are
-# sub-conversations it runs and returns from, task groups are ordered runs of
-# task steps, handoffs make the conversation somebody else's, and escalations put
-# the caller through to a person. A task is written here, inside the agent that
+# sub-conversations it runs and returns from, flows are ordered runs of task
+# steps, handoffs make the conversation somebody else's, and transfers put the
+# caller through to a person. Each is written here, inside the agent that
 # defines it, so one block says what the agent can do and when it does it.
 agents:
-  assistant:
-    instructions: instructions.md
+  - name: assistant
+    prompt: instructions.md
     think: assistant_model
     speak: assistant_voice
     tools:
@@ -96,13 +96,10 @@ models:
       provider: livekit
       model: turn-detector-mini
 
-tools:
-  - end_call
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi there, I'm listening. What can I help you with?"
+    say: "Hi there, I'm listening. What can I help you with?"
 
 === instructions.md ===
 # Identity

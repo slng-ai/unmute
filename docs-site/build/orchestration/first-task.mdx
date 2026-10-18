@@ -15,7 +15,7 @@ The shape is what matters, and you will swap the parcel for your own thing.
 <Note>
   **Tasks run on LiveKit, Pipecat and SLNG.** The package `unmute init`
   writes targets LiveKit, so you are ready. SLNG takes most task features;
-  [the SLNG page](/targets/slng#tasks-and-task-groups) lists them.
+  [the SLNG page](/targets/slng#tasks-and-flows) lists them.
 
   Twilio compiles one agent with one prompt and refuses tasks. Fold the step
   into the agent's instructions or use another target.
@@ -122,22 +122,18 @@ stop anywhere and come back.
     can hold. That list is what will let the task know, later, whether the
     lookup worked. Write one for any tool a task will end on.
 
-    Now name the tool in two places in `agent.yaml`. The agent's own list says
-    the agent may call it. The top-level list says the tool exists.
+    Every file in `tools/` is a tool already. Name it in the agent's own list in
+    `agent.yaml` to say the agent may call it.
 
     ```yaml agent.yaml
     agents:
-      assistant:
-        instructions: instructions.md
+      - name: assistant
+        prompt: instructions.md
         think: assistant_model
         speak: assistant_voice
         tools:
           - end_call
           - look_up_parcel
-
-    tools:
-      - end_call
-      - look_up_parcel
     ```
 
     And tell the agent what to do with it, at the end of `instructions.md`:
@@ -217,8 +213,8 @@ stop anywhere and come back.
 
     ```yaml agent.yaml
     agents:
-      assistant:
-        instructions: instructions.md
+      - name: assistant
+        prompt: instructions.md
         think: assistant_model
         speak: assistant_voice
         tools:
@@ -227,7 +223,7 @@ stop anywhere and come back.
         tasks:
           - name: find_parcel
             when: The caller wants to know where their parcel is.
-            instructions: tasks/find-parcel.md
+            prompt: tasks/find-parcel.md
             tools:
               - look_up_parcel
     ```
@@ -250,8 +246,8 @@ stop anywhere and come back.
 
     ```yaml agent.yaml
     agents:
-      assistant:
-        instructions: instructions.md
+      - name: assistant
+        prompt: instructions.md
         think: assistant_model
         speak: assistant_voice
         tools:
@@ -259,13 +255,12 @@ stop anywhere and come back.
         tasks:
           - name: find_parcel
             when: The caller wants to know where their parcel is.
-            instructions: tasks/find-parcel.md
+            prompt: tasks/find-parcel.md
             tools:
               - look_up_parcel
     ```
 
-    The top-level `tools:` list keeps `look_up_parcel`. That list says the
-    tool exists; the task now says who may call it.
+    The task now says who may call `look_up_parcel`.
 
     Change the agent's prompt to match. It no longer looks parcels up itself:
 
@@ -292,7 +287,7 @@ stop anywhere and come back.
         tasks:
           - name: find_parcel
             when: The caller wants to know where their parcel is.
-            instructions: tasks/find-parcel.md
+            prompt: tasks/find-parcel.md
             tools:
               - look_up_parcel
             save:
@@ -357,7 +352,7 @@ stop anywhere and come back.
         tasks:
           - name: find_parcel
             when: The caller wants to know where their parcel is.
-            instructions: tasks/find-parcel.md
+            prompt: tasks/find-parcel.md
             tools:
               - name: look_up_parcel
                 outcomes:
@@ -420,7 +415,7 @@ stop anywhere and come back.
         tasks:
           - name: find_parcel
             when: The caller wants to know where their parcel is.
-            instructions: tasks/find-parcel.md
+            prompt: tasks/find-parcel.md
             start:
               say:
                 - Sure. What is the tracking number?
@@ -483,8 +478,8 @@ name: my-agent
 entry_agent: assistant
 
 agents:
-  assistant:
-    instructions: instructions.md
+  - name: assistant
+    prompt: instructions.md
     think: assistant_model
     speak: assistant_voice
     tools:
@@ -492,7 +487,7 @@ agents:
     tasks:
       - name: find_parcel
         when: The caller wants to know where their parcel is.
-        instructions: tasks/find-parcel.md
+        prompt: tasks/find-parcel.md
         start:
           say:
             - Sure. What is the tracking number?
@@ -534,14 +529,10 @@ models:
       provider: livekit
       model: turn-detector-mini
 
-tools:
-  - end_call
-  - look_up_parcel
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi there, I'm listening. What can I help you with?"
+    say: "Hi there, I'm listening. What can I help you with?"
 ```
 </Accordion>
 
@@ -562,7 +553,7 @@ capacity:
 
 | Key | What it says | If you leave it out |
 |---|---|---|
-| `when:` | when the model should run the task | the task is only usable as a step of a task group |
+| `when:` | when the model should run the task | the task is only usable as a step of a flow |
 | `tools:` on the task | what the task may call | the task talks but cannot look anything up |
 | `save:` | what the task saves, and where | the task can still finish, and keeps nothing |
 | `outcomes:` with `then: done` | which tool result means the task is done | the model decides, by calling `finish` |
@@ -574,7 +565,7 @@ capacity:
   <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
     Every task key in full: history, what returns, sharing a task between agents.
   </Card>
-  <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
+  <Card title="Flows" icon="list-ordered" href="/build/orchestration/task-groups">
     Two or more tasks that have to run in a fixed order.
   </Card>
   <Card title="Making a task actually run" icon="footprints" href="/best-practices/step-scoping">

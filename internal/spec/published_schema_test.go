@@ -41,8 +41,8 @@ func TestPublishedSchemaRefusesAnIfItemHoldingTwoKeys(t *testing.T) {
 	resolved := resolvedSchema(t)
 	pkg := authoredInstance(t, filepath.Join("..", "testdata", "terminal_step"))
 	doc := pkg["agent"]
-	agents := doc.(map[string]any)["agents"].(map[string]any)
-	tasks := agents["desk"].(map[string]any)["tasks"].([]any)
+	agents := doc.(map[string]any)["agents"].([]any)
+	tasks := agents[0].(map[string]any)["tasks"].([]any)
 	var match []any
 	for _, item := range tasks[0].(map[string]any)["tools"].([]any) {
 		if entry, ok := item.(map[string]any); ok && entry["outcomes"] != nil {
@@ -69,11 +69,7 @@ func authoredInstance(t *testing.T, dir string) map[string]any {
 	}
 	doc := loadInstance(t, filepath.Join(dir, "agent.yaml"))
 	tools := map[string]any{}
-	for _, item := range doc.(map[string]any)["tools"].([]any) {
-		name, ok := item.(string)
-		if !ok {
-			name = item.(map[string]any)["name"].(string) // an entry with behaviour
-		}
+	for name := range pkg.Tools {
 		tools[name] = loadInstance(t, filepath.Join(dir, "tools", name+".yaml"))
 	}
 	// channels and capacity are read raw from targets.yaml, beside the targets

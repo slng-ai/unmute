@@ -219,9 +219,9 @@ name for its type and description. These are the call's real values, so they
 can include a tool's result and the caller's details; they stay in
 `build/<target>/dev.log` and this local page.
 
-The `HANDOFF` row carries no duration on purpose. A task, a task group, or a
+The `HANDOFF` row carries no duration on purpose. A task, a flow, or a
 handoff to another agent reaches the framework as a function call, so it could
-be timed like a tool. But a task or a task group does not return until
+be timed like a tool. But a task or a flow does not return until
 everything it started has finished, and a handoff never returns at all. Timed
 that way, a three-turn task would appear as one very slow tool, which is the
 opposite of what the numbers are for. The row marks the moment control moved,

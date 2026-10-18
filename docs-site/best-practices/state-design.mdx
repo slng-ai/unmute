@@ -34,11 +34,11 @@ class State(BaseModel):
 
 ```yaml agent.yaml
 agents:
-  concierge:
+  - name: concierge
     tasks:
       - name: manage_booking
         when: The caller wants to book, move, or cancel an appointment.
-        instructions: tasks/booking.md
+        prompt: tasks/booking.md
         save:
           - appointment: result.appointment
 ```
@@ -61,7 +61,7 @@ For each value, identify who saves it and who needs it later:
 
 | Value | Who saves it | Who reads it |
 |---|---|---|
-| A confirmed phone number | The verification task, through `confirm:` | `skip_when_confirmed:` on a task-group step, so a second booking skips verification |
+| A confirmed phone number | The verification task, through `confirm:` | `skip_when_confirmed:` on a flow step, so a second booking skips verification |
 | Requested new booking time | The selection task | A reset task that performs the move |
 | Successfully saved appointment | The booking task | The owner and customer care |
 | A caller's preferred contact channel | The intake task | Any later task that has to reach them |
@@ -160,10 +160,10 @@ It does not undo an action already completed by a tool.
 
 ## Reuse verification deliberately
 
-When verification is the first step of a task group, declare the skip rather
+When verification is the first step of a flow, declare the skip rather
 than asking a prompt to remember it. Put `skip_when_confirmed:` on that step,
-naming the variable the step confirms. The group then skips the step when
-that variable is confirmed at the moment the group starts, and runs it
+naming the variable the step confirms. The flow then skips the step when
+that variable is confirmed at the moment the flow starts, and runs it
 otherwise. See
 [Skip a step whose work is already done](/build/orchestration/task-groups#skip-a-step-whose-work-is-already-done).
 
@@ -171,13 +171,13 @@ Confirmed here is a real mark on the variable, set by `confirm:` alone: when
 the task it names saves the value, and cleared by any other write. A prompt
 sentence saying the caller was verified is not that mark, and neither is a
 separate status variable a task saves on success. Do not also keep a
-separate status variable for this: once the group reads the confirm mark
+separate status variable for this: once the flow reads the confirm mark
 itself, nothing needs a second copy of the same fact.
 
 Use [`confirm:`](/build/prefetch#always-check-a-value-with-the-caller) for a
 candidate value that must be checked with the caller. When that candidate
 changes, prefetched values derived from the old candidate are cleared, and
-the group runs the confirming step again on its own.
+the flow runs the confirming step again on its own.
 
 ## Write for a missing value
 
