@@ -31,7 +31,6 @@ writing.
 ## The smallest agent that works
 
 ```yaml agent.yaml
-version: 2
 name: acme-appointments
 entry_agent: appointment_desk
 
@@ -82,7 +81,6 @@ That is the shape `unmute init <name>` scaffolds, with an empty `State` class in
 
 | Key | Required | What it is |
 |---|---|---|
-| `version` | yes | the schema version. Write `2`: `livekit` and `pipecat` compile version 2 only. `1` compiles on `twilio` and `slng` only |
 | `manifest` | when a root manifest exists | the literal `manifest.yaml`, linking the company contract |
 | `name` | yes | what the deployed agent is called |
 | `entry_agent` | yes | which agent answers. A cascaded agent may add `speak:` and its own `listen:` (a `models.listen` entry, for another language; no `fallback:`; refused on a realtime or live agent, and on slng and twilio when it differs from the package's). On livekit and pipecat each agent keeps its voice and ears after a handoff |
@@ -348,7 +346,7 @@ on its own. On Logfire a call shows on the Agents page as one run per agent
 turn, with its model calls and tools inside it; on Pipecat each run is named
 after the package, not the agent that answered.
 Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
-On livekit and pipecat version 2, compile accepts `langfuse` only so far and refuses the other providers.
+On livekit and pipecat, compile accepts `langfuse` only so far and refuses the other providers.
 
 With `coval`, each trace is attached to the Coval simulation that placed the
 call. The agent finds that simulation ID on the call itself, so the package
@@ -600,7 +598,7 @@ validate, by name, with what to do instead:
 | a second `then: done` outcome in one task, `then: failed`, or `confirm:` on a step tool | SLNG supports one finishing tool per task today, and has no read-back |
 | a second `start:` `say:` line, an optional `result.x?`, a flow `then:` other than `return` | SLNG speaks one line, saves every assigned value, and returns to the agent |
 | `prefetch:` | slng compiles no session-start hook |
-| a tool entry's `save:`, `outcomes:` and `hidden:`, `start:` with `wait: true`, and `precheck` in a tool file; a step's `start:` with `call:`; `entry_by`; a prefetch `refuse_call`; a handoff's `save:` or `start:` with `call:` | the slng runtime runs version 2 without unmute-core and cannot run them: remove them, or compile to livekit or pipecat |
+| a tool entry's `save:`, `outcomes:` and `hidden:`, `start:` with `wait: true`, and `precheck` in a tool file; a step's `start:` with `call:`; `entry_by`; a prefetch `refuse_call`; a handoff's `save:` or `start:` with `call:` | the slng runtime runs without unmute-core and cannot run them: remove them, or compile to livekit or pipecat |
 | a task that lists another task or a handoff | a SLNG task cannot start another one |
 | a typed `state.py` value the dispatch fills; `datetime`, `dict`, a pattern other than `Id` | SLNG checks types only on values a task saves, in a grammar without those words |
 | a `turn:` section, `semantic_endpointing`, `endpointing_delay` | SLNG owns its own turn taking |
@@ -628,7 +626,7 @@ sample and publishes it, before it reads the account. Rules:
 
 - Write `tools/<name>.sample.json` beside the tool file: one JSON object of
   arguments. A local tool with no sample is refused.
-- A version 1 handler (a file with no `:function`) is refused. An `async def`
+- A handler with no `:function` is refused. An `async def`
   handler is refused, because SLNG calls a code tool synchronously.
 - SLNG code has no internet access. Exact pins come from the tool's
   `dependencies:`.
@@ -774,9 +772,9 @@ prefetch, webhook, MCP, knowledge and hosted tools, tool announce and
 turn fields, tracing, realtime and live, fallbacks, custom endpoints,
 `version`, `pins`, `deployment_region` and `warm_instances`.
 
-The version 2 tool entry keys `save`, `outcomes`, `hidden` and `start` with `wait`, and `precheck` in a tool file,
+The tool entry keys `save`, `outcomes`, `hidden` and `start` with `wait`, and `precheck` in a tool file,
 `entry_by`, and a handoff's `save:` or `start:` with `call:` are refused too.
-The twilio runtime runs version 2 without unmute-core, so it cannot run them.
+The twilio runtime runs without unmute-core, so it cannot run them.
 A local tool is a typed handler, `tools/<n>.py:<n>`.
 
 `unmute compile` writes `build/<target>/app.py` (the entry point, FastAPI on

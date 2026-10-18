@@ -2,7 +2,6 @@
 # only a group runs, a skipped group step, typed values with a shape, an
 # append, and a hosted tool only a task can call. Deployed to find what only a
 # real push and a real call find. hosted/ holds that tool's Python source.
-version: 2
 
 name: slng-tasks-test
 

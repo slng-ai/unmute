@@ -724,7 +724,7 @@ func TestScaffoldToolManifestsAreBlockStyle(t *testing.T) {
 		name string
 		tool Tool
 	}{
-		// local is not in this table: version 2 reads its types from the
+		// local is not in this table: agent.yaml reads its types from the
 		// handler. TestScaffoldLocalToolIsATypedHandler covers what it writes.
 		{"webhook", Tool{Execution: "webhook", URLEnv: "T_URL"}},
 		{"webhook_bearer", Tool{Execution: "webhook", URLEnv: "T_URL",
@@ -927,7 +927,7 @@ func TestScaffoldLocalToolIsATypedHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(manifest), "handler: tools/check_order.py:check_order\n") || strings.Contains(string(manifest), "input:") {
-		t.Errorf("a version 2 local tool names its function and carries no input:\n%s", manifest)
+		t.Errorf("a local tool names its function and carries no input:\n%s", manifest)
 	}
 	handler, err := os.ReadFile(filepath.Join(dir, "tools", "check_order.py"))
 	if err != nil {

@@ -13,9 +13,9 @@ a [webhook](/build/tools/webhook) or a [Python handler](/build/tools/python)
 instead.
 
 <Note>
-  `mcp:` tools compile on the SLNG target only for now. Version 2 on livekit and
-  pipecat refuses them. The sections below that name LiveKit or Pipecat describe the
-  `mcp:` block as version 1 read it.
+  `mcp:` tools compile on the SLNG target only for now. Livekit and
+  pipecat refuse them. The sections below that name LiveKit or Pipecat describe the
+  `mcp:` block for when those targets compile it.
 </Note>
 
 On this page:
@@ -181,11 +181,11 @@ targets only.
 ## Where the source can be listed
 
 On SLNG, the source can go on an agent or on a task. Livekit and pipecat do not
-compile it on version 2 yet.
+compile it yet.
 
 ## What each target needs
 
-**An `mcp:` tool is SLNG-only for now.** Version 2 on livekit and pipecat does not
+**An `mcp:` tool is SLNG-only for now.** Livekit and pipecat do not
 compile `mcp:` tools yet, and `core_spec.go` refuses them. SLNG resolves the server
 by name from its own registration, so it needs none of `url_env`, `transport` or
 `auth`.

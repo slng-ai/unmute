@@ -20,7 +20,7 @@ import (
 // back, so unmute writes the create body and the runbook says so in both
 // directions.
 
-// slngSchemaVersion and slngToolMode are written on every body. Version 2 with
+// slngSchemaVersion and slngToolMode are written on every body. A body with
 // no tool_mode is rejected, and shared mode is the only mode that takes
 // tool_refs, so neither is ever a choice.
 const (
@@ -246,7 +246,7 @@ type slngMCP struct {
 // slngArtifacts is everything the driver needs to write: the body and the facts
 // the runbook prints.
 //
-// The body names every tool by name. A version 2 local tool is a code tool
+// The body names every tool by name. A local tool is a code tool
 // written beside it (slng_code_tool.go); every other tool is one the
 // organisation already holds.
 type slngArtifacts struct {

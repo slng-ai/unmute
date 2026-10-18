@@ -9,7 +9,7 @@ this too, but spread across two agents, five tasks, tracing, knowledge documents
 and two phone routes. This one does nothing else, so the typed part is the only
 part there is to read.
 
-It is an `agent.yaml` version 2 package: it compiles onto unmute-core, with
+It compiles onto unmute-core, with
 OpenAI as its model. `scenarios/` holds a whole call that `make e2e` runs on the
 real model, on LiveKit and Pipecat.
 
@@ -118,7 +118,7 @@ be opened against somebody else's number and nothing would say so.
 | `tasks/take-details.md` | name, address and enquiry in one pass |
 | `tasks/open-record.md` | calls the tool and relays the record back |
 | `tools/create_customer_record.yaml` | one model argument, four pinned values |
-| `tools/intake.py` | the typed handler, an in-process store, and a `_demo()` self-check. `agent.yaml` version 2 reads the tool's argument and result types from here |
+| `tools/intake.py` | the typed handler, an in-process store, and a `_demo()` self-check. `agent.yaml` reads the tool's argument and result types from here |
 
 ## What it does not do
 

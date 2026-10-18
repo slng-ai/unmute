@@ -157,7 +157,7 @@ func TestCompileNeedsNoCredential(t *testing.T) {
 		target  string
 	}{
 		{"slng_hosted", "slng"},
-		// Version 2 compiles no slng tool on livekit or pipecat yet, so the
+		// unmute-core compiles no slng tool on livekit or pipecat yet, so the
 		// code-target fixtures have no compile to check here.
 	} {
 		t.Run(tc.fixture+"/"+tc.target, func(t *testing.T) {

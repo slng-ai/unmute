@@ -23,7 +23,6 @@ build/
 # which runtime this compiles to lives in targets.yaml, so the same agent runs
 # on either one. Call state lives in state.py, and a local tool's types come
 # from its Python function.
-version: 2
 
 # What this agent is called where it is deployed under a name instead of an id.
 # The slng target writes it into the agent it pushes, and an SLNG name is unique

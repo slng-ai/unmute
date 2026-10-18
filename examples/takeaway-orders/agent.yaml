@@ -5,7 +5,6 @@
 # live model hears the audio, decides when the caller has finished and speaks
 # back in its own voice, so none of that waits on a transcriber, a turn detector
 # and a synthesizer taking their turns.
-version: 2
 
 name: takeaway-orders
 

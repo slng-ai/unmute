@@ -20,8 +20,6 @@
 # live organisation. Re-pulling would put the real service host back into a
 # tracked file. If you do re-pull, de-identify the url and re-pin again.
 
-version: 2
-
 name: slng-hosted-fixture
 
 entry_agent: support

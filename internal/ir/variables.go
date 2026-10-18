@@ -188,7 +188,7 @@ func checkStatePrefix(pkg *packagespec.Package, agent *Agent) error {
 	return nil
 }
 
-// CallValue is the root of a version 2 placeholder that reads what the call
+// CallValue is the root of a placeholder that reads what the call
 // carries, like {{call.session_id}}: unmute-core's reserved CallInfo, not a
 // State value.
 const CallValue = "call"
@@ -228,7 +228,7 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 		// value the site reads; the path is resolved last, against the root's
 		// declared shape, and only decides which part is rendered.
 		root, fields := PathRoot(ref), PathFields(ref)
-		if root == CallValue && pkg.Agent.Version == packagespec.Version2 {
+		if root == CallValue {
 			if len(fields) != 1 || !slices.Contains(CallFields, fields[0]) {
 				return fmt.Errorf("%s: %s references {{%s}}; a call value is {{call.<field>}}, one of %s",
 					where, site, ref, strings.Join(CallFields, ", "))

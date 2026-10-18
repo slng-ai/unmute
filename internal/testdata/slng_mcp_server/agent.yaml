@@ -11,8 +11,6 @@
 # It also carries a Vault token in the greeting and a secret behind the webhook
 # tool, so the runbook has both kinds of Vault name to group.
 
-version: 2
-
 name: slng-tools-fixture
 
 entry_agent: support

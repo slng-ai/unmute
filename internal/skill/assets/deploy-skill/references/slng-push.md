@@ -18,7 +18,7 @@ This needs voiceai 0.1.23 or newer. With `--dry-run` it prints `would create
 code tool X, run its sample and publish it` (or `would update`) and stops that
 preview there, because the rest is checked against the published tool.
 
-A `local:` tool with no sample, a version 1 handler, or an `async def` handler
+A `local:` tool with no sample, a handler with no `:function`, or an `async def` handler
 is refused at validate.
 
 ## What is checked before anything is written

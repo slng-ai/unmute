@@ -17,7 +17,7 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-// Load strictly decodes a v1 package without resolving references.
+// Load strictly decodes a package without resolving references.
 func Load(dir string) (*Package, error) {
 	root, err := filepath.Abs(dir)
 	if err != nil {
@@ -131,7 +131,7 @@ func Load(dir string) (*Package, error) {
 	if err := pkg.flattenTasks(); err != nil {
 		return nil, err
 	}
-	if err := pkg.checkVersionKeys(); err != nil {
+	if err := pkg.checkTools(); err != nil {
 		return nil, err
 	}
 

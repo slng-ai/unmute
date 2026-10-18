@@ -4,7 +4,7 @@ package target
 // with. It is the same line the Twilio project runs on.
 const StatePython = TwilioPython
 
-// CorePin is the unmute-core release `unmute` reads a version 2 package's
+// CorePin is the unmute-core release `unmute` reads a package's
 // local tool handlers with, through its own local_tool, so the compiler and
 // the runtime read the same types. Moving it changes every tool recording.
 const CorePin = "0.18.1"

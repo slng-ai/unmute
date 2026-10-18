@@ -12,12 +12,12 @@ import (
 	"github.com/slng-ai/unmute/internal/stateschema"
 )
 
-// handlerTypes gives a version 2 local tool the types its handler declares.
+// handlerTypes gives a local tool the types its handler declares.
 // Input is what the model fills in, so an injected parameter is left out of
-// it, which is what Input means on version 1 too. Every injected key has to
+// it, which is what Input means. Every injected key has to
 // be a parameter, because that is where unmute-core's locked value goes.
 func handlerTypes(pkg *packagespec.Package, name string, tool *Tool) error {
-	if pkg.Agent.Version != packagespec.Version2 || tool.Execution != ToolLocal {
+	if tool.Execution != ToolLocal {
 		return nil
 	}
 	file := filepath.Join("tools", name+".yaml")
@@ -83,14 +83,11 @@ func callStart(entry packagespec.Variable, variable *Variable) error {
 	}
 }
 
-// buildV2 resolves and checks the version 2 keys, after every tool, task,
+// buildV2 resolves and checks the typed keys, after every tool, task,
 // group and prefetch entry is built. Each check names the file and the key to
 // fix. The library checks the same things again when the emitted spec.py is
 // imported; these exist so the author hears it at validate, with a line.
 func buildV2(pkg *packagespec.Package, out *Agent) error {
-	if pkg.Agent.Version != packagespec.Version2 {
-		return nil
-	}
 	if strings.TrimSpace(pkg.Agent.Mode) != "" {
 		return fmt.Errorf("%s: mode: is removed. Every task runs in record mode: it hands its agent the values "+
 			"the caller confirmed, keeps them on a hand-back, and lets the caller go back a step. Delete the line",
@@ -228,7 +225,7 @@ func buildV2Tool(pkg *packagespec.Package, out *Agent, name string) error {
 	return nil
 }
 
-// buildV2Task resolves one step's version 2 keys.
+// buildV2Task resolves one step's keys.
 func buildV2Task(pkg *packagespec.Package, out *Agent, name string) error {
 	raw, task := pkg.Tasks[name], out.Tasks[name]
 	for i, entry := range raw.Finish {

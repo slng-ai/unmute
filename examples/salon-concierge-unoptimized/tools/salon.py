@@ -425,7 +425,7 @@ def _record_complaint(customer_phone, summary, requested_resolution=""):
 
 # What each tool takes and returns. The functions above keep the diary's rules and
 # return plain dicts. These wrappers give the model and the call state their types,
-# which agent.yaml version 2 reads from here instead of from a JSON schema.
+# which agent.yaml reads from here instead of from a JSON schema.
 Service = Literal["haircut", "hair-color", "blowout"]
 
 

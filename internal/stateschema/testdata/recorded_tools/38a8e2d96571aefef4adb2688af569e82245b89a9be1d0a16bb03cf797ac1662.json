@@ -45,5 +45,5 @@
       }
     }
   },
-  "source": "internal/testdata/speechmatics_listen"
+  "source": "internal/testdata/speechmatics_local"
 }

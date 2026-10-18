@@ -1,7 +1,7 @@
 """Read each local tool handler of a package and print its types, as JSON.
 
 unmute runs this through uv, with the pinned Pydantic and unmute-core, on every
-validate and compile of a version 2 package. It never runs during a call. The
+validate and compile of a package. It never runs during a call. The
 input schema comes from the handler's signature and the output schema from its
 return type, read by unmute-core's own local_tool, so Go and the runtime read
 the same types.

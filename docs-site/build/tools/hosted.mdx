@@ -199,11 +199,11 @@ it prints.
 | Target | What happens |
 |---|---|
 | SLNG | resolves the platform's own tool by name at deploy time. Nothing is created, nothing is uploaded, nothing local is required |
-| LiveKit | refused on version 2 for now |
+| LiveKit | refused for now |
 | Pipecat | the same |
 
 **A `slng:` tool is SLNG-only for now.** SLNG needs nothing from your package beyond
-the name. Version 2 on livekit and pipecat does not compile hosted tools yet. When
+the name. Livekit and pipecat do not compile hosted tools yet. When
 it does, they will need a real copy of the tool's definition, which `unmute pull`
 fetches.
 

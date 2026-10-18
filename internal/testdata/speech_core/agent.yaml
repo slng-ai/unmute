@@ -1,7 +1,6 @@
 # A version 2 package whose speech is not SLNG's: Deepgram listens, and the
 # voices are Cartesia's, ElevenLabs' and Deepgram's. It compiles on both code
 # targets and imports offline. It has no scenarios: nothing here runs a call.
-version: 2
 
 name: speech-core
 

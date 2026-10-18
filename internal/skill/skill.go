@@ -57,7 +57,7 @@ type Destination struct {
 	root string   // subtree of the embedded FS this destination takes
 }
 
-// The six destinations: three skills, each in the place Claude Code reads and
+// The eight destinations: four skills, each in the place Claude Code reads and
 // the place everybody else reads. Path elements rather than a literal string,
 // because Windows is a supported platform and filepath.Join owns the separator.
 //
@@ -66,11 +66,13 @@ type Destination struct {
 // `assets` minus the subtrees below it, and listing those by hand is how a new
 // skill quietly ships inside the old one.
 //
-// Three skills because they are three jobs, done at three times. `unmute`
+// Four skills because they are four jobs, done at four times. `unmute`
 // builds a package. `unmute-manifest` writes the company contract a package is
 // held to. `unmute-deploy` pushes a finished package to SLNG, which is often a
 // different person on a different day, and a reference file inside the build
-// skill only loads once the build skill has already matched.
+// skill only loads once the build skill has already matched. `unmute-migrate`
+// rewrites an agent.yaml written for unmute 0.8 or older, once, when unmute
+// refuses its version: line.
 var (
 	Canonical = Destination{
 		Name: "canonical",
@@ -102,10 +104,20 @@ var (
 		dir:  []string{".claude", "skills", "unmute-deploy"},
 		root: "assets/deploy-pointer",
 	}
+	MigrateCanonical = Destination{
+		Name: "migrate canonical",
+		dir:  []string{".agents", "skills", "unmute-migrate"},
+		root: "assets/migrate-skill",
+	}
+	MigratePointer = Destination{
+		Name: "migrate pointer",
+		dir:  []string{".claude", "skills", "unmute-migrate"},
+		root: "assets/migrate-pointer",
+	}
 )
 
 // All is every destination, in install order.
-var All = []Destination{Canonical, Pointer, ManifestCanonical, ManifestPointer, DeployCanonical, DeployPointer}
+var All = []Destination{Canonical, Pointer, ManifestCanonical, ManifestPointer, DeployCanonical, DeployPointer, MigrateCanonical, MigratePointer}
 
 // Skills is how many skills the install writes. Every skill has exactly two
 // destinations, the canonical copy and the pointer beside it, so the count is
@@ -130,9 +142,9 @@ func (d Destination) Rel() string { return path.Join(d.dir...) }
 // beside it sends Claude to a file that does not exist.
 var assistants = map[string][]Destination{
 	"claude":  All,
-	"codex":   {Canonical, ManifestCanonical, DeployCanonical},
-	"cursor":  {Canonical, ManifestCanonical, DeployCanonical},
-	"copilot": {Canonical, ManifestCanonical, DeployCanonical},
+	"codex":   {Canonical, ManifestCanonical, DeployCanonical, MigrateCanonical},
+	"cursor":  {Canonical, ManifestCanonical, DeployCanonical, MigrateCanonical},
+	"copilot": {Canonical, ManifestCanonical, DeployCanonical, MigrateCanonical},
 	"all":     All,
 }
 

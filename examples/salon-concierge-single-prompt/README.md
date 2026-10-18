@@ -11,7 +11,7 @@ top, the transfer before anything else, and every rule that came out of a call
 going wrong. The problem it has is not sloppiness. It is that one prompt has to
 be four prompts at once, and it is all in front of the model on every turn.
 
-It is an `agent.yaml` version 2 package, compiled onto unmute-core. Its tools are the typed `tools/salon.py` the main salon used before it moved to core's design, so the comparison still holds. `scenarios/` has one call that `make e2e` runs on the real model.
+It is compiled onto unmute-core. Its tools are the typed `tools/salon.py` the main salon used before it moved to core's design, so the comparison still holds. `scenarios/` has one call that `make e2e` runs on the real model.
 
 On this page:
 

@@ -4,7 +4,6 @@
 #
 # Core has no scenarios for this example. The two in scenarios/ are written from its
 # task prompts: a moved delivery and a call-back note.
-version: 2
 
 name: parcel-desk
 

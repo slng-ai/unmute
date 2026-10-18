@@ -49,8 +49,8 @@ also the list of what you could have written.
 | Field | Required | Legal on |
 |---|---|---|
 | `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
-| `input` | on `webhook:` only; a `local:` tool's handler signature is its input | `webhook:` and version 1 `local:` |
-| `output` | no | `webhook:` and version 1 `local:`, but see below. A version 2 `local:` return model is its output |
+| `input` | on `webhook:` only; a `local:` tool's handler signature is its input | `webhook:` |
+| `output` | no | `webhook:`, but see below. A `local:` return model is its output |
 | `with` | no | `webhook:`, `local:` and `slng:`, and `builtin:` for a capability's own settings |
 | `precheck` | no | `webhook:` and `local:` |
 | `interruption` | no | everywhere except `mcp:` |
@@ -127,7 +127,7 @@ remains model-invoked either way, never automatic.
 SLNG only.** Never write `slng: {}` and tell the user to run `unmute pull`:
 that was the old shape, superseded by naming the tool directly.
 
-**`slng:` compiles on the slng target only for now.** Version 2 livekit and
+**`slng:` compiles on the slng target only for now.** Livekit and
 pipecat refuse it. When the package also targets one of them, write the tool
 as a typed `local:` handler or a `webhook:` there instead.
 
@@ -245,7 +245,7 @@ vector store.
 
 ### The index is built at startup
 
-The version 2 `Dockerfile` has no step that bakes the index into the image, so
+The `Dockerfile` has no step that bakes the index into the image, so
 every worker process embeds the corpus at startup, and that is paid again on
 every scale-up. Say so when a package declares `knowledge:` with a mode that
 embeds. It does not apply to `mode: keyword`, which embeds nothing. A lookup
@@ -439,8 +439,7 @@ Say so and write a Python handler instead.
 
 Two files that go together: the tool file and the typed handler it names. The
 handler's signature is the tool's input and its Pydantic return model is the
-output, so the tool file has no `input:` or `output:`. LiveKit and Pipecat compile
-`version: 2` only, and this is the version 2 form.
+output, so the tool file has no `input:` or `output:`.
 
 ```yaml tools/cancel_appointment.yaml
 description: Cancel the appointment outright. Call it only when the customer says plainly that they want to cancel, never when they want a different time.
@@ -478,8 +477,8 @@ The rules the function follows:
 | it may be `async def`, except on slng | livekit and pipecat await an awaitable result, and SLNG calls a code tool synchronously |
 
 `handler:` is written `file.py:function`. The function name need not match the
-tool name, and one file can hold many tools. SLNG refuses a version 1
-handler, so write the typed function and a `tools/<name>.sample.json` beside it.
+tool name, and one file can hold many tools. SLNG refuses a handler with
+no `:function`, so write the typed function and a `tools/<name>.sample.json` beside it.
 Twilio runs the typed handlers too.
 
 A handler reaches a credential through `os.environ`, and the variable name goes
@@ -490,9 +489,9 @@ environment instructions and startup checks.
 
 ## MCP servers
 
-**`mcp:` compiles on the slng target only for now.** Version 2 livekit and
-pipecat refuse it. The `url_env`, `transport` and `auth` fields below belonged
-to the version 1 livekit and pipecat output.
+**`mcp:` compiles on the slng target only for now.** Livekit and
+pipecat refuse it. The `url_env`, `transport` and `auth` fields below apply
+when those targets compile it.
 
 One block, and nothing else in the file.
 

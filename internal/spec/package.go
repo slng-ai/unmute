@@ -7,7 +7,7 @@ import (
 	"github.com/slng-ai/unmute/internal/stateschema"
 )
 
-// Package is the decoded, unresolved v1 package assembled from its files.
+// Package is the decoded, unresolved package assembled from its files.
 type Package struct {
 	Manifest      *Manifest             `json:"-" yaml:"-"`
 	ManifestBytes []byte                `json:"-" yaml:"-"`
@@ -82,7 +82,7 @@ type Package struct {
 	// State is what Pydantic says state.py declares, set by ReadState. Nil with
 	// a StateSource means nobody asked yet, which ir.Build refuses.
 	State *stateschema.Model `json:"-" yaml:"-"`
-	// ToolTypes is what each version 2 local tool's handler declares, by tool
+	// ToolTypes is what each local tool's handler declares, by tool
 	// name: its input from the signature and its output from the return type.
 	// Set by ReadState, like State.
 	ToolTypes map[string]stateschema.ToolTypes `json:"-" yaml:"-"`
@@ -127,7 +127,6 @@ func (p *Package) KeyLocation(file, key string) string {
 
 type AgentFile struct {
 	Manifest string `json:"manifest,omitempty" yaml:"manifest,omitempty"`
-	Version  int    `json:"version" yaml:"version"`
 	// Name is what this agent is called wherever it is deployed under a name
 	// rather than an id. It lives here, in the package, because that is the only
 	// thing about it that is stable: a target instance is named for where the
@@ -153,7 +152,7 @@ type AgentFile struct {
 	EntryAgent string `json:"entry_agent" yaml:"entry_agent"`
 	// EntryBy picks the agent a call starts with from a State value, read once the
 	// prefetch has run. entry_agent is the one a value it does not list starts with.
-	EntryBy *EntryBy      `json:"entry_by,omitempty" yaml:"entry_by,omitempty" since:"2"`
+	EntryBy *EntryBy      `json:"entry_by,omitempty" yaml:"entry_by,omitempty"`
 	Models  ModelSections `json:"models" yaml:"models"`
 	// Listen/Turn select one entry of the matching models section by name.
 	// Optional when the section has at most one entry (the sole entry selects
@@ -452,13 +451,13 @@ type Prefetch struct {
 	Args   []Pair `json:"with,omitempty" yaml:"with,omitempty"`
 	Assign []Pair `json:"save,omitempty" yaml:"save,omitempty"`
 	// Background runs the entry beside the greeting rather than before it.
-	Background bool `json:"background,omitempty" yaml:"background,omitempty" since:"2"`
+	Background bool `json:"background,omitempty" yaml:"background,omitempty"`
 	// NeedsConfirmed names State values the caller must have agreed to before
 	// the entry runs.
-	NeedsConfirmed []string `json:"needs_confirmed,omitempty" yaml:"needs_confirmed,omitempty" since:"2"`
+	NeedsConfirmed []string `json:"needs_confirmed,omitempty" yaml:"needs_confirmed,omitempty"`
 	// RefuseCall is the line logged when a tool: entry saves nothing, and the
 	// call does not start, like "no account {{state.account_id}}".
-	RefuseCall string `json:"refuse_call,omitempty" yaml:"refuse_call,omitempty" since:"2"`
+	RefuseCall string `json:"refuse_call,omitempty" yaml:"refuse_call,omitempty"`
 }
 
 // Secret declares one runtime environment value the package needs. The map key
@@ -529,9 +528,9 @@ type Task struct {
 	When         string `json:"when,omitempty" yaml:"when,omitempty"`
 	// Start is how the step opens: the line it says, whether it then waits for
 	// the caller, and a tool code runs first.
-	Start *TaskStart `json:"start,omitempty" yaml:"start,omitempty" since:"2"`
+	Start *TaskStart `json:"start,omitempty" yaml:"start,omitempty"`
 	// Arguments are State values the agent passes when it starts the step.
-	Arguments []string `json:"fills,omitempty" yaml:"fills,omitempty" since:"2"`
+	Arguments []string `json:"fills,omitempty" yaml:"fills,omitempty"`
 	// Save is what the step saves when it ends, as `- customer_name:
 	// result.customer_name`: the model fills `result` when it ends the step
 	// itself, and a tool's result fills it when an outcome with no save: of
@@ -576,9 +575,9 @@ type TaskGroup struct {
 	Merge        string `json:"merge,omitempty" yaml:"merge,omitempty"`
 	// Arguments are the group's fills: State values the agent fills when it
 	// starts the group.
-	Arguments []string `json:"fills,omitempty" yaml:"fills,omitempty" since:"2"`
+	Arguments []string `json:"fills,omitempty" yaml:"fills,omitempty"`
 	// NonBlocking names steps whose failure is recorded and the group goes on.
-	NonBlocking []string `json:"non_blocking,omitempty" yaml:"non_blocking,omitempty" since:"2"`
+	NonBlocking []string `json:"non_blocking,omitempty" yaml:"non_blocking,omitempty"`
 }
 
 // Reply is one line set code speaks for a typed tool result: every `when:`
@@ -656,11 +655,11 @@ type Handoff struct {
 	Context *TransferContext `json:"context,omitempty" yaml:"context,omitempty"`
 	// Saves sets State values as the call moves, like `- explanation: ES`, the
 	// language the next agent speaks.
-	Saves []Pair `json:"save,omitempty" yaml:"save,omitempty" since:"2"`
+	Saves []Pair `json:"save,omitempty" yaml:"save,omitempty"`
 	// Start is a tool of the next agent's own, run in code as it takes the
 	// call. When its outcome's say: line fills, that line is the agent's first
 	// reply.
-	Start *HandoffStart `json:"start,omitempty" yaml:"start,omitempty" since:"2"`
+	Start *HandoffStart `json:"start,omitempty" yaml:"start,omitempty"`
 	// OpensWith is Start as the compiler reads it, filled by Load.
 	OpensWith *OpensWith `json:"-" yaml:"-"`
 }
@@ -744,7 +743,7 @@ type Tool struct {
 
 	// Precheck names a Python function, as `file.py:function`, that returns an
 	// outcome or None before the tool runs.
-	Precheck string `json:"precheck,omitempty" yaml:"precheck,omitempty" since:"2"`
+	Precheck string `json:"precheck,omitempty" yaml:"precheck,omitempty"`
 
 	// The fields below come from the tool's entry in agent.yaml (outcomes:,
 	// hidden:, start:), filled by Load, and are never written in the tool file.
@@ -952,9 +951,9 @@ type Greeting struct {
 	SpeaksFirst string `json:"speaks_first" yaml:"speaks_first"`
 	Text        string `json:"say,omitempty" yaml:"say,omitempty"`
 	// Instruction tells the model how to word a greeting with no text.
-	Instruction string `json:"instruction,omitempty" yaml:"instruction,omitempty" since:"2"`
+	Instruction string `json:"instruction,omitempty" yaml:"instruction,omitempty"`
 	// Interruptible false holds the caller's audio until the greeting played.
-	Interruptible *bool `json:"interruptible,omitempty" yaml:"interruptible,omitempty" since:"2"`
+	Interruptible *bool `json:"interruptible,omitempty" yaml:"interruptible,omitempty"`
 }
 
 type Interruption struct {
@@ -973,8 +972,8 @@ type Inactivity struct {
 	EndAfter   string `json:"end_after,omitempty" yaml:"end_after,omitempty"`
 	// NudgeText and EndText are the fixed lines spoken at nudge_after and
 	// before ending at end_after. Empty means the model words them.
-	NudgeText string `json:"nudge_text,omitempty" yaml:"nudge_text,omitempty" since:"2"`
-	EndText   string `json:"end_text,omitempty" yaml:"end_text,omitempty" since:"2"`
+	NudgeText string `json:"nudge_text,omitempty" yaml:"nudge_text,omitempty"`
+	EndText   string `json:"end_text,omitempty" yaml:"end_text,omitempty"`
 }
 
 // Channel is one entry of targets.yaml's `channels:` list: how callers reach

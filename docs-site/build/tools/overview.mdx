@@ -96,11 +96,11 @@ Both blocks have no fields, but YAML still needs an explicit body: write
 | `client:` | no | no | no | no |
 | `provider_hosted:` | no | no | no | no |
 
-Twilio runs `version: 2` typed handlers, and the only builtin it takes is `end_call`. The target runs one agent with no tasks, and it refuses
+Twilio runs typed handlers, and the only builtin it takes is `end_call`. The target runs one agent with no tasks, and it refuses
 `start: say` and `interruption: cancel`. [The Twilio target](/targets/twilio#what-the-package-may-carry)
 lists every refusal.
 
-This table is the capability table for `version: 1`. On version 2, livekit and pipecat compile only `local:`, `webhook:`, `knowledge:` and the `end_call` builtin: they refuse `mcp:`, `slng:` and every other builtin, so those are SLNG-only for now.
+On livekit and pipecat, the table is narrower: they compile only `local:`, `webhook:`, `knowledge:` and the `end_call` builtin: they refuse `mcp:`, `slng:` and every other builtin, so those are SLNG-only for now.
 
 The same tool file compiles to three different runtimes, and they do not all
 support the same things. This table is the capability table, which is what the
@@ -115,7 +115,7 @@ target, `unmute deploy` publishes a typed `local:` tool to SLNG. It needs a
 A `webhook:` block is refused. An API request tool is created in SLNG and
 reached with `slng:`. Both blocks work as before on LiveKit and Pipecat.
 
-**`mcp:` and `slng:` are SLNG-only for now.** Version 2 on LiveKit and Pipecat does
+**`mcp:` and `slng:` are SLNG-only for now.** LiveKit and Pipecat do
 not compile them, and the compiler refuses them. Builtins other than `end_call` are
 refused there too. SLNG resolves a hosted reference by name at deploy time: no mirror,
 no hash, no `unmute pull`. See [Hosted tools](/build/tools/hosted) and
@@ -215,7 +215,7 @@ The contract fields are shared, with one exception that matters:
 
 <ParamField path="input" type="object">
   Required for authored webhook contracts: a JSON Schema with `type: object`
-  describing model arguments. A version 2 local tool leaves it out, because its handler
+  describing model arguments. A local tool leaves it out, because its handler
   signature is the input. Refused on builtin, MCP, knowledge, and hosted `slng` tools,
   which own their schemas.
 </ParamField>
@@ -223,7 +223,7 @@ The contract fields are shared, with one exception that matters:
 <ParamField path="output" type="object">
   An author-side JSON Schema with `type: object`. Omit for no declared result schema. Used
   by `save:` rows and outcome matches; it is not a general runtime result validator or a
-  model prompt. A version 2 local tool leaves it out, because its return model is the
+  model prompt. A local tool leaves it out, because its return model is the
   output. Refused on builtin, MCP, knowledge, and hosted `slng` tools.
 </ParamField>
 

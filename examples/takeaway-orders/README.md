@@ -3,7 +3,7 @@
 Take a takeaway order with an OpenAI live voice model and tools that look up dishes and calculate the total.
 The live model handles the conversation. Its OpenAI backend runs local tools and searches the shop documents.
 
-It is an `agent.yaml` version 2 package, compiled onto unmute-core. The tools' types come from `tools/takeaway.py`. `state.py` holds an empty `State`, because the call saves no values. It has no scenarios: the scenario runner drives cascade calls, and has no live path yet.
+It is compiled onto unmute-core. The tools' types come from `tools/takeaway.py`. `state.py` holds an empty `State`, because the call saves no values. It has no scenarios: the scenario runner drives cascade calls, and has no live path yet.
 
 On this page:
 

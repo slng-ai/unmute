@@ -22,8 +22,8 @@ import (
 // files and the voiceai CLI pushes them, which is the boundary the whole design
 // rests on and internal/ir's TestNoSlngFileOpensASocket is the gate under it.
 //
-//go:embed templates/slng_v1/*.tmpl
-var slngV1Templates embed.FS
+//go:embed templates/slng/*.tmpl
+var slngTemplates embed.FS
 
 // GenerateSlng writes build/<target>/: agent.json, tools/<name>.json for every
 // tool that needs a body, and README.md.
@@ -44,7 +44,7 @@ func GenerateSlng(agent *ir.Agent, tgt ir.Target) (Artifact, error) {
 		return Artifact{}, err
 	}
 	files = append(files, File{Path: "README.md", Content: runbook})
-	// A version 2 local tool is a code tool SLNG builds from its Python, written
+	// A local tool is a code tool SLNG builds from its Python, written
 	// where `voiceai agents push` reads tool bodies and samples.
 	code, err := slngCodeToolFiles(agent)
 	if err != nil {
@@ -95,7 +95,7 @@ func marshalSortedMap[V any](values map[string]V) ([]byte, error) {
 }
 
 func renderSlngRunbook(data slngRunbook) ([]byte, error) {
-	tmpl, err := template.New("README.md.tmpl").ParseFS(slngV1Templates, "templates/slng_v1/README.md.tmpl")
+	tmpl, err := template.New("README.md.tmpl").ParseFS(slngTemplates, "templates/slng/README.md.tmpl")
 	if err != nil {
 		return nil, fmt.Errorf("slng runbook template: %w", err)
 	}

@@ -11,7 +11,7 @@ import (
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
-// coreSpeech is the speech a version 2 project builds from version 1's
+// coreSpeech is the speech a project builds from the
 // catalogue: every listen and speak binding that is not SLNG's. SLNG speech
 // stays in the entrypoint, which hands it the call's tracking ids.
 type coreSpeech struct {
@@ -106,7 +106,7 @@ func buildCoreSpeech(agent *ir.Agent, resolved ir.Target) (coreSpeech, error) {
 	}
 	slices.Sort(imports)
 	out.Source = "\"\"\"This agent's speech models that are not SLNG's. Written by `unmute compile`.\n\n" +
-		"Each constructor comes from the same catalogue row version 1 uses. SLNG speech is built in\n" +
+		"Each constructor comes from the same catalogue row. SLNG speech is built in\n" +
 		"the entrypoint, with the call's tracking ids.\n\"\"\"\n\n" +
 		"import os  # noqa: F401 - a constructor may read a key from the environment\n" +
 		"from collections.abc import Callable\nfrom typing import Any\n\n" +
@@ -118,7 +118,7 @@ func buildCoreSpeech(agent *ir.Agent, resolved ir.Target) (coreSpeech, error) {
 	return out, nil
 }
 
-// renderCall writes one ServiceCall as a Python expression, the way version 1's
+// renderCall writes one ServiceCall as a Python expression, the way the
 // "svc" template does.
 func renderCall(call ServiceCall) string {
 	args := make([]string, 0, len(call.Args)+1)
@@ -135,10 +135,10 @@ func renderCall(call ServiceCall) string {
 	return call.Class + "(" + strings.Join(args, ", ") + ")"
 }
 
-// coreRealtimeCall renders one realtime model the way version 1's drivers do.
+// coreRealtimeCall renders one realtime model the way the drivers do.
 // LiveKit takes the voice as an argument and the turn detection as a kwarg.
 // Pipecat takes neither as an argument: both live in the service's session
-// properties, which version 1's own function writes.
+// properties, which the driver's own function writes.
 func coreRealtimeCall(fw targetcap.Provider, binding ir.Binding, env *envSet,
 	render func(targetcap.Role, ir.Binding) (string, error)) (string, []string, error) {
 	if fw == targetcap.LiveKit {
@@ -182,7 +182,7 @@ func coreRealtimeCall(fw targetcap.Provider, binding ir.Binding, env *envSet,
 	return renderCall(call), []string{"from pipecat.services.openai.realtime import events as realtime_events"}, nil
 }
 
-// coreLiveCall renders one live model the way version 1's drivers do. The
+// coreLiveCall renders one live model the way the drivers do. The
 // backend think model it names runs the tools and the careful work, through
 // OpenAI's Responses delegation, which both frameworks' live models take as a
 // constructor argument. With no backend, LiveKit hands that work to the client,

@@ -1,5 +1,3 @@
-version: 2
-
 name: hotel-concierge
 
 entry_agent: concierge

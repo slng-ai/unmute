@@ -63,13 +63,12 @@ that names the built-in hang-up, and a `state.py`. `unmute init` writes all of t
 
 ```yaml
 # agent.yaml
-version: 2
 name: my-agent
 entry_agent: assistant
 
 agents:
-  assistant:
-    instructions: instructions.md
+  - name: assistant
+    prompt: instructions.md
     think: assistant_model
     speak: assistant_voice
     tools:
@@ -107,23 +106,14 @@ models:
       provider: local
       model: silero
 
-tools:
-  - end_call
-
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, how can I help?"
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 10
-  max_sessions: 20
-  avg_session_duration: 5m
+    say: "Hi, how can I help?"
 ```
+
+An `agent.yaml` written for unmute 0.8 or older has a `version:` line, and unmute
+refuses it. See [Migrate an older package](https://unmute.ai/reference/migrate).
 
 Three things to notice:
 
@@ -146,6 +136,15 @@ yet. See [`customer-intake`](examples/customer-intake/) for one that does.
 
 ```yaml
 # targets.yaml
+channels:
+  - name: web
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 10
+  max_sessions: 20
+  avg_session_duration: 5m
+
 targets:
   pipecat:
     provider: pipecat
@@ -178,10 +177,10 @@ change.
 `pipecat`, `livekit`, `slng` and `twilio` are the only values `provider`
 accepts. A code target gives you something to host. The hosted target has
 nothing to host, and no `unmute dev`. The Twilio target answers inbound phone
-calls only, and has no `unmute dev` either. SLNG and Twilio run version 2 with
+calls only, and has no `unmute dev` either. SLNG and Twilio run the package with
 their own runtimes, without unmute-core, so they refuse the keys that need the
-library, such as a tool's `assign`, `replies` and `precheck`, `entry_by`, and a
-task's `confirm`. The error names each one. `mcp:` and `slng:` tools and every
+library, such as a tool entry's `save` and `outcomes`, a tool's `precheck`,
+`entry_by`, and a step's `confirm`. The error names each one. `mcp:` and `slng:` tools and every
 built-in but `end_call` run on SLNG only for now.
 
 ## What compile writes
@@ -276,14 +275,14 @@ so the model fixes it rather than saving something wrong. The email check never
 asks DNS: this runs while the caller is on the line, and a slow resolver would
 hold them in silence.
 
-A step takes one part of a result with a dotted path, and `+` appends instead of
-replacing.
+A step takes one part of a result with a dotted path. `+` appends instead of
+replacing, and `?` lets the step end without that field.
 
 ```yaml
-assign:
+save:
   - contact: result.contact
   - caller_email: result.contact.email
-  - notes+: result.note
+  - callback_time: result.callback_time?
 ```
 
 ### A step that ends on its own tool
@@ -292,53 +291,72 @@ One task out of an agent's `tasks:` list.
 
 ```yaml
 - name: manage_booking
-  instructions: tasks/booking.md
+  prompt: tasks/booking.md
+  start:
+    say:
+      - Let me have a look.
+    call: find_slots
+    with:
+      - service: state.requested_service?
+      - date: state.requested_day?
   tools:
-    - find_slots
-    - save_booking
-  finish:
-    - tool: save_booking
-      success:
-        - status:
-            - booked
-            - moved
-            - cancelled
-  assign:
-    - appointment: result.appointment
-  context:
-    history: messages
+    - name: find_slots
+      outcomes:
+        - if:
+            - offered:
+                - true
+          say:
+            - "{{result.offer}}"
+    - name: book_appointment
+      confirm:
+        - Shall I book your {{input.service}} for {{input.date}} at {{input.time}}?
+      outcomes:
+        - if:
+            - status:
+                - booked
+          save:
+            - appointment: result.appointment
+          say:
+            - Lovely, you're booked for {{result.appointment.date}} at {{result.appointment.time}}.
+          then: done
 ```
 
-`finish:` names the tool calls that end the step, and the result value that
-counts as success. The booking goes through and the step is over. No extra model
-call to announce it, no second sentence, and none of those tools runs again in
-that step, because a second booking that ran and was then refused is still a
-second booking. The caller hears the owning agent reply once.
+`start:` runs as the step opens. Code says one line, calls `find_slots` with
+saved values, and says the offer. No model request is needed for any of it.
 
-The success value has to be one the tool's own output declares in an `enum:`. A
-field that cannot hold it is refused when you compile, with the file and the
-line.
+`confirm:` is read back by code, and the tool runs only on the caller's yes.
+Each `outcomes:` entry matches the tool's typed result. `then: done` ends the
+step, and its `say:` is the receipt. The booking goes through and the step is
+over. None of those tools runs again in that step, because a second booking
+that ran and was then refused is still a second booking.
 
-### A group that skips work already done
+An `if:` value has to be one the tool's result can hold. A field that cannot
+hold it is refused when you compile, with the file and the line.
+
+### A flow that skips work already done
+
+Inside the agent that runs it:
 
 ```yaml
-task_groups:
-  book:
+flows:
+  - name: book
     when: >-
       The caller wants to create, move or cancel a booking. Includes a change to
       an appointment just made.
+    fills:
+      - requested_service
+      - requested_day
     steps:
       - task: verify_customer
         skip_when_confirmed: customer_phone
       - manage_booking
-    context_scope: shared
-    then: return
 ```
 
 Verification runs the first time and is skipped once the number is agreed.
 `skip_when_confirmed:` has to name a value that this same step confirms, so the
 two cannot drift apart. Entering the step again withdraws what it confirmed,
-which is what a caller correcting their number needs.
+which is what a caller correcting their number needs. `fills:` are the State
+values the agent passes as it starts the flow.
 
 ### Facts in the prompt before the caller speaks
 
@@ -347,13 +365,13 @@ prefetch:
   - name: today
     clock: now
     timezone: Europe/Madrid
-    assign:
-      - today_date: result.date
+    save:
+      - booking_date: result.date
 
   - name: caller
     source: from_number
-    assign:
-      - caller_phone: result.value
+    save:
+      - customer_phone: result.value
 ```
 
 Each entry runs before the greeting, on its own budget, and cannot raise. When
@@ -365,28 +383,25 @@ the wrong day for everybody who is not on it.
 
 ```yaml
 # tools/create_customer_record.yaml
-input:
-  type: object
-  properties:
-    summary:
-      type: string
-      description: One sentence in the caller's own words saying what they rang about.
-  required:
-    - summary
+description: Open the customer record once the caller's details are taken.
 
-inject:
-  - phone: "{{state.caller_phone}}"
-  - email: "{{state.caller_email}}"
-  - name: "{{state.contact.name}}"
+with:
+  - phone: "state.caller_phone"
+  - email: "state.caller_email"
+  - name: "state.contact.name"
+
+local:
+  handler: tools/intake.py:create_customer_record
 ```
 
-The model fills one argument. The other three come straight out of saved state
-and are hidden from it, so a digit cannot change between the turn it was agreed
+The handler's Python signature is the tool's input, and its return type is the
+output. The values under `with:` come straight out of saved state and are
+hidden from the model, so a digit cannot change between the turn it was agreed
 on and the turn it was written down.
 
 A value can also carry `confirm: verify_contact` in `variables:`. Until that step hears a
-yes, the value renders in no prompt but that step's own, and any tool injecting
-it refuses itself and names the step to run first.
+yes, the value renders in no prompt but that step's own, and any tool reading
+it with `with:` refuses itself and names the step to run first.
 
 ### Speech through the gateway nearest your callers
 
@@ -445,7 +460,7 @@ address out loud wants `patient`, because they pause between the characters.
 file, the line and often the column when something is wrong. It is offline and
 needs no account. A few of the things it refuses:
 
-- a `finish:` whose success value the tool's own output cannot hold
+- an outcome `if:` naming a value the tool's own result cannot hold
 - a `skip_when_confirmed:` naming a value that step does not confirm
 - a pre-fetch entry reading a value only a later entry assigns, naming both and
   which one to move
@@ -456,8 +471,8 @@ needs no account. A few of the things it refuses:
 - a feature the chosen target cannot run, naming what to write instead
 
 Warnings are the other half. A credential a package uses but never declares in
-`secrets:`, an agent holding every tool of its own step so the step's `assign:`
-never runs, a turn field that reaches nothing: each one names the thing to
+`secrets:`, an agent holding every tool of its own step so the step's `save:`
+may never run, a turn field that reaches nothing: each one names the thing to
 change, goes to standard error, and still exits 0.
 
 ## What goes in a package
@@ -548,7 +563,8 @@ per feature of the compiler, held to every gate in this repository.
 
 ## Examples
 
-[`examples/`](examples/) holds four packages.
+[`examples/`](examples/) holds one package per feature. These five are the
+places to start.
 
 - [`customer-intake`](examples/customer-intake/) is the small one: one agent,
   three tasks, one local tool. It takes a caller's number, name, email address,
@@ -556,8 +572,8 @@ per feature of the compiler, held to every gate in this repository.
   tool the model cannot type over. Every type in the grammar appears once. Start
   here if the question is about types, saved values or injection.
 - [`salon-concierge`](examples/salon-concierge/) is the big one: two agents, four
-  tasks, a task group that skips verification once the number is agreed, three
-  steps that end on their own tool with `finish:`, handoffs in both directions, a
+  tasks, a flow that skips verification once the number is agreed, three
+  steps that end on their own tool with `then: done`, handoffs in both directions, a
   cold manager transfer, tracing, and inbound phone on both code targets. Every
   tool is local Python, so nothing remote has to be up before the greeting.
 - [`salon-concierge-single-prompt`](examples/salon-concierge-single-prompt/) is
@@ -570,7 +586,7 @@ per feature of the compiler, held to every gate in this repository.
   optimizations: the starting point to measure them against.
 - [`hotel-concierge`](examples/hotel-concierge/) is the hosted target's
   showcase: a concierge line whose tools are all references SLNG already holds,
-  with template variables, an injected argument, a tool announcement, named MCP
+  with template variables, a pinned argument, a line said as a tool starts, named MCP
   tools and a fallback. It produces no runnable project:
   `unmute deploy` compiles a deployment body and pushes it.
 

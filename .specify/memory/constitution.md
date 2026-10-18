@@ -113,7 +113,7 @@ Unmute MUST NOT sit in the generated agent's production call path.
   generated output.
 - Package commands use the same flow: `spec.Load` -> `ir.Build` ->
   `ir.Validate` -> `generate.Generate`.
-- A version 1 project carries no Unmute runtime dependency. A version 2 project depends on unmute-core, the library that holds the voice-agent behaviour every framework shares.
+- A LiveKit or Pipecat project depends on unmute-core, the library that holds the voice-agent behaviour every framework shares. A twilio or slng project carries no Unmute runtime dependency.
 - `build/<target>/` is disposable. Authors edit the package and compile again.
 - Portable behavior belongs in the package. Target mechanics belong in one
   driver per target.

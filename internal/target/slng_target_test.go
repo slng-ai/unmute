@@ -23,7 +23,7 @@ import (
 func TestSlngPushCommandsAgree(t *testing.T) {
 	root := filepath.Join("..", "..")
 	surfaces := map[string]string{
-		"the emitted runbook":  filepath.Join(root, "internal", "generate", "templates", "slng_v1", "README.md.tmpl"),
+		"the emitted runbook":  filepath.Join(root, "internal", "generate", "templates", "slng", "README.md.tmpl"),
 		"the example README":   filepath.Join(root, "examples", "hotel-concierge", "README.md"),
 		"the deployment guide": filepath.Join(root, "docs-site", "deploy", "slng.mdx"),
 		// The push moved out of the build skill into its own, so this is the
@@ -135,7 +135,7 @@ func TestEveryVoiceaiCommandNamedExists(t *testing.T) {
 	// point of them, and a prose scan cannot tell a warning from a claim.
 	root := filepath.Join("..", "..")
 	surfaces := []string{
-		filepath.Join(root, "internal", "generate", "templates", "slng_v1", "README.md.tmpl"),
+		filepath.Join(root, "internal", "generate", "templates", "slng", "README.md.tmpl"),
 		filepath.Join(root, "examples", "hotel-concierge", "README.md"),
 		filepath.Join(root, "docs-site", "targets", "slng.mdx"),
 		filepath.Join(root, "docs-site", "deploy", "slng.mdx"),

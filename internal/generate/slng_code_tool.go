@@ -37,7 +37,7 @@ var stateImport = regexp.MustCompile(`(?m)^from state import [^\n]*\n|^import st
 // module that defines one of them would be shadowed by the adapter.
 var slngCodeToolNames = []string{"Input", "Output", "handler"}
 
-// slngCodeToolFiles writes one code tool body and its sample per version 2
+// slngCodeToolFiles writes one code tool body and its sample per
 // local tool: build/slng/tools/<name>.json and build/slng/samples/<name>.json,
 // where `voiceai agents push` reads them.
 func slngCodeToolFiles(agent *ir.Agent) ([]File, error) {

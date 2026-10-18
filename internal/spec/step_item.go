@@ -22,9 +22,9 @@ type FinishEntry struct {
 	Tool    string        `json:"tool" yaml:"tool"`
 	Success []SuccessPair `json:"success" yaml:"success"`
 	// Confirm is read back by code before the tool runs; it runs on the yes.
-	Confirm []string `json:"confirm,omitempty" yaml:"confirm,omitempty" since:"2"`
+	Confirm []string `json:"confirm,omitempty" yaml:"confirm,omitempty"`
 	// Say is spoken by code when the step ends on this tool.
-	Say []string `json:"say,omitempty" yaml:"say,omitempty" since:"2"`
+	Say []string `json:"say,omitempty" yaml:"say,omitempty"`
 	// Save is what this result writes to State, and Ends is how the step ends:
 	// completed or failed. Both come from an outcome.
 	Save []Pair `json:"-" yaml:"-"`

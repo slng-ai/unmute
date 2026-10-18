@@ -20,7 +20,7 @@ import (
 // -update-slng-target, not -update-slng: that flag belongs to the SLNG Context
 // Router goldens next door, which are the model vendor's. Same word, third
 // meaning.
-var updateSlngV1 = flag.Bool("update-slng-target", false, "rewrite the slng target goldens")
+var updateSlng = flag.Bool("update-slng-target", false, "rewrite the slng target goldens")
 
 func TestSlngExampleNeedsNoSessionArguments(t *testing.T) {
 	_, files := compileSlng(t, filepath.Join("..", "..", "examples", "hotel-concierge"))
@@ -94,7 +94,7 @@ func slngGolden(t *testing.T, artifact Artifact, name string) {
 		}
 	}
 	path := filepath.Join("testdata", "slng", name)
-	if *updateSlngV1 {
+	if *updateSlng {
 		if err := os.WriteFile(path, []byte(out.String()), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -104,31 +104,31 @@ func slngGolden(t *testing.T, artifact Artifact, name string) {
 		t.Fatal(err)
 	}
 	if out.String() != string(want) {
-		t.Fatalf("slng golden %s differs; run: go test ./internal/generate -run TestSlngV1 -update-slng-target", name)
+		t.Fatalf("slng golden %s differs; run: go test ./internal/generate -run TestSlng -update-slng-target", name)
 	}
 }
 
-// TestSlngV1CoreGolden is the builtins-only package: the shape an author can
+// TestSlngCoreGolden is the builtins-only package: the shape an author can
 // verify end to end today, because a builtin needs no tool created first.
-func TestSlngV1CoreGolden(t *testing.T) {
+func TestSlngCoreGolden(t *testing.T) {
 	artifact, _ := compileSlng(t, "slng_core")
-	slngGolden(t, artifact, "slng_v1_core.txt")
+	slngGolden(t, artifact, "slng_core.txt")
 }
 
-// TestSlngV1ToolsGolden is every tool shape in one package: a code body, an
+// TestSlngToolsGolden is every tool shape in one package: a code body, an
 // api_request body with a templated URL that has to move to the attachment, an
 // MCP source with no file at all, and a builtin.
-func TestSlngV1ToolsGolden(t *testing.T) {
+func TestSlngToolsGolden(t *testing.T) {
 	artifact, _ := compileSlng(t, "slng_tools")
-	slngGolden(t, artifact, "slng_v1_tools.txt")
+	slngGolden(t, artifact, "slng_tools.txt")
 }
 
-// TestSlngV1TasksGolden is every task feature the target writes: a task with
+// TestSlngTasksGolden is every task feature the target writes: a task with
 // its own when:, a group-only step, a skip, typed values with a shape, an
 // append, a last_n history and a tool only a task can call.
-func TestSlngV1TasksGolden(t *testing.T) {
+func TestSlngTasksGolden(t *testing.T) {
 	artifact, _ := compileSlng(t, "slng_tasks")
-	slngGolden(t, artifact, "slng_v1_tasks.txt")
+	slngGolden(t, artifact, "slng_tasks.txt")
 }
 
 // A task names its tool by the name the tool's reference carries, and that
@@ -154,7 +154,7 @@ func TestSlngTaskToolsAreTheirReferencesNames(t *testing.T) {
 // Two files, and the reason there are two rather than four is the shape of this
 // target now: it references tools SLNG already owns and creates none, so there
 // is no tool body to write beside the agent body.
-func TestSlngV1WritesTheBodyAndTheRunbookAndNothingElse(t *testing.T) {
+func TestSlngWritesTheBodyAndTheRunbookAndNothingElse(t *testing.T) {
 	artifact, files := compileSlng(t, "slng_tools")
 	if artifact.Kind != BodyTarget {
 		t.Errorf("artifact kind = %q, want %q", artifact.Kind, BodyTarget)
@@ -187,7 +187,7 @@ func TestSlngV1WritesTheBodyAndTheRunbookAndNothingElse(t *testing.T) {
 }
 
 // The invariants a body must hold, read off the decoded document.
-func TestSlngV1BodyInvariants(t *testing.T) {
+func TestSlngBodyInvariants(t *testing.T) {
 	_, files := compileSlng(t, "slng_tools")
 	body := slngBodyOf(t, files)
 
@@ -210,7 +210,7 @@ func TestSlngV1BodyInvariants(t *testing.T) {
 		t.Errorf("schema_version = %v, want 2", body["schema_version"])
 	}
 	if body["tool_mode"] != "shared" {
-		t.Errorf("tool_mode = %v, want shared; version 2 with no tool_mode is rejected", body["tool_mode"])
+		t.Errorf("tool_mode = %v, want shared; a body with no tool_mode is rejected", body["tool_mode"])
 	}
 	// Exactly one greeting, and it is the one the package wrote.
 	greeting, ok := body["greeting"].(string)
@@ -236,7 +236,7 @@ func TestSlngV1BodyInvariants(t *testing.T) {
 
 // A package with no variables still writes both maps, present and empty. An
 // absent map and an empty one are different statements to SLNG's resolver.
-func TestSlngV1WritesEmptyVariableMapsRatherThanNone(t *testing.T) {
+func TestSlngWritesEmptyVariableMapsRatherThanNone(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "slng_core"))
 	if err != nil {
 		t.Fatal(err)
@@ -268,7 +268,7 @@ func TestSlngV1WritesEmptyVariableMapsRatherThanNone(t *testing.T) {
 // it. On a think model it builds the Context Router base URL. On SLNG the
 // agent's region does both and SLNG refuses world_part as a kwarg, so the same
 // package must compile without it, on all three models. Other params stay.
-func TestSlngV1DropsWorldPart(t *testing.T) {
+func TestSlngDropsWorldPart(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "slng_core"))
 	if err != nil {
 		t.Fatal(err)
@@ -323,7 +323,7 @@ func TestSlngV1DropsWorldPart(t *testing.T) {
 // none, and an inbound call carries no arguments, so a required call_id would
 // refuse every inbound call that names it. It must be written optional, while
 // an ordinary variable stays required.
-func TestSlngV1CallFactsAreOptional(t *testing.T) {
+func TestSlngCallFactsAreOptional(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "slng_core"))
 	if err != nil {
 		t.Fatal(err)
@@ -361,7 +361,7 @@ func TestSlngV1CallFactsAreOptional(t *testing.T) {
 //
 // Kept as an assertion rather than deleted, because an override reappearing
 // would mean something started writing a tool body again.
-func TestSlngV1WritesNoConfigOverride(t *testing.T) {
+func TestSlngWritesNoConfigOverride(t *testing.T) {
 	_, files := compileSlng(t, "slng_tools")
 	body := slngBodyOf(t, files)
 	refs, _ := body["tool_refs"].([]any)
@@ -378,7 +378,7 @@ func TestSlngV1WritesNoConfigOverride(t *testing.T) {
 
 // An MCP tool and a builtin produce no file. The MCP tool produces one named
 // reference per exposed tool instead.
-func TestSlngV1WritesNoFileForMCPOrBuiltin(t *testing.T) {
+func TestSlngWritesNoFileForMCPOrBuiltin(t *testing.T) {
 	_, files := compileSlng(t, "slng_tools")
 	for _, absent := range []string{"tools/internal_docs.json", "tools/end_call.json"} {
 		if _, present := files[absent]; present {
@@ -408,7 +408,7 @@ func TestSlngV1WritesNoFileForMCPOrBuiltin(t *testing.T) {
 
 // No emitted tool name may be one of SLNG's five reserved names, except where
 // the tool is the curated capability that owns it.
-func TestSlngV1EmitsNoReservedToolBody(t *testing.T) {
+func TestSlngEmitsNoReservedToolBody(t *testing.T) {
 	_, files := compileSlng(t, "slng_tools")
 	for path := range files {
 		name := strings.TrimSuffix(strings.TrimPrefix(path, "tools/"), ".json")
@@ -421,11 +421,11 @@ func TestSlngV1EmitsNoReservedToolBody(t *testing.T) {
 	}
 }
 
-// TestSlngV1LeaksNoSecretValue is the gate under FR-033. Every declared secret
+// TestSlngLeaksNoSecretValue is the gate under FR-033. Every declared secret
 // is a *name*; the value never enters the compiler, so the check is that no
 // emitted file carries anything but the name, and that the runbook's commands
 // carry not even that.
-func TestSlngV1LeaksNoSecretValue(t *testing.T) {
+func TestSlngLeaksNoSecretValue(t *testing.T) {
 	_, files := compileSlng(t, "slng_tools")
 	// A value that would exist if the compiler ever read one. Nothing may look
 	// like it, and the test also proves the scan works by checking the name it
@@ -451,7 +451,7 @@ func TestSlngV1LeaksNoSecretValue(t *testing.T) {
 
 // The runbook lists every Vault name the package needs, grouped by kind, above
 // the push command, and says so plainly when a package needs none.
-func TestSlngV1RunbookGroupsVaultNames(t *testing.T) {
+func TestSlngRunbookGroupsVaultNames(t *testing.T) {
 	_, files := compileSlng(t, "slng_tools")
 	runbook := files["README.md"]
 	// **Variables** and a {{$NAME}} name are deliberately not asserted here any
@@ -482,7 +482,7 @@ func TestSlngV1RunbookGroupsVaultNames(t *testing.T) {
 
 // The runbook states both directions of the create-body-versus-document trap,
 // and names the credential the push tool reads.
-func TestSlngV1RunbookNamesTheTrapsAndTheCredential(t *testing.T) {
+func TestSlngRunbookNamesTheTrapsAndTheCredential(t *testing.T) {
 	_, files := compileSlng(t, "slng_tools")
 	// Collapsed, because these are sentences and the runbook wraps them. A test
 	// that searches raw text is really testing where the line breaks fall.
@@ -535,7 +535,7 @@ func TestSlngV1RunbookNamesTheTrapsAndTheCredential(t *testing.T) {
 // the same file still works on all three and the byte-for-byte rule now runs
 // the other way. TestHostedToolLowersOnBothCodeTargets is where it is checked.
 
-// TestSlngV1WritesNoToolBodyToTag replaces TestSlngV1ToolConfigCarriesItsUnionTag.
+// TestSlngWritesNoToolBodyToTag replaces TestSlngToolConfigCarriesItsUnionTag.
 //
 // That test held a real and expensive fact: `config` is a tagged union on the
 // wire, a create body gets away without the tag because `tool_type` sits beside
@@ -546,7 +546,7 @@ func TestSlngV1RunbookNamesTheTrapsAndTheCredential(t *testing.T) {
 // None of it can happen now, because unmute writes no tool body at all. The
 // fact is kept here rather than deleted, because it is the reason to be
 // suspicious of any change that starts writing one again.
-func TestSlngV1WritesNoToolBodyToTag(t *testing.T) {
+func TestSlngWritesNoToolBodyToTag(t *testing.T) {
 	_, files := compileSlng(t, "slng_tools")
 	for path := range files {
 		if strings.HasPrefix(path, "tools/") {
@@ -823,7 +823,7 @@ func TestResolvedBodyCarriesExactlyWhatWasChecked(t *testing.T) {
 	}
 }
 
-// A version 2 local tool reaches SLNG as a code tool: its body and sample sit
+// A local tool reaches SLNG as a code tool: its body and sample sit
 // where `voiceai agents push` reads them, and one finish rule ends the step on
 // it, with its say line reading the tool's result.
 func TestSlngLocalToolIsACodeToolThatCanFinishAStep(t *testing.T) {

@@ -10,7 +10,6 @@
 # Every line the caller hears in the flow is code's. The scenarios in
 # scenarios/ are unmute-core's, word for word: the same lines and the same
 # model request counts must hold when Unmute compiles this package.
-version: 2
 
 name: kestrel
 

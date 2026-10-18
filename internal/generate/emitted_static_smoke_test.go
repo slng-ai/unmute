@@ -25,7 +25,7 @@ var emittedEntryModule = map[ir.Provider]string{
 }
 
 // staticCheckFixtures are the internal packages that reach code no example
-// does: v2_core writes every key version 2 adds.
+// does: v2_core writes every key the contract adds.
 var staticCheckFixtures = []string{"v2_core"}
 
 // TestSmokeEmittedProjectsPassTheirOwnGate holds every example, on every code

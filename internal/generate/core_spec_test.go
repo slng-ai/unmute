@@ -155,7 +155,7 @@ func TestTwilioRefusesTheVersion2KeysItsRuntimeCannotRun(t *testing.T) {
 	}
 	resolved := targetByProvider(t, agent, ir.ProviderTwilio)
 	if _, err := Generate(agent, resolved, target.Default()); err != nil {
-		t.Fatalf("relay-desk on version 2 does not compile for twilio: %v", err)
+		t.Fatalf("relay-desk does not compile for twilio: %v", err)
 	}
 	tool := agent.Tools["opening_hours"]
 	tool.Replies = []ir.Reply{{When: map[string][]string{"open": {"true"}}, Say: []string{"We're open."}}}

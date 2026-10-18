@@ -82,8 +82,8 @@ Three rules apply to a local tool on this target:
 - Put a sample beside the tool file: `tools/<name>.sample.json`, one JSON object
   of arguments. SLNG publishes a code tool only after one run, so a local tool
   with no sample is refused.
-- Use a version 2 handler with a function name. A version 1 handler (a file with
-  no `:function`) is refused. An `async def` handler is refused too, because SLNG
+- Name the function in the handler, as `file.py:function`. A handler with no
+  `:function` is refused. An `async def` handler is refused too, because SLNG
   calls a code tool synchronously.
 - Expect no internet. SLNG code has no network access. Exact dependency pins come
   from the tool's `dependencies:`.
@@ -319,7 +319,7 @@ None is dropped quietly.
 |---|---|
 | handoffs | the create body carries one agent |
 | prefetch | SLNG compiles no session-start hook |
-| a tool entry's `save`, `outcomes`, `hidden` and `start: wait`, and a tool file's `precheck` | the SLNG runtime runs version 2 without unmute-core. Compile to livekit or pipecat to use them |
+| a tool entry's `save`, `outcomes`, `hidden` and `start: wait`, and a tool file's `precheck` | the SLNG runtime runs without unmute-core. Compile to livekit or pipecat to use them |
 | a step's outcomes without `then:`, a step's `start:` with `call:`, `entry_by`, prefetch `refuse_call`, a handoff's `save` or `start` | the same: they need unmute-core |
 | a task's `think:`, `history: summary` or `include_tool_calls: false` | SLNG runs every task on the agent's one model and has no summary |
 | a second outcome with `then: done` in one task, an outcome with `then: failed`, or a `confirm:` line | SLNG supports one finishing tool per task today, ends a step only as done, and has no read-back |

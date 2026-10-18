@@ -6,20 +6,17 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/stateschema"
 )
 
-var updateToolRecordings = flag.Bool("update", false, "re-record every version 2 package's tool types through uv")
+var updateToolRecordings = flag.Bool("update", false, "re-record every package's tool types through uv")
 
-var versionTwo = regexp.MustCompile(`(?m)^version:\s*2\s*$`)
-
-// v2Packages is every version 2 package in the tree that has a local tool,
+// toolPackages is every package in the tree that has a local tool,
 // loaded, with the tool refs its read is filed under.
-func v2Packages(t *testing.T) map[string]*Package {
+func toolPackages(t *testing.T) map[string]*Package {
 	t.Helper()
 	out := map[string]*Package{}
 	for _, top := range []string{"examples", "internal/testdata", "internal/voice-agents-tests"} {
@@ -32,10 +29,6 @@ func v2Packages(t *testing.T) map[string]*Package {
 			}
 			if entry.IsDir() || entry.Name() != "agent.yaml" {
 				return nil
-			}
-			source, err := os.ReadFile(path)
-			if err != nil || !versionTwo.Match(source) {
-				return err
 			}
 			pkg, err := Load(filepath.Dir(path))
 			if err != nil {
@@ -54,7 +47,7 @@ func v2Packages(t *testing.T) map[string]*Package {
 	return out
 }
 
-// TestRecordTools re-records every version 2 package's tool types through uv.
+// TestRecordTools re-records every package's tool types through uv.
 // It runs only with -update, because it needs uv and the network the first
 // time. It lives here rather than in stateschema because finding a package's
 // tools needs Load, and stateschema cannot import this package.
@@ -69,7 +62,7 @@ func TestRecordTools(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for path, pkg := range v2Packages(t) {
+	for path, pkg := range toolPackages(t) {
 		refs := pkg.localToolRefs()
 		out, err := stateschema.UV{}.RunTools(t.Context(), pkg.Root, pkg.StateSource != nil, refs)
 		if err != nil {
@@ -91,7 +84,7 @@ func TestRecordTools(t *testing.T) {
 // edited, or a pin moved, without recording again. It needs no Python.
 func TestEveryV2ToolIsRecorded(t *testing.T) {
 	recorded := stateschema.Recorded{Dir: stateschema.RecordedInRepo().Dir}
-	for path, pkg := range v2Packages(t) {
+	for path, pkg := range toolPackages(t) {
 		if _, err := recorded.ReadTools(t.Context(), path, pkg.StateSource, pkg.localToolRefs()); err != nil {
 			t.Error(err)
 		}
@@ -101,7 +94,7 @@ func TestEveryV2ToolIsRecorded(t *testing.T) {
 // TestNoOrphanToolRecording fails on a recording no package matches any more.
 func TestNoOrphanToolRecording(t *testing.T) {
 	live := map[string]bool{}
-	for _, pkg := range v2Packages(t) {
+	for _, pkg := range toolPackages(t) {
 		live[stateschema.ToolDigest(pkg.StateSource, pkg.localToolRefs())] = true
 	}
 	recorded, err := filepath.Glob(filepath.Join(stateschema.RecordedToolsInRepo(), "*.json"))

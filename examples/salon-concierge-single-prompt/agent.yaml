@@ -1,5 +1,3 @@
-version: 2
-
 name: salon-concierge-single-prompt
 
 entry_agent: concierge

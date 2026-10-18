@@ -5,8 +5,6 @@
 # tests in internal/ir and internal/generate read this package; nothing here
 # reaches the network.
 
-version: 2
-
 name: slng-memory-sms-fixture
 
 entry_agent: desk

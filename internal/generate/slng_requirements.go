@@ -37,7 +37,7 @@ type Requirements struct {
 	// a version of it, so each entry carries what it was pinned to and the
 	// preflight can say when the organisation has moved on.
 	Hosted []Requirement
-	// Code is one entry per version 2 local tool. Deploy creates or updates it
+	// Code is one entry per local tool. Deploy creates or updates it
 	// from build/slng/tools/<name>.json, runs its sample and publishes it, so
 	// the account need not hold it yet: Count leaves it out.
 	Code []Requirement

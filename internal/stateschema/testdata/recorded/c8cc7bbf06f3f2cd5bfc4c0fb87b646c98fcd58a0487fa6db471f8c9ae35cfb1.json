@@ -1,6 +1,6 @@
 {
-  "source": "examples/takeaway-orders/state.py",
-  "digest": "a4bbcd257812cb610c351da69d9e65b00b9ad50b677a5468344f393974e86abc",
+  "source": "examples/pharmacy-refills/state.py",
+  "digest": "c8cc7bbf06f3f2cd5bfc4c0fb87b646c98fcd58a0487fa6db471f8c9ae35cfb1",
   "report": {
     "schema": {
       "description": "One call. It holds no values.",

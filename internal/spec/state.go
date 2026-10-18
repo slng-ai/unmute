@@ -33,7 +33,7 @@ func (p *Package) readState() error {
 // answer comes from Python: a command reads it through uv, and a test through a
 // recorded report, so Load stays free of both.
 //
-// A version 2 package's local tools are read here too, by the same reader,
+// The local tools are read here too, by the same reader,
 // because their types come from Python the same way and may name a model
 // state.py declares.
 func (p *Package) ReadState(ctx context.Context, reader stateschema.Reader) error {

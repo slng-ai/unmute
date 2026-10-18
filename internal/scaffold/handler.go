@@ -12,7 +12,7 @@ import (
 	"github.com/slng-ai/unmute/internal/stateschema"
 )
 
-// HandlerRef is a local tool's handler in the version 2 form,
+// HandlerRef is a local tool's handler in the file:function form,
 // `tools/<name>.py:<name>`. A handler naming a file alone gets the tool's name
 // as its function.
 func (t Tool) HandlerRef() string {
@@ -81,7 +81,7 @@ func (t Tool) resultClass() string {
 
 // handlerStub is the handler file the console writes for a new local tool: a
 // typed function whose signature is the tool's input and whose return type is
-// its output, as version 2 reads them. The author replaces its body.
+// its output, as agent.yaml reads them. The author replaces its body.
 func (t Tool) handlerStub() string {
 	params := t.stubParams()
 	described := slices.ContainsFunc(params, func(p stubParam) bool { return p.description != "" })

@@ -58,17 +58,19 @@ it is not YAML to paste into an existing one.
 Nothing is downloaded and no agent package is created.
 Commit the installed files so your team's assistants read the same workflow.
 
-Three skills are installed. `unmute` builds and maintains agent packages;
+Four skills are installed. `unmute` builds and maintains agent packages.
 `unmute-manifest` interviews you about your company's approved choices and saves
-the contract; `unmute-deploy` pushes a finished package to SLNG and reads back
-what landed. Your assistant picks the one that matches what you ask for.
+the contract. `unmute-deploy` pushes a finished package to SLNG and reads back
+what landed. `unmute-migrate` rewrites a package written for unmute 0.8 or older
+to the current contract. Your assistant picks the one that matches what you ask
+for.
 
 | Assistant | Reads |
 |---|---|
-| Claude Code | `.claude/skills/unmute/`, `.claude/skills/unmute-manifest/` and `.claude/skills/unmute-deploy/` |
-| Codex | `.agents/skills/unmute/`, `.agents/skills/unmute-manifest/` and `.agents/skills/unmute-deploy/` |
-| Cursor | `.agents/skills/unmute/`, `.agents/skills/unmute-manifest/` and `.agents/skills/unmute-deploy/` |
-| GitHub Copilot | `.agents/skills/unmute/`, `.agents/skills/unmute-manifest/` and `.agents/skills/unmute-deploy/` |
+| Claude Code | `.claude/skills/unmute/`, `.claude/skills/unmute-manifest/`, `.claude/skills/unmute-deploy/` and `.claude/skills/unmute-migrate/` |
+| Codex | `.agents/skills/unmute/`, `.agents/skills/unmute-manifest/`, `.agents/skills/unmute-deploy/` and `.agents/skills/unmute-migrate/` |
+| Cursor | `.agents/skills/unmute/`, `.agents/skills/unmute-manifest/`, `.agents/skills/unmute-deploy/` and `.agents/skills/unmute-migrate/` |
+| GitHub Copilot | `.agents/skills/unmute/`, `.agents/skills/unmute-manifest/`, `.agents/skills/unmute-deploy/` and `.agents/skills/unmute-migrate/` |
 
 The shared instructions live under `.agents/skills/`.
 Claude's files point to them. The installer does not modify `AGENTS.md`,
@@ -156,7 +158,8 @@ unmute skill install --force
 ```
 
 `--force` replaces files; it does not merge your changes.
-To uninstall, remove the `unmute` and `unmute-manifest` directories under
+To uninstall, remove the `unmute`, `unmute-manifest`, `unmute-deploy` and
+`unmute-migrate` directories under
 `.agents/skills/` and `.claude/skills/`.
 There is no uninstall subcommand.
 

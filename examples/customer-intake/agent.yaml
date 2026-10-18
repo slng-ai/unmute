@@ -1,5 +1,3 @@
-version: 2
-
 name: customer-intake
 
 entry_agent: intake
