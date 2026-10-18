@@ -18,6 +18,14 @@ func TestRetiredTaskFieldsGiveLocatedAdvice(t *testing.T) {
 			t.Fatalf("%s: want located sharing advice, got %v", key, err)
 		}
 	}
+	for key, advice := range map[string]string{"inputs": "{{state.x}}", "via": "when:"} {
+		var task Task
+		err := yaml.UnmarshalWithOptions([]byte("name: choose\n"+key+": []\n"), &task, yaml.Strict())
+		var located *PairError
+		if !errors.As(err, &located) || located.Line != 2 || !strings.Contains(located.Msg, advice) {
+			t.Fatalf("%s: want located advice naming %s, got %v", key, advice, err)
+		}
+	}
 	var handoff Handoff
 	err := yaml.UnmarshalWithOptions([]byte("to: specialist\nexpect: []\n"), &handoff, yaml.Strict())
 	var located *PairError

@@ -91,8 +91,10 @@ func buildV2(pkg *packagespec.Package, out *Agent) error {
 	if pkg.Agent.Version != packagespec.Version2 {
 		return nil
 	}
-	if out.Mode != "" && out.Mode != TasksStatus && out.Mode != TasksRecord {
-		return fmt.Errorf("%s: mode: %s; write record or status", pkg.KeyLocation("agent.yaml", "mode"), out.Mode)
+	if strings.TrimSpace(pkg.Agent.Mode) != "" {
+		return fmt.Errorf("%s: mode: is removed. Every task runs in record mode: it hands its agent the values "+
+			"the caller confirmed, keeps them on a hand-back, and lets the caller go back a step. Delete the line",
+			pkg.KeyLocation("agent.yaml", "mode"))
 	}
 	if err := checkV2Variables(pkg, out); err != nil {
 		return err
@@ -265,19 +267,10 @@ func buildV2Task(pkg *packagespec.Package, out *Agent, name string) error {
 	if err != nil {
 		return err
 	}
-	inputs, err := buildTaskInputs(pkg, out, raw.Inputs)
-	if err != nil {
-		return err
-	}
 	if err := stateNames(out, "arguments", raw.Arguments); err != nil {
 		return err
 	}
-	for _, tool := range raw.Via {
-		if !slices.Contains(raw.Tools, tool) {
-			return fmt.Errorf("via names %q, which the step does not list under tools:; a via tool is one of the step's own", tool)
-		}
-	}
-	task.Replies, task.OpensWith, task.Inputs, task.Arguments, task.Via = replies, opens, inputs, raw.Arguments, raw.Via
+	task.Replies, task.OpensWith, task.Arguments = replies, opens, raw.Arguments
 	out.Tasks[name] = task
 	return nil
 }
@@ -394,39 +387,6 @@ func buildOpensWith(pkg *packagespec.Package, out *Agent, opens *packagespec.Ope
 		}
 	}
 	return &OpensWith{Tool: opens.Tool, Arguments: arguments, Say: flattenLines(opens.Say)}, nil
-}
-
-// buildTaskInputs resolves a step's inputs:, each with exactly one key.
-func buildTaskInputs(pkg *packagespec.Package, out *Agent, raw []packagespec.TaskInput) ([]TaskInput, error) {
-	var inputs []TaskInput
-	for _, item := range raw {
-		var built []TaskInput
-		if item.Memory != "" {
-			if _, ok := out.Variables[item.Memory]; !ok {
-				return nil, fmt.Errorf("inputs reads memory: %s, which State in state.py does not declare", item.Memory)
-			}
-			built = append(built, TaskInput{Kind: TaskInputMemory, Name: item.Memory})
-		}
-		if item.Tool != "" {
-			if !slices.ContainsFunc(pkg.Agent.Prefetch, func(entry packagespec.Prefetch) bool { return entry.Name == item.Tool }) {
-				return nil, fmt.Errorf("inputs reads tool: %s, which is not a prefetch entry; name an entry under prefetch", item.Tool)
-			}
-			built = append(built, TaskInput{Kind: TaskInputTool, Name: item.Tool})
-		}
-		if item.Input != "" {
-			if strings.TrimSpace(item.Value) == "" {
-				return nil, fmt.Errorf("inputs names input: %s with no value:; write the text it reads", item.Input)
-			}
-			built = append(built, TaskInput{Kind: TaskInputText, Name: item.Input, Value: item.Value})
-		} else if item.Value != "" {
-			return nil, fmt.Errorf("inputs has value: with no input:; value: is the text of an input: entry")
-		}
-		if len(built) != 1 {
-			return nil, fmt.Errorf("an inputs entry takes exactly one of memory:, tool: and input:, and this one has %d", len(built))
-		}
-		inputs = append(inputs, built[0])
-	}
-	return inputs, nil
 }
 
 // lineHint says where a spoken line's value is saved: assign names the list to

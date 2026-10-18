@@ -42,9 +42,6 @@ type Agent struct {
 	EntryAgent   string       `json:"entry_agent" yaml:"entry_agent"`
 	// EntryBy picks the first agent from a State value. Version 2, nil when unset.
 	EntryBy *EntryBy `json:"entry_by,omitempty" yaml:"entry_by,omitempty"`
-	// Mode is how a step hands back to its agent, version 2 only: record or
-	// status. Empty on version 1.
-	Mode TasksMode `json:"mode,omitempty" yaml:"mode,omitempty"`
 	// Models flattens the authoring sections into one name-keyed map; each
 	// entry's Kind records its section (names are one namespace, N15).
 	Models map[string]ModelDef `json:"models" yaml:"models"`
@@ -533,11 +530,9 @@ type Task struct {
 	Withdraws bool `json:"withdraws,omitempty" yaml:"withdraws,omitempty"`
 	// The version 2 step keys, each unmute-core's TaskSpec field of the same
 	// name. Empty on version 1.
-	Replies   []Reply     `json:"replies,omitempty" yaml:"replies,omitempty"`
-	OpensWith *OpensWith  `json:"opens_with,omitempty" yaml:"opens_with,omitempty"`
-	Inputs    []TaskInput `json:"inputs,omitempty" yaml:"inputs,omitempty"`
-	Arguments []string    `json:"arguments,omitempty" yaml:"arguments,omitempty"`
-	Via       []string    `json:"via,omitempty" yaml:"via,omitempty"`
+	Replies   []Reply    `json:"replies,omitempty" yaml:"replies,omitempty"`
+	OpensWith *OpensWith `json:"opens_with,omitempty" yaml:"opens_with,omitempty"`
+	Arguments []string   `json:"arguments,omitempty" yaml:"arguments,omitempty"`
 }
 
 // Reply is a set of lines code speaks for a typed tool result: when every
@@ -556,31 +551,6 @@ type OpensWith struct {
 	Arguments map[string]string `json:"arguments,omitempty" yaml:"arguments,omitempty"`
 	Say       []string          `json:"say,omitempty" yaml:"say,omitempty"`
 }
-
-// TaskInput is one thing a step reads at the end of its prompt.
-type TaskInput struct {
-	Kind  TaskInputKind `json:"kind" yaml:"kind"`
-	Name  string        `json:"name" yaml:"name"`
-	Value string        `json:"value,omitempty" yaml:"value,omitempty"`
-}
-
-// TaskInputKind is memory (a State value), tool (a prefetch entry's result)
-// or input (a fixed text).
-type TaskInputKind string
-
-const (
-	TaskInputMemory TaskInputKind = "memory"
-	TaskInputTool   TaskInputKind = "tool"
-	TaskInputText   TaskInputKind = "input"
-)
-
-// TasksMode is unmute-core's TasksSpec.mode.
-type TasksMode string
-
-const (
-	TasksStatus TasksMode = "status"
-	TasksRecord TasksMode = "record"
-)
 
 // CallStartRule says whether a value dispatched with the call must be there.
 type CallStartRule string

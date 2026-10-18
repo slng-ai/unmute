@@ -6,10 +6,10 @@ What an author writes, file by file. This is the surface you work in.
 
 | File | Required | What it holds |
 |---|---|---|
-| `agent.yaml` | yes | the agent: models, prompts, tools, conversation, channels |
+| `agent.yaml` | yes | the agent: models, prompts, tools, conversation |
 | `manifest.yaml` | when linked | the company rules copied into this package; see [manifests](manifests.md) |
 | an instructions file | yes | the prompt, in Markdown, named by each agent |
-| `targets.yaml` | yes | where it runs, and the framework version pinned |
+| `targets.yaml` | yes | where it runs, the framework version pinned, how people reach the agent (`channels`) and your traffic estimate (`capacity`) |
 | `state.py` | yes on `livekit` and `pipecat` | the call's `State` class: every variable's type, default and description. `unmute init` writes it empty. Needs `uv` to read |
 | `tools/<name>.yaml` | no | one file per tool |
 | `tools/<name>.py` | no | a typed Python handler, named by its tool file as `file.py:function` |
@@ -72,16 +72,9 @@ conversation:
     text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
   interruption:
     enabled: true
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 5
-  max_sessions: 10
-  avg_session_duration: 5m
 ```
+
+`channels:` and `capacity:` are not in this file. They sit at the top of `targets.yaml`.
 
 That is the shape `unmute init <name>` scaffolds, with an empty `State` class in `state.py` beside it, and it runs in a browser.
 
@@ -106,8 +99,6 @@ That is the shape `unmute init <name>` scaffolds, with an empty `State` class in
 | `tools` | no | which tool files to load |
 | `conversation` | no | greeting, interruption, inactivity, limits |
 | `tracing` | no | tracing provider |
-| `channels` | yes | how people reach the agent |
-| `capacity` | for telephony or code targets | your traffic estimate |
 
 ## name
 
@@ -268,11 +259,13 @@ what you fill in.
 
 ## channels
 
-```yaml
+A top-level key of `targets.yaml`, above `targets:`. It is a list, and every channel applies to every target. It is required.
+
+```yaml targets.yaml
 channels:
-  web:
+  - name: web
     kind: realtime_audio
-  phone:
+  - name: phone
     kind: telephony
     inbound: true
     outbound: true
@@ -280,25 +273,32 @@ channels:
 
 | Field | Values |
 |---|---|
+| `name` | the channel's name, such as `web` or `phone` |
 | `kind` | `realtime_audio` or `telephony` |
 | `inbound`, `outbound` | `true` or `false`; at least one must be `true` |
 | `required_controls` | `cold_transfer`, `warm_transfer`, `dtmf_send`, `dtmf_receive`, `hold`, `hangup`, `voicemail_detection`, or `ivr_navigation` |
 | `on_voicemail` | `hangup` or `leave_message`, requires `outbound: true` |
 
-`web: realtime_audio` is browser audio, which is what `unmute dev` serves.
+A `kind: realtime_audio` channel is browser audio, which is what `unmute dev` serves.
 It takes only `kind`. A `telephony` channel requires both `inbound` and
 `outbound`, at least one set to `true`, and it needs a connection file too. See
 `telephony.md`.
 
 ## capacity and tracing
 
-```yaml
+`capacity` is a top-level key of `targets.yaml`, required for telephony or code targets.
+
+```yaml targets.yaml
 capacity:
   peak_sessions: 5
   max_sessions: 10
   peak_starts_per_second: 2
   avg_session_duration: 5m
+```
 
+`tracing` stays in `agent.yaml`.
+
+```yaml agent.yaml
 tracing:
   provider: langfuse
 ```

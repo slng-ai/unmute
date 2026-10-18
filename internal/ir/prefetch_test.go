@@ -661,10 +661,11 @@ func TestValidatePrefetchWarnsWhenTheFactIsSuppliedTheOtherWay(t *testing.T) {
 				t.Fatal(err)
 			}
 			inbound, outbound := !tc.outbound, tc.outbound
-			pkg.Agent.Channels["phone"] = packagespec.Channel{
+			setChannel(pkg, packagespec.Channel{
+				Name: "phone",
 				Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
 				RequiredControls: []string{"cold_transfer", "hangup"},
-			}
+			})
 			setTargetField(pkg, "pipecat", func(target *packagespec.Target) { target.Connection = "primary_phone" })
 			setTargetField(pkg, "livekit", func(target *packagespec.Target) { target.Connection = "twilio_sip" })
 			agent, err := Build(pkg)

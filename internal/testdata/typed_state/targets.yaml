@@ -1,5 +1,15 @@
 # One instance per code target. The same source compiles to both, which is what
 # the typed-state gates compare.
+
+channels:
+  - name: web
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m
+
 targets:
   livekit:
     provider: livekit

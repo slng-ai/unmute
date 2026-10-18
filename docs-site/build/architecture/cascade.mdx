@@ -61,8 +61,13 @@ agents:
     instructions: instructions.md
     think: reasoning
     speak: voice
+```
+
+`channels:` and `capacity:` live in targets.yaml. Set them at the top of the scaffold's file:
+
+```yaml targets.yaml
 channels:
-  web:
+  - name: web
     kind: realtime_audio
 capacity:
   peak_sessions: 1

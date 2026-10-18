@@ -23,8 +23,6 @@ agents:
         instructions: tasks/verify-contact.md
         assign:
           - caller_phone: result.caller_phone
-        context:
-          history: messages
 
       # One step, one pass: the name and the address arrive together as a
       # NameEmail, and caller_email is picked off the same answer rather than
@@ -41,8 +39,6 @@ agents:
           - enquiry: result.enquiry
           - callback_time: result.callback_time?
           - notes+: result.note
-        context:
-          history: messages
 
       # create_customer_record lives here and not on the agent. An agent holding
       # every tool of its own step takes the short route and this assign never
@@ -57,8 +53,6 @@ agents:
         assign:
           - record: result.record
           - record_id: result.record.record_id
-        context:
-          history: messages
 
 # How the values on State in state.py behave: where one comes from, and
 # which step confirms it. A value needs an entry only for one of those.
@@ -160,13 +154,3 @@ conversation:
     nudge_after: 15s
     end_after: 45s
   max_duration: 10m
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 2
-  max_sessions: 5
-  peak_starts_per_second: 1
-  avg_session_duration: 3m

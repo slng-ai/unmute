@@ -1,5 +1,15 @@
 # The same package compiles to both code targets. The e2e suite runs its
 # scenarios on each one.
+
+channels:
+  - name: web
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  avg_session_duration: 5m
+
 targets:
   livekit:
     provider: livekit

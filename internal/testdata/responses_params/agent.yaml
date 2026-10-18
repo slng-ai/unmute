@@ -47,12 +47,3 @@ conversation:
   greeting:
     speaks_first: agent
     text: "Hi, how can I help?"
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 5
-  max_sessions: 10
-  avg_session_duration: 5m

@@ -1,5 +1,15 @@
 # Pipecat only: LiveKit's turn model runs beside the transcriber and cannot hand
 # it the decision, so this shape is refused there.
+
+channels:
+  - name: web
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m
+
 targets:
   pipecat:
     provider: pipecat

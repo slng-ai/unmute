@@ -3,7 +3,6 @@
   "name": "v2-core",
   "architecture": "cascade",
   "entry_agent": "desk",
-  "mode": "record",
   "models": {
     "reasoning": {
       "kind": "think",
@@ -411,26 +410,8 @@
           "I have {{offered_slots}} free. Which suits you?"
         ]
       },
-      "inputs": [
-        {
-          "kind": "memory",
-          "name": "caller_name"
-        },
-        {
-          "kind": "tool",
-          "name": "account"
-        },
-        {
-          "kind": "input",
-          "name": "policy",
-          "value": "Bookings can be moved up to a day before."
-        }
-      ],
       "arguments": [
         "preferred_day"
-      ],
-      "via": [
-        "find_slots"
       ]
     },
     "note_reason": {

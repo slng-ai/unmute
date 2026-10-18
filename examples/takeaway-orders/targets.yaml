@@ -1,6 +1,17 @@
 # Both code targets from one source, and no `connection:` on either. That makes
 # this a browser package: `unmute dev` runs it and no carrier account is needed.
 # A live package compiles for the browser route only in this version anyway.
+
+channels:
+  - name: web
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 3
+  max_sessions: 8
+  peak_starts_per_second: 1
+  avg_session_duration: 3m
+
 targets:
   livekit:
     provider: livekit

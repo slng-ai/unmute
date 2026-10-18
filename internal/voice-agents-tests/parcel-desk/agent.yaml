@@ -10,8 +10,6 @@ name: parcel-desk
 
 entry_agent: desk
 
-mode: record
-
 agents:
   desk:
     instructions: instructions.md
@@ -73,13 +71,10 @@ task_groups:
     steps:
       - track_parcel
       - change_delivery
-    context_scope: shared
-    then: return
   request_callback:
     when: The caller wants a person to call them back.
     steps:
       - callback_note
-    context_scope: shared
     then: end
 
 prefetch:
@@ -142,12 +137,3 @@ conversation:
     speaks_first: agent
     text: Hi, this is Parcel Desk. How can I help?
   max_duration: 10m
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 2
-  max_sessions: 5
-  avg_session_duration: 3m

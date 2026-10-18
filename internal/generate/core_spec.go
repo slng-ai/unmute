@@ -272,7 +272,7 @@ func coreAgent(agent *ir.Agent, name string) (map[string]any, error) {
 	}
 	slices.Sort(taskOnly)
 	out["tasks"] = map[string]any{
-		"version": 1, "mode": cmp.Or(string(agent.Mode), "status"), "tasks": tasks, "groups": groups, "task_only_tools": taskOnly,
+		"version": 1, "mode": "record", "tasks": tasks, "groups": groups, "task_only_tools": taskOnly,
 	}
 	return out, nil
 }
@@ -352,20 +352,8 @@ func coreTask(agent *ir.Agent, name, when string, announce []string) (map[string
 		}
 		out["opens_with"] = built
 	}
-	if len(task.Inputs) > 0 {
-		var inputs []any
-		for _, input := range task.Inputs {
-			built := map[string]any{"kind": string(input.Kind), "name": input.Name}
-			putString(built, "value", input.Value)
-			inputs = append(inputs, built)
-		}
-		out["inputs"] = inputs
-	}
 	if len(task.Arguments) > 0 {
 		out["arguments"] = task.Arguments
-	}
-	if len(task.Via) > 0 {
-		out["via"] = task.Via
 	}
 	return out, nil
 }

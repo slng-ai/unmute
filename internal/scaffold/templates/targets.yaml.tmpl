@@ -6,6 +6,26 @@
 #
 # Nothing here holds a secret. Where a model override or a connection does name
 # a credential, it names the environment variable and never the value.
+
+# How callers reach the agent, and how many calls it takes at once. The same
+# for every target below.
+channels:
+[[range .AllChannels]][[if eq .Kind "realtime_audio"]]  - name: [[.Name]]
+    kind: realtime_audio
+[[else]]  - name: [[.Name]]
+    kind: telephony
+    inbound: [[.Inbound]]
+    outbound: [[.Outbound]]
+[[if .RequiredControls]]    required_controls:
+[[range .RequiredControls]]      - [[.]]
+[[end]][[end]][[if .OnVoicemail]]    on_voicemail: [[.OnVoicemail]]
+[[end]][[end]][[end]]
+[[with .EffectiveCapacity]]capacity:
+  peak_sessions: [[.PeakSessions]]
+  max_sessions: [[.MaxSessions]]
+[[if .PeakStartsPerSecond]]  peak_starts_per_second: [[.PeakStartsPerSecond]]
+[[end]]  avg_session_duration: [[.AvgSessionDuration]]
+[[end]]
 targets:
   [[.Target]]:
     provider: [[.Target]]

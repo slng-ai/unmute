@@ -79,17 +79,3 @@ conversation:
     text: "Good day, this is the concierge desk at {{state.hotel_name}}. How can I help with your stay?"
   interruption:
     enabled: true
-
-channels:
-  web:
-    kind: realtime_audio
-  phone:
-    kind: telephony
-    inbound: true
-    outbound: false
-
-capacity:
-  peak_sessions: 5
-  max_sessions: 10
-  peak_starts_per_second: 0.5
-  avg_session_duration: 4m

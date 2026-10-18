@@ -53,16 +53,9 @@ agents:
     instructions: instructions.md
     think: reasoning
     speak: voice
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 2
-  max_sessions: 5
-  avg_session_duration: 3m
 ```
+
+`channels:` and `capacity:` live in [targets.yaml](/reference/targets-yaml#channels), above `targets:`.
 
 That `turn.detector` binding runs as written on Pipecat, which forwards a
 model identity unchecked. `silero` is a voice activity detector, not a turn
@@ -184,16 +177,6 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
 <ParamField path="tracing" type="object">
   Tracing provider. Accepts `provider: langfuse`, `provider: logfire` or `provider: coval`. If omitted, no
   tracing is configured.
-</ParamField>
-
-<ParamField path="channels" type="map" required>
-  How people reach the agent. Accepts one or more channel definitions. Required; omission
-  is refused.
-</ParamField>
-
-<ParamField path="capacity" type="object">
-  Traffic estimate. Accepts positive values; constraints below. Required for code targets
-  or telephony; otherwise no traffic estimate is declared.
 </ParamField>
 
 ## `name`
@@ -869,9 +852,6 @@ task_groups:
     steps:
       - identify_customer
       - select_appointment
-    context_scope: shared
-    then: return
-    merge: results
 ```
 
 <ParamField path="steps" type="list of strings or objects" required>
@@ -897,13 +877,13 @@ task_groups:
   runs belongs on that step's own `announce:`, not here.
 </ParamField>
 
-<ParamField path="context_scope" type="string" required>
-  Accepts `shared` or `isolated`. There is no default. Each member still applies its own
+<ParamField path="context_scope" type="string" default="shared">
+  Accepts `shared` or `isolated`. Omit it for `shared`. Each member still applies its own
   `context.history`; an isolated group cannot be widened by a member’s `full`.
 </ParamField>
 
-<ParamField path="then" type="string" required>
-  Accepts `return`, `transfer`, or `end`. There is no default.
+<ParamField path="then" type="string" default="return">
+  Accepts `return`, `transfer`, or `end`. Omit it for `return`.
 </ParamField>
 
 <ParamField path="then_target" type="string">
@@ -1275,104 +1255,6 @@ Traces can contain caller speech, model input and output, and tool arguments and
 Use only fake identities and fake customer data for release tests. Use a separate
 project on your tracing provider for those tests, and do not send real customer
 data until its access and retention rules are approved.
-
-## `channels`
-
-```yaml
-channels:
-  web:
-    kind: realtime_audio
-  phone:
-    kind: telephony
-    inbound: true
-    outbound: true
-```
-
-<ParamField path="kind" type="string" required>
-  Accepts `realtime_audio` or `telephony`. No kind is inferred.
-</ParamField>
-
-<ParamField path="inbound" type="boolean">
-  Accepts `true` or `false` for telephony only. Omitted does not enable inbound calls. At
-  least one of `inbound` and `outbound` must be `true`.
-</ParamField>
-
-<ParamField path="outbound" type="boolean">
-  Accepts `true` or `false` for telephony only. Omitted does not enable outbound calls.
-  Required as `true` for warm transfer or voicemail handling.
-</ParamField>
-
-<ParamField path="required_controls" type="list of strings">
-  Telephony only. Accepts `cold_transfer`, `warm_transfer`, `dtmf_send`, `dtmf_receive`,
-  `hold`, `hangup`, `voicemail_detection`, and `ivr_navigation`; the route must support
-  each requested control. Omit for no extra explicit requirements.
-</ParamField>
-
-<ParamField path="on_voicemail" type="string">
-  Accepts `hangup` or `leave_message` where supported by the route. Requires `kind:
-  telephony` and `outbound: true`. Omit for no package-defined voicemail action.
-</ParamField>
-
-### Three rules a telephony channel brings with it
-
-All three are enforced, fail validation, and are easier to read here than to
-meet by trial and error.
-
-**At least one direction must be enabled.** A channel with both `inbound: false`
-and `outbound: false` has no call leg and is refused.
-
-**A warm transfer needs `outbound: true`.** A warm transfer dials the
-destination itself, so the agent places a call, and a channel that only receives
-them cannot:
-
-```text
-channel "phone" needs outbound: true; a warm transfer places a call to its destination
-```
-
-Write `outbound: true` even on a line people only ring in on. It describes what
-the agent does, not what the number is for.
-
-**`capacity.peak_starts_per_second` becomes required.** The moment any channel
-is `telephony`, the field stops being optional and must be positive:
-
-```text
-capacity.peak_starts_per_second must be positive for telephony
-```
-
-Calls arrive in bursts and each one starts a session, so a rate is the number
-the compiler sizes workers from. One is a fine answer for a first line.
-
-## `capacity`
-
-Capacity is required for LiveKit and Pipecat, the two code targets. A telephony channel also makes `peak_starts_per_second` required.
-
-```yaml
-capacity:
-  peak_sessions: 5
-  max_sessions: 10
-  avg_session_duration: 5m
-```
-
-<ParamField path="peak_sessions" type="integer" required>
-  Expected concurrent sessions at peak; must be positive. No estimate is inferred.
-</ParamField>
-
-<ParamField path="max_sessions" type="integer" required>
-  Maximum concurrent sessions; must be positive and at least `peak_sessions`. No ceiling
-  is inferred.
-</ParamField>
-
-<ParamField path="peak_starts_per_second" type="number">
-  Required and positive for any telephony channel. Omit on a browser-only package to
-  declare no call-start rate.
-</ParamField>
-
-<ParamField path="avg_session_duration" type="string" required>
-  A positive Go duration, such as `5m`. No duration is inferred.
-</ParamField>
-
-The compiler turns these into worker and quota numbers, marked
-`[unbenchmarked]`.
 
 ## Reachability
 

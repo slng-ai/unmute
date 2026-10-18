@@ -38,8 +38,6 @@ agents:
         instructions: tasks/verify.md
         assign:
           - phone_number: result.phone_number
-        context:
-          history: messages
 
       # No when: on purpose. The book group is the only way in.
       - name: take_booking
@@ -63,8 +61,6 @@ task_groups:
       - task: verify_identity
         skip_when_confirmed: phone_number
       - take_booking
-    context_scope: shared
-    then: return
 
 variables:
   - name: phone_number
@@ -80,7 +76,3 @@ conversation:
     text: "Hi {{state.customer_name}}, you have reached the salon. How can I help?"
   interruption:
     enabled: true
-
-channels:
-  web:
-    kind: realtime_audio

@@ -85,12 +85,3 @@ conversation:
   greeting:
     speaks_first: agent
     text: Hi, this is the order desk. What's your order number?
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 2
-  max_sessions: 5
-  avg_session_duration: 3m

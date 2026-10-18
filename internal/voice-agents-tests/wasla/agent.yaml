@@ -14,8 +14,6 @@ name: wasla
 
 entry_agent: lina
 
-mode: record
-
 variables:
   # The dispatch must name the account. A call without one never starts.
   - name: account_id
@@ -201,15 +199,12 @@ task_groups:
       - task: identify
         skip_when_confirmed: birth_date
       - talk_account
-    context_scope: shared
-    then: return
   callback:
     when: >-
       Someone other than the holder answered, or the holder wants to talk
       another time.
     steps:
       - take_callback
-    context_scope: shared
     then: end
     arguments:
       - callback_day
@@ -218,7 +213,6 @@ task_groups:
     when: Nobody of the holder's name can be reached at this number.
     steps:
       - take_off_list
-    context_scope: shared
     then: end
 
 prefetch:
@@ -295,12 +289,3 @@ conversation:
       Hello, this is Lina calling from Wasla. Am I speaking with
       {{state.first_name}} {{state.last_name}}?
   max_duration: 10m
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 2
-  max_sessions: 5
-  avg_session_duration: 5m

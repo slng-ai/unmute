@@ -52,8 +52,8 @@ func TestPublishedSchemaRefusesASuccessItemHoldingTwoKeys(t *testing.T) {
 }
 
 // authoredInstance is the package as the schema publishes it: the agent.yaml
-// document as written, every tool file as written, keyed by name, and the
-// targets Load resolves from them. The two YAML documents are read raw rather
+// document as written, every tool file as written, keyed by name, the
+// targets Load resolves from them, and targets.yaml's channels and capacity. The two YAML documents are read raw rather
 // than through Load, because the shapes under test are the ones the decoder
 // rewrites on the way in.
 func authoredInstance(t *testing.T, dir string) map[string]any {
@@ -68,7 +68,14 @@ func authoredInstance(t *testing.T, dir string) map[string]any {
 		name := item.(string)
 		tools[name] = loadInstance(t, filepath.Join(dir, "tools", name+".yaml"))
 	}
-	return map[string]any{"agent": doc, "tools": tools, "targets": jsonValue(t, pkg.Targets)}
+	// channels and capacity are read raw from targets.yaml, beside the targets
+	// Load resolves, because that file is where an author writes them.
+	head := loadInstance(t, filepath.Join(dir, "targets.yaml")).(map[string]any)
+	out := map[string]any{"agent": doc, "tools": tools, "targets": jsonValue(t, pkg.Targets), "channels": head["channels"]}
+	if capacity, ok := head["capacity"]; ok {
+		out["capacity"] = capacity
+	}
+	return out
 }
 
 func jsonValue(t *testing.T, value any) any {

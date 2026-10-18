@@ -113,7 +113,7 @@ func Load(dir string) (*Package, error) {
 	if err := pkg.readYAML("targets.yaml", &targets); err != nil {
 		return nil, err
 	}
-	pkg.Targets = targets.Targets
+	pkg.Targets, pkg.Channels, pkg.Capacity = targets.Targets, targets.Channels, targets.Capacity
 	if err := pkg.readConnections(); err != nil {
 		return nil, err
 	}

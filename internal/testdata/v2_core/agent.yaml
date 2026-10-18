@@ -10,8 +10,6 @@ name: v2-core
 
 entry_agent: desk
 
-mode: record
-
 secrets:
   - OPENAI_API_KEY
   - DEEPGRAM_API_KEY
@@ -50,15 +48,8 @@ agents:
         tools:
           - find_slots
           - save_booking
-        via:
-          - find_slots
         arguments:
           - preferred_day
-        inputs:
-          - memory: caller_name
-          - tool: account
-          - input: policy
-            value: Bookings can be moved up to a day before.
         opens_with:
           tool: find_slots
           arguments:
@@ -151,15 +142,6 @@ conversation:
     end_after: 45s
     nudge_text: Are you still there?
     end_text: I'll let you go now. Call back any time.
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 5
-  max_sessions: 10
-  avg_session_duration: 5m
 
 tools:
   - find_slots

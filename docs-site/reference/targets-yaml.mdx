@@ -3,8 +3,8 @@ title: "Targets configuration"
 description: "Every field of a target, plus the connection files it points at."
 ---
 
-`targets.yaml` says where the agent runs. Nothing about the agent's behavior
-belongs here.
+`targets.yaml` says where the agent runs, how people reach it, and how much
+traffic to size for. Nothing about the agent's behavior belongs here.
 
 ```yaml targets.yaml
 targets:
@@ -23,6 +23,16 @@ targets:
 ```
 
 ## All keys
+
+<ParamField path="channels" type="list" required>
+  How people reach the agent. Accepts one or more channel entries, each with a `name`.
+  Required; omission is refused.
+</ParamField>
+
+<ParamField path="capacity" type="object">
+  Traffic estimate. Accepts positive values; constraints below. Required for code targets
+  or telephony; otherwise no traffic estimate is declared.
+</ParamField>
 
 <ParamField path="targets" type="map" required>
   Target definitions selected by `--target`. Accepts one or more target instance names.
@@ -84,7 +94,7 @@ what names the output directory, `build/<name>/`. Two targets may use the same
 provider with different settings, for example `pipecat_twilio` and
 `pipecat_telnyx`.
 
-That is the whole list. A target says where the agent runs and, for a phone
+That is the whole list. `channels` and `capacity` apply to every target. A target says where the agent runs and, for a phone
 agent, which one connection carries the call. `unmute compile` compiles a
 project for `livekit`, `pipecat` and `twilio`; a `slng` target compiles to a
 deployment body instead, which [Deploy to SLNG](/deploy/slng) covers. A
@@ -101,6 +111,110 @@ provider "deepgram" was retired: the deepgram target never emitted a runnable pr
 
 Deepgram stays a model vendor: what the refusal calls out is the target name,
 never the vendor.
+
+## `channels`
+
+```yaml targets.yaml
+channels:
+  - name: web
+    kind: realtime_audio
+  - name: phone
+    kind: telephony
+    inbound: true
+    outbound: true
+```
+
+`channels:` is a list. Each entry carries its own `name`, and every channel applies to every target.
+
+<ParamField path="name" type="string" required>
+  What this channel is called, such as `web` or `phone`. Required; omission is refused.
+</ParamField>
+
+<ParamField path="kind" type="string" required>
+  Accepts `realtime_audio` or `telephony`. No kind is inferred.
+</ParamField>
+
+<ParamField path="inbound" type="boolean">
+  Accepts `true` or `false` for telephony only. Omitted does not enable inbound calls. At
+  least one of `inbound` and `outbound` must be `true`.
+</ParamField>
+
+<ParamField path="outbound" type="boolean">
+  Accepts `true` or `false` for telephony only. Omitted does not enable outbound calls.
+  Required as `true` for warm transfer or voicemail handling.
+</ParamField>
+
+<ParamField path="required_controls" type="list of strings">
+  Telephony only. Accepts `cold_transfer`, `warm_transfer`, `dtmf_send`, `dtmf_receive`,
+  `hold`, `hangup`, `voicemail_detection`, and `ivr_navigation`; the route must support
+  each requested control. Omit for no extra explicit requirements.
+</ParamField>
+
+<ParamField path="on_voicemail" type="string">
+  Accepts `hangup` or `leave_message` where supported by the route. Requires `kind:
+  telephony` and `outbound: true`. Omit for no package-defined voicemail action.
+</ParamField>
+
+### Three rules a telephony channel brings with it
+
+All three are enforced, fail validation, and are easier to read here than to
+meet by trial and error.
+
+**At least one direction must be enabled.** A channel with both `inbound: false`
+and `outbound: false` has no call leg and is refused.
+
+**A warm transfer needs `outbound: true`.** A warm transfer dials the
+destination itself, so the agent places a call, and a channel that only receives
+them cannot:
+
+```text
+channel "phone" needs outbound: true; a warm transfer places a call to its destination
+```
+
+Write `outbound: true` even on a line people only ring in on. It describes what
+the agent does, not what the number is for.
+
+**`capacity.peak_starts_per_second` becomes required.** The moment any channel
+is `telephony`, the field stops being optional and must be positive:
+
+```text
+capacity.peak_starts_per_second must be positive for telephony
+```
+
+Calls arrive in bursts and each one starts a session, so a rate is the number
+the compiler sizes workers from. One is a fine answer for a first line.
+
+## `capacity`
+
+`capacity:` is a top-level key of targets.yaml and applies to every target. It is required for LiveKit and Pipecat, the two code targets. A telephony channel also makes `peak_starts_per_second` required.
+
+```yaml targets.yaml
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m
+```
+
+<ParamField path="peak_sessions" type="integer" required>
+  Expected concurrent sessions at peak; must be positive. No estimate is inferred.
+</ParamField>
+
+<ParamField path="max_sessions" type="integer" required>
+  Maximum concurrent sessions; must be positive and at least `peak_sessions`. No ceiling
+  is inferred.
+</ParamField>
+
+<ParamField path="peak_starts_per_second" type="number">
+  Required and positive for any telephony channel. Omit on a browser-only package to
+  declare no call-start rate.
+</ParamField>
+
+<ParamField path="avg_session_duration" type="string" required>
+  A positive Go duration, such as `5m`. No duration is inferred.
+</ParamField>
+
+The compiler turns these into worker and quota numbers, marked
+`[unbenchmarked]`.
 
 ## Framework versions are exact
 

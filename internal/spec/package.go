@@ -14,7 +14,11 @@ type Package struct {
 	Agent         AgentFile             `json:"agent" yaml:"agent"`
 	Tools         map[string]Tool       `json:"tools,omitempty" yaml:"tools,omitempty"`
 	Connections   map[string]Connection `json:"connections,omitempty" yaml:"connections,omitempty"`
-	Targets       map[string]Target     `json:"targets" yaml:"targets"`
+	// Channels and Capacity are read from targets.yaml: where the agent runs
+	// and how many calls it takes, which is the same for every target.
+	Channels []Channel         `json:"channels" yaml:"channels"`
+	Capacity *Capacity         `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	Targets  map[string]Target `json:"targets" yaml:"targets"`
 
 	Root     string            `json:"-" yaml:"-"`
 	Markdown map[string]string `json:"-" yaml:"-"`
@@ -141,10 +145,11 @@ type AgentFile struct {
 	// those sections are legal. See the Architecture type for why it is written
 	// rather than derived from whichever binding happens to be present.
 	Architecture Architecture `json:"architecture,omitempty" yaml:"architecture,omitempty"`
-	// Mode is how a step hands back to its agent: `status` (the default) hands
-	// back a status and saves nothing on the way, `record` hands back what the
-	// caller confirmed per step. unmute-core's TasksSpec.mode.
-	Mode       string `json:"mode,omitempty" yaml:"mode,omitempty" since:"2"`
+	// Mode is retired: every task runs in unmute-core's `record` mode. The
+	// field survives only so a file still carrying the key is refused with a
+	// sentence saying to delete it, rather than with "unknown field".
+	// `json:"-"` keeps it out of the derived authoring schema.
+	Mode       string `json:"-" yaml:"mode,omitempty"`
 	EntryAgent string `json:"entry_agent" yaml:"entry_agent"`
 	// EntryBy picks the agent a call starts with from a State value, read once the
 	// prefetch has run. entry_agent is the one a value it does not list starts with.
@@ -201,8 +206,12 @@ type AgentFile struct {
 	Tools        []string              `json:"tools,omitempty" yaml:"tools,omitempty"`
 	Conversation *Conversation         `json:"conversation,omitempty" yaml:"conversation,omitempty"`
 	Tracing      *Tracing              `json:"tracing,omitempty" yaml:"tracing,omitempty"`
-	Channels     map[string]Channel    `json:"channels" yaml:"channels"`
-	Capacity     *Capacity             `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	// Channels and Capacity moved to targets.yaml. Both survive here only so
+	// a file still carrying them is refused with a sentence naming the new
+	// home, rather than "unknown field". `json:"-"` keeps them out of the
+	// derived authoring schema. `any`, because only their presence is read.
+	Channels any `json:"-" yaml:"channels,omitempty"`
+	Capacity any `json:"-" yaml:"capacity,omitempty"`
 }
 
 type Tracing struct {
@@ -505,13 +514,8 @@ type Task struct {
 	Replies []Reply `json:"replies,omitempty" yaml:"replies,omitempty" since:"2"`
 	// OpensWith runs one tool in code as the step opens.
 	OpensWith *OpensWith `json:"opens_with,omitempty" yaml:"opens_with,omitempty" since:"2"`
-	// Inputs are what the step reads at the end of its prompt.
-	Inputs []TaskInput `json:"inputs,omitempty" yaml:"inputs,omitempty" since:"2"`
 	// Arguments are State values the agent passes when it starts the step.
 	Arguments []string `json:"arguments,omitempty" yaml:"arguments,omitempty" since:"2"`
-	// Via names step tools the agent may call too; a success moves the caller
-	// into the step.
-	Via []string `json:"via,omitempty" yaml:"via,omitempty" since:"2"`
 	// Finish names the tools this step ends on. When one of them returns a
 	// result meeting every `success:` pair, the step saves `assign:` from that
 	// result and ends, so the model is not asked to call `finish` for a decision
@@ -537,13 +541,15 @@ type Task struct {
 type TaskGroup struct {
 	// Steps is the ordered run. Each item is a bare task name, or a mapping
 	// naming the task and how the group treats it.
-	Steps        []StepItem `json:"steps" yaml:"steps"`
-	When         string     `json:"when,omitempty" yaml:"when,omitempty"`
-	Announce     Announce   `json:"announce,omitempty" yaml:"announce,omitempty"`
-	ContextScope string     `json:"context_scope" yaml:"context_scope"`
-	Then         string     `json:"then" yaml:"then"`
-	ThenTarget   string     `json:"then_target,omitempty" yaml:"then_target,omitempty"`
-	Merge        string     `json:"merge,omitempty" yaml:"merge,omitempty"`
+	Steps    []StepItem `json:"steps" yaml:"steps"`
+	When     string     `json:"when,omitempty" yaml:"when,omitempty"`
+	Announce Announce   `json:"announce,omitempty" yaml:"announce,omitempty"`
+	// ContextScope and Then default to shared and return, which is what most
+	// flows write. build.go fills them in.
+	ContextScope string `json:"context_scope,omitempty" yaml:"context_scope,omitempty"`
+	Then         string `json:"then,omitempty" yaml:"then,omitempty"`
+	ThenTarget   string `json:"then_target,omitempty" yaml:"then_target,omitempty"`
+	Merge        string `json:"merge,omitempty" yaml:"merge,omitempty"`
 	// Arguments are State values the agent passes when it starts the group.
 	Arguments []string `json:"arguments,omitempty" yaml:"arguments,omitempty" since:"2"`
 	// NonBlocking names steps whose failure is recorded and the group goes on.
@@ -572,16 +578,6 @@ type OpensWith struct {
 	Tool      string   `json:"tool" yaml:"tool"`
 	Arguments []Pair   `json:"arguments,omitempty" yaml:"arguments,omitempty"`
 	Say       []string `json:"say,omitempty" yaml:"say,omitempty"`
-}
-
-// TaskInput is one thing a step reads at the end of its prompt. Exactly one
-// of the three keys: `memory:` a State value, `tool:` a prefetch entry's
-// result, `input:` a fixed text named by the key and written in `value:`.
-type TaskInput struct {
-	Memory string `json:"memory,omitempty" yaml:"memory,omitempty"`
-	Tool   string `json:"tool,omitempty" yaml:"tool,omitempty"`
-	Input  string `json:"input,omitempty" yaml:"input,omitempty"`
-	Value  string `json:"value,omitempty" yaml:"value,omitempty"`
 }
 
 type TaskContext struct {
@@ -946,7 +942,11 @@ type Inactivity struct {
 	EndText   string `json:"end_text,omitempty" yaml:"end_text,omitempty" since:"2"`
 }
 
+// Channel is one entry of targets.yaml's `channels:` list: how callers reach
+// the agent. A list with `name:`, not a map, so the file shows its order and
+// each entry can carry its own comment.
 type Channel struct {
+	Name             string   `json:"name" yaml:"name"`
 	Kind             string   `json:"kind" yaml:"kind"`
 	Inbound          *bool    `json:"inbound,omitempty" yaml:"inbound,omitempty"`
 	Outbound         *bool    `json:"outbound,omitempty" yaml:"outbound,omitempty"`
@@ -977,7 +977,9 @@ type Connection struct {
 }
 
 type TargetsFile struct {
-	Targets map[string]Target `json:"targets" yaml:"targets"`
+	Channels []Channel         `json:"channels" yaml:"channels"`
+	Capacity *Capacity         `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	Targets  map[string]Target `json:"targets" yaml:"targets"`
 }
 
 type Target struct {
