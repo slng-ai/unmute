@@ -8,6 +8,7 @@ validate` names most of these by their old spelling, with the new one.
 | Old | New | Where |
 |---|---|---|
 | `version: 1` or `version: 2` | delete the line | agent.yaml |
+| a target's `version:` pin that validate calls outside the supported range | the version the error names. That `version:` is the framework's, and it stays | targets.yaml |
 
 ## From unmute 0.8 (`version: 2`)
 
@@ -28,6 +29,8 @@ validate` names most of these by their old spelling, with the new one.
 | a task's `inputs:` and `via:` | delete them. A flow takes `fills:` | agent.yaml |
 | `context: history: messages` | delete it. It is the default | agent.yaml |
 | a flow's `context_scope: shared` and `then: return` | delete them. They are the defaults | agent.yaml |
+| a flow step's `skip_when_confirmed:`, `non_blocking:`, `entry_agent:`, `models:`, `secrets:`, `knowledge:`, prefetch `clock:`, `source:`, `writes:` | unchanged | agent.yaml |
+| a flow with no `arguments:` | no `fills:`. It is optional | agent.yaml |
 | a top-level `tools:` list of bare names | delete the bare names. Every file in `tools/` is a tool. The list keeps only entries with `save:`, `outcomes:`, `hidden:` or `start:` | agent.yaml |
 | an agent's own `tools:` list | unchanged, a list of names | agent.yaml |
 
@@ -135,6 +138,64 @@ packages older than unmute 0.7. Skip a row the package does not have.
 | tool file `read_only:` | `writes: true` or `writes: false` on the prefetch entry that runs the tool | tool file, agent.yaml |
 | tool file `execution:`, top-level `handler:`, `url_env:`, `auth:` | one block: `local:`, `webhook:`, `mcp:` or `builtin:`, holding those keys | tool file |
 | a saved value that exists only so a line can say it | delete the save and the `State` field. A `confirm:` line reads `{{input.x}}`, and an outcome's `say:` reads `{{result.x}}` | agent.yaml, state.py |
+
+A tool file's `description:`, `interruption:` and `effect:` stay as they are.
+
+Example, one local tool. Before, the tool file held the types and the handler
+returned a dict:
+
+```yaml
+# tools/find_customer.yaml
+description: Look up one customer by phone number.
+input:
+  type: object
+  properties:
+    phone:
+      type: string
+      description: The confirmed number in E.164.
+  required: [phone]
+output:
+  type: object
+  properties:
+    status:
+      type: string
+      enum: [existing, created]
+local:
+  handler: tools/salon.py
+```
+
+After, the tool file names the function, and the function carries the types:
+
+```yaml
+# tools/find_customer.yaml
+description: Look up one customer by phone number.
+local:
+  handler: tools/salon.py:find_customer
+```
+
+```python
+# tools/salon.py
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
+
+
+class Customer(BaseModel):
+    status: Literal["existing", "created"]
+
+
+def find_customer(
+    phone: Annotated[str, Field(description="The confirmed number in E.164.")],
+) -> Customer:
+    ...
+```
+
+1. Every parameter has a type. A value passed by `with:` is a parameter too.
+2. A required input is a parameter with no default. An optional one has a
+   default.
+3. An `enum:` is a `Literal[...]`.
+4. The return type is a Pydantic model. Keep the old dict logic in a private
+   function and build the model from its result if that is simpler.
 
 A webhook, knowledge, mcp or slng tool keeps its own shape. A webhook tool
 keeps `input:` and `output:` as JSON Schema.

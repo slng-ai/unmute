@@ -46,8 +46,14 @@ func (p *Package) checkTool(name string, tool Tool) error {
 		return nil
 	}
 	if !handlerRef.MatchString(tool.Local.Handler) {
-		return fmt.Errorf("%s: handler %q must be written file.py:function, as tools/%s.py:%s; its signature and return type are the tool's types",
-			p.Location(file, "handler:"), tool.Local.Handler, name, name)
+		// Suggest the file the author already named, because one file may hold
+		// many tools: an old handler is a file whose function is the tool's name.
+		suggest := "tools/" + name + ".py"
+		if handlerFile, _ := SplitHandler(tool.Local.Handler); strings.HasSuffix(handlerFile, ".py") {
+			suggest = handlerFile
+		}
+		return fmt.Errorf("%s: handler %q must be written file.py:function, as %s:%s; its signature and return type are the tool's types",
+			p.Location(file, "handler:"), tool.Local.Handler, suggest, name)
 	}
 	for _, key := range []string{"input", "output"} {
 		if (key == "input" && tool.Input != nil) || (key == "output" && tool.Output != nil) {

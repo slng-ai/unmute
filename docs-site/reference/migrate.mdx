@@ -52,8 +52,9 @@ agents.
 | top-level `task_groups:` | `flows:` inside the agent that runs it, each `- name:`, `when:`, `steps:` |
 | the same handoff, transfer or flow on a second agent | its bare name in that agent's list |
 | `channels:` and `capacity:` | the top of `targets.yaml`. `channels:` is a list, `- name: web` |
+| a target's `version:` pin in `targets.yaml` that validate calls outside the supported range | the version the error names |
 | `mode:` | delete it |
-| a task's `inputs:` and `via:` | delete them. A flow takes `fills:` |
+| a task's `inputs:` and `via:` | delete them. A flow may take `fills:` |
 | `context: history: messages`, `context_scope: shared`, `then: return` | delete them. They are the defaults |
 | a top-level `tools:` list of bare names | delete the bare names. Every file in `tools/` is a tool. Keep an entry only for `save:`, `outcomes:`, `hidden:` or `start:` |
 
@@ -150,5 +151,25 @@ not have.
 | tool file `read_only:` | `writes: true` or `writes: false` on the prefetch entry that runs the tool |
 | tool file `execution:`, `handler:`, `url_env:`, `auth:` at the top | one block, `local:`, `webhook:`, `mcp:` or `builtin:`, holding those keys |
 
-A webhook tool keeps `input:` and `output:` as JSON Schema. Every key is
+A local tool's types now come from its Python function. Each parameter has a
+type, a required input has no default, an `enum:` becomes a `Literal[...]`,
+and the return type is a Pydantic model:
+
+```python tools/salon.py
+class Customer(BaseModel):
+    status: Literal["existing", "created"]
+
+
+def find_customer(
+    phone: Annotated[str, Field(description="The confirmed number in E.164.")],
+) -> Customer:
+    ...
+```
+
+The tool file keeps `description:`, `interruption:` and `effect:`, and its
+handler is `tools/salon.py:find_customer`.
+
+`skip_when_confirmed:`, `non_blocking:`, `models:`, `secrets:` and
+`knowledge:` are unchanged. A webhook tool keeps `input:` and `output:` as
+JSON Schema. Every key is
 described in [Agent configuration](/reference/agent-yaml).

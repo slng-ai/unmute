@@ -35,7 +35,8 @@ unmute validate .
    package that has the same old key, not only the one on that line.
 3. Run it again. Stop when it prints no error.
 
-Do the big moves first, because they change where everything else sits:
+Do the big moves first, because they change where everything else sits.
+validate may name them in another order. Do them all in one pass anyway:
 
 1. `agents:` becomes a list with `- name:`.
 2. `handoffs:`, `transfers:` and `flows:` move inside the agent that uses them.

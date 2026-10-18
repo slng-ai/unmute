@@ -13,7 +13,10 @@ func TestToolForms(t *testing.T) {
 		want string
 	}{
 		{"a handler naming only a file",
-			Package{Tools: map[string]Tool{"find": {Local: local("tools/find.py")}}},
+			Package{Tools: map[string]Tool{"find": {Local: local("tools/salon.py")}}},
+			"must be written file.py:function, as tools/salon.py:find"},
+		{"a handler naming no file",
+			Package{Tools: map[string]Tool{"find": {Local: local("find")}}},
 			"must be written file.py:function, as tools/find.py:find"},
 		{"input: on a local tool",
 			Package{Tools: map[string]Tool{"find": {Local: local("tools/s.py:find"), Input: map[string]any{"type": "object"}}}},
