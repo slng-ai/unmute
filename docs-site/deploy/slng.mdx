@@ -85,8 +85,9 @@ bindings for reasoning, speech recognition and speech generation. Keep those
 in `agent.yaml` and the prompt files it references.
 
 SLNG owns runtime versions, capacity and turn detection. Omit target `version`,
-`pins`, `sdk_language`, `connection` and `warm_instances`. Tasks, handoffs and
-package-local Python are unavailable on this target. See the
+`pins`, `sdk_language`, `connection` and `warm_instances`. Tasks and typed
+`local:` tools work, and `unmute deploy` publishes each local tool as a SLNG code
+tool. Handoffs and prefetch are refused. See the
 [complete target limits](/targets/slng#what-a-slng-package-may-not-ask-for).
 
 ### Choose models and their region
@@ -122,7 +123,7 @@ voiceai login --profile production
 
 Unmute needs a `voiceai` release that supports checked, resolved pushes.
 It checks that capability before pushing and gives upgrade guidance if it is
-missing. Use `voiceai 0.1.22` or later. Unmute refuses an older release before
+missing. Use `voiceai 0.1.22` or later. A package with `local:` tools needs `voiceai 0.1.23` or later. Unmute refuses an older release before
 it writes anything, with the command that upgrades it. No Python SDK version is
 yours to install for this target.
 
@@ -384,8 +385,7 @@ browser and does not prove a worker joined. Keep deployment keys on your server.
 | No phone call appears in SLNG | Carrier routing failed before the agent started | Check the number's routing and inbound connection |
 
 A dry run may report an unusable MCP snapshot. A real deploy can refresh it
-once and recheck it. A local-module error belongs to a LiveKit or Pipecat
-build: SLNG does not execute the package's Python files.
+once and recheck it. SLNG runs a `local:` tool as a code tool, built from its typed handler.
 
 ## Where to go next
 

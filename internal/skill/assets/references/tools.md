@@ -122,12 +122,11 @@ remains model-invoked either way, never automatic.
 
 **No hash, no mirror, and no `unmute pull` for a package that deploys to
 SLNG only.** Never write `slng: {}` and tell the user to run `unmute pull`:
-that was the old shape, superseded by naming the tool directly. If the
-user's package also compiles to `livekit` or `pipecat`, which build and run
-the tool themselves, run `unmute pull` once to fetch a real copy into the
-package (`tools/<name>.slng.json`, and for a code tool `tools/<name>.slng.py`,
-plus generated `tools/<name>.slng.meta.json` holding the pin), then commit
-what it writes.
+that was the old shape, superseded by naming the tool directly.
+
+**`slng:` compiles on the slng target only for now.** Version 2 livekit and
+pipecat refuse it. When the package also targets one of them, write the tool
+as a typed `local:` handler or a `webhook:` there instead.
 
 The `.slng.` files a pull writes are the platform's copy, mirrored, never
 authored. Never edit one: the change reaches nothing, and the next compile of
@@ -239,24 +238,14 @@ this is the answer. It produces no scores, so `min_score` is refused with it. Do
 not sell it on image size: the difference is small, because no mode installs a
 vector store.
 
-### Tell the user to bake the index into the image
+### The index is built at startup
 
-Every worker process embeds the corpus at startup otherwise, and that is paid again
-on every scale-up. One extra build flag removes it:
-
-```sh
-docker build --build-arg KNOWLEDGE_BAKE=1 \
-  --secret id=OPENAI_API_KEY,env=OPENAI_API_KEY .
-```
-
-Startup becomes a disk read, with the same answers. Use the credential the chosen
-embedding service needs, and the generated `README.md` prints the exact command. Both flags are required, and the credential must be a `--secret` rather
-than a `--build-arg` so it never lands in a layer.
-
-Mention it whenever a package declares `knowledge:` with a mode that embeds. It does
-not apply to `mode: keyword`, which embeds nothing, though baking still saves the
-splitting work. A lookup embeds the caller's question either way, so the run time
-still needs the credential in `secrets:`.
+The version 2 `Dockerfile` has no step that bakes the index into the image, so
+every worker process embeds the corpus at startup, and that is paid again on
+every scale-up. Say so when a package declares `knowledge:` with a mode that
+embeds. It does not apply to `mode: keyword`, which embeds nothing. A lookup
+embeds the caller's question either way, so the run time needs the credential in
+`secrets:`.
 
 ### A startup error that names neither uv nor knowledge
 
@@ -481,11 +470,12 @@ The rules the function follows:
 | the return type is a Pydantic model | its fields are the tool's output, which `assign:`, `finish:` and `replies:` read |
 | a `Field(description=...)` on a parameter says what it means | the model reads that text |
 | a parameter named by `inject:` is not the model's | it takes its value from State, so the model never sees it |
-| it may be `async def` | the code targets await an awaitable result |
+| it may be `async def`, except on slng | livekit and pipecat await an awaitable result, and SLNG calls a code tool synchronously |
 
 `handler:` is written `file.py:function`. The function name need not match the
-tool name, and one file can hold many tools. Twilio and SLNG still accept
-`version: 1`, where a local tool writes `input:` and `output:` as JSON Schema.
+tool name, and one file can hold many tools. SLNG refuses a version 1
+handler, so write the typed function and a `tools/<name>.sample.json` beside it.
+Twilio runs the typed handlers too.
 
 A handler reaches a credential through `os.environ`, and the variable name goes
 in `secrets:` like any other. Literal lookups are also inferred for generated
@@ -494,6 +484,10 @@ environment instructions and startup checks.
 `unmute compile` copies the file into the generated project.
 
 ## MCP servers
+
+**`mcp:` compiles on the slng target only for now.** Version 2 livekit and
+pipecat refuse it. The `url_env`, `transport` and `auth` fields below belonged
+to the version 1 livekit and pipecat output.
 
 One block, and nothing else in the file.
 
@@ -531,17 +525,6 @@ inferred. Any other value is refused with both legal ones named.
 Listing specific `tools:` is usually right. A whole server dropped into an
 agent's tool list is a large, unreviewed surface, and the model will use all of
 it.
-
-MCP sources are required at runtime. Pipecat connects them during bot setup;
-LiveKit probes every source before `AgentSession.start`, always attempts to close
-every created probe, and mounts a fresh client on the agent or task. A connection
-or tool-list error stops the session before it greets the caller on either
-target. A LiveKit probe close error also stops startup. Pipecat cleanup errors
-surface during teardown after every close has been attempted.
-
-With Langfuse tracing enabled, Pipecat MCP calls emit finite spans named after the tool, with its arguments and, when completed, the result.
-With Coval tracing enabled, the same calls emit `llm_tool_call` spans carrying `function.name`, `tool_call_id`, `function.arguments`, the bounded result as `tool.result`, `tool.latency_ms`, and a numeric `tool.error`, with an error status when the tool failed.
-Pipecat refuses to start when an agent tool, task function, or MCP source on the same agent exposes the same name.
 
 ## Prebuilt tools
 

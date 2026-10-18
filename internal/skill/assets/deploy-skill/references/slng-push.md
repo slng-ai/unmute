@@ -215,7 +215,7 @@ or pipecat project reads at run time. `VOICEAI_API_KEY` is the name the push
 tool itself reads. The key decides the organisation, and every call in a deploy
 uses the same key, so no command asks which organisation it is.
 
-A real push needs `voiceai` 0.1.22 or later. It attaches a checked, resolved
+A real push needs `voiceai` 0.1.23 or later. It attaches a checked, resolved
 version, turns a task's tool names into attachment ids, waits while SLNG
 prepares a hosted code tool, and needs no organisation flag. `unmute deploy`
 checks for that support first: an older `voiceai` is refused with upgrade guidance naming the install command,
@@ -356,7 +356,7 @@ voiceai agents web-sessions create <agent_id>
 ```
 
 The command takes the agent id `unmute deploy` printed. With no `--file` it sends
-an empty body (voiceai 0.1.22 or later), so every input takes its default. A
+an empty body (voiceai 0.1.23 or later), so every input takes its default. A
 required input without a default goes in a body, passed as
 `--file session.json` holding `{"arguments": {...}}`. It returns
 LiveKit connection details, not a browser call. For a microphone test, open the

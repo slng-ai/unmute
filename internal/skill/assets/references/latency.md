@@ -174,7 +174,7 @@ in every compiled package whether or not it was asked for), and then the turn
 waits for the transcriber to mark the transcript final. `endpointing_delay` sets
 the first stage and `pace` sets the second.
 
-Both stages are spelled `stop_secs` in the emitted `call.py` and they are
+Both stages are spelled `stop_secs` in Pipecat and they are
 different fields: `VADParams(stop_secs=...)` is the silence window,
 `SmartTurnParams(stop_secs=...)` is the classifier's ceiling.
 
@@ -232,8 +232,8 @@ three spellings across three hosts (2026-08-27, nine requests) and answers only 
 its own `/no_think` directive in the prompt. For a model like that, use
 `prompt_suffix` on the think entry, which the compiler appends to every system
 prompt that binding sends. It is prompt text, so it works wherever the model reads
-its instructions, and you can read what it did in the emitted `prompts/*.md`
-files.
+its instructions, and you can read what it did in the emitted prompt in
+`agent.json`.
 
 Read the number, not the setting. `usage.completion_tokens_details.reasoning_tokens`
 on a live response is what says whether thinking is actually off: 0 or 1 means it

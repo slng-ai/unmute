@@ -16,13 +16,13 @@ If it is just an authenticated HTTP call, use
 [a webhook tool](/build/tools/webhook) instead. It needs no code from you and no
 code review.
 
-A `local:` handler works on livekit and pipecat, which compile `version: 2` only.
-There, its Python function is typed: the signature is the tool's input and the
-Pydantic return model is its output, so the tool file has no `input:` or
-`output:`. Twilio still takes the version 1 form, with `input` and `output`
-schemas that are flat ([the Twilio target](/targets/twilio)). On an slng target,
+A `local:` handler is a `version: 2` typed function. The signature is the tool's
+input and the Pydantic return model is its output, so the tool file has no
+`input:` or `output:`. Livekit and pipecat compile `version: 2` only. Twilio runs
+the same typed handlers ([the Twilio target](/targets/twilio)). On an slng target,
 a typed handler is wrapped into an SLNG code tool and published by
-`unmute deploy` ([details](#on-the-slng-target)).
+`unmute deploy` ([details](#on-the-slng-target)). SLNG needs `version: 2` and
+refuses a version 1 handler.
 
 On this page:
 
@@ -273,8 +273,8 @@ point has to be synchronous.
 **SLNG derives the schemas by introspection.** A hosted `code` tool's module
 defines an `Input` model, an `Output` model and a `handler()` taking one
 `Input`, and the platform reads the parameter and result schemas off those
-classes. `unmute pull` mirrors that module into your package, so the same
-module is what runs on livekit and pipecat too:
+classes. `unmute compile` writes the same shape for a local tool: it wraps your typed
+handler in an adapter like this one. Livekit and pipecat do not use it:
 
 ```python
 def check_order(order_number: str) -> dict:
@@ -299,9 +299,8 @@ def handler(input: Input) -> Output:
     return Output(**result)
 ```
 
-`handler()` is what SLNG calls, and it is also what a generated livekit or
-pipecat project calls, through the mirror. A return value that does not fit
-`Output` fails there rather than reaching the model unnoticed.
+`handler()` is what SLNG calls. A return value that does not fit `Output` fails
+there rather than reaching the model unnoticed.
 
 ## Troubleshooting
 

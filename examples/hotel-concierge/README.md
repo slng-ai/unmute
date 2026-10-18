@@ -87,9 +87,11 @@ one block to read.
 | A model fallback | `agent.yaml` `models.think` | `fallback:` naming `backup` on the primary |
 | An inbound phone number | `channels.phone` and the deploy | trunk chosen at the terminal after the push |
 
-What this target does not take, it refuses at validate by name: tasks, step
-announcements, `prefetch:`, `confirm:` and any `state.py` field that is more than a plain `str`, `int`, `float` or `bool`. Read the two salon
-examples for those. Reading the caller's number, detecting voicemail and
+This target compiles tasks, task groups, `finish:`, typed local tools and typed
+`state.py` fields too. What it does not take, it refuses at validate by name:
+handoffs, `prefetch:`, `webhook:` tools, and the keys that need unmute-core, such as
+a tool's `assign:`, `replies:` and `precheck:`, `entry_by`, and a task's `confirm:`.
+Read the two salon examples for those. Reading the caller's number, detecting voicemail and
 telling the time are capabilities SLNG curates and attaches in the dashboard; a
 package reaches only `end_call` and `send_sms` by name.
 
@@ -134,7 +136,7 @@ the model has no text tool, and the prompt says so to the guest.
   `{{state.hotel_name}}` and the prompt names all four. A fifth, `caller_phone`, has
   `source: conversation` in `agent.yaml` and `= None` in `state.py`: the model
   records it once the guest confirms the number, and it comes back on the call
-  record. This target runs no Python, but `unmute validate` and `unmute compile`
+  record. This package runs no Python of its own, but `unmute validate` and `unmute compile`
   read `state.py` through `uv`, so `uv` has to be on your `PATH`.
 - **Tools.** Every one is a reference to a tool SLNG already has, and no
   tool file carries a mirror. A typed `local:` tool would be published by

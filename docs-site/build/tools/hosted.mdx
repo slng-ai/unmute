@@ -193,36 +193,13 @@ it prints.
 | Target | What happens |
 |---|---|
 | SLNG | resolves the platform's own tool by name at deploy time. Nothing is created, nothing is uploaded, nothing local is required |
-| LiveKit | the mirrored code runs inside the generated project |
+| LiveKit | refused on version 2 for now |
 | Pipecat | the same |
 
-SLNG needs nothing from your package beyond the name. LiveKit and Pipecat are
-different: they build and run the tool themselves, so they need a real copy
-of its definition, and for a `code` tool its module, sitting in your package.
-That copy is what `unmute pull` fetches:
-
-```sh
-unmute pull my-agent          # writes the mirror beside each hosted tool file
-unmute compile my-agent --target livekit
-```
-
-The reference line is the portable part. `slng: check_order` is the same on
-livekit, pipecat and slng, and nothing about the tool file changes between
-them. The twilio target refuses hosted tools.
-
-What does not travel is one package selecting slng **and** a code target at
-once. A code target needs a `turn:` binding to place its end-of-turn detector,
-the slng target refuses one because SLNG runs its own turn taking, and a
-per-target `models:` override cannot add a binding the agent does not define.
-So the code-target build is a second package with the same tool files in it:
-
-```text
-my-agent/            targets.yaml selects slng, no turn binding
-  tools/check_order.yaml         slng: check_order
-my-agent-livekit/    targets.yaml selects livekit, agent.yaml adds turn
-  tools/check_order.yaml         the same one line
-  tools/check_order.slng.json    written by unmute pull
-```
+**A `slng:` tool is SLNG-only for now.** SLNG needs nothing from your package beyond
+the name. Version 2 on livekit and pipecat does not compile hosted tools yet. When
+it does, they will need a real copy of the tool's definition, which `unmute pull`
+fetches.
 
 For a scalar reference, the pin that proves the mirror is still the one your
 package means goes into a generated `tools/<name>.slng.meta.json` beside the

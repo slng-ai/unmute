@@ -192,9 +192,10 @@ lk --project "<project>" agent create --region "<region>" --secrets-file .env
 ```
 
 Later changes use `lk --project "<project>" agent deploy .`, which updates the
-agent in `livekit.toml` rather than creating a second one. Pass
-`--secrets-file .env` whenever the declared name set changes: the generated agent
-checks its whole list the moment a SIP caller arrives, so a missing name fails
+agent in the `livekit.toml` that `lk agent create` wrote, rather than creating a
+second one. Pass
+`--secrets-file .env` (copy it from `.env.example`) whenever the declared name
+set changes: the generated agent checks its whole list the moment a SIP caller arrives, so a missing name fails
 the call and not the build.
 
 ### 3: the carrier
@@ -228,23 +229,25 @@ public SIP signalling address of the LiveKit SIP service they deployed.
 
 ### 4: the two LiveKit records
 
-`unmute compile` writes `sip-inbound-trunk.json` and `sip-dispatch-rule.json`
-into `build/livekit/`. Those are the inputs, and they carry fields the `lk` flags
-cannot express. Never edit `build/`: change the package and compile again.
+`unmute compile` writes no SIP files. Unmute does not write the trunk or the
+dispatch rule yet, so the author writes both as JSON files beside the project
+and passes them to `lk`. The JSON carries fields the `lk` flags cannot express.
+Never put them in `build/`: compile replaces that folder.
 
-Each file holds exactly one `${...}` placeholder: the phone number in the trunk
-input, the trunk ID in the rule. Both commands take the file as an argument, so
-tell the author to edit the placeholder and run the command. Do not hand them a
-`sed` pipeline.
+The trunk file holds the phone number in E.164 form and sets no authentication.
+The rule file is an individual rule whose `roomConfig.agents` names the deployed
+agent, and it holds the trunk ID. Take the field names from LiveKit's SIP
+documentation. Both commands take the file as an argument, so tell the author to
+edit the placeholder and run the command. Do not hand them a `sed` pipeline.
 
-1. In `sip-inbound-trunk.json`, replace the placeholder with the number in E.164
-   form, then `lk --project "<project>" sip inbound create sip-inbound-trunk.json`.
+1. In `sip-inbound-trunk.json`, put the number in E.164 form, then
+   `lk --project "<project>" sip inbound create sip-inbound-trunk.json`.
 2. Copy the `ST_` ID it prints into `sip-dispatch-rule.json` in place of its
    placeholder, then
    `lk --project "<project>" sip dispatch create sip-dispatch-rule.json`.
 
 Stop if the first command prints no ID: a rule with the placeholder still in it
-matches every trunk in the project. Compiling again rewrites both files.
+matches every trunk in the project.
 
 **Never offer the `lk` flags instead of the JSON.** Two flag sets look
 equivalent and are not:
@@ -254,8 +257,8 @@ equivalent and are not:
   the caller hears ringing forever.
 - `sip inbound create --auth-user/--auth-pass` makes a trunk that challenges
   incoming INVITEs for a SIP password. Carrier origination sends none, because it
-  identifies itself by source IP, so every call is rejected. The generated JSON
-  sets no authentication, which is correct here. To restrict inbound, use
+  identifies itself by source IP, so every call is rejected. Write the trunk JSON
+  with no authentication, which is correct here. To restrict inbound, use
   `allowedAddresses` with the carrier's signalling IP ranges, never digest auth.
 
 Check both records:
@@ -284,9 +287,9 @@ The symptom is rarely near the cause.
 
 | What they see | What it is | Fix |
 |---|---|---|
-| carrier call log says failed, 0 seconds, 0 cost | the inbound trunk has `authUsername` set | recreate the trunk from the generated JSON, which sets no auth |
+| carrier call log says failed, 0 seconds, 0 cost | the inbound trunk has `authUsername` set | recreate the trunk from a JSON file that sets no auth |
 | records in an account nobody expected | a bare `lk` command used the default project | always pass `--project`, delete the strays, create them again |
-| the phone rings forever, nobody answers | the rule's Agents column is empty, or the named agent is not deployed | recreate the rule from the JSON, check `lk agent list` |
+| the phone rings forever, nobody answers | the rule's Agents column is empty, or the named agent is not deployed | recreate the rule from your JSON, check `lk agent list` |
 | nothing in the carrier call log at all | no origination URL, or the number is not on the trunk | part 3, especially the Numbers tab |
 | everything looks right, still nothing | the number is on a SIP trunk, so its voice configuration is ignored | one route per number |
 | the deploy worked, behaviour is the old one | deployed from a branch without the SIP changes | deploy from the branch that has them |
@@ -311,14 +314,14 @@ real call through the carrier. Say this plainly before a user assumes a working
 unmute compile examples/salon-concierge --target pipecat
 ```
 
-Deploy the emitted project, then follow the Telephony setup section of its
-`README.md` for the exact carrier steps that route and that carrier need. See
+Deploy the emitted project with its platform's own tool and the `Dockerfile`,
+then follow the docs pages below for the exact carrier steps that route and that
+carrier need. Unmute writes no build `README.md` for livekit or pipecat. See
 `docs-site/telephony/overview.mdx` and `docs-site/transfers/overview.mdx` for
 the user-facing version of the routes and the transfer shapes,
 `docs-site/telephony/pipecat-twilio.mdx` for the Pipecat `cloud-websocket` route
 end to end, and `deploy.md` in this bundle for going live. Never invent carrier
-markup: the emitted runbook dictates it, and that page explains what each part
-of it is for.
+markup: those pages give it and explain what each part of it is for.
 
 ## The boundary Unmute does not cross
 
@@ -329,8 +332,7 @@ carrier trunk, or a carrier subaccount. It does not sign anyone up to Twilio,
 Telnyx, Plivo, or Daily.
 
 What Unmute does is generate the code for the route. Everything that reaches an
-existing number, a trunk, or a carrier console is a step in the generated
-runbook, done by hand, after a deploy.
+existing number, a trunk, or a carrier console is a step done by hand, after a deploy.
 
 What the operator does by hand:
 
@@ -341,14 +343,14 @@ What the operator does by hand:
 | put the values in the environment variables the connection names |
 | enable any account permission the route needs, for example dial-out on a Daily domain |
 | paste the markup, attach the number, or configure the trunk, as the generated runbook says |
-| on LiveKit `sip`, create the inbound trunk and the dispatch rule with `lk`, from the JSON files compile wrote |
+| on LiveKit `sip`, create the inbound trunk and the dispatch rule with `lk`, from JSON files you write |
 
-**Unmute never creates a LiveKit SIP record either.** It writes the two JSON
-inputs and nothing else runs `lk`. There is no setup script to point anyone at.
+**Unmute never creates a LiveKit SIP record either.** It writes no SIP JSON and
+nothing else runs `lk`. There is no setup script to point anyone at.
 
-The generated `build/<target>/README.md` carries the exact carrier steps for
-that route and that carrier. Point the user at it rather than repeating a
-half-remembered version.
+The docs pages carry the exact carrier steps for that route and that carrier.
+Point the user at them rather than repeating a half-remembered version. The slng
+and twilio builds still write a `README.md` runbook.
 
 ## Outbound
 
