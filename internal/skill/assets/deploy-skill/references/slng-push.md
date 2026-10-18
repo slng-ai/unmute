@@ -37,7 +37,7 @@ useful package and one that fails at the push:
 |---|---|
 | every `builtin:` tool, by the **tool file's own name** | a control, because the compiled body carries no reference to one |
 | every `slng:` reference, against the organisation's tools and the latest published version | a `webhook:` tool: refused before this step is reached. A `local:` tool is published first, in the code tool step below |
-| every `inject:` argument on a `slng:` reference, against that version's published parameters | |
+| every `with:` argument on a `slng:` reference, against that version's published parameters | |
 | every MCP server named by an `mcp:` tool, and every tool listed under `mcp.tools` | |
 | every vault secret and variable, including one a hosted tool or MCP server needs that nothing in the package declares | |
 | two tool files resolving to the same hosted tool, refused before anything is staged and naming both | |
@@ -48,10 +48,10 @@ creates a tool, so there is nothing else to try. A committed mirror pinned to a 
 organisation has since moved past only warns, because the agent calls the
 organisation's latest published version either way, checked fresh on every run;
 a package with no mirror has nothing to compare and gets no warning either way.
-An injected argument that does not fit the published parameters stops the run,
+A `with:` argument that does not fit the published parameters stops the run,
 naming the tool, the argument, the version checked and the file that supplied it.
 
-**Three things stop an `inject:` value, and none of them is "the value is
+**Three things stop a `with:` value, and none of them is "the value is
 wrong".** The parameter is not declared, so an attachment has nowhere to bind it.
 The parameter's type is not settled to a single scalar, so the platform will not
 pin it: a parameter that could be a string or an integer, that declares no type,
@@ -78,9 +78,10 @@ the arguments a system-invoked attachment carries, or a setting of a curated
 capability that the package does not pin. A setting the package **does** pin is
 compared rather than called lost, so pinning a timezone never reads as deleting
 one. The sentence the agent speaks before a
-tool runs is **not** on that list, because a package declares it with `announce:`:
-the preview compares the two and says nothing when they match, so never tell a
-user that deploying will delete an announcement their own tool file declares.
+tool runs is **not** on that list, because a package declares it with `start:` and
+`say:` on the tool's entry in `agent.yaml`: the preview compares the two and
+says nothing when they match, so never tell a user that deploying will delete an
+announcement their own package declares.
 Never tell a user that a schema comparison proves a tool's behaviour is
 unchanged: it proves only that the contract is, or is not, the same shape. A dry
 run changes no live state, no authored file and no mirror.
@@ -105,8 +106,8 @@ The names, read 2026-08-31: `end_call`, `transfer_call`, `voicemail_detection`,
 table, with the settings each one takes.
 
 **Use `builtin:` when the capability takes a setting.** A setting is written with
-`inject:` and reaches the attachment's configuration only through that block.
-Under `slng:` an `inject:` becomes an *argument*, and a curated capability
+`with:` and reaches the attachment's configuration only through that block.
+Under `slng:` a `with:` becomes an *argument*, and a curated capability
 publishes an empty argument schema, so validate refuses that combination and
 names the `builtin:` spelling to use instead.
 

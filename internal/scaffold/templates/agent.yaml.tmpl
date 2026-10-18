@@ -61,21 +61,18 @@ agents:
 [[range $tasks]]      - name: [[.Name]]
         when: [[quote .When]]
         instructions: [[.PromptPath]]
-[[if .Announce]]        announce: [[announce 10 .Announce]]
-[[end]][[$taskTools := $.TaskTools .Name]][[if $taskTools]]        tools:
-[[range $taskTools]]          - [[.]]
-[[end]][[end]][[$taskHandoffs := $.TaskHandoffs .Name]][[if $taskHandoffs]]        handoffs:
+[[if .Start]]        start:[[yamlValue 10 .Start]]
+[[end]][[$taskTools := $.TaskToolEntries .]][[if $taskTools]]        tools:[[yamlValue 10 $taskTools]]
+[[end]][[$taskHandoffs := $.TaskHandoffs .Name]][[if $taskHandoffs]]        handoffs:
 [[range $taskHandoffs]]          - [[.]]
 [[end]][[end]][[if .Model]]        think: [[.Model]]
-[[end]][[if .Finish]]        finish:[[finishBlock 10 .Finish]]
-[[end]][[if .Opening]]        opening: [[.Opening]]
-[[end]][[if .Assign]]        assign:[[pairs 10 .Assign]]
-[[end]]        context:
-          history: [[if .History]][[.History]][[else]]messages[[end]]
-[[if .MaxMessages]]          max_messages: [[.MaxMessages]]
+[[end]][[if .Assign]]        save:[[pairs 10 .Assign]]
+[[end]][[if or (and .History (ne .History "messages")) .MaxMessages .Summarizer .IncludeToolCalls]]        context:
+[[if .History]]          history: [[.History]]
+[[end]][[if .MaxMessages]]          max_messages: [[.MaxMessages]]
 [[end]][[if .Summarizer]]          summarizer: [[.Summarizer]]
 [[end]][[if .IncludeToolCalls]]          include_tool_calls: [[boolValue .IncludeToolCalls]]
-[[end]][[end]][[end]][[$groups := $.AgentTaskGroups .Name]][[if $groups]]    task_groups:
+[[end]][[end]][[end]][[end]][[$groups := $.AgentTaskGroups .Name]][[if $groups]]    task_groups:
 [[range $groups]]      - [[.]]
 [[end]][[end]][[$handoffs := $.AgentHandoffs .Name]][[if $handoffs]]    handoffs:
 [[range $handoffs]]      - [[.]]
@@ -261,9 +258,8 @@ knowledge:
       provider: livekit
       model: turn-detector-mini
 [[end]][[end]]
-[[if .Tools]]tools:
-[[range .Tools]]  - [[.Name]]
-[[end]]
+[[if .Tools]]tools:[[yamlValue 2 .TopToolEntries]]
+
 [[end]]conversation:
   greeting:
     speaks_first: [[.SpeaksFirst]]

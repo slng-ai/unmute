@@ -8,5 +8,5 @@ description: Send a text message to the guest's confirmed mobile number. Use it 
 builtin:
   id: send_sms
 
-inject:
+with:
   - from_number: "+447450306381"

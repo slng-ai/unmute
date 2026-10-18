@@ -16,7 +16,7 @@ On this page:
 - [Give the task a tool the owner does not have](#give-the-task-a-tool-the-owner-does-not-have) - the one that decides entry
 - [Order steps with the prompt](#order-steps-with-the-prompt) - two sentences, no gate
 - [Keep a read on the owner](#keep-a-read-on-the-owner-keep-the-write-on-the-task) - and the write on the task
-- [Let the tool end the task](#let-the-tool-end-the-task) - `finish:` and its success values
+- [Let the tool end the task](#let-the-tool-end-the-task) - an outcome with `then: done`
 - [Scope history down](#scope-history-down-and-let-saved-values-carry-the-facts) - what each scope shows
 - [Give every task an escape](#give-every-task-an-escape-and-read-it) - `unserved_request`, and reading it
 - [Do not let two prompts disagree](#do-not-let-two-prompts-disagree) - owner and task together
@@ -24,7 +24,7 @@ On this page:
 ## Give the task a tool the owner does not have
 
 If the owner already holds every tool the task holds, the owner can finish the
-job without entering the task. It usually will. The task's `assign:` then never
+job without entering the task. It usually will. The task's `save:` then never
 runs and nothing is saved.
 
 This is the shape that produces it. A scheduling desk declared:
@@ -38,7 +38,7 @@ scheduling_desk:
     - name: take_booking
       tools:
         - book_appointment
-      assign:
+      save:
         - appointment: result.appointment
 ```
 
@@ -67,7 +67,7 @@ which the compiler reads. Read the warning and decide.
 </Note>
 
 A task that declares no tools at all is fine. Its prompt, context choice, and
-saved assignments are reasons to enter it that have nothing to do with tools.
+saved values are reasons to enter it that have nothing to do with tools.
 
 ## Order steps with the prompt
 
@@ -105,7 +105,7 @@ The verified customer is {{state.customer_id}}. Once that value is present, veri
 succeeded. Never run that task again unless the caller says the number is wrong.
 ```
 
-A tool that silently reads a value, through `inject:` or a webhook path, still
+A tool that silently reads a value, through `with:` or a webhook path, still
 refuses to run while that value is empty or unconfirmed. The model is told
 which task supplies it. When nothing supplies it, the model is told to ask the
 caller.
@@ -129,26 +129,26 @@ route to the thing the caller is asking for.
 
 ## Let the tool end the task
 
-When a task's work ends on one tool, name that tool under `finish:` with the
-result values that count as success. The task then ends on the tool's own
-success result, saves its `assign:` from that result, and never waits for the
-model to make the `finish` call. A result that is not a success goes back to
+When a task's work ends on one tool, give that tool an entry in the step's
+`tools:` with an outcome that says `then: done`. The task then ends on the
+tool's own success result, saves its `save:` rows from that result, and never
+waits for the model to end the step. A result no outcome matches goes back to
 the model and the task stays open.
 
 ```yaml agent.yaml
     - name: take_booking
       tools:
-        - book_appointment
-      finish:
-        - tool: book_appointment
-          success:
-            - status: booked
-      assign:
+        - name: book_appointment
+          outcomes:
+            - if:
+                - status: booked
+              then: done
+      save:
         - appointment: result.appointment
 ```
 
-The tool has to declare the success values in its output `enum:`, and every
-tool under `finish:` has to return what `assign:` saves. See
+The `if:` names a field of the tool's `output:`, and the tool has to return
+what `save:` reads. See
 [Say what success looks like](/build/orchestration/tasks#say-what-success-looks-like).
 
 ## Scope history down and let saved values carry the facts

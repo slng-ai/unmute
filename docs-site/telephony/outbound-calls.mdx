@@ -200,7 +200,7 @@ explains. The list takes three keys.
 <ParamField path="source" type="call_start | conversation | a system call fact">
   Where the value comes from. `call_start` is the dispatch payload, which
   `--var` stands in for. `conversation` is a value the model records mid-call.
-  The eight system facts are listed below. Left out, a task's `assign:` fills
+  The eight system facts are listed below. Left out, a task's `save:` fills
   it. A `call_start` field needs a default in `state.py` when the channel is also
   inbound, because an inbound call carries no dispatch payload.
 </ParamField>

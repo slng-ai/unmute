@@ -93,7 +93,10 @@ tools:
   - find_or_create_customer
   - find_slots
   - save_booking
-  - record_complaint
+  - name: record_complaint
+    start:
+      say:
+        - Let me get that written down.
   - look_up_refund_policy
   - look_up_salon_info
   - end_call

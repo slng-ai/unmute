@@ -151,7 +151,7 @@ func TestTwilioRefusesTheVersion2KeysItsRuntimeCannotRun(t *testing.T) {
 	tool := agent.Tools["opening_hours"]
 	tool.Replies = []ir.Reply{{When: map[string][]string{"open": {"true"}}, Say: []string{"We're open."}}}
 	agent.Tools["opening_hours"] = tool
-	if _, err := Generate(agent, resolved, target.Default()); err == nil || !strings.Contains(err.Error(), "cannot run tools/opening_hours.yaml replies") {
+	if _, err := Generate(agent, resolved, target.Default()); err == nil || !strings.Contains(err.Error(), "cannot run agent.yaml tools: opening_hours outcomes") {
 		t.Fatalf("a reply compiled for twilio, or was refused for another reason: %v", err)
 	}
 }

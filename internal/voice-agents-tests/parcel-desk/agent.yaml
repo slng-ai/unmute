@@ -25,44 +25,44 @@ agents:
         when: The caller asks where a parcel is.
         instructions: tasks/track-parcel.md
         tools:
-          - find_parcel
-        finish:
-          - tool: find_parcel
-            success:
-              - found:
-                  - true
-        assign:
+          - name: find_parcel
+            outcomes:
+              - if:
+                  - found:
+                      - true
+                then: done
+        save:
           - parcel: result.parcel
 
       - name: change_delivery
         instructions: tasks/change-delivery.md
         tools:
-          - reschedule_delivery
-        finish:
-          - tool: reschedule_delivery
-            success:
-              - status:
-                  - rescheduled
+          - name: reschedule_delivery
             confirm:
               - "Shall I move the delivery to {{state.day}}?"
-            say:
-              - "Done, it now arrives on {{state.parcel.delivery_day}}."
-        assign:
+            outcomes:
+              - if:
+                  - status:
+                      - rescheduled
+                say:
+                  - "Done, it now arrives on {{state.parcel.delivery_day}}."
+                then: done
+        save:
           - day: input.day
           - parcel: result.parcel
 
       - name: callback_note
         instructions: tasks/callback-note.md
         tools:
-          - save_callback_note
-        finish:
-          - tool: save_callback_note
-            success:
-              - saved:
-                  - true
-            say:
-              - Thanks, someone will call you back today. Goodbye.
-        assign:
+          - name: save_callback_note
+            outcomes:
+              - if:
+                  - saved:
+                      - true
+                say:
+                  - Thanks, someone will call you back today. Goodbye.
+                then: done
+        save:
           - callback_note: result.note
 
 task_groups:
@@ -127,8 +127,15 @@ models:
       pace: balanced
 
 tools:
-  - find_parcel
-  - reschedule_delivery
+  - name: find_parcel
+    start:
+      say:
+        - Let me look that up.
+        - One moment.
+  - name: reschedule_delivery
+    start:
+      say:
+        - Let me book that in.
   - save_callback_note
   - end_call
 

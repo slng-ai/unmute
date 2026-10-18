@@ -76,7 +76,7 @@ func TestBuildResolvesAPlaceholderPath(t *testing.T) {
 			mutate: func(pkg *packagespec.Package) {
 				pkg.Markdown["instructions.md"] += "\n{{state.appointments.scheduled_date}}\n"
 			},
-			want: "references {{appointments.scheduled_date}}: appointments is list[Appointment], and a path cannot name a field inside a list: nothing says which entry it means. Record the entry you need into its own variable with assign:",
+			want: "references {{appointments.scheduled_date}}: appointments is list[Appointment], and a path cannot name a field inside a list: nothing says which entry it means. Record the entry you need into its own variable with save:",
 		},
 		{
 			name: "a plain variable has no fields",

@@ -36,16 +36,18 @@ agents:
       - name: verify_identity
         when: The caller needs to confirm who they are before a booking is looked up or changed.
         instructions: tasks/verify.md
-        assign:
+        save:
           - phone_number: result.phone_number
 
       # No when: on purpose. The book group is the only way in.
       - name: take_booking
         instructions: tasks/booking.md
-        announce: Let me have a look.
+        start:
+          say:
+            - Let me have a look.
         tools:
           - check_availability
-        assign:
+        save:
           - booking: result.booking
           - notes+: result.note
         context:

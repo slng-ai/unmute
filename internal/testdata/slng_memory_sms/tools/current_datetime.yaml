@@ -5,7 +5,7 @@ builtin:
 
 # The capability's own setting, not an argument: the curated tool defaults to
 # UTC and belongs to no organisation, so the zone is pinned on the attachment.
-inject:
+with:
   - timezone: "America/Los_Angeles"
 
 effect: returns_data

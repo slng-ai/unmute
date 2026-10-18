@@ -254,7 +254,7 @@ variables:
 Until they say yes, the value is held back:
 
 - no prompt can use it, except that one step's own;
-- during the conversation, a tool that reads it through `inject:` or a webhook
+- during the conversation, a tool that reads it through `with:` or a webhook
   path refuses to run until it is confirmed. A prefetch lookup may still read
   the candidate so it can prepare a record before the greeting.
 
@@ -269,7 +269,7 @@ The call came from {{state.customer_phone}}. If there is a number there, read it
 and ask if it is the right one for the booking. If it is empty, ask for a number.
 ```
 
-The task must save the agreed number to clear confirmation. Add the assignment
+The task must save the agreed number to clear confirmation. Add a `save:` row
 to the confirming task:
 
 ```yaml agent.yaml
@@ -279,7 +279,7 @@ agents:
       - name: verify_customer
         when: Confirm the customer's number before using their account.
         instructions: tasks/verify-customer.md
-        assign:
+        save:
           - customer_phone: result.phone
 ```
 
@@ -471,7 +471,7 @@ result. Text is fine, and so is a `date`, a `time`, a checked phone number or an
 `Literal` works when the tool's own field declares the same set.
 
 **Fix:** run the lookup in a [task](/build/orchestration/tasks) and save the
-result through task `assign:`. The refusal names the step to assign it from.
+result through the step's `save:`. The refusal names the step to save it from.
 
 ### A value arrives empty on every call
 

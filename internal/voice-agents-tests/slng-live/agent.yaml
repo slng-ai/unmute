@@ -38,24 +38,25 @@ agents:
       - name: verify_identity
         when: The caller needs to confirm who they are before a booking is made.
         instructions: tasks/verify.md
-        assign:
+        save:
           - phone_number: result.phone_number
 
       # No when: on purpose. The book group is the only way in.
       - name: take_booking
         instructions: tasks/booking.md
-        announce: Let me have a look.
+        start:
+          say:
+            - Let me have a look.
         tools:
           - find_free_slots
-          - book_slot
-        # One tool ends the step, as SLNG runs today.
-        finish:
-          - tool: book_slot
-            success:
-              - status: booked
-            say:
-              - "Thanks for having us. You're booked for {{state.booking.time}} on {{state.booking.day}}."
-        assign:
+          - name: book_slot
+            outcomes:
+              - if:
+                  - status: booked
+                say:
+                  - "Thanks for having us. You're booked for {{state.booking.time}} on {{state.booking.day}}."
+                then: done
+        save:
           - booking: result.booking
     task_groups:
       - book

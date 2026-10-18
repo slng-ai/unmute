@@ -46,8 +46,8 @@ These files extend an existing package that declares `customer_id`. Add
 ```yaml tools/cancel_appointment.yaml expandable wrap
 description: Cancel the appointment outright. Call it only when the customer says plainly that they want to cancel, never when they want a different time.
 
-inject:
-  - customer_id: "{{state.customer_id}}"
+with:
+  - customer_id: "state.customer_id"
 
 local:
   handler: tools/cancel_appointment.py:cancel_appointment
@@ -67,7 +67,7 @@ def cancel_appointment(customer_id: str) -> Cancellation:
 ```
 
 Those two are a worked example rather than a quote: they are the smallest shape
-that shows a handler receiving an injected value. For real ones, every tool in
+that shows a handler receiving a value from State. For real ones, every tool in
 `examples/salon-concierge` is a local handler, and all of them share the one
 `tools/salon.py`.
 
@@ -88,32 +88,38 @@ The function does not need the tool's name, and one file can hold many tools. In
 | Rule | Why |
 |---|---|
 | every parameter has a type | the type becomes the model's input schema |
-| the return type is a Pydantic model | its fields are the tool's output, which `assign:`, `finish:` and `replies:` read |
+| the return type is a Pydantic model | its fields are the tool's output, which `save:` and `outcomes:` read |
 | a `Field(description=...)` on a parameter says what it means | the model reads that text |
-| a parameter named by `inject:` is not the model's | it takes its value from State, so the model never sees it |
+| a parameter named by `with:` is not the model's | it takes its value from State, so the model never sees it |
 
 The handler above takes `customer_id` and the model is never asked for it,
-because `customer_id` is injected. The model never sees that value and cannot
+because `customer_id` comes from `with:`. The model never sees that value and cannot
 invent one. Put a description on a parameter with
 `Annotated[str, Field(description="...")]`.
 
 ## When the handler is slow
 
 A local handler that reads a calendar or a database keeps the caller waiting the
-same way a webhook does. `announce:` gives the agent one fixed sentence to speak
-as the handler starts, and it does not wait for that sentence to finish, so the
+same way a webhook does. `start: say:` on the tool's entry in `agent.yaml` gives the agent one fixed sentence
+to speak as the handler starts. It does not wait for that sentence to finish, so the
 result arrives no later than it would in silence:
 
 ```yaml tools/record_complaint.yaml
 local:
   handler: tools/salon.py:record_complaint
+```
 
-announce: Let me get that written down.
+```yaml agent.yaml
+tools:
+  - name: record_complaint
+    start:
+      say:
+        - Let me get that written down.
 ```
 
 That one is real, from `examples/salon-concierge`. Keep the line shorter than the
 gap it covers: a long one runs into the answer and breaks its own promise of a
-wait. The fixtures above carry no `announce:`, because they return instantly and a
+wait. The fixtures above carry no `start:`, because they return instantly and a
 tool that speaks before doing nothing slow is just noise. Full rules in
 [the behavior fields](/build/tools/overview#the-three-behavior-fields).
 
@@ -122,7 +128,7 @@ when the tool is **called**, not when it succeeds, so a tool that can refuse the
 call will sometimes promise something it then does not do. The salon's booking
 tool refuses a save that arrives unconfirmed, and the caller heard "putting that
 through now" followed by a question asking their permission. And only one line
-belongs in a turn: a task group's own `announce:` and a tool's fire together when
+belongs in a turn: a task group's own `announce:` and a tool's `start: say:` fire together when
 the group's first step calls that tool, which the caller hears as two promises to
 go and look.
 

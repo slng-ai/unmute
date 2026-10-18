@@ -1,8 +1,7 @@
 """What one salon call knows, shared by both agents and every task.
 
-Ported from unmute-core's examples/salon-concierge-unmute. The values after
-``customer_verified`` are what the lines code speaks read: agent.yaml version 2 lines read
-only State, so each step saves what its read-back or its offer names first.
+Ported from unmute-core's examples/salon-concierge-unmute. A line code speaks reads the
+tool's input or result directly, so nothing is saved here only to be said.
 """
 
 from datetime import date, time
@@ -63,12 +62,3 @@ class State(BaseModel):
             "was verified yet. Customer care reads it instead of the phone number."
         ),
     )
-    number_heard: Phone | None = Field(
-        None, description="The number the caller gave, read back before verification runs."
-    )
-    chosen_service: Literal["haircut", "hair-color", "blowout"] | None = Field(
-        None, description="The service a booking or a cancellation reads back."
-    )
-    chosen_day: date | None = Field(None, description="The day a booking, move or cancel reads back.")
-    chosen_time: time | None = Field(None, description="The time a booking, move or cancel reads back.")
-    offer: str = Field("", description="The offer find_slots last returned, said by code.")

@@ -122,7 +122,7 @@ for.
 **One verification step, named by both agents.** `verify_customer` is defined
 once, on the concierge, and customer care names it as a bare
 `- verify_customer`. It has to be in reach there, because `record_complaint`
-injects `customer_phone` and is refused while the caller has not agreed to it,
+pins `customer_phone` with `with:` and is refused while the caller has not agreed to it,
 and a caller who opens with a complaint has never been near the booking flow.
 
 It was the concierge's alone until September 2026, with `to_concierge` as the
@@ -162,13 +162,13 @@ flowchart TD
    typed `arguments:`: `requested_service`, `requested_day`, `requested_intent`.
 2. `verify_customer` runs only while the number is not confirmed
    (`skip_when_confirmed: customer_phone`). With no saved number it asks for one
-   and listens (`opening: listen`). With a saved number it opens on the lookup.
+   and listens (`start:` with `say:` and `listen: true`). With a saved number it opens on the lookup.
 3. The model calls `find_or_create_customer` with the number. Code reads it back
    (`confirm:`), and the lookup runs on the caller's yes. The model never asks
    for the yes itself.
 4. `manage_booking` opens by calling `find_slots` in code, with the group's
-   arguments (`opens_with:`). The tool returns the offer as a sentence, and code
-   says it (`say: {{state.offer}}`). No model request.
+   arguments (`start:` with `call:` and `with:`). The tool returns the offer as a sentence, and its outcome
+   says it (`say: {{result.offer}}`). No model request.
 5. The caller picks a time. The model calls `book_appointment`,
    `move_appointment` or `cancel_appointment`. Code reads the change back, and
    the write runs on the yes.
@@ -195,9 +195,9 @@ is this salon written by hand on the library.
 | Before | Now |
 |---|---|
 | One `save_booking` tool with `action` and a `confirmed` flag the model set | `book_appointment`, `move_appointment`, `cancel_appointment`. Code reads each one back, so there is no `confirmed` flag |
-| The model read the number and the booking back | Code reads them back (`confirm:`) |
+| The model read the number and the booking back | Code reads them back (`confirm:`, from `{{input.x}}`) |
 | The model offered the free times | `find_slots` returns the offer, and code says it |
-| `Appointment.spoken` held the sentence to read | Code says the typed day and time in the receipt (`say:`) |
+| `Appointment.spoken` held the sentence to read | Code says the typed day and time in the receipt (an outcome `say:`) |
 | `to_complaints` was silent | It says "I'm sorry to hear that. Let me take this down properly." first |
 | 2 to 3 model requests on a booking turn | 1 |
 | `phonenumbers` and `pydantic-extra-types` for the phone type | unmute-core's `Phone` and `Id` |
@@ -216,14 +216,17 @@ a completed or unserved status. It does not copy the task's conversation back.
 **Typed values shared on purpose.** Booking saves `appointment`, a Pydantic model
 in `state.py`, only after a book, move or cancellation succeeds. The owner and
 customer care read it through explicit `{{state.appointment}}` prompt references, so a later complaint can refer to the updated date
-without asking again. Tools inject the confirmed phone number. No value is
+without asking again. Tools pin the confirmed phone number with `with:`. No value is
 automatically added to a prompt.
 
-**Five variables, and each one is read somewhere.** A saved value costs a task
+**Each field on `State` is read somewhere.** A saved value costs a step
 to write and a line in every prompt that names it, so a value nothing reads is
 pure cost. This package used to carry a `customer_status` that only ever said
 what `confirm:` already enforced, and a name and an on-file flag that no prompt
-mentioned at all. They are gone. See
+mentioned at all. They are gone, and so are the helper fields `chosen_service`,
+`chosen_day`, `chosen_time`, `number_heard` and `offer`: a read-back reads
+`{{input.x}}` and a receipt or offer reads `{{result.x}}`, so nothing is saved
+just to be said once. See
 [choosing fewer variables](https://unmute.ai/build/variables#keep-only-the-values-the-call-needs).
 
 ## Before the greeting

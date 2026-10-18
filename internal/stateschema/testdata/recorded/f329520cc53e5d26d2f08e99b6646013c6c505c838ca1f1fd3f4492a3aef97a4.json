@@ -1,6 +1,6 @@
 {
   "source": "examples/salon-concierge/state.py",
-  "digest": "44688eb75ff89fe8cde056d8bc0cbc56dca62a50b450f444dda5303b1654cea4",
+  "digest": "f329520cc53e5d26d2f08e99b6646013c6c505c838ca1f1fd3f4492a3aef97a4",
   "report": {
     "schema": {
       "$defs": {
@@ -168,72 +168,6 @@
           "default": "",
           "description": "What verification found on this call: existing or created. Empty means nobody was verified yet. Customer care reads it instead of the phone number.",
           "title": "Customer Verified",
-          "type": "string"
-        },
-        "number_heard": {
-          "anyOf": [
-            {
-              "format": "phone",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "The number the caller gave, read back before verification runs.",
-          "title": "Number Heard"
-        },
-        "chosen_service": {
-          "anyOf": [
-            {
-              "enum": [
-                "haircut",
-                "hair-color",
-                "blowout"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "The service a booking or a cancellation reads back.",
-          "title": "Chosen Service"
-        },
-        "chosen_day": {
-          "anyOf": [
-            {
-              "format": "date",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "The day a booking, move or cancel reads back.",
-          "title": "Chosen Day"
-        },
-        "chosen_time": {
-          "anyOf": [
-            {
-              "format": "time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "The time a booking, move or cancel reads back.",
-          "title": "Chosen Time"
-        },
-        "offer": {
-          "default": "",
-          "description": "The offer find_slots last returned, said by code.",
-          "title": "Offer",
           "type": "string"
         }
       },

@@ -41,9 +41,10 @@ agents:
       # groups turned out to produce no speech at all on Pipecat (trace
       # 5a330c65).
       - name: find_slot
-        announce:
-          - Let me see what is open.
-          - One moment, let me look at the book.
+        start:
+          say:
+            - Let me see what is open.
+            - One moment, let me look at the book.
         instructions: tasks/find_slot.md
         tools:
           - check_availability

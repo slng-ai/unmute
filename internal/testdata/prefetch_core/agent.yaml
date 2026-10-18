@@ -24,9 +24,11 @@ agents:
     tasks:
       - name: verify_caller
         when: Confirm who you are speaking to.
-        announce: One moment while I check.
+        start:
+          say:
+            - One moment while I check.
         instructions: tasks/verify_caller.md
-        assign:
+        save:
           - caller_phone: result.caller_phone
         context:
           history: full

@@ -110,7 +110,7 @@ func TestTwilioRefusesWhatItDoesNotRun(t *testing.T) {
 		{"tool announce", func(a *Agent, _ *Target) {
 			a.Tools["find"] = Tool{Execution: ToolLocal, Handler: "tools/find.py", HandlerSource: "def find():\n    return {}\n", Announce: []string{"One moment."}}
 			addTool(a, "find")
-		}, "announce"},
+		}, "start: say:"},
 		{"tool cancel", func(a *Agent, _ *Target) {
 			a.Tools["find"] = Tool{Execution: ToolLocal, Handler: "tools/find.py", HandlerSource: "def find():\n    return {}\n", Interruption: ToolCancel}
 			addTool(a, "find")

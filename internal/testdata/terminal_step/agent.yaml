@@ -28,43 +28,46 @@ agents:
         when: The caller has not been identified, or corrects their number.
         instructions: tasks/verify.md
         tools:
-          - look_up
-        finish:
-          - tool: look_up
-            success:
-              - status:
-                  - existing
-                  - created
-        assign:
+          - name: look_up
+            outcomes:
+              - if:
+                  - status:
+                      - existing
+                      - created
+                then: done
+        save:
           - customer_phone: result.customer_phone
 
       # Ends on either of its two mutations, and can hand the caller out.
       - name: book
         instructions: tasks/book.md
         tools:
-          - book_it
-          - cancel_it
+          - name: book_it
+            outcomes:
+              - if:
+                  - status: booked
+                then: done
+          - name: cancel_it
+            outcomes:
+              - if:
+                  - status: cancelled
+                then: done
         handoffs:
           - to_care
-        finish:
-          - tool: book_it
-            success:
-              - status: booked
-          - tool: cancel_it
-            success:
-              - status: cancelled
-        assign:
+        save:
           - booking: result.booking?
       # Opens by speaking one fixed line and waiting, with the step's own
       # history reset, which is the pair that proves the line survives.
       - name: take_note
         when: The caller wants a note left for the stylist.
-        announce: What would you like me to pass on?
-        opening: listen
+        start:
+          say:
+            - What would you like me to pass on?
+          listen: true
         instructions: tasks/take_note.md
         context:
           history: reset
-        assign:
+        save:
           - note: result.note
     task_groups:
       - do_book

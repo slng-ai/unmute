@@ -17,10 +17,10 @@ func TestVersionKeys(t *testing.T) {
 			"entry_by: is a version 2 key; write version: 2"},
 		{"a version 2 key deep in a step under version 1",
 			Package{Agent: AgentFile{Version: 1, Agents: map[string]AgentDef{"desk": {Tasks: []TaskItem{{Task: &Task{
-				Finish: []FinishEntry{{Tool: "save", Confirm: []string{"Shall I?"}}}}}}}}}},
+				ToolEntries: []ToolEntry{{Name: "save", Confirm: []string{"Shall I?"}}}}}}}}}},
 			"confirm: is a version 2 key"},
 		{"a version 2 tool key under version 1",
-			Package{Agent: AgentFile{Version: 1}, Tools: map[string]Tool{"find": {Local: local(""), Hidden: []string{"x"}}}},
+			Package{Agent: AgentFile{Version: 1, Tools: []ToolEntry{{Name: "find", Hidden: []string{"x"}}}}},
 			"hidden: is a version 2 key"},
 		{"a handler naming a function under version 1",
 			Package{Agent: AgentFile{Version: 1}, Tools: map[string]Tool{"find": {Local: local("tools/salon.py:find")}}},

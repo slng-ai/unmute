@@ -44,10 +44,10 @@ stop anywhere and come back.
 2. **Give the agent a tool** - a lookup, so there is something to move
 3. **Say what you want to keep** - add fields to `State`
 4. **Add the task** - move the tool onto it
-5. **Save the answer** - `assign:`
+5. **Save the answer** - `save:`
 6. **Read it back** - a placeholder in the owner's prompt
-7. **Say what success looks like** - `finish:`, so the tool ends the step
-8. **Open with the question** - `announce:` and `opening: listen`
+7. **Say what success looks like** - an outcome, so the tool ends the step
+8. **Open with the question** - `start:` with `say:` and `listen: true`
 9. **Run it** - talk to it in the browser
 
 <Steps>
@@ -239,7 +239,7 @@ stop anywhere and come back.
     It still validates, and it warns:
 
     ```text wrap
-    agent "assistant" holds every tool of its step "find_parcel" (look_up_parcel), so it can do the step's work without entering it and the step's assign may never run: drop look_up_parcel from agent "assistant" tools and leave them on the step
+    agent "assistant" holds every tool of its step "find_parcel" (look_up_parcel), so it can do the step's work without entering it and the step's save: may never run: drop look_up_parcel from agent "assistant" tools and leave them on the step
     ```
 
     Read that warning, because it is the most common mistake with a first
@@ -285,7 +285,7 @@ stop anywhere and come back.
 
   <Step title="Save the answer">
     Right now the task can find the parcel, but when it ends, what it found is
-    gone. `assign:` says which values the task saves, and where. Each line is
+    gone. `save:` says which values the task saves, and where. Each line is
     one variable you declared, and the tool result field it takes:
 
     ```yaml agent.yaml
@@ -295,7 +295,7 @@ stop anywhere and come back.
             instructions: tasks/find-parcel.md
             tools:
               - look_up_parcel
-            assign:
+            save:
               - tracking_number: result.tracking_number
               - delivery_date: result.delivery_date
     ```
@@ -305,7 +305,7 @@ stop anywhere and come back.
     ```
 
     Here is what that line did. Every task gets a `finish` call, a function
-    the model calls to say the task is done. `assign:` gives that call two
+    the model calls to say the task is done. `save:` gives that call two
     arguments, `tracking_number` and `delivery_date`, typed from the `State` fields
     they land in. When the model calls `finish`, each value is checked against
     its type. If one is wrong, nothing is saved and the task stays open, so a
@@ -317,7 +317,7 @@ stop anywhere and come back.
     A wrong name on the left is refused with the line it is on:
 
     ```text
-    unmute: validate my-agent: build: agent.yaml:36: task "find_parcel": assign writes to "due_date", which State in state.py does not declare
+    unmute: validate my-agent: build: agent.yaml:36: task "find_parcel": save writes to "due_date", which State in state.py does not declare
     ```
   </Step>
 
@@ -350,8 +350,8 @@ stop anywhere and come back.
     So far the task ends when the model decides to call `finish`. That is one
     more model request after the lookup, and one more chance for the model to
     do something else first. The tool already knows whether it worked: its
-    `status` is `found` or `not_found`. `finish:` lets that result end the
-    task:
+    `status` is `found` or `not_found`. An outcome on the tool lets that result
+    end the task. The tool becomes an entry with a `name:` and `outcomes:`:
 
     ```yaml agent.yaml
         tasks:
@@ -359,13 +359,13 @@ stop anywhere and come back.
             when: The caller wants to know where their parcel is.
             instructions: tasks/find-parcel.md
             tools:
-              - look_up_parcel
-            finish:
-              - tool: look_up_parcel
-                success:
-                  - status:
-                      - found
-            assign:
+              - name: look_up_parcel
+                outcomes:
+                  - if:
+                      - status:
+                          - found
+                    then: done
+            save:
               - tracking_number: result.tracking_number
               - delivery_date: result.delivery_date
     ```
@@ -374,26 +374,27 @@ stop anywhere and come back.
     unmute validate my-agent
     ```
 
-    Read it as a sentence: "this task is finished when `look_up_parcel` returns
-    `status: found`". When that happens, the task saves its `assign:` straight
-    from the tool result and ends. The model is not asked, and the result never
-    reaches it. When the status is `not_found`, the result goes back to the
-    model as normal and the task stays open, which is exactly when you want the
-    prompt's "ask the caller to check the number" line to do its job.
+    Read it as a sentence: "when `look_up_parcel` returns `status: found`, the
+    task is done". When that happens, the task saves its `save:` straight from
+    the tool result and ends. The model is not asked, and the result never
+    reaches it. When the status is `not_found`, no outcome matches. The result
+    goes back to the model as normal and the task stays open, which is exactly
+    when you want the prompt's "ask the caller to check the number" line to do
+    its job.
 
     | | Who decides the task is finished |
     |---|---|
-    | no `finish:` | the model, by calling `finish` |
-    | with `finish:` | the tool's own result, checked against `success:` |
+    | no `then: done` outcome | the model, by calling `finish` |
+    | a `then: done` outcome | the tool's own result, matched by its `if:` |
 
-    Two rules keep this honest, and the compiler holds both. A `finish:` entry
-    needs a `success:` check:
+    Two rules keep this honest, and the compiler holds both. An outcome starts
+    with an `if:` that checks the result:
 
     ```text
-    unmute: validate my-agent: build: agent.yaml:36: task "find_parcel": finish names "look_up_parcel" with no success:; a step cannot end on a result nothing checks
+    unmute: validate my-agent: load: agent.yaml:36: task "find_parcel": an outcome of look_up_parcel starts with if: or else:, and this one has neither
     ```
 
-    And every `success:` value has to be one the tool's return type allows, here
+    And every `if:` value has to be one the tool's return type allows, here
     the `Literal` on `status`, so a typo is caught here and not on a call that never ends:
 
     ```text
@@ -419,15 +420,17 @@ stop anywhere and come back.
         tasks:
           - name: find_parcel
             when: The caller wants to know where their parcel is.
-            announce: Sure. What is the tracking number?
-            opening: listen
             instructions: tasks/find-parcel.md
+            start:
+              say:
+                - Sure. What is the tracking number?
+              listen: true
     ```
 
-    `announce:` is one fixed line, spoken exactly as written. `opening: listen`
-    says: speak it, then wait for the caller. The line is recorded as the
-    task's own first turn, so the caller's answer lands in a conversation the
-    task can see.
+    `start:` replaces the model's first turn. `say:` is one fixed line, spoken
+    exactly as written. `listen: true` says: speak it, then wait for the
+    caller. The line is recorded as the task's own first turn, so the caller's
+    answer lands in a conversation the task can see.
 
     Update the task's prompt so it does not ask the question twice:
 
@@ -470,7 +473,7 @@ stop anywhere and come back.
 
 This is `agent.yaml` at the end, with the scaffold's comments taken out. The
 three lists near the top are the whole change: one tool on the agent, one task
-nested under it, and the task's own tool, `finish:` and `assign:`.
+nested under it, and the task's own tool with its outcome, `start:` and `save:`.
 
 <Accordion title="Complete agent.yaml">
 ```yaml
@@ -489,16 +492,18 @@ agents:
     tasks:
       - name: find_parcel
         when: The caller wants to know where their parcel is.
-        announce: Sure. What is the tracking number?
-        opening: listen
         instructions: tasks/find-parcel.md
+        start:
+          say:
+            - Sure. What is the tracking number?
+          listen: true
         tools:
-          - look_up_parcel
-        finish:
-          - tool: look_up_parcel
-            success:
-              - status: found
-        assign:
+          - name: look_up_parcel
+            outcomes:
+              - if:
+                  - status: found
+                then: done
+        save:
           - tracking_number: result.tracking_number
           - delivery_date: result.delivery_date
 
@@ -559,9 +564,9 @@ capacity:
 |---|---|---|
 | `when:` | when the model should run the task | the task is only usable as a step of a task group |
 | `tools:` on the task | what the task may call | the task talks but cannot look anything up |
-| `assign:` | what the task saves, and where | the task can still finish, and keeps nothing |
-| `finish:` | which tool result means the task is done | the model decides, by calling `finish` |
-| `announce:` and `opening: listen` | a fixed first line, and no model request to write it | the model writes the opening line |
+| `save:` | what the task saves, and where | the task can still finish, and keeps nothing |
+| `outcomes:` with `then: done` | which tool result means the task is done | the model decides, by calling `finish` |
+| `start:` | a fixed first line, and no model request to write it | the model writes the opening line |
 
 ## Where to go next
 

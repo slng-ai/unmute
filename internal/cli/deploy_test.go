@@ -1830,7 +1830,7 @@ func TestDeployRefusesTwoReferencesToOneHostedTool(t *testing.T) {
 	// so the deeper one is replaced first and the shallower replacement is
 	// anchored on its own indent.
 	body := strings.Replace(string(raw), "      - check_order\n", "      - check_order\n      - order_status\n", 1)
-	body = strings.Replace(body, "\ntools:\n  - check_order\n", "\ntools:\n  - check_order\n  - order_status\n", 1)
+	body = strings.Replace(body, "\ntools:\n", "\ntools:\n  - order_status\n", 1)
 	if strings.Count(body, "order_status") != 2 {
 		t.Fatalf("the fixture's shape changed, so this test no longer attaches the alias:\n%s", body)
 	}
@@ -1945,11 +1945,11 @@ func TestARealDeployPrintsNoRoutineAdvisory(t *testing.T) {
 // guarded dry run got wrong: it said a replacement would remove "the message
 // the agent speaks before this tool runs, which the agent has now and this
 // package cannot declare" about a package whose own tool file declares that
-// sentence. `announce:` is an authoring key, it compiles to the attachment's
+// sentence. `start: say:` is an authoring key, it compiles to the attachment's
 // execution_policy.pre_action_message, and the preview had the live policy with
 // nothing to compare it against, so every one read as a removal.
 //
-// The fixture's check_order.yaml declares `announce: One moment while I look
+// The fixture's check_order entry declares `start: say: One moment while I look
 // that up.`, so the agent below carries exactly that and the run must say
 // nothing about it. The second half changes one word, because a preview that
 // stopped reading the policy at all would pass the first half on its own.
@@ -1992,10 +1992,10 @@ esac`
 	}
 
 	if changes := changesFor(t, "One moment while I look that up."); strings.Contains(changes, "pre_action_message") {
-		t.Errorf("a replacement writing this package's own `announce:` back was reported as removing it:\n%s", changes)
+		t.Errorf("a replacement writing this package's own `start: say:` back was reported as removing it:\n%s", changes)
 	}
 	changed := changesFor(t, "Hold on.")
-	if !strings.Contains(changed, `execution_policy.pre_action_message, from "Hold on." to this package's `+"`announce:`") {
+	if !strings.Contains(changed, `execution_policy.pre_action_message, from "Hold on." to this package's `+"`start: say:`") {
 		t.Errorf("a different sentence on the agent was not reported as a change:\n%s", changed)
 	}
 }

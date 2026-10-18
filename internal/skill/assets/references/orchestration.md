@@ -79,7 +79,7 @@ the server, not the package, owns that order.
 | the model does things out of order | a task group. The order is declared, not requested |
 | the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
 | a step runs before you have the value it needs | give the step's own `when:` the clause that names what has to be true first, "once the caller is identified" |
-| you need a value out of a step and want to keep it | a task that saves it to a typed variable with `assign:` |
+| you need a value out of a step and want to keep it | a task that saves it to a typed variable with `save:` |
 | two phases need different tools or different permissions | a handoff |
 | the caller changes intent while a task is active | put the destination's handoff on that task's own `handoffs:` list |
 | the caller needs a person | none of these. That is an escalation, and what it can do depends on the phone route. See `transfers.md` |
@@ -231,31 +231,31 @@ agents:
         tools:
           - lookup_customer
           - create_customer
-        assign:
+        save:
           - customer_id: result.customer_id
           - customer_name: result.customer_name
 ```
 
 A task is nested inside the agent that runs it. The mapping does two things at
-once: it defines the task (`instructions`, `tools`, `assign`, `context`) and
+once: it defines the task (`instructions`, `tools`, `save`, `context`) and
 it attaches it, because `when:` is the trigger the model reads to decide to
 run it. There is no separate catalog to keep in step with the agent's own
 list.
 
-`assign:` is the save contract. The compiler derives each finish field's type
+`save:` is the save contract. The compiler derives each finish field's type
 and description from its destination variable. A task with no values to save
-may omit `assign:`. Tool `output:` remains the tool's own API contract.
+may omit `save:`. Tool `output:` remains the tool's own API contract.
 
 When a task returns, its private turns and finish fields stay private. The
 owner receives only `{"status":"completed"}` or `{"status":"unserved"}`.
 
-`assign:` copies fields out of the result into package variables, so the rest
-of the call uses them without asking again. Declare each of those variables at
-the top level, and write `assign:` as a list of one-key items, one pair per
+`save:` copies fields out of the result into package variables, so the rest
+of the call uses them without asking again. Declare each of those variables
+in `state.py`, and write `save:` as a list of one-key items, one pair per
 line:
 
 ```yaml
-assign:
+save:
   - customer_id: result.customer_id
   - customer_name: result.customer_name
 ```
@@ -299,7 +299,7 @@ agents:
       - name: customer_record
         when: Identify the caller before handling an appointment request.
         instructions: tasks/customer-record.md
-        assign:
+        save:
           - customer_id: result.customer_id
 
   billing_desk:
@@ -326,105 +326,144 @@ some `task_groups:` entry) is refused: there is no trigger for the agent to
 act on. Give it a `when:` to make it something an agent runs on its own, or
 list it as a step in [Task group](#task-group).
 
-### Covering the entry with `announce:`
+### The step start
 
-Entering a task costs two model requests, and they were silence. One fixed
-sentence, spoken as the task starts:
+`start:` is what a step does as it opens. It takes `say:`, `listen:` and
+`call:` with `with:`, and all three are optional.
+
+Entering a task costs two model requests, and they were silence. `say:` is one
+fixed sentence, or a list of alternatives, spoken as the step starts:
 
 ```yaml agent.yaml
       - name: manage_booking
         when: The caller wants to create, modify, or cancel a booking.
-        announce: Let me pull up the diary.
         instructions: tasks/booking.md
+        start:
+          say: Let me pull up the diary.
 ```
 
-Same field as a tool's, same rules: one fixed sentence, spoken word for word.
+Same rules as a tool's `start:`: one fixed sentence, spoken word for word.
 
-Do not put one on a task whose first tool already announces, and check the
-tool that runs immediately **before** the task too: a lookup at the end of one
-task and an `announce:` into the next cover the same handover, so the caller
-hears two lines for one request. Both cases read as a stutter. The task's line
-covers two model requests and the tool's covers a request body, so the task's
-is usually the one worth keeping.
+Do not put one on a task whose first tool already has a `start:` line, and
+check the tool that runs immediately **before** the task too: a lookup at the
+end of one task and a `start:` into the next cover the same handover, so the
+caller hears two lines for one request. Both cases read as a stutter. The
+step's line covers two model requests and the tool's covers a request body, so
+the step's is usually the one worth keeping.
 
 **In a group, put the line on each step and none on the group.** A step's own
-`announce:` fires as that step is entered, so a group of three steps covers all
+`start:` fires as that step is entered, so a group of three steps covers all
 three seams with three lines that are each true where they play. The group's own
-line fires once on the way in, before anything has been decided, and it has to
-be true of whichever step runs first: a group that opens on a verification
-question the first time and on a diary read every time after has no such
-sentence, and a skipped first step would hear a line about work that never
-happened.
+`announce:` fires once on the way in, before anything has been decided, and it
+has to be true of whichever step runs first: a group that opens on a
+verification question the first time and on a diary read every time after has
+no such sentence, and a skipped first step would hear a line about work that
+never happened.
 
 On the `slng` target a task or a group takes one line, not alternatives.
+
+`listen: true` opens a step by waiting. When a step opens with one fixed
+question, `say:` speaks it and `listen: true` waits, and neither costs a
+request:
+
+```yaml agent.yaml
+      - name: take_stylist_note
+        when: The caller wants a note left for the stylist.
+        instructions: tasks/stylist-note.md
+        start:
+          say: What would you like me to pass on to your stylist?
+          listen: true
+```
+
+The line is spoken once and recorded as the step's own first turn. Without
+`listen: true` the step generates its opening, as it always did. A listening
+step with no `say:` warns: the caller hears nothing until they speak. Tell the
+step's prompt that the question has already been asked.
+
+`call:` runs one of the step's tools in code before the model speaks, and
+`with:` gives it its arguments, one `- name: state.x` pair per item. A `?`
+after the value (`state.requested_day?`) makes it optional, so the call runs
+without it. No `?` means the tool requires it, and the compiler checks both
+marks against the tool's input schema.
+
+```yaml agent.yaml
+      - name: manage_booking
+        instructions: tasks/booking.md
+        start:
+          say: Let me have a look.
+          call: find_slots
+          with:
+            - service: state.requested_service?
+            - date: state.requested_day?
+        tools:
+          - name: find_slots
+            outcomes:
+              - if:
+                  - offered: true
+                say:
+                  - "{{result.offer}}"
+```
+
+What happens when the step opens:
+
+- A required `with:` value is empty: the call does not run, and the step says
+  `say:` and listens.
+- The value is already confirmed: the step is skipped.
+- The tool has a `confirm:` line: the read-back is said instead of `say:`.
+- Otherwise the call's result goes through the tool's outcomes, and the line
+  they pick is said.
 
 ### Ending a step on its tool
 
 A step that runs a tool and then asks the model to call `finish` spends a model
-request on a decision the tool already made. Name the tools that end the step:
+request on a decision the tool already made. Give the tool an outcome with
+`then: done`:
 
 ```yaml agent.yaml
       - name: manage_booking
         instructions: tasks/booking.md
         tools:
           - find_slots
-          - save_booking
-        finish:
-          - tool: save_booking
-            success:
-              - status: booked
-          - tool: save_booking
-            success:
-              - status: cancelled
-        assign:
+          - name: save_booking
+            outcomes:
+              - if:
+                  - status:
+                      - booked
+                      - cancelled
+                then: done
+        save:
           - appointment: result.appointment
 ```
 
-A result meeting every `success:` pair saves `assign:` and ends the step, with
+A result matching the `if:` saves the step's `save:` and ends the step, with
 no request in between, and never reaches the model. Anything else goes back to
-the model and the step stays open.
+the model and the step stays open. Outcomes are written once, in
+`references/tools.md`, "The tool entry in agent.yaml".
 
 Rules worth knowing before you write one:
 
-- Every `success:` value has to be one the tool declares in its output `enum:`,
-  and every `assign:` field has to be an output property of **every** listed
-  tool. Both are compile-time refusals.
-- After one listed tool succeeds, none of them runs again in that invocation. A
+- Every `if:` value has to be one the tool declares in its output `enum:`,
+  and every `save:` field has to be an output property of **every** tool with a
+  `then: done` outcome. Both are compile-time refusals.
+- After one such tool succeeds, none of them runs again in that invocation. A
   second booking is a new invocation of the step.
 - `finish` stays for a request the step cannot serve, for values it already
   holds, and for a save the validator refused. A repair keeps the values the
   tool returned; the model fills only what the tool could not.
-- The step says nothing after its tool. The next step opens, or the owner
-  speaks once when the flow returns, so write the owner's acknowledgement into
-  the owner's prompt and not into the step's.
+- The step says nothing after its tool unless the outcome has a `say:`
+  line. Otherwise the next step opens, or the owner speaks once when the flow
+  returns, so write the owner's acknowledgement into the owner's prompt and not
+  into the step's.
 - A handoff the model calls beside one of these tools, or while one is still
   running, waits for it: the caller is moved once the action is recorded, and
   told the action did not complete when it did not.
 - Do not also write "call finish as soon as the tool succeeds" in the step's
   prompt. The generated tail says the opposite, and the two contradict.
 
-On the `slng` target `finish:` works with one rule per task. Its `say:` lines
-are spoken by SLNG, and `confirm:` is refused. The tool needs a known output: a
-typed local tool, or a hosted `slng:` tool with a mirror. Twilio refuses `finish`
-`confirm` and `say`.
-
-### Opening a step by listening
-
-When a step opens with one fixed question, `opening: listen` speaks it and
-waits, and costs no request:
-
-```yaml agent.yaml
-      - name: take_stylist_note
-        when: The caller wants a note left for the stylist.
-        announce: What would you like me to pass on to your stylist?
-        opening: listen
-        instructions: tasks/stylist-note.md
-```
-
-The line is the `announce:` line, spoken once and recorded as the step's own
-first turn. The default, `generate`, is what every step did before this key. A
-listening step with no `announce:` warns: the caller hears nothing until they
-speak. Tell the step's prompt that the question has already been asked.
+On the `slng` target `then: done` works with one outcome per task. Its `say:`
+lines are spoken by SLNG, and `confirm:` is refused. The tool needs a known
+output: a typed local tool, or a hosted `slng:` tool with a mirror. Twilio
+refuses `then:`, `confirm:` and `say:` outcomes.
 
 ## Order steps with the prompt
 
@@ -439,7 +478,7 @@ agents:
       - name: customer_record
         when: Identify the caller before handling an appointment request.
         instructions: tasks/customer-record.md
-        assign:
+        save:
           - customer_phone: result.customer_phone
 
       - name: manage_appointment
@@ -451,7 +490,7 @@ Reference a saved value in a task prompt only when that task needs it. No
 automatic state block is added.
 
 **The last line sits on the tool.** A tool that silently reads a value,
-through `inject:` or a webhook path, refuses to run while that value is empty
+through `with:` or a webhook path, refuses to run while that value is empty
 or unconfirmed, and the model is told which task supplies it, or, when
 nothing does, to ask the caller. The worst case is one extra model turn, not
 a request sent with a blank or an unconfirmed field.
@@ -565,21 +604,21 @@ agents:
         instructions: tasks/identify-customer.md
         tools:
           - lookup_customer
-        assign:
+        save:
           - customer_id: result.customer_id
 
       - name: select_appointment
         instructions: tasks/select-appointment.md
         tools:
           - check_slots
-        assign:
+        save:
           - selected_slot: result.selected_slot
 
       - name: finalize_appointment
         instructions: tasks/finalize-appointment.md
         tools:
           - book_appointment
-        assign:
+        save:
           - booking_status: result.booking_status
     task_groups:
       - appointment_flow
@@ -607,7 +646,7 @@ same tasks written as separate `when:`-bearing tasks cost a request per step,
 and the extra request speaks nothing and does nothing but name the next task.
 The group's `context_scope` governs
 how the members relate while the group runs. It does not replace a member
-task's `context:` block. A member may omit both `assign:` and `context:` when it
+task's `context:` block. A member may omit both `save:` and `context:` when it
 saves no value and the default spoken-message history is right.
 
 | Field | Values | What it does |
@@ -656,7 +695,7 @@ work as though it were a fresh request: a live call saved a booking, re-entered
 the flow on the caller's own "3 o'clock" still sitting above the result, read
 the diary twice more, and the caller's last words on the call were an agent
 saying it was off to check the diary. The refusal comes before the step's
-`announce:`, so a refused call speaks nothing at all.
+`start:`, so a refused call speaks nothing at all.
 
 Write the owner's prompt to expect this rather than to work around it: a bare
 "yes" above a completed flow is the caller answering the flow's own question,
@@ -684,7 +723,7 @@ answer out loud for each boundary the package actually has.
 | a handoff | do tool calls travel too? | `context.include_tool_calls` |
 | a task or a handoff | which saved values can the receiver see? | only `{{references}}` in the receiver's own prompt |
 | a task | what does the task see when it starts? | `context.history` on the task |
-| a task | what is saved? | `assign:` on the task; destination variables supply the types |
+| a task | what is saved? | `save:` on the task; destination variables supply the types |
 | a task group | do the steps share context or each start clean? | `context_scope` |
 | a task group | what happens when the last step ends? | `then`, and `then_target` if it transfers |
 | a task group | what reaches later shared steps and returns to the caller? | completion status; saved values are visible only through explicit prompt references |
@@ -761,7 +800,7 @@ rather than one list with a kind field.
 | | `tasks:` | `handoffs:` |
 |---|---|---|
 | returns | yes | no |
-| typed save | yes, through `assign:` and destination variables | no |
+| typed save | yes, through `save:` and destination variables | no |
 | targets | a task, run in place | another agent |
 | context control | `context:` on the task | `context:` on the handoff entry |
 
@@ -774,11 +813,11 @@ directions. The concierge defines two tasks, `verify_customer` and
 `record_complaint` sits directly on it as a tool, because filing a complaint
 is one action rather than a step that has to happen in order. It does name
 `verify_customer`, as a bare `- verify_customer` reusing the concierge's
-definition, because `record_complaint` injects the caller's number and is
+definition, because `record_complaint` pins the caller's number with `with:` and is
 refused while the caller has not agreed to it. A task within reach beats a
 prompt rule, so the prompt asks for the step at the point it is needed rather
 than forbidding it. `to_concierge` is the way back. Both tasks end on their own tool through
-`finish:`.
+`then: done` outcomes.
 
 The same package carries the task group, `book`: `verify_customer` with
 `skip_when_confirmed: customer_phone`, then `manage_booking`, on the group

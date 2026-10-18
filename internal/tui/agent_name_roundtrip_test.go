@@ -99,21 +99,21 @@ func TestMaintainKeepsATasksHandoffs(t *testing.T) {
 	}
 }
 
-// TestMaintainKeepsATasksAnnounce guards the same silent data loss over
-// another key this feature added.
+// TestMaintainKeepsATasksStart guards the same silent data loss over a step's
+// start: block.
 //
-// A task's announce: is the line it speaks as the step is entered, so the two
-// model requests it takes to enter one are not silence. A scaffold.Task without
-// an Announce field would have made `unmute maintain` delete the salon
-// package's "Let me pull up the diary." on the way out, quietly and at exit 0.
-func TestMaintainKeepsATasksAnnounce(t *testing.T) {
+// start: say: is the line a step speaks as it is entered, so the two model
+// requests it takes to enter one are not silence. A scaffold.Task without it
+// would have made `unmute maintain` delete the salon package's "Let me pull up
+// the diary." on the way out, quietly and at exit 0.
+func TestMaintainKeepsATasksStart(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "pkg")
 	data := scaffold.Data{
 		Name: "pkg", AgentName: "acme-support",
 		Agents: []scaffold.Agent{{Name: "billing", Instructions: "Handle billing."}},
 		Tasks: []scaffold.Task{{
 			Name: "collect", Instructions: "Collect the details.", Agent: "assistant",
-			When: "Collect first.", Announce: spec.Announce{"One moment while I check."},
+			When: "Collect first.", Start: &spec.TaskStart{Say: []string{"One moment while I check."}},
 			History: "full",
 		}},
 	}
@@ -127,7 +127,7 @@ func TestMaintainKeepsATasksAnnounce(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, loss := range agent.losses {
-		if strings.Contains(loss, "announce") {
+		if strings.Contains(loss, "start") {
 			t.Errorf("the console cannot preserve %q, so maintain would delete it", loss)
 		}
 	}
@@ -140,8 +140,8 @@ func TestMaintainKeepsATasksAnnounce(t *testing.T) {
 	if collect == nil {
 		t.Fatal("the task did not survive the round trip at all")
 	}
-	if len(collect.Announce) != 1 || collect.Announce[0] != "One moment while I check." {
-		t.Errorf("task announce = %q, want it carried through", collect.Announce)
+	if collect.Start == nil || len(collect.Start.Say) != 1 || collect.Start.Say[0] != "One moment while I check." {
+		t.Errorf("task start = %+v, want its say: line carried through", collect.Start)
 	}
 }
 
@@ -365,8 +365,8 @@ func TestMaintainKeepsNonalphabeticalToolOrder(t *testing.T) {
 		t.Fatalf("the package the console wrote does not load: %v", err)
 	}
 	want := []string{"zebra_tool", "alpha_tool", "middle_tool"}
-	if !slices.Equal(pkg.Agent.Tools, want) {
-		t.Errorf("agent.yaml's tools: catalogue = %v, want the authored order %v", pkg.Agent.Tools, want)
+	if got := spec.ToolNames(pkg.Agent.Tools); !slices.Equal(got, want) {
+		t.Errorf("agent.yaml's tools: catalogue = %v, want the authored order %v", got, want)
 	}
 	wantBilling := []string{"zebra_tool", "alpha_tool"}
 	if !slices.Equal(pkg.Agent.Agents["billing"].Tools, wantBilling) {
@@ -400,22 +400,22 @@ func TestMaintainKeepsNonalphabeticalToolOrder(t *testing.T) {
 	}
 }
 
-// The same silent loss, over spec 010's three keys. A key scaffold.Data does not
+// The same silent loss, over a step's start: and its tool's outcomes. A key scaffold.Data does not
 // carry is a key `unmute maintain` deletes from the author's file at exit 0, and
 // the three it added are exactly the kind nobody notices going: the package
 // still compiles, it just quietly makes three model requests again.
-func TestMaintainKeepsATasksFinish(t *testing.T) {
+func TestMaintainKeepsATasksOutcomes(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "pkg")
 	data := scaffold.Data{
 		Name: "pkg", AgentName: "acme-desk",
 		Tasks: []scaffold.Task{{
 			Name: "collect", Instructions: "Collect the details.", Agent: "assistant",
-			When: "Collect first.", History: "full", Opening: "listen",
-			Announce: spec.Announce{"What is the reference?"},
-			Finish: []spec.FinishEntry{{
-				Tool:    "look_up",
-				Success: []spec.SuccessPair{{Field: "status", Values: []string{"found"}}},
-			}},
+			When: "Collect first.", History: "full",
+			Start: &spec.TaskStart{Say: []string{"What is the reference?"}, Listen: true},
+			ToolEntries: []spec.ToolEntry{{Name: "look_up", Outcomes: []spec.Outcome{{
+				If:   []spec.SuccessPair{{Field: "status", Values: []string{"found"}}},
+				Then: "done",
+			}}}},
 			Tools: []string{"look_up"},
 		}},
 		Tools: []scaffold.Tool{{
@@ -443,17 +443,15 @@ func TestMaintainKeepsATasksFinish(t *testing.T) {
 	if collect == nil {
 		t.Fatal("the task did not survive the round trip at all")
 	}
-	if len(collect.Finish) != 1 || collect.Finish[0].Tool != "look_up" {
-		t.Errorf("finish = %+v, want the terminal tool carried through", collect.Finish)
+	if len(collect.ToolEntries) != 1 || collect.ToolEntries[0].Name != "look_up" || len(collect.ToolEntries[0].Outcomes) != 1 {
+		t.Fatalf("tools = %+v, want look_up with its outcome carried through", collect.ToolEntries)
 	}
-	if len(collect.Finish) == 1 {
-		success := collect.Finish[0].Success
-		if len(success) != 1 || success[0].Field != "status" || len(success[0].Values) != 1 || success[0].Values[0] != "found" {
-			t.Errorf("success = %+v, want status: found", success)
-		}
+	outcome := collect.ToolEntries[0].Outcomes[0]
+	if len(outcome.If) != 1 || outcome.If[0].Field != "status" || outcome.If[0].Values[0] != "found" || outcome.Then != "done" {
+		t.Errorf("outcome = %+v, want if status: found, then: done", outcome)
 	}
-	if collect.Opening != "listen" {
-		t.Errorf("opening = %q, want listen", collect.Opening)
+	if collect.Start == nil || !collect.Start.Listen {
+		t.Errorf("start = %+v, want listen: true", collect.Start)
 	}
 }
 

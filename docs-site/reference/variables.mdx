@@ -13,7 +13,7 @@ This is the complete reference. For an introduction, start with
 ## How a value moves
 
 Values are supplied at session start, filled by `prefetch:`, or saved when
-a task finishes through `assign:`. Prompts and tools read them through
+a task finishes through `save:`. Prompts and tools read them through
 explicit `{{state.name}}` references. Conversation sharing is controlled
 separately by `context.history`.
 
@@ -147,7 +147,7 @@ An unset value renders as `none recorded yet.` in a prompt.
 A declared type does two jobs, in two different places.
 
 **The model is told, not constrained.** A task's finish call takes one argument
-for each value it assigns. Its schema is built from the field's type and
+for each value it saves. Its schema is built from the field's type and
 description. Format and pattern keywords are not sent, because one target sends
 its schema with strict mode on and rejects them. The rule travels as words in
 the description instead.
@@ -238,7 +238,7 @@ with a pointer to `state.py`. So is a `shapes:` block, which is a model in
 | Source | Who supplies it | Availability |
 |---|---|---|
 | `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
-| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `assign:` | never guaranteed, so write the prompt to read whole while it is still empty, or give its field a default in `state.py` |
+| omitted | the dispatch payload if it carries the name, or `--var` locally; otherwise a step's `save:` | never guaranteed, so write the prompt to read whole while it is still empty, or give its field a default in `state.py` |
 | `conversation` | the model, during the call, once the caller has given and confirmed the value | `slng` only. It becomes one of the agent's runtime variables, filled through SLNG's own `set_runtime_variables` tool and returned on the call record under `memory_variables`. Its field in `state.py` is `= None` and has a `Field(description=...)`, which the model reads. It takes no `{{placeholder}}` in any prompt or the greeting. On `livekit` and `pipecat` a step's `assign:` records such a value instead |
 
 A value the model records during the call reaches no prompt. It has no value
@@ -274,7 +274,7 @@ needs a default. There is no dispatch payload to supply an unsolicited incoming
 call before its greeting.
 
 A value from the dispatch or from the phone adapter is checked against the
-field's type in `state.py` when it is saved, the same check a step's `assign:`
+field's type in `state.py` when it is saved, the same check a step's `save:`
 gets. A dispatched value that does not fit stops the call before the greeting,
 and the error names the field. A phone-adapter fact that does not fit, such as
 `anonymous` for an E.164 phone field, is treated as a fact that never arrived.
@@ -329,7 +329,7 @@ fields as you want. All six come from that one reading, so an entry assigning
 `result.date` and `result.day_of_week` cannot straddle midnight.
 
 `args:` belongs to a `tool:` entry only, and takes the same value grammar as a
-tool's `inject:`.
+tool file's `with:`.
 
 <Note>
 `assign:` and `args:` are **lists of one-key items**, not mappings. Each pair gets
@@ -456,7 +456,7 @@ Until that step has heard the caller agree, the value:
 
 - **renders in no prompt but that step's own**, refused at compile time everywhere
   else, including the greeting and every agent prompt;
-- **makes every tool injecting it refuse itself to the model**, naming the value it
+- **makes every tool that takes it through `with:` refuse itself to the model**, naming the value it
   is waiting for.
 
 The mark clears when the named confirming task saves a non-empty value. Its
@@ -468,7 +468,7 @@ unconfirmed as the number was. That is what stops an agent greeting a stranger b
 the account holder's name.
 
 Write the confirming task's prompt to read the value back when present and
-ask from scratch when absent, then save it through `assign:` after agreement.
+ask from scratch when absent, then save it through `save:` after agreement.
 A prefetch lookup can use a candidate before confirmation, but its dependent
 values inherit the same restriction. When the candidate changes, those old
 prefetched values are cleared, not silently reused or automatically fetched
@@ -488,7 +488,7 @@ lists. A bare `{{variable}}` naming a field on `State` is refused with the fix,
 | `conversation.greeting.text` | Once, at session start |
 | An agent's instructions | On entry and when its tasks save values |
 | A task's instructions | When the task starts |
-| A tool's `inject:` value | On every tool call |
+| A tool's `with:` value | On every tool call |
 | A webhook tool's `path` | On every tool call; substituted values are URL encoded |
 
 The greeting may only name a variable with a session-start source, a default,
@@ -570,9 +570,9 @@ act on a number it never read back. The run would pass a path a real call fails.
 ```yaml tools/book_appointment.yaml
 description: Book the selected appointment for the current customer.
 
-inject:
-  - customer_id: "{{state.customer_id}}"
-  - service: "{{state.requested_service}}"
+with:
+  - customer_id: "state.customer_id"
+  - service: "state.requested_service"
 
 local:
   handler: tools/book_appointment.py:book_appointment
@@ -583,25 +583,25 @@ def book_appointment(slot_id: str, customer_id: str, service: str) -> Booking:
     ...
 ```
 
-`inject` values are not part of the model's schema, so the model can neither
-see them nor overwrite them. On a webhook tool, an `inject` key that also names an
+`with` values are not part of the model's schema, so the model can neither
+see them nor overwrite them. On a webhook tool, a `with` key that also names an
 `input` property is a compile error, for exactly that reason.
 
-Each authored injected value must be a scalar, such as a string containing
-`{{state.variable}}`. An exact placeholder passes the value with its native type,
-including a referenced object or list. Mixed text such as `"Booking {{state.booking_id}}"`
+Each authored `with` value must be a scalar, such as `state.variable` or a string
+containing `{{state.variable}}`. An exact `state.variable` or placeholder passes the
+value with its native type, including a referenced object or list. Mixed text such as `"Booking {{state.booking_id}}"`
 produces a string. An authored map or list is refused.
 
-On a webhook tool, keep injected keys out of both `input.properties` and `input.required`.
-Injection hides an argument from the model; it does not hide data a tool
+On a webhook tool, keep `with` keys out of both `input.properties` and `input.required`.
+`with` hides an argument from the model; it does not hide data a tool
 returns or data already present in the conversation.
 
-`inject` is legal on `webhook`, `local`, and hosted `slng` tools, and on
+`with` is legal on `webhook`, `local`, and hosted `slng` tools, and on
 `builtin: send_sms` for its one setting, the sender (see
 [Prebuilt tools](/build/tools/prebuilt)). See
 [Hosted tools](/build/tools/hosted) for the hosted attachment rules.
 
-When an injected variable is missing or unconfirmed, the tool refuses before
+When a `with` variable is missing or unconfirmed, the tool refuses before
 execution. The error names the task that supplies or confirms it, if there is
 one. Otherwise it tells the model to ask the caller:
 
@@ -609,7 +609,7 @@ one. Otherwise it tells the model to ask the caller:
 cannot call book_appointment yet: requested_service not set. Ask the caller first.
 ```
 
-## Assigning a task result to a variable
+## Saving a task result to a variable
 
 ```yaml agent.yaml
 agents:
@@ -618,30 +618,35 @@ agents:
       - name: check_customer
         when: Identify the caller before booking.
         instructions: tasks/check-customer.md
-        assign:
+        save:
           - customer_id: result.customer_id
 ```
 
 The field on `State` supplies the finish argument's type and description. The
-task validates all assigned values before saving any of them. A failed
+task validates all saved values before saving any of them. A failed
 validation keeps the task open so the model can correct the result. Finishing
-with a non-empty `unserved_request` saves no assignments.
+with a non-empty `unserved_request` saves nothing.
 
 A `+` on the key appends one entry instead of replacing the value:
 
 ```yaml agent.yaml
-        assign:
+        save:
           - appointments+: result.appointment
 ```
 
 Use append with a `list[T]` field. It accepts one item of type `T` or
 `null`, which adds nothing. Identical structured items are saved once; plain
-values may repeat. A changed object is a new item. Without `+`, the assignment
+values may repeat. A changed object is a new item. Without `+`, the row
 replaces the variable's value.
+
+`save:` rows also go on a tool's entry in `agent.yaml` and on one outcome. A
+tool's `save:` writes on every result. An outcome's `save:` writes only when
+that outcome matches. Both read `result.` only. See
+[Say what success looks like](/build/orchestration/tasks#say-what-success-looks-like).
 
 ### Picking one part of a structured result
 
-The right side of an `assign:` pair does not have to be the whole result. It
+The right side of a `save:` pair does not have to be the whole result. It
 can be `result.<field>`, or a dotted path into a model from `state.py`,
 `result.<field>.<subfield>`, as deep as the model goes:
 
@@ -652,13 +657,13 @@ agents:
       - name: manage_booking
         when: Save one appointment.
         instructions: tasks/booking.md
-        assign:
+        save:
           - appointments+: result.appointment
           - last_booking_day: result.appointment.scheduled_date
 ```
 
 with `appointments` declared `list[Appointment]` and `last_booking_day`
-declared `date | None`. The whole-object assignment establishes the
+declared `date | None`. The whole-object row establishes the
 `appointment` result field as `Appointment | None`; the second line can then
 project its date.
 
@@ -676,7 +681,7 @@ Two paths are refused rather than silently accepted:
 If a field on the way is optional, `Appointment | None` above, the picked
 value may be absent for a visit where the task left it out. Give the field
 the same option, `date | None`, so an absent pick is a legal value, or use an
-appending assign, `name+:`, which already skips an absent entry instead of
+appending row, `name+:`, which already skips an absent entry instead of
 writing one into the list.
 
 The same path form works in a prompt placeholder too: see [Naming one part of
@@ -684,7 +689,7 @@ a value](#naming-one-part-of-a-value).
 
 ### A value the caller may not give ends in `?`
 
-A step must return every whole value it assigns. A finish that leaves one out,
+A step must return every whole value it saves. A finish that leaves one out,
 or sends an explicit null for it, is refused: nothing is saved, the model is
 told why and gets another go, and the caller waits through that round trip.
 
@@ -692,7 +697,7 @@ When the caller may simply not give a value, mark it with `?` after the result
 field:
 
 ```yaml agent.yaml
-        assign:
+        save:
           - callback_time: result.callback_time?
 ```
 
@@ -706,7 +711,7 @@ not be known yet. The difference is whether absence is a legal outcome of the
 step. If it is, say so with `?`.
 
 Absence is already legal in one other place, and needs nothing: an appending
-assign, `name+:`, drops an absent entry instead of writing it into the list.
+row, `name+:`, drops an absent entry instead of writing it into the list.
 A finish with a non-empty `unserved_request` is never refused for a missing
 value, because it saves nothing.
 

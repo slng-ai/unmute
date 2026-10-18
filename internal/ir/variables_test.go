@@ -81,7 +81,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 				tool.Inject = []packagespec.Pair{{Key: "caller", Value: "{{state.customer_id}}"}}
 				pkg.Tools["lookup_customer"] = tool
 			},
-			want: "inject is legal on webhook, local and slng tools",
+			want: "with: is legal on webhook, local and slng tools",
 		},
 		{
 			name: "a webhook path must start with a slash",

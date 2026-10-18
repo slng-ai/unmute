@@ -40,11 +40,11 @@ Choose the smallest native shape and tell the user what you chose.
 **Keep state small.** Keep only values needed across a task or handoff, by a later tool, or as prompt facts. Prefer one timestamp to separate date and time values; `references/variables.md` has the example.
 
 **Every agent-level list attaches something already declared, except `tasks:`, written where it runs.** Five kinds: `tools:`, `tasks:` and `task_groups:` come back, `handoffs:` and `escalations:` do not. No `kind:` field, and all five share one namespace. `references/orchestration.md` has the table.
-**Define each tool once.** Its contract lives in `tools/<name>.yaml`; `tools:` lists hold names only.
+**Define each tool once.** Its contract (`description`, `input`, `output`, one execution block, `with:`) lives in `tools/<name>.yaml`. What a tool does in a conversation lives in `agent.yaml`: a top-level `tools:` entry is a bare name or a block with `save:`, `outcomes:`, `hidden:` and `start:`, and a step's `tools:` entry is a bare name or a block with `confirm:` and `outcomes:`. `references/tools.md` has the rules.
 
-**Task `assign:` and tool `output:` are different contracts.** Task finish fields come from destination fields on `State` in `state.py`; do not repeat their types.
-**A step that ends on a tool result should say so.** `finish:` names the tools that end it and what a successful result looks like, so it saves and moves on with no model request in between. `skip_when_confirmed:` skips a group step whose confirmation holds; `opening: listen` speaks one fixed question and waits. Code targets only; `references/orchestration.md` has the rules.
+**A step that ends on a tool result says so in its outcomes.** `then: done` on an outcome saves and moves on with no model request in between. `start:` says a line, listens, or runs a tool in code as the step opens. `skip_when_confirmed:` skips a group step whose confirmation holds. Code targets only; `references/orchestration.md` has the rules.
 
+**A step's `save:` and a tool's `output:` are different contracts.** Task finish fields come from destination fields on `State` in `state.py`, listed under the step's `save:`; do not repeat their types.
 Omitted task and handoff history means `messages`: spoken turns without tool records. With `reset`, name each needed saved value in the receiver's prompt as `{{state.variable}}`.
 
 Use block-style YAML sequences in assistant-authored packages. Do not use anchors or aliases.

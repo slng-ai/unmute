@@ -1,5 +1,5 @@
 {
-  "digest": "796b159a9986b44cb26cf9aa07c898cd327cb8103faca3b29979935ae2189e4a",
+  "digest": "dbdf3110f375ec702d9a965c4c505ee8f731561a4f300486ce70545dd746e1e4",
   "report": {
     "tools": {
       "check_availability": {
@@ -110,5 +110,5 @@
       }
     }
   },
-  "source": "internal/testdata/realtime_model"
+  "source": "internal/testdata/live_model"
 }

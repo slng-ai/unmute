@@ -58,7 +58,7 @@ unmute deploy examples/hotel-concierge --target slng --dry-run
 unmute deploy examples/hotel-concierge --target slng
 ```
 
-`--dry-run` resolves every reference, checks the injected `hotel_id` against
+`--dry-run` resolves every reference, checks the pinned `hotel_id` against
 the published `hotel_info` schema, and previews the attachment changes without
 changing SLNG. Both commands write `build/slng/deploy-report.json`. Each real
 deployment resolves the latest published tools again and attaches the versions
@@ -77,20 +77,20 @@ one block to read.
 |---|---|---|
 | A hosted code tool, referenced by name | `tools/hotel_info.yaml` | one `slng:` line; description and schema come from the platform |
 | A hosted request tool with a package description | `tools/search_places_text.yaml` | `slng:` plus a `description:` that overrides the published one |
-| A tool announcement | `tools/search_places_text.yaml` | `announce:`, spoken before the wait |
-| An argument the model never sees | `tools/hotel_info.yaml` | `inject:` pins `hotel_id` to one fixed value |
+| A tool announcement | `agent.yaml` `tools:` | the `search_places_text` entry's `start:` and `say:`, spoken before the wait |
+| An argument the model never sees | `tools/hotel_info.yaml` | `with:` pins `hotel_id` to one fixed value |
 | Named MCP tools | `tools/web_search.yaml` | `mcp.server` and two names under `mcp.tools` |
 | A curated builtin | `tools/end_call.yaml` | `builtin: {id: end_call}` |
-| A curated text message with a pinned sender | `tools/send_sms.yaml` | `builtin: {id: send_sms}` and `inject: from_number`; the model writes the message, SLNG sends it to the caller's number, on phone calls only |
+| A curated text message with a pinned sender | `tools/send_sms.yaml` | `builtin: {id: send_sms}` and `with: from_number`; the model writes the message, SLNG sends it to the caller's number, on phone calls only |
 | Template variables in the greeting and the prompt | `state.py`, `conversation.greeting.text`, `instructions.md` | four fields on `State`, each with a default |
 | A value the model records during the call | `state.py` `caller_phone`, and `agent.yaml` `variables:` | `source: conversation`, `= None`, a `Field(description=...)` the model reads; returned on the call record as a memory variable |
 | A model fallback | `agent.yaml` `models.think` | `fallback:` naming `backup` on the primary |
 | An inbound phone number | `channels.phone` and the deploy | trunk chosen at the terminal after the push |
 
-This target compiles tasks, task groups, `finish:`, typed local tools and typed
+This target compiles tasks, task groups, `then: done` outcomes, typed local tools and typed
 `state.py` fields too. What it does not take, it refuses at validate by name:
 handoffs, `prefetch:`, `webhook:` tools, and the keys that need unmute-core, such as
-a tool's `assign:`, `replies:` and `precheck:`, `entry_by`, and a task's `confirm:`.
+a tool entry's `save:`, `outcomes:` and `hidden:`, a tool file's `precheck:`, `entry_by`, and a step tool's `confirm:`.
 Read the two salon examples for those. Reading the caller's number, detecting voicemail and
 telling the time are capabilities SLNG curates and attaches in the dashboard; a
 package reaches only `end_call` and `send_sms` by name.
@@ -145,7 +145,7 @@ the model has no text tool, and the prompt says so to the guest.
     from a two-row table. Its one parameter is pinned to `lumbre-sol`; change
     that line to serve the other property.
   - `send_sms` (builtin): SLNG's curated text message. The package pins the
-    sender with `inject: from_number`; the model writes the message, SLNG
+    sender with `with: from_number`; the model writes the message, SLNG
     addresses it to the number the call came from and reads
     `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` from the vault itself. SLNG
     offers it on phone calls only.
@@ -293,7 +293,7 @@ voiceai agents calls get <agent_id> <call_id> --json
 ```
 
 The record shows each tool call. `hotel_info` received `hotel_id` from the
-injection, and the model's own arguments carry none. After a text was sent,
+`with:` value, and the model's own arguments carry none. After a text was sent,
 `memory_variables` carries `caller_phone` with the number the guest confirmed,
 so you can check what was recorded without reading the transcript.
 
@@ -409,7 +409,7 @@ The identifier pinned in `tools/hotel_info.yaml` is not a row in the published
 module. The model never sees that value, so it cannot correct it mid-call.
 
 **Fix:** run the published tool once with the pinned identifier, and change
-either the `inject:` line or the module's table until the two agree:
+either the `with:` line or the module's table until the two agree:
 
 ```bash
 printf '{"hotel_id":"lumbre-sol"}\n' | voiceai tool run hotel_info --input - --confirm-side-effects

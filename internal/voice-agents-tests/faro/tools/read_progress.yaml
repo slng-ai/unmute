@@ -1,10 +1,5 @@
 local:
   handler: tools/lessons.py:read_progress
-inject:
-  - learner_id: "{{state.learner_id}}"
-  - explanation: "{{state.explanation}}"
-assign:
-  - said: result.said
-replies:
-  - say:
-      - "{{state.said}}"
+with:
+  - learner_id: "state.learner_id"
+  - explanation: "state.explanation"

@@ -225,14 +225,14 @@ func TestLoadToolShape(t *testing.T) {
 		{"mcp with description", "description: Probe.\n\nmcp:\n  url_env: PROBE_MCP_URL\n", "tools/probe.yaml:1: remove `description`"},
 		{"mcp with input", head + "\nmcp:\n  url_env: PROBE_MCP_URL\n", "tools/probe.yaml:2: remove `input`"},
 		{"mcp with effect", "mcp:\n  url_env: PROBE_MCP_URL\neffect: returns_data\n", "tools/probe.yaml:3: remove `effect`"},
-		{"mcp with inject", "mcp:\n  url_env: PROBE_MCP_URL\ninject:\n  caller: \"1\"\n", "tools/probe.yaml:3: remove `inject`"},
+		{"mcp with with", "mcp:\n  url_env: PROBE_MCP_URL\nwith:\n  caller: \"1\"\n", "tools/probe.yaml:3: remove `with`"},
 		{"mcp with interruption", "mcp:\n  url_env: PROBE_MCP_URL\ninterruption: cancel\n", "tools/probe.yaml:3: remove `interruption`"},
 		// A knowledge tool owns both sides of its contract, so input, output,
 		// inject and effect have nowhere to go. Unlike mcp, description,
 		// announce and interruption stay legal, which the table below proves.
 		{"knowledge with input", head + "\nknowledge:\n  base: refunds\n", "tools/probe.yaml:2: remove `input`"},
 		{"knowledge with output", "description: Probe.\nknowledge:\n  base: refunds\noutput: { type: object }\n", "tools/probe.yaml:4: remove `output`"},
-		{"knowledge with inject", "description: Probe.\nknowledge:\n  base: refunds\ninject:\n  caller: \"1\"\n", "tools/probe.yaml:4: remove `inject`"},
+		{"knowledge with with", "description: Probe.\nknowledge:\n  base: refunds\nwith:\n  caller: \"1\"\n", "tools/probe.yaml:4: remove `with`"},
 		{"knowledge with effect", "description: Probe.\nknowledge:\n  base: refunds\neffect: returns_data\n", "tools/probe.yaml:4: remove `effect`"},
 		{"knowledge beside webhook", "description: Probe.\ninput: { type: object }\nwebhook:\n  url_env: PROBE_URL\nknowledge:\n  base: refunds\n", "two execution blocks"},
 		{"empty knowledge block", "description: Probe.\nknowledge:\n", "block is empty"},
@@ -284,17 +284,17 @@ func TestLoadToolShape(t *testing.T) {
 		{"explicit empty client", head + "\nclient: {}\n", "client"},
 		{"mcp", "mcp:\n  url_env: PROBE_MCP_URL\n", "mcp"},
 		{"knowledge", "description: Probe.\nknowledge:\n  base: refunds\n", "knowledge"},
-		{"knowledge with announce", "description: Probe.\nannounce: Let me check.\ninterruption: cancel\nknowledge:\n  base: refunds\n", "knowledge"},
+		{"knowledge with interruption", "description: Probe.\ninterruption: cancel\nknowledge:\n  base: refunds\n", "knowledge"},
 		// `slng: {}` is what an author writes before the first pull, so it has
 		// to load. ir.Validate is what refuses it, naming the pull, because that
 		// is the message the author can act on.
 		{"explicit empty slng", "description: Probe.\nslng: {}\n", "slng"},
 		{"slng with a pin", "description: Probe.\nslng:\n  hash: abc\n", "slng"},
-		{"slng keeps announce and effect", "description: Probe.\nannounce: One moment.\neffect: returns_data\nslng:\n  hash: abc\n", "slng"},
+		{"slng keeps effect", "description: Probe.\neffect: returns_data\nslng:\n  hash: abc\n", "slng"},
 		// The scalar is the whole reference: one line, the hosted tool's name.
 		{"scalar slng", "slng: check_order\n", "slng"},
 		{"scalar slng with a description", "description: Probe.\nslng: check_order\n", "slng"},
-		{"scalar slng keeps announce and inject", "announce: One moment.\nslng: check_order\ninject:\n  - query: hello\n", "slng"},
+		{"scalar slng keeps with", "slng: check_order\nwith:\n  - query: hello\n", "slng"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pkg, err := Load(writeToolPackage(t, tc.body))
@@ -353,12 +353,14 @@ func TestLoadMCPUnknownField(t *testing.T) {
 // It has its own function rather than a row in TestLoadToolShape's table so that
 // `go test -run Announce` selects it: -run matches the top-level name, and a
 // filter that matches nothing still exits 0.
-func TestLoadToolAnnounceRefusedOnMCPFile(t *testing.T) {
+// A tool's line moved to its entry in agent.yaml, so a tool file of any kind
+// that still carries announce: hears where it went.
+func TestLoadToolFileRefusesAnnounce(t *testing.T) {
 	_, err := Load(writeToolPackage(t, "mcp:\n  url_env: PROBE_MCP_URL\nannounce: Let me check.\n"))
 	if err == nil {
-		t.Fatal("an mcp file carrying announce must be refused")
+		t.Fatal("a tool file carrying announce must be refused")
 	}
-	for _, want := range []string{"tools/probe.yaml:3", "remove `announce`", "the server owns each tool's speech"} {
+	for _, want := range []string{"tools/probe.yaml:3", "announce moved to agent.yaml", "start: with say:"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error must contain %q: %v", want, err)
 		}

@@ -14,9 +14,7 @@ description: >-
 local:
   handler: tools/salon.py:find_slots
 
-inject:
-  - customer_phone: "{{state.customer_phone}}"
+with:
+  - customer_phone: "state.customer_phone"
 
 # The offer sentence, saved on every result so the booking step can say it in code.
-assign:
-  - offer: result.offer

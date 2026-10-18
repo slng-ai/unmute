@@ -106,7 +106,7 @@ job.
 
 A saved value can remove a lookup from the conversation only if the agent or
 tool uses it. Add a placeholder where the model needs to read it, or use
-`inject:` for a tool argument it need not type.
+`with:` for a tool argument it need not type.
 
 Then update any instruction that still says to collect the value from scratch.
 Tell the agent to use the existing value when present and ask only when it is
@@ -135,7 +135,7 @@ So the step does not disappear. It changes job:
 
 [`confirm:`](/build/prefetch#always-check-a-value-with-the-caller) makes that
 happen. Only the confirming task may reference the candidate in a prompt. During the
-conversation, tools that inject it refuse to run until that task saves the
+conversation, tools that take it through `with:` refuse to run until that task saves the
 confirmed value. The prompt must ask for agreement; saving through the named
 task is what clears the runtime mark.
 
@@ -158,20 +158,20 @@ Three rules keep it safe, and the first two are enforced for you:
 2. It **cannot fail a call**. An error is logged and given up on too.
 3. Keep the list short, and do not chain a lookup off a lookup off a lookup. Entries run one after another, so a chain eats the time limit.
 
-For a noticeable wait, consider one short `announce:` line. Omit it for quick
+For a noticeable wait, consider one short `start: say:` line on the tool. Omit it for quick
 tools, and avoid a second model-generated line saying the same thing.
 
 ### A pre-fetch is not a cover line
 
 Both make a gap easier to sit through. They are not interchangeable.
 
-| | `prefetch:` | `announce:` |
+| | `prefetch:` | `start: say:` |
 |---|---|---|
 | what it does | removes a round trip | gives the caller something to hear during one |
 | when it runs | once, before the greeting | every time that tool fires |
 | use it for | a value that was already knowable | a value you really do have to fetch now |
 
-A task transition may also take time. A task can have an `announce:` line,
+A task transition may also take time. A task can have a `start: say:` line,
 but it is optional; test whether the caller benefits from hearing it.
 
 Reach for a pre-fetch first, because a round trip you remove is gone for good.
@@ -217,14 +217,14 @@ controls decide how far each value travels.
   renders in no prompt but its confirming step's. The phone number tells you
   which phone called, not who is holding it, so it appears in the verification
   step and nowhere else: not the greeting, not the booking step.
-- **`inject:`** hands a value straight to a tool. The model never types it, so
+- **`with:`** hands a value straight to a tool. The model never types it, so
   it cannot type it in a shape your records do not match. See
   [Hand a value to a tool](/build/variables#hand-a-value-to-a-tool).
 - **`{{ }}` placeholders** give a prompt only the values it names. Two
   placeholders, two values. The greeting names none, so it gets none, however
   many variables the call has collected by then.
-- **Task `assign:`** derives each finish field from its destination field on `State`
-  and saves it. Values that are not assigned never enter call state. See
+- **Task `save:`** derives each finish field from its destination field on `State`
+  and saves it. Values that are not saved never enter call state. See
   [Tasks](/build/orchestration/tasks).
 
 #### Why this beats a prompt instruction

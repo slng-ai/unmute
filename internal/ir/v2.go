@@ -28,7 +28,7 @@ func handlerTypes(pkg *packagespec.Package, name string, tool *Tool) error {
 	properties, _ := types.Input["properties"].(map[string]any)
 	for _, key := range slices.Sorted(maps.Keys(tool.Inject)) {
 		if _, ok := properties[key]; !ok {
-			return fmt.Errorf("%s: inject %q names no parameter of %s; add %s to the handler's signature, or remove it here",
+			return fmt.Errorf("%s: with: %q names no parameter of %s; add %s to the handler's signature, or remove it here",
 				pkg.Location(file, key), key, tool.HandlerFunction, key)
 		}
 	}
@@ -184,8 +184,8 @@ func buildV2Tool(pkg *packagespec.Package, out *Agent, name string) error {
 	raw, tool := pkg.Tools[name], out.Tools[name]
 	file := filepath.Join("tools", name+".yaml")
 	if raw.AnnounceWait && len(raw.Announce) == 0 {
-		return fmt.Errorf("%s: announce_wait waits for the announce line, and %s has none; add announce: or remove announce_wait",
-			pkg.Location(file, "announce_wait:"), name)
+		return fmt.Errorf("%s: start: wait: true waits for the start: say: line, and %s has none; add a say: line or remove wait: true",
+			pkg.Location("agent.yaml", "wait:"), name)
 	}
 	tool.AnnounceWait = raw.AnnounceWait
 	if len(raw.Assign) == 0 && len(raw.Replies) == 0 && len(raw.Hidden) == 0 {
@@ -200,29 +200,26 @@ func buildV2Tool(pkg *packagespec.Package, out *Agent, name string) error {
 	for _, field := range raw.Hidden {
 		if _, ok := output.Field(field); !ok {
 			return fmt.Errorf("%s: hidden names %q, which %s never returns; it returns %s",
-				pkg.Location(file, "hidden:"), field, name, modelFields(output))
+				pkg.Location("agent.yaml", "hidden:"), field, name, modelFields(output))
 		}
 	}
+	where := pkg.Location("agent.yaml", "name: "+name)
 	assign, err := assignments(raw.Assign, false)
 	if err != nil {
-		return fmt.Errorf("%s: %w", pkg.Location(file, "assign:"), err)
+		return fmt.Errorf("%s: %w", where, err)
 	}
 	for _, entry := range assign {
 		source, err := modelPath(output, entry.Field)
 		if err != nil {
-			return fmt.Errorf("%s: assign result.%s: %s %w", pkg.Location(file, entry.Field), entry.Field, name, err)
+			return fmt.Errorf("%s: save result.%s: %s %w", where, entry.Field, name, err)
 		}
 		if err := fitsAssign(entry, source, out); err != nil {
-			return fmt.Errorf("%s: %w", pkg.Location(file, entry.Field), err)
+			return fmt.Errorf("%s: %w", where, err)
 		}
 	}
-	hint := lineHint{assign: "assign: in " + file}
-	replies, err := buildReplies(pkg, out, file, raw.Replies, func(reply packagespec.Reply) (string, error) {
-		if reply.Tool != "" {
-			return "", fmt.Errorf("a reply in %s names tool: %s; a tool's own replies speak for it, so remove the tool: line", file, reply.Tool)
-		}
+	replies, err := buildReplies(pkg, out, "agent.yaml", raw.Replies, func(packagespec.Reply) (string, error) {
 		return name, nil
-	}, func(string) lineHint { return hint })
+	})
 	if err != nil {
 		return err
 	}
@@ -234,16 +231,15 @@ func buildV2Tool(pkg *packagespec.Package, out *Agent, name string) error {
 // buildV2Task resolves one step's version 2 keys.
 func buildV2Task(pkg *packagespec.Package, out *Agent, name string) error {
 	raw, task := pkg.Tasks[name], out.Tasks[name]
-	taskAssign := fmt.Sprintf("assign: of task %q", name)
 	for i, entry := range raw.Finish {
-		site := fmt.Sprintf("finish on %q", entry.Tool)
+		site := fmt.Sprintf("an outcome of %q", entry.Tool)
 		for _, line := range entry.Confirm {
-			if err := checkLine(pkg, out, "agent.yaml", line, site+" confirm", line, lineHint{assign: taskAssign, beforeTool: true}); err != nil {
+			if err := checkLine(pkg, out, "agent.yaml", line, "confirm of "+entry.Tool, line, lineHint{tool: entry.Tool, beforeTool: true}); err != nil {
 				return err
 			}
 		}
 		for _, line := range entry.Say {
-			if err := checkLine(pkg, out, "agent.yaml", line, site+" say", line, lineHint{assign: taskAssign}); err != nil {
+			if err := checkLine(pkg, out, "agent.yaml", line, site, line, lineHint{tool: entry.Tool}); err != nil {
 				return err
 			}
 		}
@@ -253,12 +249,7 @@ func buildV2Task(pkg *packagespec.Package, out *Agent, name string) error {
 		return err
 	}
 	replies, err := buildReplies(pkg, out, "agent.yaml", raw.Replies, func(reply packagespec.Reply) (string, error) {
-		if !slices.Contains(raw.Tools, reply.Tool) {
-			return "", fmt.Errorf("a reply names tool %q, which the step does not list under tools:; name one of its tools", reply.Tool)
-		}
 		return reply.Tool, nil
-	}, func(tool string) lineHint {
-		return lineHint{assign: "assign: in " + filepath.Join("tools", tool+".yaml")}
 	})
 	if err != nil {
 		return err
@@ -285,7 +276,7 @@ func checkInputAssigns(pkg *packagespec.Package, out *Agent, raw packagespec.Tas
 			continue
 		}
 		if len(raw.Finish) == 0 {
-			return fmt.Errorf("assign input.%s reads the input of the tool the step finishes on, and the step has no finish:; add one, or save from result instead", entry.Field)
+			return fmt.Errorf("save input.%s reads the input of a tool the step ends on, and no outcome ends the step; add one with then: done, or save from result instead", entry.Field)
 		}
 		var tools []string
 		taken := false
@@ -305,16 +296,16 @@ func checkInputAssigns(pkg *packagespec.Package, out *Agent, raw packagespec.Tas
 			taken = true
 		}
 		if !taken {
-			return fmt.Errorf("assign input.%s: no tool the step finishes on takes that input (%s)", entry.Field, strings.Join(tools, ", "))
+			return fmt.Errorf("save input.%s: no tool the step ends on takes that input (%s)", entry.Field, strings.Join(tools, ", "))
 		}
 	}
 	return nil
 }
 
-// buildReplies resolves a replies: list. toolOf says which tool a reply speaks
-// for, and hintOf where a value it needs is saved.
+// buildReplies resolves the outcomes that say a line and do not end the step.
+// toolOf says which tool each one belongs to.
 func buildReplies(pkg *packagespec.Package, out *Agent, file string, raw []packagespec.Reply,
-	toolOf func(packagespec.Reply) (string, error), hintOf func(string) lineHint) ([]Reply, error) {
+	toolOf func(packagespec.Reply) (string, error)) ([]Reply, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
@@ -322,17 +313,14 @@ func buildReplies(pkg *packagespec.Package, out *Agent, file string, raw []packa
 	for _, reply := range raw {
 		tool, err := toolOf(reply)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", pkg.Location(file, "replies:"), err)
-		}
-		if len(reply.Say) == 0 {
-			return nil, fmt.Errorf("%s: a reply for %s has no say:; give it at least one line", pkg.Location(file, "replies:"), tool)
+			return nil, fmt.Errorf("%s: %w", pkg.Location(file, "outcomes:"), err)
 		}
 		properties, _ := out.Tools[tool].Output["properties"].(map[string]any)
 		when := map[string][]string{}
 		for _, pair := range reply.When {
 			declared, err := declaredEnum(tool, properties, pair.Field)
 			if err != nil {
-				return nil, fmt.Errorf("%s: %w", pkg.Location(file, "when:"), err)
+				return nil, fmt.Errorf("%s: %w", pkg.Location(file, "if:"), err)
 			}
 			for _, value := range pair.Values {
 				if !slices.Contains(declared, value) {
@@ -343,11 +331,18 @@ func buildReplies(pkg *packagespec.Package, out *Agent, file string, raw []packa
 			when[pair.Field] = pair.Values
 		}
 		for _, line := range reply.Say {
-			if err := checkLine(pkg, out, file, line, fmt.Sprintf("a reply for %s", tool), line, hintOf(tool)); err != nil {
+			if err := checkLine(pkg, out, file, line, fmt.Sprintf("an outcome of %s", tool), line, lineHint{tool: tool}); err != nil {
 				return nil, err
 			}
 		}
-		built := Reply{When: when, Say: flattenLines(reply.Say)}
+		saves, err := assignments(reply.Save, false)
+		if err != nil {
+			return nil, fmt.Errorf("%s: an outcome of %s: %w", pkg.Location(file, "save:"), tool, err)
+		}
+		if err := ownSaveFits(pkg, out, tool, saves); err != nil {
+			return nil, fmt.Errorf("%s: an outcome of %s: %w", pkg.Location(file, "save:"), tool, err)
+		}
+		built := Reply{When: when, Say: flattenLines(reply.Say), Assign: saves}
 		if reply.Tool != "" {
 			built.Tool = tool
 		}
@@ -356,52 +351,67 @@ func buildReplies(pkg *packagespec.Package, out *Agent, file string, raw []packa
 	return replies, nil
 }
 
-// buildOpensWith resolves an opens_with: of a step or a handoff. tools are the
-// tools of whoever runs it, named by owner in a refusal.
+// buildOpensWith resolves the start: call: of a step or a handoff. tools are
+// the tools of whoever runs it, named by owner in a refusal. A with: value
+// marked ? is one the call runs without, and the mark has to agree with the
+// tool's input schema, so the page says which values the call needs.
 func buildOpensWith(pkg *packagespec.Package, out *Agent, opens *packagespec.OpensWith, tools []string, owner string) (*OpensWith, error) {
 	if opens == nil {
 		return nil, nil
 	}
 	if !slices.Contains(tools, opens.Tool) {
-		return nil, fmt.Errorf("opens_with names %q, which %s does not list under tools; add it there", opens.Tool, owner)
+		return nil, fmt.Errorf("start: calls %q, which %s does not list under tools:; add it there", opens.Tool, owner)
 	}
 	input, err := inputModel(pkg, out, opens.Tool)
 	if err != nil {
 		return nil, err
 	}
+	required := map[string]bool{}
+	schema := out.Tools[opens.Tool].Input
+	if types, ok := pkg.ToolTypes[opens.Tool]; ok {
+		schema = types.Input
+	}
+	if names, err := stringSlice(schema["required"]); err == nil {
+		for _, name := range names {
+			required[name] = true
+		}
+	}
 	arguments := map[string]string{}
 	for _, pair := range opens.Arguments {
 		variable, _ := pair.Value.(string)
 		if _, ok := input.Field(pair.Key); !ok {
-			return nil, fmt.Errorf("opens_with passes %q, which %s does not take; it takes %s", pair.Key, opens.Tool, modelFields(input))
+			return nil, fmt.Errorf("with: passes %q, which %s does not take; it takes %s", pair.Key, opens.Tool, modelFields(input))
 		}
 		if _, ok := out.Variables[variable]; !ok {
-			return nil, fmt.Errorf("opens_with passes %s from %q, which State in state.py does not declare; name a State value", pair.Key, variable)
+			return nil, fmt.Errorf("with: passes %s from state.%s, which State in state.py does not declare; name a State value", pair.Key, variable)
+		}
+		marked := slices.Contains(opens.Optional, pair.Key)
+		switch {
+		case marked && required[pair.Key]:
+			return nil, fmt.Errorf("with: marks %s with ?, and %s requires it, so the call cannot run without it. Remove the ?", pair.Key, opens.Tool)
+		case !marked && !required[pair.Key]:
+			return nil, fmt.Errorf("with: passes %s with no ?, and %s runs without it. Write state.%s? so the page says the call runs when it is empty", pair.Key, opens.Tool, variable)
 		}
 		arguments[pair.Key] = variable
-	}
-	hint := lineHint{assign: "assign: in " + filepath.Join("tools", opens.Tool+".yaml")}
-	for _, line := range opens.Say {
-		if err := checkLine(pkg, out, "agent.yaml", line, "opens_with say", line, hint); err != nil {
-			return nil, err
-		}
 	}
 	return &OpensWith{Tool: opens.Tool, Arguments: arguments, Say: flattenLines(opens.Say)}, nil
 }
 
-// lineHint says where a spoken line's value is saved: assign names the list to
-// add the save to, and beforeTool marks a read-back, which runs before the tool
-// and so has no result.
+// lineHint says what a spoken line may read besides State: the tool whose
+// input or result it reads, and whether it is a read-back, which runs before
+// the tool and so reads the input, not the result.
 type lineHint struct {
-	assign     string
+	tool       string
 	beforeTool bool
 }
 
-// checkLine holds one spoken line to state only. A `{{input.x}}` or
-// `{{result.x}}` is refused with the save to write; every other reference is
-// checked like any other template, so a name State lacks is refused too.
+// checkLine holds one spoken line to what it can read. {{state.x}} reads State.
+// A line of a tool reads {{result.x}}, or {{input.x}} when it is a read-back,
+// and the path has to be one the tool takes or returns. Every State reference
+// is checked like any other template, so a name State lacks is refused too.
 func checkLine(pkg *packagespec.Package, out *Agent, file, token, site, line string, hint lineHint) error {
 	where := pkg.Location(file, firstNonBlank(token, "{{"))
+	stateOnly := line
 	for _, match := range templatePattern.FindAllStringSubmatch(line, -1) {
 		ref := match[1]
 		kind, path, found := strings.Cut(ref, ".")
@@ -411,21 +421,30 @@ func checkLine(pkg *packagespec.Package, out *Agent, file, token, site, line str
 			}
 			continue
 		}
-		root, _, _ := strings.Cut(path, ".")
 		switch {
-		case kind == "result" && hint.beforeTool:
-			return fmt.Errorf("%s: %s reads {{%s}}, and a read-back runs before the tool, so there is no result yet. "+
-				"Read back the input instead: add \"- %s: input.%s\" under %s, then write {{state.%s}}",
-				where, site, ref, root, root, hint.assign, path)
-		case hint.assign == "":
-			return fmt.Errorf("%s: %s reads {{%s}}, and this line has no tool. A spoken line reads only state: write {{state.<name>}}",
+		case hint.tool == "":
+			return fmt.Errorf("%s: %s reads {{%s}}, and this line belongs to no tool, so it has no input or result. Say a State value as {{state.<name>}}",
 				where, site, ref)
-		default:
-			return fmt.Errorf("%s: %s reads {{%s}}. A spoken line reads only state: add \"- %s: %s.%s\" under %s, then write {{state.%s}}",
-				where, site, ref, root, kind, root, hint.assign, path)
+		case kind == "result" && hint.beforeTool:
+			return fmt.Errorf("%s: %s reads {{%s}}, and a read-back runs before the tool, so there is no result yet. Read the input instead, as {{input.%s}}",
+				where, site, ref, path)
+		case kind == "input" && !hint.beforeTool:
+			return fmt.Errorf("%s: %s reads {{%s}}. A line said after the tool reads its result: say {{result.<field>}}, "+
+				"or save the input in the step's save: and say {{state.<name>}}", where, site, ref)
 		}
+		model, err := outputModel(hint.tool, out.Tools[hint.tool].Output)
+		if kind == "input" {
+			model, err = inputModel(pkg, out, hint.tool)
+		}
+		if err == nil {
+			_, err = modelPath(model, path)
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %s reads {{%s}}: %s %w", where, site, ref, hint.tool, err)
+		}
+		stateOnly = strings.Replace(stateOnly, match[0], "", 1)
 	}
-	return checkTemplateSite(pkg, out, file, token, site, line, false, false)
+	return checkTemplateSite(pkg, out, file, token, site, stateOnly, false, false)
 }
 
 // flattenLines is FlattenPaths over a list of lines, the emitted form.

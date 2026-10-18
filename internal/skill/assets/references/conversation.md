@@ -51,11 +51,11 @@ name a variable that already has a value: `source: call_start`, a system source,
 or a `default`. A greeting naming a variable with none of those is refused, not
 silently blanked.
 
-What decides it is the value, not the source. A variable a step assigns later
+What decides it is the value, not the source. A variable a step saves later
 in the call still needs a `default:` to appear in a greeting, and if you give
 it one the greeting renders that default, not the real value: the greeting is
 built before any step has run, and it never re-renders once one does. Read
-such a value back at the per-call sites instead: `inject:` on a tool, or a
+such a value back at the per-call sites instead: `with:` on a tool, or a
 webhook `path`, both of which render per call rather than once at the start.
 
 Write the greeting the way it will sound. It is spoken text, so the rules in

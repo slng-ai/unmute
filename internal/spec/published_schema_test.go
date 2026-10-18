@@ -37,17 +37,22 @@ func TestPublishedSchemaAcceptsWhatTheDecoderAccepts(t *testing.T) {
 
 // The schema says the "exactly one" part too, which is the refusal a dropped
 // indent hits, so a reader validating their file sees it before the decoder.
-func TestPublishedSchemaRefusesASuccessItemHoldingTwoKeys(t *testing.T) {
+func TestPublishedSchemaRefusesAnIfItemHoldingTwoKeys(t *testing.T) {
 	resolved := resolvedSchema(t)
 	pkg := authoredInstance(t, filepath.Join("..", "testdata", "terminal_step"))
 	doc := pkg["agent"]
 	agents := doc.(map[string]any)["agents"].(map[string]any)
 	tasks := agents["desk"].(map[string]any)["tasks"].([]any)
-	finish := tasks[0].(map[string]any)["finish"].([]any)
-	success := finish[0].(map[string]any)["success"].([]any)
-	success[0] = map[string]any{"status": "existing", "summary": "found"}
+	var match []any
+	for _, item := range tasks[0].(map[string]any)["tools"].([]any) {
+		if entry, ok := item.(map[string]any); ok && entry["outcomes"] != nil {
+			match = entry["outcomes"].([]any)[0].(map[string]any)["if"].([]any)
+			break
+		}
+	}
+	match[0] = map[string]any{"status": "existing", "summary": "found"}
 	if err := resolved.Validate(pkg); err == nil {
-		t.Fatal("a success item holding two keys passed the published schema")
+		t.Fatal("an if: item holding two keys passed the published schema")
 	}
 }
 
@@ -65,7 +70,10 @@ func authoredInstance(t *testing.T, dir string) map[string]any {
 	doc := loadInstance(t, filepath.Join(dir, "agent.yaml"))
 	tools := map[string]any{}
 	for _, item := range doc.(map[string]any)["tools"].([]any) {
-		name := item.(string)
+		name, ok := item.(string)
+		if !ok {
+			name = item.(map[string]any)["name"].(string) // an entry with behaviour
+		}
 		tools[name] = loadInstance(t, filepath.Join(dir, "tools", name+".yaml"))
 	}
 	// channels and capacity are read raw from targets.yaml, beside the targets

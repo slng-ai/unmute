@@ -13,7 +13,7 @@ On this page:
 
 - [Start with messages](#1-start-with-messages) - the default, and why
 - [Decide what must survive](#2-decide-what-must-survive) - list the facts needed
-- [Save the selected details](#3-save-the-selected-details) - assign them in a task
+- [Save the selected details](#3-save-the-selected-details) - save them in a task
 - [Reset the next task](#4-reset-the-next-task-and-name-its-inputs) - and name its inputs
 - [Save the outcome](#5-save-the-outcome-and-let-the-owner-read-it) - what the owner reads
 - [Apply the same choice to handoffs](#6-apply-the-same-choice-to-handoffs) - one receiving agent
@@ -69,7 +69,7 @@ booking change, that might be:
 - Whether identity verification has already succeeded, if this task needs it.
 
 A spoken request is not a saved value. An earlier task must save those facts
-through `assign:`, or they must already come from the call's initial values
+through `save:`, or they must already come from the call's initial values
 or prefetch. Describing a variable does not fill it.
 
 Keep requested details separate from the latest successful booking. A failed
@@ -78,7 +78,7 @@ move must not overwrite the saved appointment with an unbooked time.
 ## 3. Save the selected details
 
 This example assumes the selection task has the tools needed to find the
-booking and check available times. Add the following fields and assignments
+booking and check available times. Add the following fields and `save:` rows
 to that task in your package:
 
 ```python state.py
@@ -104,7 +104,7 @@ agents:
       - name: choose_booking
         when: Select the existing booking and its requested new time.
         instructions: tasks/choose-booking.md
-        assign:
+        save:
           - appointment_id: result.appointment_id
           - appointment_date: result.appointment_date
           - appointment_time: result.appointment_time
@@ -162,7 +162,7 @@ There is no automatic request passed by the owner.
 
 For **no prior conversation and no saved values in the prompt**, use `reset`
 and omit variable placeholders. The task can collect what it needs from the
-caller. Review its tools too: `inject:` and tool results are separate ways
+caller. Review its tools too: `with:` and tool results are separate ways
 data can reach a task's work.
 
 ## 5. Save the outcome and let the owner read it
@@ -183,11 +183,11 @@ class State(BaseModel):
 ```
 
 ```yaml
-assign:
+save:
   - appointment: result.appointment
 ```
 
-Add the assignment to `reschedule_booking` and change its final instruction:
+Add the row to `reschedule_booking` and change its final instruction:
 
 ```markdown tasks/reschedule-booking.md
 After save_booking reports success, copy the saved appointment from its
@@ -209,7 +209,7 @@ with `skip_when_confirmed:` naming the variable. The group skips the step once
 it is confirmed, and runs it again once the caller corrects the value. See
 [Reuse verification deliberately](/best-practices/state-design#reuse-verification-deliberately).
 
-Finishing with a non-empty `unserved_request` saves no assignments. It also
+Finishing with a non-empty `unserved_request` saves nothing. It also
 does not undo a booking tool that already succeeded. Finish promptly after
 success so a new caller request is handled by the owner, not mistaken for
 unfinished booking work.

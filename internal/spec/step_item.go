@@ -25,6 +25,10 @@ type FinishEntry struct {
 	Confirm []string `json:"confirm,omitempty" yaml:"confirm,omitempty" since:"2"`
 	// Say is spoken by code when the step ends on this tool.
 	Say []string `json:"say,omitempty" yaml:"say,omitempty" since:"2"`
+	// Save is what this result writes to State, and Ends is how the step ends:
+	// completed or failed. Both come from an outcome.
+	Save []Pair `json:"-" yaml:"-"`
+	Ends string `json:"-" yaml:"-"`
 }
 
 // SuccessPair is one `field: value` or `field: [value, value]` item under

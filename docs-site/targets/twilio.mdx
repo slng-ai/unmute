@@ -202,11 +202,11 @@ do instead. The refused list:
 - more agents, tasks, task groups, handoffs and transfers;
 - variables, a `state.py` and prefetch;
 - webhook, MCP, knowledge and hosted tools;
-- tool `announce`, `interruption: cancel`, and `effect: ends_conversation` on a local tool;
+- a tool's `start: say:`, `interruption: cancel`, and `effect: ends_conversation` on a local tool;
 - `instructions` on `end_call`;
 - inactivity and duration timers, `pace` and the other turn fields;
 - tracing, realtime and live architectures, fallbacks and custom endpoints;
-- these `version: 2` keys, because the Twilio runtime runs version 2 without unmute-core: the tool keys `assign`, `replies`, `precheck`, `hidden` and `announce_wait`; a task's `replies` and `opens_with`; a task `finish` rule with `confirm` or `say`; `entry_by`; prefetch `refuse_call`; and a handoff's `saves` or `opens_with`. To use them, compile to livekit or pipecat;
+- these `version: 2` keys, because the Twilio runtime runs version 2 without unmute-core: a tool entry's `save`, `outcomes`, `hidden` and `start: wait`, and a tool file's `precheck`; a step's outcomes without `then:`, its `start:` with `call:`, and an outcome with `confirm:` or `say:`; `entry_by`; prefetch `refuse_call`; and a handoff's `saves` or `start`. To use them, compile to livekit or pipecat;
 - the target keys `version`, `pins`, `deployment_region` and `warm_instances`.
 
 ## What compiling writes

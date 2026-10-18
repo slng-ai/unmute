@@ -72,7 +72,7 @@ tasks in a task group. The server owns its dynamic order.
 | the model does things out of order | a [task group](/build/orchestration/task-groups): the order is declared, not requested |
 | the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current task does not hold cannot be called at all |
 | a task runs before you have the value it needs | give the task's own `when:` the clause that names what has to be true first, "once the caller is identified" |
-| you need to keep a value a task produces | `assign:` on the task, into a declared variable |
+| you need to keep a value a task produces | `save:` on the task, into a declared variable |
 | two phases need different tools or different permissions | a [handoff](/build/orchestration/handoffs) |
 | the caller needs a person | none of these: that is a [human transfer](/transfers/overview), and what it can do depends on the phone route |
 
@@ -101,7 +101,7 @@ agents:
       - name: check_customer     # runs, returns a typed result, the agent continues
         when: Identify the caller before handling an appointment request.
         instructions: tasks/check-customer.md
-        assign:
+        save:
           - customer_id: result.customer_id
 
 handoffs:
@@ -134,7 +134,7 @@ first.
 | | `tasks:` | `handoffs:` |
 |---|---|---|
 | returns | yes | no |
-| saved typed values | yes, through `assign:` | existing call state remains available to explicit prompt references |
+| saved typed values | yes, through `save:` | existing call state remains available to explicit prompt references |
 | targets | a task, run in place | another agent |
 | where context is set | `context:` on the task | `context:` on the handoff entry |
 
@@ -150,8 +150,8 @@ with no task in between.
 
 **Confirm who is calling before anything personal.** One job with a definite,
 typed answer: a task. `verify_customer` holds the one tool that looks the
-caller up, ends on that tool through `finish:`, and saves `customer_phone`
-with `assign:`. The `customer_phone` variable carries
+caller up, ends on that tool through an outcome with `then: done`, and saves
+`customer_phone` with `save:`. The `customer_phone` variable carries
 `confirm: verify_customer`, so until this task has heard the caller agree, the
 number reaches no other prompt and every tool that needs it refuses. The task
 keeps a `when:` of its own for one case only: the caller correcting their phone
@@ -198,7 +198,7 @@ on the specialist rather than behind a task. `to_concierge` carries the
 reverse direction. The specialist does name `verify_customer`, as a bare
 `- verify_customer`: the definition stays on the concierge, because a task name
 is one name across the package. It needs the step in reach because
-`record_complaint` injects `customer_phone` and is refused while the caller has
+`record_complaint` takes `customer_phone` through `with:` and is refused while the caller has
 not agreed to it, and a caller who opens with a complaint has never been near
 the booking flow.
 

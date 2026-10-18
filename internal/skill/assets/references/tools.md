@@ -51,10 +51,15 @@ also the list of what you could have written.
 | `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
 | `input` | on `webhook:` only; a `local:` tool's handler signature is its input | `webhook:` and version 1 `local:` |
 | `output` | no | `webhook:` and version 1 `local:`, but see below. A version 2 `local:` return model is its output |
-| `inject` | no | `webhook:`, `local:` and `slng:`, and `builtin:` for a capability's own settings |
+| `with` | no | `webhook:`, `local:` and `slng:`, and `builtin:` for a capability's own settings |
+| `precheck` | no | `webhook:` and `local:` |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` and `knowledge:` |
-| `announce` | no | everywhere except `mcp:`; on a `builtin:`, the `slng` target only |
+
+The tool file keeps what the tool is. What it does in a conversation (a spoken
+line while it runs, what it saves, what is said after it, whether the model
+sees it) is written on the tool's entry in `agent.yaml`: see "The tool entry in
+agent.yaml" below.
 
 An `mcp:` file is the block and nothing else, because the server owns each
 tool's contract. A `builtin:` file needs no `description` or `input`, because
@@ -90,8 +95,6 @@ line naming it, not a copy of it:
 ```yaml
 # tools/check_order.yaml
 slng: check_order
-
-announce: One moment while I look that up.
 ```
 
 `slng: check_order` is the whole reference. `check_order` is the tool's exact
@@ -115,9 +118,9 @@ Two names, and keeping them straight is what a coding agent gets wrong first:
    refuses, naming the organisation and what it does have; nothing checks it
    offline, because only the organisation knows.
 
-`inject:` and `announce:` work exactly as they do on any other tool: see
-"Hidden values the model cannot see" and "Using `announce:`" below. Injected
-values keep their exact type, including `false` and `0`; the tool call
+`with:` and the tool's entry in `agent.yaml` work exactly as they do on any
+other tool: see "Hidden values the model cannot see" and "The tool entry in
+agent.yaml" below. Pinned values keep their exact type, including `false` and `0`; the tool call
 remains model-invoked either way, never automatic.
 
 **No hash, no mirror, and no `unmute pull` for a package that deploys to
@@ -166,7 +169,7 @@ deploy, because there is no mirror to read it from ahead of time.
 
 **Say plainly what an offline `validate` or `compile` cannot tell the user,**
 for a `slng:` reference: whether the organisation still holds that name,
-whether an injected argument fits its published parameters, and which Vault
+whether a `with:` argument fits its published parameters, and which Vault
 entries it needs. `compile-report.json` names these under `deferred_checks`;
 `unmute deploy` completes all three before it changes the agent, and reports
 what it found. A clean `validate` or `compile` is not proof the reference
@@ -199,10 +202,12 @@ description: >-
   Look up the company's refund and complaints policy. Use this before you state
   any refund, replacement, timescale, or goodwill offer, so you quote the policy
   instead of guessing it.
-announce: "Let me check the policy."
 knowledge:
   base: refunds
 ```
+
+To cover the lookup with a spoken line, give the tool a `start:` entry in
+`agent.yaml`.
 
 | Field | Required | Default | Rule |
 |---|---|---|---|
@@ -312,7 +317,7 @@ authenticates through the AWS credential chain.
 - **Write a real `description`.** It is the only thing that tells the model when
   to look something up rather than answer from memory. Say what is in the folder
   and when to check it, as the example above does.
-- **Write an `announce`.** A lookup takes a moment, and silence sounds like a
+- **Write a `start:` line.** A lookup takes a moment, and silence sounds like a
   dropped call.
 - **Give each agent only the bases it should see.** An agent gets a base by
   being given its tool, so a refunds tool on the concierge means the concierge
@@ -343,8 +348,8 @@ input:
   type: object
   properties: {}
 
-inject:
-  - customer_id: "{{state.customer_id}}"
+with:
+  - customer_id: state.customer_id
   - channel: phone
 
 webhook:
@@ -415,7 +420,7 @@ The API then receives `{"tracking_number": "..."}` in the body. Only put a
 block, and say to the user which shape the request ended up with, because they
 may need to change their endpoint to match.
 
-Every `inject` value must be a scalar: a string, number, boolean, or null. Maps
+Every `with` value must be a scalar: a string, number, boolean, or null. Maps
 and lists are refused.
 
 ### Authentication
@@ -440,8 +445,8 @@ output, so the tool file has no `input:` or `output:`. LiveKit and Pipecat compi
 ```yaml tools/cancel_appointment.yaml
 description: Cancel the appointment outright. Call it only when the customer says plainly that they want to cancel, never when they want a different time.
 
-inject:
-  - customer_id: "{{state.customer_id}}"
+with:
+  - customer_id: state.customer_id
 
 local:
   handler: tools/cancel_appointment.py:cancel_appointment
@@ -467,9 +472,9 @@ The rules the function follows:
 | Rule | Why |
 |---|---|
 | every parameter has a type | the type becomes the model's input schema |
-| the return type is a Pydantic model | its fields are the tool's output, which `assign:`, `finish:` and `replies:` read |
+| the return type is a Pydantic model | its fields are the tool's output, which a `save:` and an outcome's `if:` and `say:` read as `result.x` |
 | a `Field(description=...)` on a parameter says what it means | the model reads that text |
-| a parameter named by `inject:` is not the model's | it takes its value from State, so the model never sees it |
+| a parameter named by `with:` is not the model's | it takes its value from State, so the model never sees it |
 | it may be `async def`, except on slng | livekit and pipecat await an awaitable result, and SLNG calls a code tool synchronously |
 
 `handler:` is written `file.py:function`. The function name need not match the
@@ -555,7 +560,7 @@ by the tool file's own name, so `tools/hang_up.yaml` declaring
 `builtin: {id: end_call}` asks the platform for a tool called `hang_up`, which
 nobody has. Validate refuses it and says which file to rename.
 
-A capability's **settings** are written with `inject:`, which on a builtin is
+A capability's **settings** are written with `with:`, which on a builtin is
 the tool's own configuration and not an argument. A curated capability
 publishes no argument schema, so there is nowhere else for a pinned value to go,
 and the model never sees one either way.
@@ -575,7 +580,7 @@ for part of every day:
 description: Read the clock. Call it once at the start of the call, before any day or time is discussed.
 builtin:
   id: current_datetime
-inject:
+with:
   - timezone: "America/Los_Angeles"
 effect: returns_data
 ```
@@ -600,28 +605,31 @@ Add `end_call` to every agent that answers a phone. `unmute init` scaffolds it
 for exactly that reason.
 
 On `slng`, `end_call` says its own goodbye before it hangs up, "Thanks for
-calling. Goodbye!" by default. Set your own with `announce:` (see "When to write
-`announce:`" below), and do not tell the model to say goodbye too.
+calling. Goodbye!" by default. Set your own with `start:` and `say:` on its entry
+in `agent.yaml` (see "The tool entry in agent.yaml" below), and do not tell the
+model to say goodbye too.
 
 ## Hidden values the model cannot see
 
 ```yaml
-inject:
-  - customer_id: "{{state.customer_id}}"
+with:
+  - customer_id: state.customer_id
   - channel: phone
 ```
 
-`inject` is an ordered list of one-key items merged into the call and never advertised to the model,
-so the model can neither see the value nor overwrite it. An `inject` key that
-also names an `input` property is a compile error, for that reason.
+`with` is an ordered list of one-key items merged into the call and never
+advertised to the model, so the model can neither see the value nor overwrite
+it. A value written `state.x` is read from State on every call; anything else
+is a literal or a template. A `with` key that also names an `input` property is
+a compile error, for that reason.
 
-Legal on `webhook:` and `local:` only. An MCP server owns its own call shape, so
-there is nothing to merge into.
+Legal on `webhook:`, `local:` and `slng:`. An MCP server owns its own call
+shape, so there is nothing to merge into.
 
-When an injected variable has no value at call time, the tool refuses instead of
+When a pinned variable has no value at call time, the tool refuses instead of
 sending a half formed request, and the model is told what to ask for.
 
-Use `inject` for anything the caller should not be able to change: the customer
+Use `with` for anything the caller should not be able to change: the customer
 id, the channel, a tenant. A parameter in `input` is a parameter the model can
 invent.
 
@@ -630,31 +638,122 @@ invent.
 ```yaml
 interruption: provider_default
 effect: returns_data
-announce: Let me check the calendar.
 ```
 
 | Field | Values | Default | Meaning |
 |---|---|---|---|
 | `interruption` | `provider_default`, `continue`, `cancel` | `provider_default` | what happens to the call if the caller speaks while the tool runs |
 | `effect` | `returns_data`, `ends_conversation` | `returns_data` | whether the conversation continues after the tool |
-| `announce` | one sentence, or a list of alternatives | absent, nothing is spoken | a fixed line the agent speaks as the tool starts, so a slow call is not silence |
 
 A tool run by `prefetch:` carries no field of its own for this. The pre-fetch
 entry that runs it declares `writes: true` or `writes: false`, because the
 question is about that one use of the tool, not about the tool itself. See
 `variables.md`, "`writes:` is a promise, not a guarantee".
 
-All three are honoured differently per target. Pipecat maps `interruption` onto
-its own cancel-on-interruption setting. LiveKit runs tools to completion, so a
-non-default value warns there. Read the warning to the user rather than dropping
-it.
+Both are honoured differently per target. Pipecat maps `interruption` onto its
+own cancel-on-interruption setting. LiveKit runs tools to completion, so a
+non-default value warns there. Read the warning to the user rather than
+dropping it.
 
-### When to write `announce:`
+## The tool entry in agent.yaml
 
-Write it on a tool that keeps the caller waiting: a webhook to a slow service, a
-handler that reads a calendar or a database. Do not write it on a fast tool, and
-do not write one on every tool. Two agents talking over each other is worse than
-a short pause.
+A `tools:` item is a bare name or a block. The block says what the tool does in
+a conversation, so the tool file stays the contract.
+
+A **top-level** block holds the same for every agent and step:
+
+```yaml agent.yaml
+tools:
+  - end_call
+  - name: find_slots
+    start:
+      say:
+        - Let me check the calendar.
+        - Let me see what is free.
+    save:
+      - last_offer: result.offer
+    outcomes:
+      - if:
+          - status: closed
+        say:
+          - We are closed that day. Which other day suits you?
+      - else:
+        say:
+          - "{{result.offer}}"
+  - name: look_up_staff
+    hidden: true
+```
+
+| Key | Meaning |
+|---|---|
+| `start` | `say:` is a fixed line, or a list of alternatives, spoken as the tool starts. `wait: true` holds the call until the line has played |
+| `save` | what the tool saves on every result, one `- variable: result.path` pair per item |
+| `outcomes` | what is said after the result (see below) |
+| `hidden` | with `true`, the model never sees the tool; only code calls it |
+
+A **step** block is the tool inside one step. It holds `confirm:` and
+`outcomes:`, and only that step uses them:
+
+```yaml agent.yaml
+agents:
+  concierge:
+    tasks:
+      - name: manage_booking
+        instructions: tasks/booking.md
+        tools:
+          - name: book_appointment
+            confirm:
+              - Shall I book your {{input.service}} for {{input.date}} at {{input.time}}?
+            outcomes:
+              - if:
+                  - status: booked
+                save:
+                  - appointment: result.appointment
+                say:
+                  - Lovely, you are booked for {{result.appointment.date}}.
+                then: done
+```
+
+### Outcomes
+
+Outcomes run top to bottom, and the first match wins.
+
+- Each starts with `if:` or `else:`. `if:` is a typed match on the result:
+  `- status: booked`, or `- status: [a, b]` for either. `else:` takes every
+  result no `if:` above matched. It comes last, and there is at most one.
+- `then: done` ends the step as completed. `then: failed` ends it as failed,
+  and a flow stops unless the step is non-blocking. No `then:` means the step
+  goes on. Only a step's outcomes may have `then:`.
+- Write outcomes with `then:` first, then those without, then `else:`. An
+  `else:` cannot say `then: done`. An `else:` with `then: failed` cannot follow
+  an outcome without `then:`.
+- An outcome without `then:` needs `say:`. Its `save:` reads `result.` only.
+- An outcome with `then: done` and no `save:` saves the step's own `save:`
+  rows from the tool's result. A step cannot mix `done` outcomes with and
+  without `save:`.
+
+### Confirm
+
+`confirm:` is a line, or a list of alternatives, read back before the tool
+runs. The tool runs on the caller's yes. It needs at least one `then: done`
+outcome on that tool.
+
+### Lines
+
+| Where | What it can read |
+|---|---|
+| any line | `{{state.x}}` |
+| a `confirm:` line | `{{input.x}}`, the arguments about to be sent |
+| an outcome `say:` | `{{result.x}}`, the tool's result |
+| a line with no tool (a greeting, a nudge) | State only |
+| a tool's `start:` `say:` | fixed text, no template |
+
+### When to write `start:` on a tool
+
+Write it on a tool that keeps the caller waiting: a webhook to a slow service,
+a handler that reads a calendar or a database. Do not write it on a fast tool,
+and do not write one on every tool. Two agents talking over each other is worse
+than a short pause.
 
 The sentence is fixed, so it is spoken word for word every time that tool runs.
 Write what the agent is **doing**, never what it expects to find, and keep it
@@ -667,70 +766,59 @@ shorter than the wait it covers:
 
 **Write a list when the tool can fire twice in one call.** One sentence is the
 same sentence every time, and a caller who books and then moves the booking
-hears it twice inside a minute, which is what a recording sounds like. Give the
-key a list and the caller hears one of them per firing, never the one that tool
-used last:
-
-```yaml
-announce:
-  - Let me check the calendar.
-  - Let me see what is free.
-  - Right, let me have a look at the diary.
-```
+hears it twice inside a minute, which is what a recording sounds like. Give
+`say:` a list and the caller hears one of them per firing, never the one that
+tool used last.
 
 The `slng` target takes one line, because an attachment carries a single
 pre-action message. A list there is refused by `unmute validate`, with the
 line, rather than quietly narrowed to the first entry.
 
 **On `slng`, a `builtin:` takes one too.** A curated capability is an
-attachment like any other, so `tools/current_datetime.yaml` can speak before it
-reads the clock. On `tools/end_call.yaml` the line is the goodbye: SLNG's
-`end_call` always says one before it hangs up, "Thanks for calling. Goodbye!"
-by default, and `announce:` replaces it. Do not also tell the model to say
-goodbye before it calls `end_call`, or the caller hears two. A
-code target refuses it by name: it builds the prebuilt from its own SDK and has
-no seam in front of it.
+attachment like any other, so `current_datetime` can speak before it reads the
+clock. On `end_call` the line is the goodbye: SLNG's `end_call` always says one
+before it hangs up, "Thanks for calling. Goodbye!" by default, and `start:`
+replaces it. Do not also tell the model to say goodbye before it calls
+`end_call`, or the caller hears two. A code target refuses it by name: it
+builds the prebuilt from its own SDK and has no seam in front of it.
 
 If the package instructions already tell the agent to say it is checking
-something, remove that instruction when you add `announce:`. Otherwise the model
+something, remove that instruction when you add `start:`. Otherwise the model
 speaks its own version and the tool speaks the fixed one, and the caller hears
 both. This is the most common way to get it wrong.
 
 The second most common way is quieter, because no instruction asks for it. The
 model opens its **next** turn with an acknowledgment of its own, so the caller
-hears "Okay, one sec." and then "A haircut, lovely. What day suits you?". The fix
-is in the prompt, not here: see `prompting.md`, "Do not say the same thing twice".
+hears "Okay, one sec." and then "A haircut, lovely. What day suits you?". The
+fix is in the prompt, not here: see `prompting.md`, "Do not say the same thing
+twice".
 
 Rules that will fail the compile if you break them:
 
-- Legal on `webhook:` and `local:` only. Every other kind has no body to speak
-  before. An `mcp:` file is refused at load with the line number.
+- Legal on `webhook:`, `local:`, `knowledge:`, `slng:` and `builtin:` tools.
+  An `mcp:` file has no body to speak before.
 - A fixed sentence. `{{variables}}` are refused, because a rendered line would
   need a round trip, which is the delay the field exists to hide.
 - A blank value reads as absent. Nothing is spoken and nothing is emitted.
-- Legal on a tool listed on an agent **or** on a task, on both code drivers.
-  LiveKit lowers both through one path and emits the same `session.say`. Pipecat
-  emits an agent tool as a decorated function and a task tool as a flows handler,
-  and queues the frame through `FlowManager.worker` in the second case. This rule
-  used to say a Pipecat task tool was refused by name; that was wrong, and the
-  compiler was refusing a feature that worked.
-- A target whose driver has no lowering for the field fails validation with that
-  driver's own reason. Read the error to the user rather than dropping the field.
+- A target whose driver has no lowering for the field fails validation with
+  that driver's own reason. Read the error to the user rather than dropping the
+  field.
 
-Nothing waits for the line to finish playing, on either driver. The tool's own
-work starts straight away, and the tool's `interruption:` value still decides
-what happens if the caller speaks over it.
+Nothing waits for the line to finish playing unless `wait: true` is set. The
+tool's own work starts straight away, and the tool's `interruption:` value
+still decides what happens if the caller speaks over it.
 
 ## Define once, attach by name
 
 **Define each tool once.** The full definition exists only in
-`tools/<name>.yaml`: `description`, `input`, optional `output` and `inject`, and
+`tools/<name>.yaml`: `description`, `input`, optional `output` and `with`, and
 one execution block. A local handler lives beside it in `tools/<handler>.py`.
 Do not put any of those fields in `agent.yaml`.
 
-Every `tools:` entry in `agent.yaml` is a string name:
+Every `tools:` entry under an agent is a string name, and so is a step's unless it needs `confirm:` or `outcomes:`:
 
-- the top-level list loads `tools/<name>.yaml`,
+- the top-level list loads `tools/<name>.yaml`; an entry there may be a block
+  (see above),
 - `agents.<name>.tools` grants an agent access, and
 - `tasks.<name>.tools` grants a task access.
 
@@ -767,9 +855,10 @@ called; do not grant it to both unless both really call it. Never replace a
 name with an inline mapping of `description`, `input`, `output`, `local`, or
 `webhook`.
 
-**Task `assign:` and tool `output:` are different contracts.** A tool's optional
-`output:` describes one tool call and stays in `tools/<name>.yaml`. A task's
-finish fields come from the destination variables in its `assign:` list. A task
+**A step's `save:` and a tool's `output:` are different contracts.** A tool's optional
+`output:` describes one tool call and stays in `tools/<name>.yaml`. A step's
+finish fields come from the destination variables in its `save:` list, which
+older packages wrote `assign:`. A task
 that saves nothing needs neither an assignment nor an invented summary.
 
 A file in `tools/` that the package level list does not name is not loaded at

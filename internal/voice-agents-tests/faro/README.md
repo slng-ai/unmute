@@ -14,12 +14,12 @@ The model grades and code teaches. Nearly every turn of a lesson is one model re
 - `from_number` prefetch, then a tool prefetch (`language_of`) that picks the greeting's
   language and number read-back before anything is said.
 - A greeting built from state, with an `instruction` fallback when there is no caller ID.
-- A lesson with no task: agent tools whose `said` result is saved with `assign` and spoken
-  with `replies`.
-- `inject` keeps the learner, the language and the exercise waiting out of the model's hands.
-- `precheck` and `replies` that refuse a number from outside Spain, in the caller's language.
-- Two tasks that read back before acting: `other_number` (`arguments`, `opens_with`,
-  `announce`, `opening: listen`) and `sign_up` (a `confirm` of a new profile).
+- A lesson with no task: agent tools whose `said` result is spoken by an `outcomes:` entry
+  with `save:` where a result is kept.
+- `with:` keeps the learner, the language and the exercise waiting out of the model's hands.
+- `precheck` and an outcome that refuse a number from outside Spain, in the caller's language.
+- Two tasks that read back before acting: `other_number` (`arguments`, `start:` with
+  `call:`, `with:`, `say:` and `listen: true`) and `sign_up` (a `confirm` of a new profile).
 - Progress in SQLite, so it survives a call and a restart.
 - Typed tools: `Literal` grades and levels, `Phone`, `ToolError`.
 
@@ -53,7 +53,7 @@ FARO_DB=:memory: python -I -m unmute_core.testing converse livekit agent --patch
 | `agent.yaml` | Both agents, their tasks, the handoffs, prefetch, models |
 | `state.py` | The call's `State` |
 | `tools/lessons.py` | The lessons, the SQLite store and every tool (one module) |
-| `tools/*.yaml` | One file per tool: inject, assign, replies, precheck |
+| `tools/*.yaml` | One file per tool: with, precheck. Its save and outcomes sit on the tool's entry in `agent.yaml` |
 | `instructions.md`, `instructions-es.md` | The prompt, once per agent |
 | `tasks/*.md` | The prompts of the two tasks |
 | `scenarios/*.json` | unmute-core's scenarios, unchanged |
@@ -70,11 +70,10 @@ What core does that v2 cannot say yet, and what is written instead.
 - **The same task in two agents.** Core builds one task from a template per language.
   A task name is one name across the package, so the Spanish agent's are `other_number_es`
   and `sign_up_es`, and its prompt, `instructions-es.md`, names them.
-- **`said` through state.** Core's replies say `{{result.said}}`. Here each tool saves
-  `said` to state and a reply says `{{state.said}}`.
-- **Number and profile read-backs.** Core reads `{{input.phone}}` and `{{input.name}}`.
-  Here the task assigns `input.*` to `phone`, `profile_name`, `profile_learn`,
-  `profile_goal` and `profile_level`, and the confirm lines read those.
+- **`said` and the read-backs.** Core's replies say `{{result.said}}` and its read-backs
+  say `{{input.phone}}` and `{{input.name}}`. So do these: an outcome `say:` reads
+  `{{result.said}}` and a `confirm:` line reads `{{input.x}}`, so `State` holds no
+  `said` and no `profile_*` field.
 - **The greeting's read-back.** Core builds `number_question` in Python after the prefetch.
   Here `language_of` returns it, and the prefetch assigns it.
 - **Task-only tools.** Core's `task_only_tools`: `check_number` and `create_profile` are

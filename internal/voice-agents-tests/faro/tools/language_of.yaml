@@ -1,4 +1,4 @@
 local:
   handler: tools/lessons.py:language_of
-inject:
-  - phone: "{{state.phone}}"
+with:
+  - phone: "state.phone"

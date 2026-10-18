@@ -77,9 +77,15 @@ func Schema() (*jsonschema.Schema, error) {
 				"Exactly one field per item; several values on one field are alternatives.",
 		},
 	}}
-	// Both hooks below are derived before they are registered, because each one
+	// The hooks below are derived before they are registered, because each one
 	// publishes a shape that includes the reflected struct: registering first
-	// would make the derivation read its own hook.
+	// would make the derivation read its own hook. A tool entry goes first,
+	// because a task holds tool entries.
+	entry, err := toolEntrySchema(options)
+	if err != nil {
+		return nil, err
+	}
+	options.TypeSchemas[reflect.TypeFor[ToolEntry]()] = entry
 	item, err := taskItemSchema(options)
 	if err != nil {
 		return nil, err
@@ -119,6 +125,19 @@ func taskItemSchema(options *jsonschema.ForOptions) (*jsonschema.Schema, error) 
 	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{
 		{Type: "string", Description: "The name of a task another agent defines."},
 		task,
+	}}, nil
+}
+
+// toolEntrySchema publishes the two shapes a `tools:` item may take: a bare
+// tool name, or the block saying what happens around the tool.
+func toolEntrySchema(options *jsonschema.ForOptions) (*jsonschema.Schema, error) {
+	block, err := jsonschema.For[ToolEntry](options)
+	if err != nil {
+		return nil, err
+	}
+	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{
+		{Type: "string", Description: "The name of a tool in tools/."},
+		block,
 	}}, nil
 }
 

@@ -39,7 +39,7 @@ agents:
       - name: manage_booking
         when: The caller wants to book, move, or cancel an appointment.
         instructions: tasks/booking.md
-        assign:
+        save:
           - appointment: result.appointment
 ```
 
@@ -95,7 +95,7 @@ For a booking flow:
 3. Add `appointment: Appointment | None = None` to `State`. Give it a
    description such as "The latest appointment successfully saved by the
    booking tool."
-4. Assign `appointment: result.appointment` in the booking task. Tell the task
+4. Save `appointment: result.appointment` in the booking task. Tell the task
    to copy the successful result and finish immediately.
 5. Reference `{{state.appointment}}` in the owner, or just `{{state.appointment.date}}`
    in a prompt that needs only the date.
@@ -112,9 +112,9 @@ or the caller can supply. Do not require an ID that no tool produces.
 
 Use `T | None = None` when a successful result may legitimately have no value.
 A field with a pattern cannot be replaced by an empty string just to finish
-the task. When a step may finish without a value, mark it in `assign:` with
+the task. When a step may finish without a value, mark it in `save:` with
 `?` after the result field, as `- callback_time: result.callback_time?`.
-Otherwise the step must return every whole value it assigns.
+Otherwise the step must return every whole value it saves.
 
 An external identifier may need a plain `str`. For example, a booking slot
 containing `|` does not fit an identifier pattern. Preserve the exact value the
@@ -129,7 +129,7 @@ makes the new date the current one.
 Use a list when later tasks need several records. Append with `+`:
 
 ```yaml
-assign:
+save:
   - notes+: result.note
 ```
 
@@ -149,13 +149,13 @@ immediately. Let the owner read the saved value and confirm it once. For a task
 designed to save one record, finish after that record; run it again for another
 request.
 
-Better still, when the task's last action is a tool, name that tool under
-`finish:`. The task then ends on the tool's success result by itself, saves its
-`assign:` from that result, and the model never has to decide that the work is
-done. See
+Better still, when the task's last action is a tool, give that tool an entry
+under the step's `tools:` with an outcome that says `then: done`. The task then
+ends on the tool's success result by itself, saves its `save:` rows from that
+result, and the model never has to decide that the work is done. See
 [Say what success looks like](/build/orchestration/tasks#say-what-success-looks-like).
 
-A non-empty `unserved_request` saves no assignments and returns only a status.
+A non-empty `unserved_request` saves nothing and returns only a status.
 It does not undo an action already completed by a tool.
 
 ## Reuse verification deliberately
@@ -170,7 +170,7 @@ otherwise. See
 Confirmed here is a real mark on the variable, set by `confirm:` alone: when
 the task it names saves the value, and cleared by any other write. A prompt
 sentence saying the caller was verified is not that mark, and neither is a
-separate status variable a task assigns on success. Do not also keep a
+separate status variable a task saves on success. Do not also keep a
 separate status variable for this: once the group reads the confirm mark
 itself, nothing needs a second copy of the same fact.
 

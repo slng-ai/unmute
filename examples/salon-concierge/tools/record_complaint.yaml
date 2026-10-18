@@ -5,7 +5,6 @@ description: >-
 local:
   handler: tools/salon.py:record_complaint
 
-inject:
-  - customer_phone: "{{state.customer_phone}}"
+with:
+  - customer_phone: "state.customer_phone"
 
-announce: Let me get that written down.

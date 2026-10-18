@@ -8,5 +8,5 @@ description: >-
 local:
   handler: tools/salon.py:book_appointment
 
-inject:
-  - customer_phone: "{{state.customer_phone}}"
+with:
+  - customer_phone: "state.customer_phone"

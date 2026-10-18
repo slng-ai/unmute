@@ -13,14 +13,14 @@ lines, `max_requests` and final state.
 ## What it proves
 
 - An agent with only `tools:` and no tasks or task groups.
-- `assign:` on a tool saves typed values from its result (`spot`, `offer`, `details`).
-- `replies:` (`when` / `say`) is the line code says for each result. Lines read only
-  `{{state.x}}`.
-- `inject:` is core's `locked=`: `{{state.spot}}` goes to `find_places` and
-  `{{state.offer}}` to `place_details`, never from the model.
+- `save:` on a tool's entry in agent.yaml saves typed values from every result (`spot`,
+  `offer`, `details`).
+- `outcomes:` (`if` / `say`) is the line code says for each result.
+- `with:` in the tool file is core's `locked=`: `state.spot` goes to `find_places` and
+  `state.offer` to `place_details`, never from the model.
 - `ToolError`: `place_details` refuses an id that was never offered.
-- `hidden:` keeps `listed` and `spoken` out of what the model reads.
-- `announce:` on three tools, and an end tool with `effect: ends_conversation`.
+- `hidden:` on the tool's entry keeps `listed` and `spoken` out of what the model reads.
+- `start: say:` on three tools' entries, and an end tool with `effect: ends_conversation`.
 - `variables:` with `call_start: required` for `customer_name`. A dispatch without a name
   is refused (`scenarios/no-name.json`).
 - Tool handlers are module-level functions in `tools/finder.py`, with their own
@@ -37,7 +37,7 @@ about reading them. They are optional for the demo.
 | Core behaviour | What is written instead |
 |---|---|
 | `AgentSpec(timezone="Europe/Madrid")` | No clock prefetch, so the agent has no timezone. No line names a date. `tools/finder.py` reads the Madrid clock itself for "today's hours" |
-| Replies read `{{result.formatted_address}}`, `{{result.listed}}`, `{{result.spoken}}`, `{{result.name}}` | Rule 1: saved to state with `assign:` and read as `{{state.x}}`. New state fields `listed`, `spoken`, `place_name`; `spot.formatted_address` is read from the saved spot |
+| Replies read `{{result.formatted_address}}`, `{{result.listed}}`, `{{result.spoken}}`, `{{result.name}}` | Saved to state with the entry's `save:` and read as `{{state.x}}`, so later turns can read them too. New state fields `listed`, `spoken`, `place_name`; `spot.formatted_address` is read from the saved spot |
 | `hidden=["listed"]` and `["spoken"]` hide result fields only | The same `hidden:`. The saved `listed` and `spoken` state values are not hidden from the prompt, as nothing in the prompt reads them |
 | No inactivity nudge (`idle=None`) | No `inactivity:` block |
 | `Greeting` placeholder `{{customer_name}}` | `{{state.customer_name}}` |

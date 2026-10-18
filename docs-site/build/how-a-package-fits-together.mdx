@@ -18,7 +18,7 @@ On this page:
 - [The five things an agent can do](#the-five-things-an-agent-can-do) - and which give the caller back
 - [Every key an agent takes](#every-key-an-agent-takes) - three required, five lists
 - [Build one in four steps](#build-one-in-four-steps) - the worked version
-- [How a value gets from one step to the next](#how-a-value-gets-from-one-step-to-the-next) - `variables:`, `assign:`, `context:`
+- [How a value gets from one step to the next](#how-a-value-gets-from-one-step-to-the-next) - `variables:`, `save:`, `context:`
 - [What the compiler holds for you](#what-the-compiler-holds-for-you) - the errors you cannot write past
 
 ## Quickstart
@@ -145,12 +145,12 @@ agents:
       - name: verify_customer
         when: Confirm who the caller is before anything personal.
         instructions: tasks/verify-customer.md
-        assign:
+        save:
           - customer_phone: result.customer_phone
       - name: manage_booking
         when: The caller wants to create, change, or cancel a booking, once the caller is identified.
         instructions: tasks/booking.md
-        assign:
+        save:
           - booking_id: result.booking_id
     handoffs:
       - to_complaints
@@ -230,7 +230,7 @@ Three keys do this, and they each do one thing. Each has its own page.
   [Variables](/build/variables)
 </ParamField>
 
-<ParamField path="assign:" type="on a task">
+<ParamField path="save:" type="on a task">
   Fills a variable when the task finishes. `- customer_phone: result.phone`
   means "put the task's `phone` answer into `customer_phone`".
 
@@ -249,7 +249,7 @@ only when it names it, as `{{state.customer_phone}}`.
 
 ### Ordering work without a gate
 
-In the example above, `verify_customer` fills `customer_phone` with `assign:`,
+In the example above, `verify_customer` fills `customer_phone` with `save:`,
 and `manage_booking`'s own `when:` says it runs only once the caller is
 identified. That is how "verify before booking" works: the order lives in the
 prompt, not in a gate, so the caller hears nothing about it.

@@ -10,6 +10,5 @@ description: Look up an order by its number and return its status and delivery d
 
 slng: check_order
 
-announce: One moment while I look that up.
 interruption: provider_default
 effect: returns_data

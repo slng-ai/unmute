@@ -40,43 +40,42 @@ agents:
           Only when the holder wants to correct the date of birth they gave.
           Never before `account`: that flow checks the date of birth itself.
         instructions: tasks/identify.md
-        announce: >-
-          Thank you. To make sure I'm speaking with the right person, could you
-          tell me your date of birth?
-        opening: listen
+        start:
+          say:
+            - >-
+              Thank you. To make sure I'm speaking with the right person, could you
+              tell me your date of birth?
+          listen: true
         tools:
-          - verify_holder
-          - end_call
-        replies:
-          - tool: verify_holder
-            when:
-              - status:
-                  - mismatch
-            say:
-              - >-
-                I'm sorry, that doesn't match our records. Could you tell me
-                your date of birth again?
-          - tool: verify_holder
-            when:
-              - status:
-                  - locked
-            say:
-              - >-
-                I'm sorry, I can't go on with this call today. Wasla support is
-                on eight hundred, nine two seven, five two, from nine AM to six
-                PM, or by email at help at wasla dot a e. Goodbye.
-        finish:
-          - tool: verify_holder
-            success:
-              - status:
-                  - verified
+          - name: verify_holder
             confirm:
               - "Is your date of birth {{state.birth_date}}?"
-            say:
-              - >-
-                Thank you, that matches. Is now a good time to talk about your
-                Wasla account?
-        assign:
+            outcomes:
+              - if:
+                  - status:
+                      - verified
+                say:
+                  - >-
+                    Thank you, that matches. Is now a good time to talk about your
+                    Wasla account?
+                then: done
+              - if:
+                  - status:
+                      - mismatch
+                say:
+                  - >-
+                    I'm sorry, that doesn't match our records. Could you tell me
+                    your date of birth again?
+              - if:
+                  - status:
+                      - locked
+                say:
+                  - >-
+                    I'm sorry, I can't go on with this call today. Wasla support is
+                    on eight hundred, nine two seven, five two, from nine AM to six
+                    PM, or by email at help at wasla dot a e. Goodbye.
+          - end_call
+        save:
           - birth_date: input.birth_date
           - amount_words: result.amount_words?
           - merchant: result.merchant?
@@ -85,60 +84,61 @@ agents:
 
       - name: talk_account
         instructions: tasks/talk-account.md
-        opening: listen
+        start:
+          listen: true
         tools:
-          - good_time
-          - record_promise
-          - note_concern
-          - schedule_callback
-          - payment_policy
-        replies:
-          - tool: good_time
-            when:
-              - good_time:
-                  - true
-            say:
-              - "{{state.said}}"
-          - tool: good_time
-            when:
-              - good_time:
-                  - false
-            say:
-              - No problem at all. When would be a good day and time to call you back?
-        finish:
-          - tool: record_promise
-            success:
-              - status:
-                  - PTP
+          - name: good_time
+            outcomes:
+              - if:
+                  - good_time:
+                      - true
+                say:
+                  - "{{state.said}}"
+              - if:
+                  - good_time:
+                      - false
+                say:
+                  - No problem at all. When would be a good day and time to call you back?
+          - name: record_promise
             confirm:
               - "Shall I record your promise to pay {{state.amount_words}} for {{state.day}}?"
-            say:
-              - >-
-                Thank you. Your promise to pay {{state.when_said}} is recorded.
-                You can pay in the Wasla app or on our website. Is there
-                anything else I can help with?
-          - tool: note_concern
-            success:
-              - status:
-                  - HARDSHIP
-                  - LEGAL
-                  - DISPUTE
-                  - RTP
+            outcomes:
+              - if:
+                  - status:
+                      - PTP
+                say:
+                  - >-
+                    Thank you. Your promise to pay {{state.when_said}} is recorded.
+                    You can pay in the Wasla app or on our website. Is there
+                    anything else I can help with?
+                then: done
+          - name: note_concern
             confirm:
               - "Shall I pass this to our team as a {{state.concern}}: {{state.concern_note}}?"
-            say:
-              - "{{state.said}}"
-          - tool: schedule_callback
-            success:
-              - status:
-                  - CB
+            outcomes:
+              - if:
+                  - status:
+                      - HARDSHIP
+                      - LEGAL
+                      - DISPUTE
+                      - RTP
+                say:
+                  - "{{state.said}}"
+                then: done
+          - name: schedule_callback
             confirm:
               - "Shall I note a call back for {{state.day}} at {{state.at}}?"
-            say:
-              - "That's noted: we'll call back {{state.when_said}}. Thank you for your time. Goodbye."
+            outcomes:
+              - if:
+                  - status:
+                      - CB
+                say:
+                  - "That's noted: we'll call back {{state.when_said}}. Thank you for your time. Goodbye."
         # Each closing tool takes some of these inputs. A row is saved when the tool
         # that ends the step took it.
-        assign:
+                then: done
+          - payment_policy
+        save:
           - day: input.day?
           - at: input.at?
           - concern: input.kind?
@@ -148,23 +148,23 @@ agents:
       - name: take_callback
         instructions: tasks/callback.md
         tools:
-          - schedule_callback
-        opens_with:
-          tool: schedule_callback
-          arguments:
-            - day: callback_day
-            - at: callback_time
-        finish:
-          - tool: schedule_callback
-            success:
-              - status:
-                  - CB
+          - name: schedule_callback
             confirm:
               - "Shall I note a call back for {{state.day}} at {{state.at}}?"
-            say:
-              - "That's noted: we'll call back {{state.when_said}}. Thank you for your time. Goodbye."
+            outcomes:
+              - if:
+                  - status:
+                      - CB
+                say:
+                  - "That's noted: we'll call back {{state.when_said}}. Thank you for your time. Goodbye."
 
-        assign:
+                then: done
+        start:
+          call: schedule_callback
+          with:
+            - day: state.callback_day
+            - at: state.callback_time
+        save:
           - day: input.day
           - at: input.at
           - outcome: result.status
@@ -172,24 +172,24 @@ agents:
       - name: take_off_list
         instructions: tasks/wrong-number.md
         tools:
-          - mark_wrong_number
-          - end_call
-        opens_with:
-          tool: mark_wrong_number
-        finish:
-          - tool: mark_wrong_number
-            success:
-              - status:
-                  - WN
+          - name: mark_wrong_number
             confirm:
               - >-
                 I'm sorry to have bothered you. Shall I take this number off our
                 list, so we don't call it again?
-            say:
-              - >-
-                Done. You won't get any more calls from us on this number. Sorry
-                for the trouble. Goodbye.
-        assign:
+            outcomes:
+              - if:
+                  - status:
+                      - WN
+                say:
+                  - >-
+                    Done. You won't get any more calls from us on this number. Sorry
+                    for the trouble. Goodbye.
+                then: done
+          - end_call
+        start:
+          call: mark_wrong_number
+        save:
           - outcome: result.status
 
 task_groups:
@@ -274,11 +274,41 @@ models:
 tools:
   - open_account
   - verify_holder
-  - good_time
-  - record_promise
-  - schedule_callback
+  - name: good_time
+    save:
+      - said: result.said
+  - name: record_promise
+    save:
+      - when_said: result.when
+    outcomes:
+      - if:
+          - status:
+              - past_day
+        say:
+          - That day has already gone. Which other day would suit you?
+      - if:
+          - status:
+              - after_deadline
+        say:
+          - "I can only note a day up to {{state.deadline_spoken}}. Which day by then works for you?"
+  - name: schedule_callback
+    save:
+      - when_said: result.when
+    outcomes:
+      - if:
+          - status:
+              - past_day
+        say:
+          - That day has already gone. Which other day would suit you?
+      - if:
+          - status:
+              - after_deadline
+        say:
+          - "I can only note a day up to {{state.deadline_spoken}}. Which day by then works for you?"
   - mark_wrong_number
-  - note_concern
+  - name: note_concern
+    save:
+      - said: result.said
   - payment_policy
   - end_call
 

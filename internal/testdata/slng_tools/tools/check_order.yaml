@@ -7,6 +7,5 @@ description: Look up an order by its id and return its status and delivery date.
 slng:
   hash: 2d291d39d704a38afa60555d2f6e27e40c6074ad60407f301c14d0a11d2c2efd
 
-announce: One moment while I look that up.
 interruption: provider_default
 effect: returns_data

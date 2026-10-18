@@ -163,9 +163,9 @@ split this page and [targets.yaml](/reference/targets-yaml) hold between them.
   transfers.
 </ParamField>
 
-<ParamField path="tools" type="list of strings">
-  Tool files to load. Accepts loaded tool file names. If omitted, no tool files are
-  loaded.
+<ParamField path="tools" type="list of strings or objects">
+  Tool files to load, each as a name or a block. Accepts loaded tool file names. If
+  omitted, no tool files are loaded.
 </ParamField>
 
 <ParamField path="conversation" type="object">
@@ -674,13 +674,14 @@ agents:
     tasks:
       - name: customer_record
         when: Identify the caller before handling an appointment request.
-        announce:
-          - One moment.
-          - Let me have a look.
         instructions: tasks/customer-record.md
+        start:
+          say:
+            - One moment.
+            - Let me have a look.
         tools:
           - lookup_customer
-        assign:
+        save:
           - customer_id: result.customer_id
 
   billing_desk:
@@ -705,45 +706,75 @@ agents:
   by bare name.
 </ParamField>
 
-<ParamField path="announce" type="string or list of strings">
-  A fixed spoken line with no `{{placeholders}}`. Omit it for no fixed announcement.
-  Required when `opening` is `listen`.
-  Write several as a list and the caller hears one of them each time the line fires.
-  Never the one that site used last. A caller who comes back through the same flow
-  does not hear the identical sentence twice.
-
-  Spoken as the step is entered, before anything else runs: when the owning agent
-  calls the task directly the line comes at that seam, and when a task group runs
-  it as a step the step speaks it itself. Either way it is spoken once.
+<ParamField path="tools" type="list of strings or objects">
+  Tools loaded by the package. Each item is a bare tool name, or a block that starts
+  `- name: <tool>` and adds `confirm:` and `outcomes:` for this step only. Omit for no
+  ordinary tools in this task; it does not inherit its owner’s tools.
 </ParamField>
 
-<ParamField path="opening" type="string">
-  Accepts `generate` or `listen`. Omitted means `generate`, so the model writes the
-  opening turn. `listen` speaks `announce` and waits for the caller without a model
-  request.
+<ParamField path="tools[].confirm" type="list of strings">
+  Lines said to read the call back before the tool runs. The tool runs on the caller’s
+  yes. Lines read `{{input.x}}`. Needs a `then: done` outcome on the same tool.
 </ParamField>
 
-<ParamField path="tools" type="list of strings">
-  Names of tool files loaded by the package. Omit for no ordinary tools in this task; it
-  does not inherit its owner’s tools.
+<ParamField path="tools[].outcomes" type="list of objects">
+  What the step does with each result of this tool, top to bottom, first match wins. The
+  rules are in [Say what success looks like](/build/orchestration/tasks#say-what-success-looks-like).
+</ParamField>
+
+<ParamField path="outcomes[].if" type="list of one-key pairs">
+  A typed match on the result, such as `- status: booked` or `- status: [booked, moved]`.
+</ParamField>
+
+<ParamField path="outcomes[].else" type="null">
+  Matches every result no `if:` above matched. Last, and at most one.
+</ParamField>
+
+<ParamField path="outcomes[].save" type="list of one-key pairs">
+  Pairs of `variable: result.field`, saved only when this outcome matches.
+</ParamField>
+
+<ParamField path="outcomes[].say" type="list of strings">
+  Lines said for this result; several are alternatives. Lines read `{{result.x}}`.
+</ParamField>
+
+<ParamField path="outcomes[].then" type="string">
+  Accepts `done` or `failed`. Omitted means the step goes on.
 </ParamField>
 
 <ParamField path="handoffs" type="list of strings">
   Names from the top-level `handoffs` catalog. Omit for no handoffs from this task.
 </ParamField>
 
-<ParamField path="assign" type="list of one-key pairs">
+<ParamField path="save" type="list of one-key pairs">
   Pairs of `variable: result.field`, including dotted result paths. Use `variable+` to
   append one list item, and `result.field?` for a value the step may leave out. Omit to
   save no values; the task can still finish. Types and descriptions come from the
   destination fields on `State`.
 </ParamField>
 
-<ParamField path="finish" type="list of objects">
-  Tools whose successful results finish the task automatically. Each entry requires `tool`
-  and a non-empty `success` list of one-key output field/value pairs. Values must be
-  declared output enum choices; a list means alternatives. If omitted, the model ends the
-  task by calling its generated finish tool.
+<ParamField path="start" type="object">
+  What the step does as it opens. Omitted means the model writes the opening turn. Keys
+  below.
+</ParamField>
+
+<ParamField path="start.say" type="list of strings">
+  Fixed lines with no `{{placeholders}}`, said as the step opens. Several are
+  alternatives: the caller hears one each time, never the one used last.
+</ParamField>
+
+<ParamField path="start.listen" type="boolean">
+  `true` waits for the caller after `say:`, with no model request.
+</ParamField>
+
+<ParamField path="start.call" type="string">
+  A tool of this step, run in code before the model speaks.
+</ParamField>
+
+<ParamField path="start.with" type="list of one-key pairs">
+  The tool’s inputs, as `- day: state.requested_day`. A `?` after the value lets the call
+  run without it; a value without one is required. See
+  [Start a step](/build/orchestration/tasks#start-a-step).
 </ParamField>
 
 <ParamField path="think" type="string">
@@ -759,7 +790,7 @@ agents:
 
 `result`, `expect`, and `requires` are retired task fields. A package that
 writes one gets a located migration error. Declare variables, save them with
-`assign:`, and reference only the values a receiving prompt needs.
+`save:`, and reference only the values a receiving prompt needs.
 
 Two agents defining a task under the same name is refused:
 
@@ -769,8 +800,8 @@ agent.yaml:17: task "verify_customer" is defined by agent "concierge" and again 
   one definition and let the other agent name it, "- verify_customer"
 ```
 
-`when` makes a task callable; `assign` says which values it saves.
-A task may omit `assign:` and still finish. Every generated finish also takes
+`when` makes a task callable; `save` says which values it saves.
+A task may omit `save:` and still finish. Every generated finish also takes
 optional `unserved_request`; it returns only an `unserved` status to the owner.
 A webhook tool keeps its `input:` and `output:` JSON Schemas. A local tool has
 neither: its handler's types are the contract.
@@ -874,7 +905,7 @@ task_groups:
 
   It fires on entry, before any step runs, so it is spoken whether or not a
   `skip_when_confirmed:` step is skipped. A line that is only true when some step
-  runs belongs on that step's own `announce:`, not here.
+  runs belongs on that step's own `start:` `say:`, not here.
 </ParamField>
 
 <ParamField path="context_scope" type="string" default="shared">
@@ -921,6 +952,19 @@ The conversation becomes another agent, and never comes back.
 
 <ParamField path="announce" type="string">
   Exact text spoken before handing over. Omit for a silent handoff.
+</ParamField>
+
+<ParamField path="start" type="object">
+  A tool of the receiving agent, run in code as it takes the call. Keys `call` and `with`.
+</ParamField>
+
+<ParamField path="start.call" type="string" required>
+  Name of the receiving agent’s tool. Required inside `start`.
+</ParamField>
+
+<ParamField path="start.with" type="list of one-key pairs">
+  The tool’s inputs, as `- day: state.requested_day`. A `?` after the value lets the call
+  run without it; a value without one is required.
 </ParamField>
 
 <ParamField path="context" type="object">
@@ -1012,16 +1056,66 @@ pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twi
 ```yaml
 tools:
   - check_slots
+  - name: record_complaint
+    start:
+      say:
+        - Let me get that written down.
+  - name: continue_lesson
+    save:
+      - waiting: result.waiting
+    outcomes:
+      - else:
+        say:
+          - "{{result.said}}"
   - end_call
 ```
 
 Which `tools/<name>.yaml` files to load. Availability is decided by the `tools`
 list on each agent and task.
 
-This top-level list and every agent or task list contain names only.
-**Define each tool once.** Put its full contract in `tools/<name>.yaml`; never
-inline `description`, `input`, `output`, `inject`, or an execution block under
-a `tools:` list in `agent.yaml`.
+Each item is a bare name, or a block that says what happens around the tool on
+every agent. The agent and task lists hold names only, except that a task's
+list may also carry a block for that step. **Define each tool once.** Put its
+full contract in `tools/<name>.yaml`; never inline `description`, `input`,
+`output`, `with`, or an execution block under a `tools:` list in `agent.yaml`.
+
+<ParamField path="tools[]" type="string or object">
+  A bare tool name, or a block starting `- name: <tool>` with the keys below.
+</ParamField>
+
+<ParamField path="tools[].save" type="list of one-key pairs">
+  Pairs of `variable: result.field`, saved on every result of the tool, whatever the
+  outcome. Package scope only.
+</ParamField>
+
+<ParamField path="tools[].outcomes" type="list of objects">
+  What is said for each result, top to bottom, first match wins. Each item takes `if:` or
+  `else:` and `say:`, with no `then:` here, because only a step ends. Lines read
+  `{{result.x}}`. See [Say what success looks like](/build/orchestration/tasks#say-what-success-looks-like).
+</ParamField>
+
+<ParamField path="tools[].hidden" type="list of strings">
+  Result fields the model never reads. Use it for a field code speaks, such as a
+  read-back, so the model does not say it in its own words. Each name must be a field the
+  tool returns.
+</ParamField>
+
+<ParamField path="tools[].start" type="object">
+  What is said as the tool starts, so a slow call is not silence. Keys `say` and `wait`.
+</ParamField>
+
+<ParamField path="tools[].start.say" type="list of strings">
+  Fixed sentences with no `{{variables}}`, said when the tool is called, not when it
+  succeeds. Several are alternatives: the caller hears one each time, never the one used
+  last. The `slng` target takes one line only, because an attachment carries a single
+  pre-action message; a list is refused there. Legal on local, webhook, knowledge, and
+  hosted `slng` tools.
+</ParamField>
+
+<ParamField path="tools[].start.wait" type="boolean">
+  `true` runs the tool only after the `say:` line has played, for a goodbye heard in full
+  before a tool that ends the call runs. Needs a `say:` line.
+</ParamField>
 
 ### Tool files
 
@@ -1046,15 +1140,15 @@ local tool file has no `input:` or `output:`. A webhook tool writes both as JSON
 
 <ParamField path="output" type="object">
   An author-side JSON Schema with `type: object`. Omit for no declared result schema. Used
-  by assignments and success checks; it is not a general runtime result validator or a
+  by `save:` rows and outcome matches; it is not a general runtime result validator or a
   model prompt. A version 2 local tool leaves it out, because its return model is the
   output. Refused on builtin, MCP, knowledge, and hosted `slng` tools.
 </ParamField>
 
-<ParamField path="inject" type="list of one-key pairs">
-  Hidden argument/value pairs. Values are scalars or strings with `{{state.variable}}`
-  placeholders. Omit to inject nothing. Legal on local, webhook, and hosted `slng` tools;
-  builtin `send_sms` requires its literal `from_number` setting.
+<ParamField path="with" type="list of one-key pairs">
+  Hidden argument/value pairs. A value is `state.variable`, a scalar, or a string with
+  `{{state.variable}}` placeholders. Omit to pass nothing. Legal on local, webhook, and
+  hosted `slng` tools; builtin `send_sms` requires its literal `from_number` setting.
 </ParamField>
 
 <ParamField path="interruption" type="string">
@@ -1065,19 +1159,6 @@ local tool file has no `input:` or `output:`. A webhook tool writes both as JSON
 <ParamField path="effect" type="string">
   Accepts `returns_data` or `ends_conversation`. Omitted means `returns_data`, except
   builtins whose effect comes from the registry. Refused on MCP and knowledge tools.
-</ParamField>
-
-<ParamField path="announce" type="string or list of strings">
-  A fixed spoken sentence with no `{{variables}}`. Omit for no announcement. Legal on
-  local, webhook, knowledge, and hosted `slng` tools.
-  Write several as a list and the caller hears one of them each time the line fires.
-  Never the one that site used last. A caller who comes back through the same flow
-  does not hear the identical sentence twice.
-
-  The `slng` target takes one line only: an attachment carries a single pre-action
-  message, so a list is refused there rather than narrowed to its first entry.
-  Spoken when the tool is called, not when it succeeds, so a tool that can refuse
-  turns its line into a promise it then breaks.
 </ParamField>
 
 | Execution block | Fields |
@@ -1091,10 +1172,10 @@ local tool file has no `input:` or `output:`. A webhook tool writes both as JSON
 | `client` | no fields; write `client: {}`; gated on every target today |
 | `provider_hosted` | no fields; write `provider_hosted: {}`; gated on every target today |
 
-A `knowledge` file takes no `input`, `output`, `inject` or `effect`: the tool owns
+A `knowledge` file takes no `input`, `output`, `with` or `effect`: the tool owns
 both sides of its contract, taking one string and returning passages.
 
-An `mcp` file is the block and nothing else. The seven contract fields above are
+An `mcp` file is the block and nothing else. The six contract fields above are
 all illegal on one, because the server describes its own tools.
 
 <ParamField path="transport" type="string">
@@ -1109,7 +1190,7 @@ curates, so they compile on the `slng` target only.
 The file has to be named after the id it selects, because `slng` attaches a
 builtin by the tool file's own name.
 
-On a builtin, `inject:` pins the capability's own settings rather than an
+On a builtin, `with:` pins the capability's own settings rather than an
 argument, because a curated capability publishes no argument schema. The model
 never sees one either way.
 

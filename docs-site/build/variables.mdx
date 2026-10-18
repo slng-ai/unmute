@@ -14,7 +14,7 @@ On this page:
 - [Fill it](#2-fill-it) - a task, a pre-fetch, or the call itself
 - [Read it](#3-read-it-where-it-is-needed) - placeholders, and the greeting
 - [The types you can declare](#the-types-you-can-declare) - Pydantic types, plus lists and your own models
-- [Advanced](#advanced) - models, injection, and seeding a value locally
+- [Advanced](#advanced) - models, passing values to a tool, and seeding a value locally
 - [Troubleshooting](#troubleshooting) - the four that come up most
 
 ## Keep only the values the call needs
@@ -75,7 +75,7 @@ agents:
       - name: choose_service
         when: Find out which service the caller wants.
         instructions: tasks/choose-service.md
-        assign:
+        save:
           - requested_service: result.service
 ```
 
@@ -165,11 +165,11 @@ There are three ways, and each has its own page:
 
 | How | When it happens | Written where |
 |---|---|---|
-| A task's `assign:` | when that task finishes | on the [task](/build/orchestration/tasks) |
+| A task's `save:` | when that task finishes | on the [task](/build/orchestration/tasks) |
 | [`prefetch:`](/build/prefetch) | once, before the greeting | in a top-level `prefetch:` entry |
 | `source:` | as the call starts | on the variable itself |
 
-The common one is a task. Add `assign:` to the task that learns the value:
+The common one is a task. Add `save:` to the task that learns the value:
 
 ```yaml agent.yaml
 agents:
@@ -178,7 +178,7 @@ agents:
       - name: choose_service
         when: Find out which service the caller wants.
         instructions: tasks/choose-service.md
-        assign:
+        save:
           - requested_service: result.service
 ```
 
@@ -188,14 +188,14 @@ said and ask only if the service is missing or unclear. Then finish with
 that service.
 ```
 
-`assign:` creates a finish argument named `service` from the
+`save:` creates a finish argument named `service` from the
 `requested_service` field. The field already owns the type and the description,
 so the task does not repeat them.
 
-A step must return every whole value it assigns. Mark one it may leave out with
+A step must return every whole value it saves. Mark one it may leave out with
 a `?` after the result field, as `- callback_time: result.callback_time?`.
 
-All assigned values are checked before any are saved. If one is invalid, the
+All saved values are checked before any are saved. If one is invalid, the
 task stays open so the model can correct its answer, and nothing changes.
 
 ## 3. Read it where it is needed
@@ -335,7 +335,7 @@ one agent that collects a caller's details and hands them to a tool.
 Declare `list[T]` when later steps need several values of the same type. A list
 starts as `[]`.
 
-In a task's `assign:`, `variable+:` appends one item and `variable:` replaces
+In a task's `save:`, `variable+:` appends one item and `variable:` replaces
 the whole list:
 
 ```python state.py
@@ -344,12 +344,12 @@ class State(BaseModel):
 ```
 
 ```yaml agent.yaml
-assign:
+save:
   - notes+: result.note
 ```
 
 Appending skips `null` and skips an identical structured item. See
-[assignment rules](/reference/variables#assigning-a-task-result-to-a-variable),
+[saving rules](/reference/variables#saving-a-task-result-to-a-variable),
 and [state design](/best-practices/state-design#choose-a-current-value-or-a-list)
 to choose between a current value and a list.
 
@@ -373,7 +373,7 @@ A model is a Pydantic class in `state.py`. Declare its fields, then use the
 class as a field's type on `State`.
 
 One model can be used by several fields. Each field holds its own value, and a
-task assignment saves all of the object's fields together.
+a task `save:` row saves all of the object's fields together.
 
 For example, this package defines an object type called `Appointment` and
 uses it for the variable `appointment`:
@@ -426,11 +426,11 @@ saved result, and choosing one record or a list, see
 ### Hand a value to a tool
 
 Sometimes the tool needs a value the model does not need to read or type. Use
-`inject:` for that argument:
+`with:` for that argument:
 
 ```yaml tools/check_slots.yaml
-inject:
-  - service: "{{state.requested_service}}"
+with:
+  - service: "state.requested_service"
 local:
   handler: tools/check_slots.py:check_slots
 ```
@@ -442,7 +442,7 @@ def check_slots(date: str, service: str) -> Slots:
 
 The model supplies `date`. The handler receives both `date` and the current
 `service`. The handler's signature is the tool's input, so the model is asked
-only for the arguments that `inject:` does not name.
+only for the arguments that `with:` does not name.
 
 If the value is missing or unconfirmed, the tool stops before it runs. The
 error names the task that supplies or confirms the value when one is declared,
@@ -481,7 +481,7 @@ Which facts a route supplies, and in which direction, is in the
 The variable is unset. Either nothing has filled it yet, or the prompt that
 reads it runs before the step that fills it.
 
-**Fix:** check which step owns the `assign:`, and write the sentence so it reads
+**Fix:** check which step owns the `save:`, and write the sentence so it reads
 whole either way. An unset value is normal early in a call, so the prompt should
 say what to do about it:
 
@@ -499,7 +499,7 @@ does not hand back the private conversation inside the task.
 
 ### A tool refuses to run, naming a value
 
-The tool reads that value through `inject:` or a webhook path, and the value is
+The tool reads that value through `with:` or a webhook path, and the value is
 empty or still unconfirmed.
 
 **Fix:** the refusal names the task that supplies or confirms it. Run that step
@@ -521,7 +521,7 @@ unmute dev my-agent --source from_number=+15005550006
 
 <Columns cols={2}>
   <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
-    The usual way a variable gets filled: `assign:` on the task that learns it.
+    The usual way a variable gets filled: `save:` on the task that learns it.
   </Card>
   <Card title="Pre-fetch" icon="timer" href="/build/prefetch">
     Fill a value before the greeting, and confirm the ones about the caller.

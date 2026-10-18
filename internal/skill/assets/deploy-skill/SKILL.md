@@ -22,7 +22,7 @@ Four commands, in this order.
 
 ```sh
 unmute validate .                          # the package, against its manifest and the schema
-unmute deploy . --dry-run                  # the account: hosted names, injected arguments, vault entries
+unmute deploy . --dry-run                  # the account: hosted names, pinned arguments, vault entries
 unmute compile .                           # writes build/slng/agent.json
 voiceai agents push build/slng --dry-run   # tool ids, versions, and the attachment diff
 voiceai agents push build/slng
@@ -41,8 +41,8 @@ attaching in the dashboard, because a push replaces rather than merges and the
 next deploy detaches what you added by hand.
 
 Run `unmute deploy --dry-run` either way. It is the only check that resolves
-vault entries and holds each injected argument against the published tool's
-parameters, so skipping it lets a bad `inject:` key reach the platform.
+vault entries and holds each `with:` argument against the published tool's
+parameters, so skipping it lets a bad `with:` key reach the platform.
 
 ## The two dry runs check different things
 
@@ -50,7 +50,7 @@ parameters, so skipping it lets a bad `inject:` key reach the platform.
 |---|---|---|
 | manifest rules | yes | no |
 | hosted tool exists | yes | yes |
-| an injected argument is a real parameter | yes | no |
+| a `with:` argument is a real parameter | yes | no |
 | vault entries the tool needs | yes | no |
 | resolves `tool_id` and version | no | yes |
 | attachment diff, new against reused | no | yes |

@@ -19,14 +19,23 @@ On this page:
 
 ```yaml tools/check_order.yaml
 slng: check_order
-
-announce: One moment while I look that up.
 ```
 
 `slng: check_order` is the whole reference. The scalar is the hosted tool's
 **exact name**, as your organisation holds it. No description, no schema, no
 hash, no mirror, and no `unmute pull` are required to validate, compile, or
 deploy this to SLNG.
+
+A sentence spoken before the tool runs goes on the tool's entry in
+`agent.yaml`, under `start:`:
+
+```yaml agent.yaml
+tools:
+  - name: check_order
+    start:
+      say:
+        - One moment while I look that up.
+```
 
 ## Hosted reference fields
 
@@ -94,10 +103,10 @@ stay yours to write, exactly as before:
   inherit their published description. Refused on MCP sources.
 </ParamField>
 
-<ParamField path="inject" type="list of one-key pairs">
-  Hidden argument/value pairs. Values are scalars or strings with `{{state.variable}}`
-  placeholders. Omit to inject nothing. Legal on local, webhook, and hosted `slng` tools;
-  builtin `send_sms` requires its literal `from_number` setting.
+<ParamField path="with" type="list of one-key pairs">
+  Hidden argument/value pairs. A value is `state.variable`, a scalar, or a string with
+  `{{state.variable}}` placeholders. Omit to pass nothing. Legal on local, webhook, and
+  hosted `slng` tools; builtin `send_sms` requires its literal `from_number` setting.
 </ParamField>
 
 <ParamField path="interruption" type="string">
@@ -110,16 +119,17 @@ stay yours to write, exactly as before:
   builtins whose effect comes from the registry. Refused on MCP and knowledge tools.
 </ParamField>
 
-<ParamField path="announce" type="string">
-  A fixed spoken sentence with no `{{variables}}`. Omit for no announcement. Legal on
-  local, webhook, knowledge, and hosted `slng` tools.
+<ParamField path="tools[].start.say" type="list of strings">
+  Written on the tool's entry in `agent.yaml`, not in this file. A fixed spoken sentence
+  with no `{{variables}}`, legal on local, webhook, knowledge, and hosted `slng` tools.
+  See [the tools overview](/build/tools/overview#using-start-say).
 </ParamField>
 
 ```yaml tools/search_places_text.yaml
 slng: search_places_text
 
-inject:
-  - query: "{{state.customer_name}}"
+with:
+  - query: "state.customer_name"
 ```
 
 This snippet is separate from the phone-ready `hotel-concierge` example. Declare
@@ -127,7 +137,7 @@ This snippet is separate from the phone-ready `hotel-concierge` example. Declare
 `source: call_start` under `variables:`, and supply it when starting a web session. For inbound phone calls, give it a
 valid default or leave `query` to the model: carriers supply no session inputs.
 
-Injected values keep their exact type, including `false` and `0`, and are
+Values passed through `with:` keep their exact type, including `false` and `0`, and are
 never shown to the model. `{{state.customer_name}}` is resolved when a call starts;
 a fixed value such as `- limit: 0` is bound as written. Full rules for the
 last three fields are on
@@ -177,7 +187,7 @@ your organisation and not in your package:
 
 - that a tool called `check_order` exists there, and which published version
   is the latest;
-- that every `inject` argument is a parameter of that published version, and
+- that every `with` argument is a parameter of that published version, and
   that a fixed value is the type it declares;
 - which Vault entries the published version needs.
 
@@ -258,7 +268,7 @@ The last two are the two that no longer reach slng.
 
 A curated capability resolves either way: `slng: current_datetime` attaches it
 by name, and so does `builtin: {id: current_datetime}`. Reach for `builtin:`
-whenever the capability takes a setting of its own, because `inject:` under a
+whenever the capability takes a setting of its own, because `with:` under a
 `slng:` block is an argument and a curated capability publishes no argument
 schema to put one in. See [prebuilt tools](/build/tools/prebuilt).
 
@@ -315,7 +325,7 @@ tools/check_order.yaml:1: `slng:` names the tool SLNG already hosts: write `slng
 **Fix:** write the hosted tool's exact name on the same line, as your
 organisation holds it.
 
-### `unmute deploy` refuses an injected value
+### `unmute deploy` refuses a `with:` value
 
 There are three cases, each naming the tool file and the published version:
 
@@ -330,14 +340,14 @@ There are three cases, each naming the tool file and the published version:
   supplied value against a rule written for the whole call would reject the
   arguments the model fills in, so the value is not reported as checked.
 
-**Fix:** drop that key from `inject:` and let the model fill the parameter in,
+**Fix:** drop that key from `with:` and let the model fill the parameter in,
 or pin a different parameter whose published type is settled.
 
 ### Two tool files resolve to one hosted tool
 
 Two tool files resolving to the same hosted tool are refused, naming
 both. SLNG attaches a hosted tool once, so the two cannot carry separate
-descriptions or `inject:` values, and a push would silently keep one file's
+descriptions or `with:` values, and a push would silently keep one file's
 settings and drop the other's.
 
 **Fix:** keep one file per hosted tool, and attach that one file wherever both

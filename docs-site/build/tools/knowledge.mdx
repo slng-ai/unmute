@@ -36,9 +36,16 @@ description: >-
   Look up the company's refund and complaints policy. Use this before you state
   any refund, replacement, timescale, or goodwill offer, so you quote the policy
   instead of guessing it.
-announce: "Let me check the policy."
 knowledge:
   base: policies
+```
+
+```yaml agent.yaml
+tools:
+  - name: look_up_policy
+    start:
+      say:
+        - Let me check the policy.
 ```
 
 Then attach the tool to the agents that should see that folder:
@@ -110,15 +117,15 @@ different settings.
   The name of a base declared under `knowledge` in `agent.yaml`. No base is inferred.
 </ParamField>
 
-Legal beside it: `description`, `announce`, `interruption`.
+Legal beside it: `description`, `interruption`, and a `start: say:` line on its entry in `agent.yaml`.
 
-Refused beside it: `input`, `output`, `inject`, `effect`. The tool owns both sides
+Refused beside it: `input`, `output`, `with`, `effect`. The tool owns both sides
 of its contract, it takes one string, the caller's question, and returns passages,
 so there is nothing for those to describe.
 
 **Write a real `description`.** It is the only thing that tells the model when to
 look something up instead of answering from memory. Say what is in the folder and
-when to check it. **Write an `announce` too**: a lookup takes a moment, and silence
+when to check it. **Write a `start: say:` line too**: a lookup takes a moment, and silence
 sounds like a dropped call.
 
 ## How the search works

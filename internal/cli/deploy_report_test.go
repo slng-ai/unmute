@@ -522,7 +522,7 @@ func livePreAction(spoken string, wait, enabled bool) map[string]any {
 
 // TestPreviewComparesTheAnnouncementItWouldWrite.
 //
-// `announce:` is an authoring key. It compiles to the attachment's
+// `start: say:` is an authoring key. It compiles to the attachment's
 // execution_policy.pre_action_message, and the preview was given the agent's
 // live policy and nothing to compare it against, so it reported every one as a
 // setting "this package cannot declare, so a replacement removes it". A real
@@ -547,7 +547,7 @@ func TestPreviewComparesTheAnnouncementItWouldWrite(t *testing.T) {
 		{name: "only the package has one", onAgent: "", authored: words,
 			want: "which the agent does not have now"},
 		{name: "both, and they differ", onAgent: words, authored: "Checking that now.",
-			want: `from "One moment while I look that up." to this package's ` + "`announce:`"},
+			want: `from "One moment while I look that up." to this package's ` + "`start: say:`"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rows := compareAttachments(

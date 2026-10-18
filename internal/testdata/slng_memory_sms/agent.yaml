@@ -47,9 +47,16 @@ variables:
 
 tools:
   - current_datetime
-  - send_sms
-  - end_call
+  - name: send_sms
+    start:
+      say:
+        - One moment, sending that now.
+  -
 
+    name: end_call
+    start:
+      say:
+        - Thanks for calling, goodbye.
 conversation:
   greeting:
     speaks_first: agent

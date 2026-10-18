@@ -21,106 +21,104 @@ agents:
           confirmed. A change of date, time or service is not a phone
           correction.
         instructions: tasks/verify-customer.md
-        # The step asks for the number and waits. With a saved number, code
-        # opens on the lookup instead, and the read-back below asks for a yes.
-        opening: listen
-        announce:
-          - What number is best to identify you?
-          - Can you give me a number I could use to identify you?
-        opens_with:
-          tool: find_or_create_customer
-          arguments:
-            - phone: customer_phone
+        # With no saved number, the step says this line and waits. With one,
+        # code reads it back first, and the lookup runs on the caller's yes.
+        start:
+          say:
+            - What number is best to identify you?
+            - Can you give me a number I could use to identify you?
+          listen: true
+          call: find_or_create_customer
+          with:
+            - phone: state.customer_phone
         tools:
-          - find_or_create_customer
-        finish:
-          - tool: find_or_create_customer
-            success:
-              - status:
-                  - existing
-                  - created
-            # Code reads the number back, and the lookup runs on the caller's yes.
+          - name: find_or_create_customer
             confirm:
-              - Can you confirm your number is {{state.number_heard}}?
-              - Just to check, is that {{state.number_heard}}?
-        assign:
-          - number_heard: input.phone
-          - customer_phone: result.customer_phone
-          - customer_verified: result.status
+              - Can you confirm your number is {{input.phone}}?
+              - Just to check, is that {{input.phone}}?
+            outcomes:
+              - if:
+                  - status:
+                      - existing
+                      - created
+                save:
+                  - customer_phone: result.customer_phone
+                  - customer_verified: result.status
+                then: done
 
       # No `when:`: the only way in is the `book` flow, so a booking cannot
       # start before verification has been decided.
       - name: manage_booking
         instructions: tasks/booking.md
-        announce:
-          - Let me have a look.
-          - One moment, let me check the diary.
-          - Let me see what we have.
-        # The step opens by reading the diary in code, with what the caller
-        # asked for, and says the offer without asking the model.
-        opens_with:
-          tool: find_slots
-          arguments:
-            - service: requested_service
-            - date: requested_day
-            - intent: requested_intent
+        # The step reads the diary in code, with what the caller asked for,
+        # and says the offer without asking the model.
+        start:
           say:
-            - "{{state.offer}}"
+            - Let me have a look.
+            - One moment, let me check the diary.
+            - Let me see what we have.
+          call: find_slots
+          with:
+            - service: state.requested_service?
+            - date: state.requested_day?
+            - intent: state.requested_intent?
+        # Each change is read back by code first and runs on the caller's yes.
+        # Its receipt is said by code too, so the concierge makes no request.
         tools:
-          - find_slots
-          - book_appointment
-          - move_appointment
-          - cancel_appointment
+          - name: find_slots
+            outcomes:
+              - if:
+                  - offered:
+                      - true
+                say:
+                  - "{{result.offer}}"
+          - name: book_appointment
+            confirm:
+              - Shall I book your {{input.service}} for {{input.date}} at {{input.time}}?
+              - Would you like your {{input.service}} booked for {{input.date}} at {{input.time}}?
+            outcomes:
+              - if:
+                  - status:
+                      - booked
+                save:
+                  - appointment: result.appointment
+                say:
+                  - Lovely, your {{result.appointment.service}} is booked for {{result.appointment.date}} at {{result.appointment.time}}. Anything else I can do for you?
+                  - Great, you're all set for {{result.appointment.date}} at {{result.appointment.time}}. Is there anything else?
+                  - Perfect, you're in the diary for {{result.appointment.date}} at {{result.appointment.time}}. Anything else I can help with?
+                then: done
+          - name: move_appointment
+            confirm:
+              - Shall I move it to {{input.date}} at {{input.time}}?
+              - Would you like it moved to {{input.date}} at {{input.time}}?
+            outcomes:
+              - if:
+                  - status:
+                      - moved
+                save:
+                  - appointment: result.appointment
+                say:
+                  - Done, I've moved it to {{result.appointment.date}} at {{result.appointment.time}}. Anything else?
+                  - Great, you're now booked for {{result.appointment.date}} at {{result.appointment.time}}. Is there anything else I can do?
+                  - All sorted, it's moved to {{result.appointment.date}} at {{result.appointment.time}}. Anything else I can help with?
+                then: done
+          - name: cancel_appointment
+            confirm:
+              - Shall I cancel your {{input.service}} for {{input.date}} at {{input.time}}?
+              - Just to check, cancel your {{input.service}} for {{input.date}} at {{input.time}}?
+            outcomes:
+              - if:
+                  - status:
+                      - cancelled
+                save:
+                  - appointment: result.appointment
+                say:
+                  - That's cancelled for you. Anything else I can help with?
+                  - Done, I've cancelled it. Is there anything else?
+                  - All cancelled. Anything else I can do for you?
+                then: done
         handoffs:
           - to_complaints
-        replies:
-          - tool: find_slots
-            when:
-              - offered:
-                  - true
-            say:
-              - "{{state.offer}}"
-        # Each write is read back by code first and runs on the caller's yes.
-        # Its receipt is said by code too, so the concierge makes no request.
-        finish:
-          - tool: book_appointment
-            success:
-              - status:
-                  - booked
-            confirm:
-              - Shall I book your {{state.chosen_service}} for {{state.chosen_day}} at {{state.chosen_time}}?
-              - Would you like your {{state.chosen_service}} booked for {{state.chosen_day}} at {{state.chosen_time}}?
-            say:
-              - Lovely, your {{state.appointment.service}} is booked for {{state.appointment.date}} at {{state.appointment.time}}. Anything else I can do for you?
-              - Great, you're all set for {{state.appointment.date}} at {{state.appointment.time}}. Is there anything else?
-              - Perfect, you're in the diary for {{state.appointment.date}} at {{state.appointment.time}}. Anything else I can help with?
-          - tool: move_appointment
-            success:
-              - status:
-                  - moved
-            confirm:
-              - Shall I move it to {{state.chosen_day}} at {{state.chosen_time}}?
-              - Would you like it moved to {{state.chosen_day}} at {{state.chosen_time}}?
-            say:
-              - Done, I've moved it to {{state.appointment.date}} at {{state.appointment.time}}. Anything else?
-              - Great, you're now booked for {{state.appointment.date}} at {{state.appointment.time}}. Is there anything else I can do?
-              - All sorted, it's moved to {{state.appointment.date}} at {{state.appointment.time}}. Anything else I can help with?
-          - tool: cancel_appointment
-            success:
-              - status:
-                  - cancelled
-            confirm:
-              - Shall I cancel your {{state.chosen_service}} for {{state.chosen_day}} at {{state.chosen_time}}?
-              - Just to check, cancel your {{state.chosen_service}} for {{state.chosen_day}} at {{state.chosen_time}}?
-            say:
-              - That's cancelled for you. Anything else I can help with?
-              - Done, I've cancelled it. Is there anything else?
-              - All cancelled. Anything else I can do for you?
-        assign:
-          - appointment: result.appointment
-          - chosen_service: input.service?
-          - chosen_day: input.date
-          - chosen_time: input.time
     task_groups:
       - book
     handoffs:
@@ -274,7 +272,10 @@ tools:
   - book_appointment
   - move_appointment
   - cancel_appointment
-  - record_complaint
+  - name: record_complaint
+    start:
+      say:
+        - Let me get that written down.
   - look_up_refund_policy
   - look_up_salon_info
   - end_call

@@ -78,7 +78,10 @@ agents:
       - end_call
 
 tools:
-  - check_order
+  - name: check_order
+    start:
+      say:
+        - One moment while I look that up.
   - search_places_text
   - end_call
 

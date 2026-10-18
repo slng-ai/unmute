@@ -8,8 +8,8 @@ Try these tracking ids: `PD-1042` (in transit) and `PD-2077` (held at the depot)
 
 - **State with a shape.** `state.py` holds a date, `Phone`, a `Parcel` model (an `Id` and a `Literal` status) and plain strings. Core builds the same State from type text.
 - **Python tools.** `tools/depot.py` holds module-level functions over an in-memory depot. Types come from the signatures.
-- **`announce`.** `find_parcel` and `reschedule_delivery` say a line as they start.
-- **`inject`.** `reschedule_delivery` reads the tracking id from `{{state.parcel.tracking_id}}`. `save_callback_note` reads `{{call.session_id}}`. The model sends neither.
+- **`start: say:`.** `find_parcel` and `reschedule_delivery` say a line as they start.
+- **`with:`.** `reschedule_delivery` reads the tracking id from `{{state.parcel.tracking_id}}`. `save_callback_note` reads `{{call.session_id}}`. The model sends neither.
 - **`effect: ends_conversation`.** `end_call` ends the call.
 - **Finish, confirm and say.** `change_delivery` asks "Shall I move the delivery to ...?" before the write and says a receipt after it.
 - **A group that ends the call.** `request_callback` has `then: end`.
@@ -22,7 +22,7 @@ None. Core has no scenarios for this example, so there is no `scenarios/` folder
 
 ## Gaps
 
-- **Confirm line reads `{{input.day}}`.** v2 lines read only State. I added a `day` value, saved with `assign: day: input.day`. Core has no `day` in its State, so the final state has one more value.
+- **A `day` value in State.** The step saves `day: input.day` in its `save:`. Core has no `day` in its State, so the final state has one more value.
 - **Receipt line reads `{{result.parcel.delivery_day}}`.** It reads `{{state.parcel.delivery_day}}`, because the step saves `parcel: result.parcel` first.
 - **`then` on `move_delivery`.** Core leaves it unset. v2 needs one, so it is `then: return`, which is core's default.
 - **Router upstream and model.** Core asks for `slng/auto` and leaves the rest to the router config stored with the key. Unmute sends the upstream with every request, so it names one: `upstream: provider: openai`, with `model: gpt-4.1-mini`. Change both to match your config. Validate also warns that no `reasoning_effort` is set. I left it out, as core does.

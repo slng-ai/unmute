@@ -1,5 +1,5 @@
 {
-  "digest": "4c2ea10032f8cefb365a0fc2f3232c99f06b880e1f11e60e18cc97dfd95ab880",
+  "digest": "4a8c8d4b032a0ccfec77a3dd3a4e44d01c4bb4c1545835a6e112e75c3aa6704f",
   "report": {
     "tools": {
       "opening_hours": {
@@ -61,5 +61,5 @@
       }
     }
   },
-  "source": "internal/voice-agents-tests/relay-desk"
+  "source": "examples/twilio"
 }

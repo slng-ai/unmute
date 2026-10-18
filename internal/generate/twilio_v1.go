@@ -559,11 +559,12 @@ func ownRuntimeRefusals(agent *ir.Agent, provider ir.Provider) error {
 	for _, name := range sortedKeys(agent.Tools) {
 		tool := agent.Tools[name]
 		for key, used := range map[string]bool{
-			"assign": len(tool.Assign) > 0, "replies": len(tool.Replies) > 0, "precheck": tool.Precheck != "",
-			"hidden": len(tool.Hidden) > 0, "announce_wait": tool.AnnounceWait,
+			"agent.yaml tools: " + name + " save": len(tool.Assign) > 0, "agent.yaml tools: " + name + " outcomes": len(tool.Replies) > 0,
+			"agent.yaml tools: " + name + " hidden": len(tool.Hidden) > 0, "agent.yaml tools: " + name + " start: wait": tool.AnnounceWait,
+			"tools/" + name + ".yaml precheck": tool.Precheck != "",
 		} {
 			if used {
-				keys = append(keys, "tools/"+name+".yaml "+key)
+				keys = append(keys, key)
 			}
 		}
 	}
@@ -572,15 +573,15 @@ func ownRuntimeRefusals(agent *ir.Agent, provider ir.Provider) error {
 		for _, rule := range task.Finish {
 			// SLNG speaks a finish say: line itself. Twilio has no step to end.
 			if len(rule.Confirm) > 0 || (len(rule.Say) > 0 && provider != ir.ProviderSlng) {
-				keys = append(keys, "task "+name+" finish confirm or say")
+				keys = append(keys, "task "+name+" outcome confirm: or say:")
 				break
 			}
 		}
 		if len(task.Replies) > 0 {
-			keys = append(keys, "task "+name+" replies")
+			keys = append(keys, "task "+name+" outcome without then:")
 		}
 		if task.OpensWith != nil {
-			keys = append(keys, "task "+name+" opens_with")
+			keys = append(keys, "task "+name+" start: call:")
 		}
 	}
 	if agent.EntryBy != nil {
@@ -593,7 +594,7 @@ func ownRuntimeRefusals(agent *ir.Agent, provider ir.Provider) error {
 	}
 	for _, name := range sortedKeys(agent.Controls) {
 		if handoff, ok := agent.Controls[name].(*ir.AgentTransfer); ok && (len(handoff.Saves) > 0 || handoff.OpensWith != nil) {
-			keys = append(keys, "handoff "+name+" saves or opens_with")
+			keys = append(keys, "handoff "+name+" saves or start:")
 		}
 	}
 	if len(keys) == 0 {

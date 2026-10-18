@@ -119,7 +119,7 @@ func coreTools(agent *ir.Agent) ([]any, error) {
 			return nil, fmt.Errorf("tool %q: version 2 compiles local and webhook tools only so far, and this one is %s", name, tool.Execution)
 		}
 		if tool.Execution == ir.ToolWebhook && (len(tool.Replies) > 0 || tool.Precheck != "") {
-			return nil, fmt.Errorf("tool %q: replies and precheck run on a local tool only; unmute-core's webhook tool takes neither", name)
+			return nil, fmt.Errorf("tool %q: outcomes that say a line, and precheck, run on a local tool only; unmute-core's webhook tool takes neither", name)
 		}
 		options := map[string]any{"name": name}
 		putString(options, "description", tool.Description)
@@ -152,7 +152,11 @@ func coreTools(agent *ir.Agent) ([]any, error) {
 			if err != nil {
 				return nil, fmt.Errorf("tool %q: %w", name, err)
 			}
-			replies = append(replies, map[string]any{"when": when, "say": rewriteLines(reply.Say, nil, own)})
+			built := map[string]any{"when": when, "say": rewriteLines(reply.Say, nil, own)}
+			if len(reply.Assign) > 0 {
+				built["assign"] = coreAssigns(reply.Assign)
+			}
+			replies = append(replies, built)
 		}
 		if len(replies) > 0 {
 			options["replies"] = replies
@@ -317,6 +321,10 @@ func coreTask(agent *ir.Agent, name, when string, announce []string) (map[string
 			return nil, fmt.Errorf("task %q: %w", name, err)
 		}
 		built := map[string]any{"tool": rule.Tool, "success": success}
+		if len(rule.Assign) > 0 {
+			built["assign"] = coreAssigns(rule.Assign)
+		}
+		putString(built, "ends", rule.Ends)
 		if len(rule.Confirm) > 0 {
 			built["confirm"] = rewriteLines(rule.Confirm, inputPaths(task.Assign, tool), nil)
 		}
@@ -336,7 +344,11 @@ func coreTask(agent *ir.Agent, name, when string, announce []string) (map[string
 			return nil, fmt.Errorf("task %q: %w", name, err)
 		}
 		reads := mergePaths(resultPaths(tool.Assign), fromResult)
-		replies = append(replies, map[string]any{"tool": reply.Tool, "when": when, "say": rewriteLines(reply.Say, nil, reads)})
+		built := map[string]any{"tool": reply.Tool, "when": when, "say": rewriteLines(reply.Say, nil, reads)}
+		if len(reply.Assign) > 0 {
+			built["assign"] = coreAssigns(reply.Assign)
+		}
+		replies = append(replies, built)
 	}
 	if len(replies) > 0 {
 		out["replies"] = replies

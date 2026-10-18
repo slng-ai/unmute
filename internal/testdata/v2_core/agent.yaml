@@ -46,31 +46,34 @@ agents:
         when: The caller wants to book an appointment.
         instructions: tasks/booking.md
         tools:
-          - find_slots
-          - save_booking
-        arguments:
-          - preferred_day
-        opens_with:
-          tool: find_slots
-          arguments:
-            - day: preferred_day
-          say:
-            - "I have {{state.offered_slots}} free. Which suits you?"
-        replies:
-          - tool: save_booking
-            when:
-              - status: slot_taken
-            say:
-              - That time has just gone. Shall I try another?
-        finish:
-          - tool: save_booking
-            success:
-              - status: booked
+          # The step's own outcome comes before the tool's: code says the
+          # offer here, and the tool's line when nothing is free.
+          - name: find_slots
+            outcomes:
+              - if:
+                  - status: free
+                say:
+                  - "I have {{result.slots}} free. Which suits you?"
+          - name: save_booking
             confirm:
               - "Shall I book your {{state.booking.service}} on {{state.booking.day}} at {{state.booking.time}}?"
-            say:
-              - "You're all set for {{state.appointment.spoken}}."
-        assign:
+            outcomes:
+              - if:
+                  - status: booked
+                say:
+                  - "You're all set for {{state.appointment.spoken}}."
+                then: done
+              - if:
+                  - status: slot_taken
+                say:
+                  - That time has just gone. Shall I try another?
+        arguments:
+          - preferred_day
+        start:
+          call: find_slots
+          with:
+            - day: state.preferred_day
+        save:
           - booking: input.booking
           - appointment: result.appointment
         context:
@@ -78,14 +81,14 @@ agents:
 
       - name: take_name
         instructions: tasks/take_name.md
-        assign:
+        save:
           - caller_name: result.caller_name
         context:
           history: messages
 
       - name: note_reason
         instructions: tasks/note_reason.md
-        assign:
+        save:
           - reason: result.reason
         context:
           history: messages
@@ -144,6 +147,18 @@ conversation:
     end_text: I'll let you go now. Call back any time.
 
 tools:
-  - find_slots
+  - name: find_slots
+    hidden:
+      - read_back
+    save:
+      - offered_slots: result.slots
+    outcomes:
+      - if:
+          - status:
+              - none_free
+              - closed
+        say:
+          - "Nothing is free on {{state.preferred_day}}. Would another day work?"
+          - That day is full, I'm afraid. Shall I try another?
   - save_booking
   - lookup_account

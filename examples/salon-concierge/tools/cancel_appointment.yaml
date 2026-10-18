@@ -7,5 +7,5 @@ description: >-
 local:
   handler: tools/salon.py:cancel_appointment
 
-inject:
-  - customer_phone: "{{state.customer_phone}}"
+with:
+  - customer_phone: "state.customer_phone"

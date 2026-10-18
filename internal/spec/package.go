@@ -200,12 +200,14 @@ type AgentFile struct {
 	// sits. Tasks are the exception and are written inside the agent that defines
 	// them. Declared here, after Agents, because struct order is what the derived
 	// schema publishes and the canonical section order starts from the reader.
-	Handoffs     map[string]Handoff    `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
-	Escalations  map[string]Escalation `json:"escalations,omitempty" yaml:"escalations,omitempty"`
-	TaskGroups   map[string]TaskGroup  `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
-	Tools        []string              `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Conversation *Conversation         `json:"conversation,omitempty" yaml:"conversation,omitempty"`
-	Tracing      *Tracing              `json:"tracing,omitempty" yaml:"tracing,omitempty"`
+	Handoffs    map[string]Handoff    `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
+	Escalations map[string]Escalation `json:"escalations,omitempty" yaml:"escalations,omitempty"`
+	TaskGroups  map[string]TaskGroup  `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
+	// Tools lists every tool, as a name or as a block saying what happens
+	// around it on every agent: outcomes:, hidden: and start:.
+	Tools        []ToolEntry   `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Conversation *Conversation `json:"conversation,omitempty" yaml:"conversation,omitempty"`
+	Tracing      *Tracing      `json:"tracing,omitempty" yaml:"tracing,omitempty"`
 	// Channels and Capacity moved to targets.yaml. Both survive here only so
 	// a file still carrying them is refused with a sentence naming the new
 	// home, rather than "unknown field". `json:"-"` keeps them out of the
@@ -504,35 +506,35 @@ type Task struct {
 	Name         string `json:"name" yaml:"name"`
 	Instructions string `json:"instructions" yaml:"instructions"`
 	When         string `json:"when,omitempty" yaml:"when,omitempty"`
-	// Announce is one fixed sentence the agent speaks as the task is entered, so
-	// the two model requests it takes to enter one are not silence. Spoken at
-	// the very start of the step, before anything else runs.
-	Announce Announce `json:"announce,omitempty" yaml:"announce,omitempty"`
-	Assign   []Pair   `json:"assign,omitempty" yaml:"assign,omitempty"`
-	// Replies are lines code speaks for a typed result of one of the step's
-	// tools, before that tool's own replies. Each names its tool.
-	Replies []Reply `json:"replies,omitempty" yaml:"replies,omitempty" since:"2"`
-	// OpensWith runs one tool in code as the step opens.
-	OpensWith *OpensWith `json:"opens_with,omitempty" yaml:"opens_with,omitempty" since:"2"`
+	// Start is how the step opens: the line it says, whether it then waits for
+	// the caller, and a tool code runs first.
+	Start *TaskStart `json:"start,omitempty" yaml:"start,omitempty" since:"2"`
 	// Arguments are State values the agent passes when it starts the step.
 	Arguments []string `json:"arguments,omitempty" yaml:"arguments,omitempty" since:"2"`
-	// Finish names the tools this step ends on. When one of them returns a
-	// result meeting every `success:` pair, the step saves `assign:` from that
-	// result and ends, so the model is not asked to call `finish` for a decision
-	// the tool already made. The model's own `finish` is still there for a
-	// request this step cannot serve and for values it already holds.
-	Finish   []FinishEntry `json:"finish,omitempty" yaml:"finish,omitempty"`
-	Tools    []string      `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Handoffs []string      `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
+	// Save is what the step saves when it ends, as `- customer_name:
+	// result.customer_name`: the model fills `result` when it ends the step
+	// itself, and a tool's result fills it when an outcome with no save: of
+	// its own ends the step.
+	Save []Pair `json:"save,omitempty" yaml:"save,omitempty"`
+	// ToolEntries is the step's `tools:` as written: a name, or a block with the
+	// tool's confirm: and outcomes:.
+	ToolEntries []ToolEntry `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Handoffs    []string    `json:"handoffs,omitempty" yaml:"handoffs,omitempty"`
+
+	// The fields below are filled by Load from start: and the tool entries,
+	// and never written by an author (lowerToolBehaviour). They are the shape
+	// the compiler reads.
+	Tools     []string      `json:"-" yaml:"-"`
+	Announce  Announce      `json:"-" yaml:"-"`
+	Assign    []Pair        `json:"-" yaml:"-"`
+	Replies   []Reply       `json:"-" yaml:"-"`
+	OpensWith *OpensWith    `json:"-" yaml:"-"`
+	Finish    []FinishEntry `json:"-" yaml:"-"`
+	Opening   string        `json:"-" yaml:"-"`
 	// Think names an entry of `models.think`, overriding the profile the task
 	// would otherwise inherit. Spelled the way every other think pointer is.
 	Think   string      `json:"think,omitempty" yaml:"think,omitempty"`
 	Context TaskContext `json:"context,omitempty" yaml:"context,omitempty"`
-	// Opening is how the step's first turn happens: `generate` (the default, and
-	// what an omitted key means) has the model open it, `listen` speaks the
-	// `announce:` line once and waits for the caller. Listening costs no model
-	// request, which is what it is for.
-	Opening string `json:"opening,omitempty" yaml:"opening,omitempty"`
 }
 
 // TaskGroup is one entry under `task_groups:`: an ordered run of task steps. It
@@ -563,6 +565,8 @@ type Reply struct {
 	Tool string        `json:"tool,omitempty" yaml:"tool,omitempty"`
 	When []SuccessPair `json:"when,omitempty" yaml:"when,omitempty"`
 	Say  []string      `json:"say" yaml:"say"`
+	// Save is what the matching result writes to State.
+	Save []Pair `json:"-" yaml:"-"`
 }
 
 // EntryBy is `entry_by:`: the State value that picks the first agent, and the
@@ -578,6 +582,9 @@ type OpensWith struct {
 	Tool      string   `json:"tool" yaml:"tool"`
 	Arguments []Pair   `json:"arguments,omitempty" yaml:"arguments,omitempty"`
 	Say       []string `json:"say,omitempty" yaml:"say,omitempty"`
+	// Optional names the arguments written with a `?`: the call runs without
+	// them. ir holds the marks to the tool's input schema.
+	Optional []string `json:"-" yaml:"-"`
 }
 
 type TaskContext struct {
@@ -624,9 +631,12 @@ type Handoff struct {
 	// Saves sets State values as the call moves, like `- explanation: ES`, the
 	// language the next agent speaks.
 	Saves []Pair `json:"saves,omitempty" yaml:"saves,omitempty" since:"2"`
-	// OpensWith is a tool of the next agent's own, run in code as it takes the
-	// call. When its say: line fills, that line is the agent's first reply.
-	OpensWith *OpensWith `json:"opens_with,omitempty" yaml:"opens_with,omitempty" since:"2"`
+	// Start is a tool of the next agent's own, run in code as it takes the
+	// call. When its outcome's say: line fills, that line is the agent's first
+	// reply.
+	Start *HandoffStart `json:"start,omitempty" yaml:"start,omitempty" since:"2"`
+	// OpensWith is Start as the compiler reads it, filled by Load.
+	OpensWith *OpensWith `json:"-" yaml:"-"`
 }
 
 // Escalation is one entry under `escalations:`. The caller goes through to a
@@ -698,25 +708,24 @@ type Tool struct {
 	Input       map[string]any `json:"input,omitempty" yaml:"input,omitempty"`
 	Output      map[string]any `json:"output,omitempty" yaml:"output,omitempty"`
 
-	// Inject is a flat map of request key to scalar, merged into the call and
-	// never advertised to the model: a value may carry {{variable}} tokens.
-	// Legal on webhook and local only: an mcp server owns its own call shape,
-	// so there is nothing here to merge into (validate.go, SCHEMA N40).
-	Inject []Pair `json:"inject,omitempty" yaml:"inject,omitempty"`
+	// Inject is the file's `with:`: values the handler needs, merged into the
+	// call and never advertised to the model, as `- customer_phone:
+	// state.customer_phone` or a literal. Load turns a `state.x` value into a
+	// {{state.x}} template. Legal on webhook and local only: an mcp server owns
+	// its own call shape, so there is nothing here to merge into (validate.go,
+	// SCHEMA N40).
+	Inject []Pair `json:"with,omitempty" yaml:"with,omitempty"`
 
-	// Assign saves result fields to State when the tool returns. Result only:
-	// a tool's own save never reads its input.
-	Assign []Pair `json:"assign,omitempty" yaml:"assign,omitempty" since:"2"`
-	// Replies are lines code speaks for a typed result.
-	Replies []Reply `json:"replies,omitempty" yaml:"replies,omitempty" since:"2"`
 	// Precheck names a Python function, as `file.py:function`, that returns an
 	// outcome or None before the tool runs.
 	Precheck string `json:"precheck,omitempty" yaml:"precheck,omitempty" since:"2"`
-	// Hidden names result fields the model never reads.
-	Hidden []string `json:"hidden,omitempty" yaml:"hidden,omitempty" since:"2"`
-	// AnnounceWait runs the tool once its announce line has played, so a
-	// goodbye is heard in full before a tool that ends the call runs.
-	AnnounceWait bool `json:"announce_wait,omitempty" yaml:"announce_wait,omitempty" since:"2"`
+
+	// The fields below come from the tool's entry in agent.yaml (outcomes:,
+	// hidden:, start:), filled by Load, and are never written in the tool file.
+	Assign       []Pair   `json:"-" yaml:"-"`
+	Replies      []Reply  `json:"-" yaml:"-"`
+	Hidden       []string `json:"-" yaml:"-"`
+	AnnounceWait bool     `json:"-" yaml:"-"`
 
 	Webhook        *ToolWebhook   `json:"webhook,omitempty" yaml:"webhook,omitempty"`
 	Local          *ToolLocal     `json:"local,omitempty" yaml:"local,omitempty"`
@@ -739,12 +748,12 @@ type Tool struct {
 
 	// Announce is one fixed sentence the agent speaks as the tool starts, so a
 	// slow call is not silence. Legal on webhook and local only: every other
-	// kind has no body to speak before (validate.go).
+	// kind has no body to speak before (validate.go). From the entry's start:.
 	//
 	// ponytail: a plain string, not a pointer, because both execution-block
 	// agreement tests read every pointer field on Tool as an execution block.
 	// A pointer here would claim a seventh block that does not exist.
-	Announce Announce `json:"announce,omitempty" yaml:"announce,omitempty"`
+	Announce Announce `json:"-" yaml:"-"`
 }
 
 // ToolWebhook is the `webhook:` block: an HTTP endpoint named by env var or by

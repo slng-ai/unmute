@@ -15,7 +15,7 @@ On this page:
 - [Saying a value and confirming one](#saying-a-value-and-confirming-one) - two different lines
 - [Name only the values this prompt needs](#name-only-the-values-this-prompt-needs) - every placeholder is a grant
 - [Set the spoken language in every role](#set-the-spoken-language-in-every-role) - each prompt that can speak
-- [Avoid repeated waiting lines](#avoid-repeated-waiting-lines) - one `announce:` per wait
+- [Avoid repeated waiting lines](#avoid-repeated-waiting-lines) - one waiting line per wait
 - [Give every realism rule a budget](#give-every-realism-rule-a-budget) - how often, not just how
 - [Tell the model to vary](#tell-the-model-to-vary-and-it-will) - openers callers notice
 - [Keep the rules load bearing](#keep-the-rules-load-bearing) - prompt rule, or code guard
@@ -166,12 +166,12 @@ so it needs the language rule too.
 
 ## Avoid repeated waiting lines
 
-Tools, tasks, and handoffs can have an optional `announce:` line. Omit it when
+A tool's or task's `start: say:` and a handoff's `announce:` are optional lines. Omit them when
 there is no useful wait to explain. If you use one, tell the model to let that
 line cover the wait and avoid another "let me check" before or after it.
 
-Check adjacent steps as well. A tool announcement followed by a task
-announcement can sound like repetition even when each is short.
+Check adjacent steps as well. A tool line followed by a task
+line can sound like repetition even when each is short.
 
 ## Give every realism rule a budget
 

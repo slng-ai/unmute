@@ -1,8 +1,8 @@
-inject:
-  - appointment: "{{state.last_appointment}}"
-  - date: "{{state.last_appointment.scheduled_date}}"
-  - accepted: "{{state.accepted}}"
-  - count: "{{state.count}}"
+with:
+  - appointment: "state.last_appointment"
+  - date: "state.last_appointment.scheduled_date"
+  - accepted: "state.accepted"
+  - count: "state.count"
   - label: "Date {{state.last_appointment.scheduled_date}}"
 local:
   handler: tools/inspect_state.py:inspect_state
