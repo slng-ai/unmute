@@ -67,57 +67,31 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		}
 		return Artifact{}, fmt.Errorf("generate %s: %w", resolved.Name, err)
 	}
-	// Version 2 runs on unmute-core, on LiveKit or Pipecat. Other targets are
-	// refused rather than compiled with templates that would drop every key
-	// version 2 adds.
-	if agent.Version == ir.Version2 && (resolved.Provider == ir.ProviderTwilio || resolved.Provider == ir.ProviderSlng) {
-		// Twilio and SLNG keep their own runtime, and read version 2 with the keys
-		// it can run.
-		if err := ownRuntimeRefusals(agent, resolved.Provider); err != nil {
-			return Artifact{}, fmt.Errorf("generate %s %s: %w", resolved.Name, resolved.Provider, err)
-		}
-	} else if agent.Version == ir.Version2 {
-		files, err := GenerateCore(agent, resolved)
-		if err != nil {
-			return Artifact{}, fmt.Errorf("generate %s %s: %w", resolved.Name, resolved.Provider, err)
-		}
-		return Artifact{Kind: CodeTarget, Files: files}, nil
-	}
-	artifact := Artifact{Kind: artifactKind(resolved.Provider), Telephony: TelephonyRuntimePlanFor(resolved)}
+	artifact := Artifact{Kind: artifactKind(resolved.Provider)}
 	artifact.Notes.ForwardedBindings = report.ForwardedBindings
 	artifact.Notes.Sizing = report.Sizing
 	for _, row := range report.PerTarget {
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, row.Warnings...)
 	}
+	// LiveKit and Pipecat run on unmute-core. ir.Validate has already refused
+	// version 1 on them.
+	if resolved.Provider == ir.ProviderLiveKit || resolved.Provider == ir.ProviderPipecat {
+		files, err := GenerateCore(agent, resolved)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("generate %s %s: %w", resolved.Name, resolved.Provider, err)
+		}
+		artifact.Files = files
+		return withManifestReport(artifact, agent)
+	}
+	// Twilio and SLNG keep their own runtime, and read version 2 with the keys it
+	// can run.
+	if agent.Version == ir.Version2 {
+		if err := ownRuntimeRefusals(agent, resolved.Provider); err != nil {
+			return Artifact{}, fmt.Errorf("generate %s %s: %w", resolved.Name, resolved.Provider, err)
+		}
+	}
+	artifact.Telephony = TelephonyRuntimePlanFor(resolved)
 	switch resolved.Provider {
-	case ir.ProviderLiveKit:
-		emitted, err := GenerateLiveKit(agent, resolved, report.ForwardedBindings, report.Sizing)
-		if err != nil {
-			return Artifact{}, fmt.Errorf("generate %s livekit: %w", resolved.Name, err)
-		}
-		artifact.Files, err = withTelephonyReport(emitted.Files, artifact.Telephony)
-		if err != nil {
-			return Artifact{}, fmt.Errorf("generate %s livekit: %w", resolved.Name, err)
-		}
-		artifact.Files = append(artifact.Files, knowledgeFiles(agent)...)
-		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
-		artifact.Notes.Notes = append(artifact.Notes.Notes, knowledgeNotes(agent)...)
-		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
-		return withManifestReport(artifact, agent)
-	case ir.ProviderPipecat:
-		emitted, err := GeneratePipecat(agent, resolved, report.ForwardedBindings, report.Sizing)
-		if err != nil {
-			return Artifact{}, fmt.Errorf("generate %s pipecat: %w", resolved.Name, err)
-		}
-		artifact.Files, err = withTelephonyReport(emitted.Files, artifact.Telephony)
-		if err != nil {
-			return Artifact{}, fmt.Errorf("generate %s pipecat: %w", resolved.Name, err)
-		}
-		artifact.Files = append(artifact.Files, knowledgeFiles(agent)...)
-		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
-		artifact.Notes.Notes = append(artifact.Notes.Notes, knowledgeNotes(agent)...)
-		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
-		return withManifestReport(artifact, agent)
 	case ir.ProviderTwilio:
 		emitted, err := GenerateTwilio(agent, resolved, report.ForwardedBindings, report.Sizing)
 		if err != nil {
@@ -170,28 +144,6 @@ func knowledgeFiles(agent *ir.Agent) []File {
 	return files
 }
 
-// knowledgeNotes is the compile report's knowledge section (FR-015): what the
-// agent will read at every process start.
-//
-// No passage count. Splitting happens at startup, so a number here would be a
-// guess presented as a fact; the document count is what the compiler knows.
-func knowledgeNotes(agent *ir.Agent) []string {
-	if len(agent.Knowledge) == 0 {
-		return nil
-	}
-	notes := make([]string, 0, len(agent.Knowledge))
-	for _, name := range slices.Sorted(maps.Keys(agent.Knowledge)) {
-		base := agent.Knowledge[name]
-		documents := "documents"
-		if len(base.Files) == 1 {
-			documents = "document"
-		}
-		notes = append(notes, fmt.Sprintf("knowledge %q: %d %s, embed %s, fixed until next compile",
-			name, len(base.Files), documents, base.Embed))
-	}
-	return notes
-}
-
 // targetDiagnostics joins the per-target validation errors so the compile path
 // prints the same provider-vocabulary diagnostic that validate does.
 func targetDiagnostics(report ir.ValidateReport) string {
@@ -224,48 +176,3 @@ func artifactKind(provider ir.Provider) ArtifactKind {
 // envRef renders the environment-lookup idiom the emitted Python uses. Both
 // drivers emit the same expression, so there is one of it.
 func envRef(name string) string { return "os.environ[" + pyQuote(name) + "]" }
-
-// primitiveTypes is the one place a schema primitive is named. Two different
-// outputs are needed from it — the JSON Schema name and the Python annotation —
-// so the table carries two columns and the accessors below stay separate. Merging the outputs themselves would be wrong;
-// what was wrong was writing the key set out five times.
-var primitiveTypes = map[ir.PrimitiveType]struct {
-	json string
-	py   string
-}{
-	ir.PrimitiveBoolean: {"boolean", "bool"},
-	ir.PrimitiveInteger: {"integer", "int"},
-	ir.PrimitiveNumber:  {"number", "float"},
-	ir.PrimitiveString:  {"string", "str"},
-}
-
-// primitiveString is the fallback row: anything unrecognised is a string, which
-// is what all five original switches did in their default arm.
-var primitiveString = primitiveTypes[ir.PrimitiveString]
-
-func primitiveRow(t ir.PrimitiveType) struct{ json, py string } {
-	if row, ok := primitiveTypes[t]; ok {
-		return row
-	}
-	return primitiveString
-}
-
-// pyType is a primitive's Python annotation.
-func pyType(t ir.PrimitiveType) string { return primitiveRow(t).py }
-
-// pyTypeForJSON maps a JSON Schema name back to its Python annotation, for the
-// places that only ever saw the JSON spelling.
-func pyTypeForJSON(name string) string {
-	for _, row := range primitiveTypes {
-		if row.json == name {
-			return row.py
-		}
-	}
-	return primitiveString.py
-}
-
-// authoredType is a variable's type the way state.py's schema names it:
-// `CustomerRecord | None`, or `str` for a plain value.
-func authoredType(variable ir.Variable) string {
-	return variable.Schema.String()
-}

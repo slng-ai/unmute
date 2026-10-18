@@ -18,8 +18,8 @@ func newValidateCmd() *cobra.Command {
 	var names []string
 	cmd := &cobra.Command{
 		Use:   "validate [package-dir]",
-		Short: "Validate a v1 agent package against its targets.",
-		Long: "Validate a v1 agent package against its targets.\n\n" +
+		Short: "Validate an agent package against its targets.",
+		Long: "Validate an agent package against its targets.\n\n" +
 			"With no package-dir, the package is the current directory, so you can " +
 			"cd into an agent and run this with no arguments.",
 		Args: cobra.MaximumNArgs(1),

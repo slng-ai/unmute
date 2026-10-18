@@ -25,9 +25,8 @@ var emittedEntryModule = map[ir.Provider]string{
 }
 
 // staticCheckFixtures are the internal packages that reach code no example
-// does: tasks and groups (remy, terminal_step), typed session state
-// (typed_state) and the Daily carrier transport (daily_carrier).
-var staticCheckFixtures = []string{"remy", "terminal_step", "typed_state", "daily_carrier"}
+// does: v2_core writes every key version 2 adds.
+var staticCheckFixtures = []string{"v2_core"}
 
 // TestSmokeEmittedProjectsPassTheirOwnGate holds every example, on every code
 // target it declares, to the bar its generated pyproject.toml sets, using the
@@ -95,7 +94,7 @@ func TestSmokeEmittedProjectsPassTheirOwnGate(t *testing.T) {
 					runIn(t, dir, args...)
 				}
 				// Written after the checks, so they see only what a user compiles.
-				if err := os.WriteFile(filepath.Join(dir, "smoke_import.py"), []byte(withKnowledgeStub(importCheckScript(module))), 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, "smoke_import.py"), []byte(importCheckScript(module)), 0o644); err != nil {
 					t.Fatal(err)
 				}
 				runIn(t, dir, "run", "python", "smoke_import.py")

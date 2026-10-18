@@ -17,8 +17,9 @@ skill**, not this page.
 | the Python project and a `Dockerfile` | somewhere to run containers |
 | an `.env.example` naming values the operator supplies | the values, from their secret store |
 | Compose files for local development | production networking, TLS, DNS, ingress |
-| a deploy manifest and a compile report | Redis where the route needs it, scaling, monitoring |
-| a `README.md` runbook written for that platform | the decision to press go |
+| a compile report | Redis where the route needs it, scaling, monitoring |
+| a `README.md` runbook, on slng and twilio only | the decision to press go |
+| no `pcc-deploy.toml`, and no SIP JSON | the platform's own deploy settings and carrier records |
 
 The same image runs locally and in production. Only the start command and the
 environment change.
@@ -52,25 +53,26 @@ Authenticate with `lk cloud auth` and select the project with
    `eu-central` with the region declared in your target. The `.env` path is
    relative to this build directory, not the package root.
 
-For several declared LiveKit regions, use the generated README's create command
-and separate `--config` filename for each region. A later deploy uses
+For several declared LiveKit regions, run `lk agent create` once per region with
+a separate `--config` filename for each. A later deploy uses
 `lk agent deploy` from the same build directory, with the matching config.
 
 Before recompiling, return to the package root with `cd ../..`.
 `unmute compile` reads the source package, not `build/livekit/`.
 
 Compilation replaces files in each selected `build/<target>/` directory,
-including generated Python, copied handlers, manifests, `Dockerfile`,
-`.env.example`, README, and report. It preserves `.env`, `livekit*.toml`, and
+including generated Python, copied handlers, `Dockerfile`, `.env.example`,
+and report. It preserves `.env`, `livekit*.toml`, and
 `samples/*.json`. Other hand-edits do not survive. A target not selected with
 `--target` is left alone.
 
 ## The runbook is in the build
 
-Every `build/<target>/README.md` is written for that exact build: its required
-variables, its platform commands, and its carrier steps if it has a phone route.
-It is the authority for that project, because it was generated from the same
-package the code was.
+On slng and twilio, `build/<target>/README.md` is written for that exact build:
+its required variables, its platform commands, and its carrier steps if it has a
+phone route. It is the authority for that project, because it was generated from
+the same package the code was. Livekit and pipecat builds write no README: read
+`.env.example` and `compile-report.json` instead.
 
 **Point the user at it.** Do not paraphrase deployment steps from memory when a
 file with their values in it already exists.
@@ -148,7 +150,7 @@ agent. Present them as a starting point and tell the user to measure.
   speech calls keep the proxy.
 - **The carrier steps.** Markup to paste, a trunk to configure, a number to
   attach. Per route and per carrier, and the part no compiler can do. The
-  generated runbook has them.
+  docs pages for the route have them.
 
 ## Pushing to SLNG is a different skill
 
@@ -236,11 +238,12 @@ not extra steps developers must add to the native deployment workflow.
 | Choose a valid SLNG region in the console | See that deployment region is required when SLNG is selected | The console labels the shared region field optional; SLNG validation refuses omission | Enter a supported region through Advanced target settings before creating the package |
 | Deploy every target through Unmute | Run `unmute deploy` for LiveKit or Pipecat | `internal/cli/deploy.go` accepts SLNG only | Use the host CLI from the generated project directory |
 
-SLNG deliberately runs hosted tool references rather than package-local Python.
-That target boundary is documented; it is not a request to add a Python runtime.
+SLNG runs hosted tool references and typed `local:` tools that deploy publishes
+as code tools. That target boundary is documented; it is not a request to add a
+Python runtime.
 
 The dependency refusal text still suggests editing generated `pyproject.toml`
 and compiling local tools to SLNG. Those are not durable native alternatives:
-compilation replaces the file, and the SLNG target refuses local tool bodies.
+compilation replaces the file, and a local tool on SLNG must be a typed handler with a sample.
 The public guide explains the actual limits. Correcting the diagnostic is a
 separate code change.

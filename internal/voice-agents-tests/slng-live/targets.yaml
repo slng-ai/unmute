@@ -1,0 +1,5 @@
+# eu-west, where these three models run on a managed agent (see slng-tasks).
+targets:
+  slng:
+    provider: slng
+    deployment_region: eu-west

@@ -265,7 +265,6 @@ func TestSecretsCrossCheckNeverAsksForDriverSuppliedNames(t *testing.T) {
 func TestTelephonyExamplesDeclareEveryNameTheyWrite(t *testing.T) {
 	for _, example := range []string{
 		filepath.Join("..", "..", "examples", "salon-concierge"),
-		filepath.Join("..", "voice-agents-tests", "salon-concierge-v2"),
 	} {
 		t.Run(filepath.Base(example), func(t *testing.T) {
 			pkg, err := loadRecorded(example)

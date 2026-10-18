@@ -206,6 +206,25 @@ Items on different fields are all required. Every value has to be one the tool
 declares in its own output `enum:`, so a typo is a refusal at compile time
 rather than a task that never ends by itself.
 
+On the [slng target](/targets/slng), a task takes one `finish:` rule for now,
+because SLNG supports one finishing tool per task today. The rule may carry up
+to 5 `say:` lines. SLNG says them itself when the tool's result matches. A line
+may read `{{state.x}}` for a whole saved value. It may read `{{state.x.y}}` only
+when the step (or the tool) saves `x` from `result.`. A `confirm:` read-back is
+refused there, because SLNG has no read-back. The tool needs a known output: a
+typed local tool, or a hosted `slng:` tool with a mirror.
+
+```yaml agent.yaml
+        finish:
+          - tool: book_slot
+            success:
+              - status: booked
+            say:
+              - "Thanks for having us. You're booked for {{state.booking.time}} on {{state.booking.day}}."
+        assign:
+          - booking: result.booking
+```
+
 `result.<field>` in `assign:` names an output property of every listed tool, so
 one tool returning `appointment` and another returning nothing is refused.
 
