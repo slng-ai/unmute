@@ -1,3 +1,15 @@
+channels:
+  - name: phone
+    kind: telephony
+    inbound: true
+    outbound: false
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  peak_starts_per_second: 1
+  avg_session_duration: 3m
+
 targets:
   # A ConversationRelay app you host. Twilio listens and speaks; the app
   # thinks. Which model it thinks with is the agent's models.think binding.

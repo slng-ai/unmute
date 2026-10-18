@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -66,13 +67,11 @@ func TestDailyCarrierRouteNeedsNoNewAuthoringField(t *testing.T) {
 
 	carrier := write(t, map[string]string{
 		"instructions.md": "Help the caller.\n",
-		"agent.yaml": "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n" +
-			"channels:\n  phone:\n    kind: telephony\n    inbound: true\n" +
-			"capacity:\n  peak_sessions: 2\n  max_sessions: 4\n  peak_starts_per_second: 1\n  avg_session_duration: 3m\n",
+		"agent.yaml":      "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n",
 		"connections/twilio_sip_daily.yaml": "transport: daily-sip\ncarrier: twilio\nenvironment:\n" +
 			"  account_sid: TWILIO_ACCOUNT_SID\n  auth_token: TWILIO_AUTH_TOKEN\n" +
 			"  sip_address: SIP_TRUNK_HOSTNAME\n  from_number: SIP_FROM_NUMBER\n",
-		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.10.0\"\n" +
+		"targets.yaml": phoneChannel + "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.10.0\"\n" +
 			"    connection: twilio_sip_daily\n",
 	})
 	built := carrier.Targets["pipecat"]
@@ -83,7 +82,7 @@ func TestDailyCarrierRouteNeedsNoNewAuthoringField(t *testing.T) {
 	if connection.Transport != "daily-sip" || connection.Carrier != "twilio" {
 		t.Fatalf("carrier connection = %#v, want daily-sip with twilio", connection)
 	}
-	if _, ok := carrier.Agent.Channels["phone"]; !ok {
+	if !slices.ContainsFunc(carrier.Channels, func(c Channel) bool { return c.Name == "phone" }) {
 		t.Error("carrier form declares no phone channel, so it is not the carrier form")
 	}
 
@@ -134,14 +133,11 @@ func TestCloudWebsocketRouteNeedsNoNewAuthoringField(t *testing.T) {
 		}
 		return pkg
 	}
-	channels := "channels:\n  phone:\n    kind: telephony\n    inbound: true\n" +
-		"capacity:\n  peak_sessions: 2\n  max_sessions: 4\n  peak_starts_per_second: 1\n  avg_session_duration: 3m\n"
 
 	inbound := write(t, map[string]string{
 		"instructions.md": "Help the caller.\n",
-		"agent.yaml": "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n" +
-			channels,
-		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.10.0\"\n" +
+		"agent.yaml":      "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n",
+		"targets.yaml": phoneChannel + "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.10.0\"\n" +
 			"    transport: cloud-websocket\n    carrier: twilio\n",
 	})
 	got := inbound.Targets["pipecat"]
@@ -154,12 +150,11 @@ func TestCloudWebsocketRouteNeedsNoNewAuthoringField(t *testing.T) {
 
 	full := write(t, map[string]string{
 		"instructions.md": "Help the caller.\n",
-		"agent.yaml": "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n" +
-			channels,
+		"agent.yaml":      "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n",
 		"connections/twilio_voice.yaml": "kind: telephony\nenvironment:\n" +
 			"  account_sid: TWILIO_ACCOUNT_SID\n  auth_token: TWILIO_AUTH_TOKEN\n" +
 			"  from_number: TWILIO_PHONE_NUMBER\n",
-		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.10.0\"\n" +
+		"targets.yaml": phoneChannel + "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.10.0\"\n" +
 			"    transport: cloud-websocket\n    carrier: twilio\n    connection: twilio_voice\n",
 	})
 	if built := full.Targets["pipecat"]; built.Connection != "twilio_voice" {
@@ -263,3 +258,8 @@ func TestAuthoringSchemaCarriesTheThreeCatalogs(t *testing.T) {
 		}
 	}
 }
+
+// phoneChannel is the targets.yaml head of a package with one inbound phone
+// channel.
+const phoneChannel = "channels:\n  - name: phone\n    kind: telephony\n    inbound: true\n" +
+	"capacity:\n  peak_sessions: 2\n  max_sessions: 4\n  peak_starts_per_second: 1\n  avg_session_duration: 3m\n"

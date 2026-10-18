@@ -6,6 +6,17 @@
 # Neither target overrides the realtime binding. The model id, the voice and the
 # turn setting are one decision, and writing them per target is how the two
 # halves of an example stop agreeing.
+
+channels:
+  - name: web
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  peak_starts_per_second: 1
+  avg_session_duration: 3m
+
 targets:
   livekit:
     provider: livekit

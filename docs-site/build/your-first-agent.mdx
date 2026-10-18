@@ -94,15 +94,6 @@ conversation:
   greeting:
     speaks_first: agent
     text: "Hi there, I'm listening. What can I help you with?"
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 10
-  max_sessions: 20
-  avg_session_duration: 5m
 ```
 </Accordion>
 
@@ -233,28 +224,6 @@ holds `interruption:`, `inactivity:` and `max_duration:`, which the scaffold
 leaves out; the
 [`conversation` reference](/reference/agent-yaml#conversation) has them.
 
-### `channels` and `capacity`
-
-```yaml
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 10
-  max_sessions: 20
-  avg_session_duration: 5m
-```
-
-`channels` says how people reach this agent. `web: realtime_audio` is browser
-audio, which is what `unmute dev` serves. Phones come later, in
-[Telephony](/telephony/overview).
-
-`capacity` is your traffic estimate. The compiler turns it into worker counts
-and quota numbers in the generated project, and marks them unbenchmarked
-because they come from a conservative assumption, not from a measurement of
-your agent.
-
 ## The state file
 
 ```python state.py
@@ -274,12 +243,30 @@ output. See [Python tools](/build/tools/python).
 ## The target file
 
 ```yaml targets.yaml
+channels:
+  - name: web
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 10
+  max_sessions: 20
+  avg_session_duration: 5m
+
 targets:
   livekit:
     provider: livekit
     version: "1.8.8"
     sdk_language: python
 ```
+
+`channels` says how people reach this agent. The `web` channel, `kind: realtime_audio`, is browser
+audio, which is what `unmute dev` serves. Phones come later, in
+[Telephony](/telephony/overview).
+
+`capacity` is your traffic estimate. The compiler turns it into worker counts
+and quota numbers in the generated project, and marks them unbenchmarked
+because they come from a conservative assumption, not from a measurement of
+your agent. Both keys sit above `targets:` and apply to every target.
 
 One target. Nothing in `agent.yaml` names a target, so this file is the only
 place the choice lives, and one package can declare several. A second instance

@@ -186,13 +186,13 @@ the `unmute` skill, under `.agents/skills/unmute/references/manifests.md`.
 
 ## What the package cannot say, and says nothing about
 
-`capacity:` and `channels:` are accepted by the schema and never reach the
+`capacity:` and `channels:`, both top-level keys of targets.yaml, are accepted by the schema and never reach the
 compiled body. Nothing warns. They are code-target fields, so on slng they are
 simply absent from the agent that deploys.
 
-```yaml
+```yaml targets.yaml
 channels:
-  web:
+  - name: web
     kind: realtime_audio
 capacity:
   peak_sessions: 5

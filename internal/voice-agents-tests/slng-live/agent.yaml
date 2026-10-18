@@ -84,7 +84,3 @@ conversation:
     text: "Hi, you have reached Sage and Stone. How can I help?"
   interruption:
     enabled: true
-
-channels:
-  web:
-    kind: realtime_audio

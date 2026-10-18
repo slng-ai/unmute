@@ -14,7 +14,11 @@ type Package struct {
 	Agent         AgentFile             `json:"agent" yaml:"agent"`
 	Tools         map[string]Tool       `json:"tools,omitempty" yaml:"tools,omitempty"`
 	Connections   map[string]Connection `json:"connections,omitempty" yaml:"connections,omitempty"`
-	Targets       map[string]Target     `json:"targets" yaml:"targets"`
+	// Channels and Capacity are read from targets.yaml: where the agent runs
+	// and how many calls it takes, which is the same for every target.
+	Channels []Channel         `json:"channels" yaml:"channels"`
+	Capacity *Capacity         `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	Targets  map[string]Target `json:"targets" yaml:"targets"`
 
 	Root     string            `json:"-" yaml:"-"`
 	Markdown map[string]string `json:"-" yaml:"-"`
@@ -202,8 +206,12 @@ type AgentFile struct {
 	Tools        []string              `json:"tools,omitempty" yaml:"tools,omitempty"`
 	Conversation *Conversation         `json:"conversation,omitempty" yaml:"conversation,omitempty"`
 	Tracing      *Tracing              `json:"tracing,omitempty" yaml:"tracing,omitempty"`
-	Channels     map[string]Channel    `json:"channels" yaml:"channels"`
-	Capacity     *Capacity             `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	// Channels and Capacity moved to targets.yaml. Both survive here only so
+	// a file still carrying them is refused with a sentence naming the new
+	// home, rather than "unknown field". `json:"-"` keeps them out of the
+	// derived authoring schema. `any`, because only their presence is read.
+	Channels any `json:"-" yaml:"channels,omitempty"`
+	Capacity any `json:"-" yaml:"capacity,omitempty"`
 }
 
 type Tracing struct {
@@ -934,7 +942,11 @@ type Inactivity struct {
 	EndText   string `json:"end_text,omitempty" yaml:"end_text,omitempty" since:"2"`
 }
 
+// Channel is one entry of targets.yaml's `channels:` list: how callers reach
+// the agent. A list with `name:`, not a map, so the file shows its order and
+// each entry can carry its own comment.
 type Channel struct {
+	Name             string   `json:"name" yaml:"name"`
 	Kind             string   `json:"kind" yaml:"kind"`
 	Inbound          *bool    `json:"inbound,omitempty" yaml:"inbound,omitempty"`
 	Outbound         *bool    `json:"outbound,omitempty" yaml:"outbound,omitempty"`
@@ -965,7 +977,9 @@ type Connection struct {
 }
 
 type TargetsFile struct {
-	Targets map[string]Target `json:"targets" yaml:"targets"`
+	Channels []Channel         `json:"channels" yaml:"channels"`
+	Capacity *Capacity         `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	Targets  map[string]Target `json:"targets" yaml:"targets"`
 }
 
 type Target struct {

@@ -124,14 +124,5 @@ conversation:
     speaks_first: agent
     text: "Hi, this is the salon. How can I help?"
 
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 5
-  max_sessions: 10
-  avg_session_duration: 5m
-
 tools:
   - inspect_state

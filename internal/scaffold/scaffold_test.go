@@ -260,9 +260,9 @@ func TestScaffoldPromptMatchesItsChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, channel := range pkg.Agent.Channels {
+	for _, channel := range pkg.Channels {
 		if channel.Kind == "telephony" {
-			t.Fatalf("channel %q is telephony, so this test is checking the wrong thing", name)
+			t.Fatalf("channel %q is telephony, so this test is checking the wrong thing", channel.Name)
 		}
 	}
 	instructions, err := os.ReadFile(filepath.Join(dir, "instructions.md"))
@@ -631,10 +631,17 @@ func TestPreflightCustomizedTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"fallback:", "- backup_model", "speaks_first: user", "minimum_words: 2", "peak_sessions: 5"} {
+	for _, want := range []string{"fallback:", "- backup_model", "speaks_first: user", "minimum_words: 2"} {
 		if !strings.Contains(string(agent), want) {
 			t.Errorf("agent.yaml missing %q:\n%s", want, agent)
 		}
+	}
+	targets, err := os.ReadFile(filepath.Join(dir, "targets.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(targets), "peak_sessions: 5") {
+		t.Errorf("targets.yaml missing the capacity:\n%s", targets)
 	}
 }
 

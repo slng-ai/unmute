@@ -1,6 +1,16 @@
 # The LiveKit target only. The Pipecat half of architecture: realtime has its
 # own fixture, so a change to one driver cannot move the other's emitted bytes
 # while both are being built.
+
+channels:
+  - name: web
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m
+
 targets:
   livekit:
     provider: livekit

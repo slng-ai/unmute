@@ -53,7 +53,3 @@ conversation:
     text: "Hi {{state.customer_name}}, you have reached Acme Support. How can I help?"
   interruption:
     enabled: true
-
-channels:
-  web:
-    kind: realtime_audio

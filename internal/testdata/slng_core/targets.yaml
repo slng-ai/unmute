@@ -2,6 +2,10 @@
 # all four describe a project this target does not emit, and all four are
 # refused by name.
 
+channels:
+  - name: web
+    kind: realtime_audio
+
 targets:
   slng:
     provider: slng

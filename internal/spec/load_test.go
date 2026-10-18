@@ -36,8 +36,8 @@ func TestLoadConnectionsStrictAndPathSafe(t *testing.T) { // telephony V1, V3
 			t.Fatal(err)
 		}
 		for name, content := range map[string]string{
-			"agent.yaml":   "version: 1\nentry_agent: intake\nmodels: {}\nagents: {}\nchannels: {}\n",
-			"targets.yaml": "targets: {}\n",
+			"agent.yaml":   "version: 1\nentry_agent: intake\nmodels: {}\nagents: {}\n",
+			"targets.yaml": "channels: []\ntargets: {}\n",
 		} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 				t.Fatal(err)
@@ -183,9 +183,9 @@ func writeToolPackage(t *testing.T, body string) string {
 			"models:\n  think:\n    m: { provider: openai, model: gpt-4o-mini }\n" +
 			"  speak:\n    v: { provider: slng, model: \"slng/deepgram/aura:2-en\", voice: aura-2-thalia-en }\n" +
 			"agents:\n  intake:\n    instructions: instructions.md\n    think: m\n    speak: v\n    tools: [probe]\n" +
-			"tools: [probe]\nchannels:\n  web: { kind: realtime_audio }\n",
+			"tools: [probe]\n",
 		"instructions.md":  "Be brief.\n",
-		"targets.yaml":     "targets:\n  livekit:\n    provider: livekit\n    version: \"1.5.2\"\n    sdk_language: python\n",
+		"targets.yaml":     "channels:\n  - { name: web, kind: realtime_audio }\ntargets:\n  livekit:\n    provider: livekit\n    version: \"1.5.2\"\n    sdk_language: python\n",
 		"tools/probe.yaml": body,
 	}
 	for name, content := range files {

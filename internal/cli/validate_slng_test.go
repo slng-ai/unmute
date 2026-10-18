@@ -164,7 +164,7 @@ func TestValidateSlngRefusesUnsupportedPackageShapes(t *testing.T) {
 		},
 		{
 			name: "langfuse tracing", file: "agent.yaml",
-			replace: "channels:", with: "tracing:\n  provider: langfuse\n\nchannels:",
+			replace: "\ntools:", with: "\ntracing:\n  provider: langfuse\n\ntools:",
 			behaviour: "cannot install a Langfuse exporter", fix: "read the traces in the SLNG dashboard",
 		},
 	} {

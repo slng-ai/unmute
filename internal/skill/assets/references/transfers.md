@@ -74,9 +74,9 @@ the generated project, while its destination's environment name still reached
 This is the trap. A warm transfer rings the destination, and ringing someone is
 an outbound call, so the channel has to allow one:
 
-```yaml agent.yaml
+```yaml targets.yaml
 channels:
-  phone:
+  - name: phone
     kind: telephony
     inbound: true
     outbound: true    # required by the warm transfer, not by the brief

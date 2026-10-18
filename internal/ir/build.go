@@ -36,6 +36,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	if err := checkSecrets(pkg); err != nil {
 		return nil, err
 	}
+	if err := refuseMovedRuntimeKeys(pkg); err != nil {
+		return nil, err
+	}
 	if _, ok := pkg.Agent.Agents[pkg.Agent.EntryAgent]; !ok {
 		return nil, missing(pkg, "agent.yaml", "entry_agent", pkg.Agent.EntryAgent)
 	}
@@ -81,7 +84,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Controls:     make(map[string]Control, len(pkg.Callables)+len(pkg.Agent.Handoffs)+len(pkg.Agent.Escalations)),
 		Tools:        make(map[string]Tool, len(pkg.Tools)),
 		Conversation: buildConversation(pkg.Agent.Conversation),
-		Channels:     make(map[string]Channel, len(pkg.Agent.Channels)),
+		Channels:     make(map[string]Channel, len(pkg.Channels)),
 		Connections:  make(map[string]Connection, len(pkg.Connections)),
 		Targets:      make(map[string]Target, len(pkg.Targets)),
 	}
@@ -132,7 +135,14 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		}
 		out.Tools[name] = built
 	}
-	for name, channel := range pkg.Agent.Channels {
+	for _, channel := range pkg.Channels {
+		name := strings.TrimSpace(channel.Name)
+		if name == "" {
+			return nil, fmt.Errorf("%s: a channels entry has no name. Start each entry with - name: web, then write its kind", pkg.KeyLocation("targets.yaml", "channels"))
+		}
+		if _, dup := out.Channels[name]; dup {
+			return nil, fmt.Errorf("%s: two channels entries are named %q; give each a name of its own", pkg.Location("targets.yaml", "name: "+name), name)
+		}
 		out.Channels[name] = Channel{
 			Kind: ChannelKind(channel.Kind), Inbound: channel.Inbound, Outbound: channel.Outbound,
 			RequiredControls: channel.RequiredControls, OnVoicemail: VoicemailAction(channel.OnVoicemail),
@@ -185,11 +195,11 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		// keeps the resolved schema and its goldens still (data-model §2).
 		out.Connections[name] = Connection{Kind: "telephony", Environment: maps.Clone(raw.Environment), Region: raw.Region}
 	}
-	if pkg.Agent.Capacity != nil {
+	if pkg.Capacity != nil {
 		out.Capacity = &Capacity{
-			PeakSessions: pkg.Agent.Capacity.PeakSessions, MaxSessions: pkg.Agent.Capacity.MaxSessions,
-			PeakStartsPerSecond: pkg.Agent.Capacity.PeakStartsPerSecond,
-			AvgSessionDuration:  Duration(pkg.Agent.Capacity.AvgSessionDuration),
+			PeakSessions: pkg.Capacity.PeakSessions, MaxSessions: pkg.Capacity.MaxSessions,
+			PeakStartsPerSecond: pkg.Capacity.PeakStartsPerSecond,
+			AvgSessionDuration:  Duration(pkg.Capacity.AvgSessionDuration),
 		}
 	}
 
@@ -2399,4 +2409,25 @@ func intersect(names, keep []string) []string {
 		}
 	}
 	return out
+}
+
+// refuseMovedRuntimeKeys catches an agent.yaml still carrying channels: or
+// capacity:. Both moved to targets.yaml, because they say where the agent runs
+// and how many calls it takes, not what it does. The fields survive on the
+// spec struct only for this sentence.
+func refuseMovedRuntimeKeys(pkg *packagespec.Package) error {
+	for _, moved := range []struct {
+		key     string
+		present bool
+		shape   string
+	}{
+		{"channels", pkg.Agent.Channels != nil, "as a list: - name: web / kind: realtime_audio"},
+		{"capacity", pkg.Agent.Capacity != nil, "unchanged"},
+	} {
+		if moved.present {
+			return fmt.Errorf("%s: %s: moved to targets.yaml. Move the block to the top of targets.yaml, %s",
+				pkg.KeyLocation("agent.yaml", moved.key), moved.key, moved.shape)
+		}
+	}
+	return nil
 }

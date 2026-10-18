@@ -289,12 +289,3 @@ conversation:
       Hello, this is Lina calling from Wasla. Am I speaking with
       {{state.first_name}} {{state.last_name}}?
   max_duration: 10m
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 2
-  max_sessions: 5
-  avg_session_duration: 5m

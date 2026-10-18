@@ -103,13 +103,3 @@ conversation:
     nudge_after: 15s
     end_after: 45s
   max_duration: 20m
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 40
-  max_sessions: 60
-  peak_starts_per_second: 4
-  avg_session_duration: 6m

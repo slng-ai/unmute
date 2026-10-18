@@ -278,21 +278,4 @@ knowledge:
 [[end]][[if .EndAfter]]    end_after: [[.EndAfter]]
 [[end]][[end]][[if .MaxDuration]]  max_duration: [[.MaxDuration]]
 [[end]][[if .ThinkingAudio]]  thinking_audio: [[.ThinkingAudio]]
-[[end]]
-channels:
-[[range .AllChannels]][[if eq .Kind "realtime_audio"]]  [[.Name]]:
-    kind: realtime_audio
-[[else]]  [[.Name]]:
-    kind: telephony
-    inbound: [[.Inbound]]
-    outbound: [[.Outbound]]
-[[if .RequiredControls]]    required_controls:
-[[range .RequiredControls]]      - [[.]]
-[[end]][[end]][[if .OnVoicemail]]    on_voicemail: [[.OnVoicemail]]
-[[end]][[end]][[end]]
-[[with .EffectiveCapacity]]capacity:
-  peak_sessions: [[.PeakSessions]]
-  max_sessions: [[.MaxSessions]]
-[[if .PeakStartsPerSecond]]  peak_starts_per_second: [[.PeakStartsPerSecond]]
-[[end]]  avg_session_duration: [[.AvgSessionDuration]]
 [[end -]]

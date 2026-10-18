@@ -62,18 +62,6 @@ conversation:
   interruption:
     enabled: true
 
-channels:
-  phone:
-    kind: telephony
-    inbound: true
-    outbound: false
-
-capacity:
-  peak_sessions: 2
-  max_sessions: 5
-  peak_starts_per_second: 1
-  avg_session_duration: 3m
-
 secrets:
   - OPENAI_API_KEY
   - SLNG_API_KEY

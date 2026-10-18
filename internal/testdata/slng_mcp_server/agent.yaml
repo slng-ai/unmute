@@ -70,7 +70,3 @@ conversation:
     text: "Hi {{state.customer_name}}, you have reached Acme support."
   interruption:
     enabled: true
-
-channels:
-  web:
-    kind: realtime_audio

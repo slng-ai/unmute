@@ -68,11 +68,11 @@ Three pieces, in three files.
 
 ### The channel
 
-```yaml agent.yaml
+```yaml targets.yaml
 channels:
-  web:
+  - name: web
     kind: realtime_audio
-  phone:
+  - name: phone
     kind: telephony
     inbound: true
     outbound: true
@@ -82,13 +82,13 @@ channels:
 differently. Set only what the user actually wants.
 
 **A `telephony` channel makes `capacity.peak_starts_per_second` required.** Add
-it in the same edit, or validation fails on a field the user never mentioned:
+it in the same edit, beside the channels in targets.yaml, or validation fails on a field the user never mentioned:
 
 ```
 pipecat: capacity.peak_starts_per_second must be positive for telephony
 ```
 
-```yaml agent.yaml
+```yaml targets.yaml
 capacity:
   peak_sessions: 5
   max_sessions: 10

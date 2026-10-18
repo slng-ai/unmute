@@ -1,3 +1,12 @@
+channels:
+  - name: web
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 4m
+
 targets:
   livekit:
     provider: livekit

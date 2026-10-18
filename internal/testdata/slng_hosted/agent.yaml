@@ -79,13 +79,3 @@ conversation:
     text: "Hi, you have reached Acme Support. How can I help?"
   interruption:
     enabled: true
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 10
-  max_sessions: 20
-  peak_starts_per_second: 2
-  avg_session_duration: 4m

@@ -406,12 +406,11 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		}
 		data.MaxDuration, data.ThinkingAudio = conversation.MaxDuration, conversation.ThinkingAudio
 	}
-	for _, name := range slices.Sorted(maps.Keys(pkg.Agent.Channels)) {
-		channel := pkg.Agent.Channels[name]
-		data.Channels = append(data.Channels, scaffold.Channel{Name: name, Kind: channel.Kind, Inbound: boolValue(channel.Inbound), Outbound: boolValue(channel.Outbound), RequiredControls: append([]string(nil), channel.RequiredControls...), OnVoicemail: channel.OnVoicemail})
+	for _, channel := range pkg.Channels {
+		data.Channels = append(data.Channels, scaffold.Channel{Name: channel.Name, Kind: channel.Kind, Inbound: boolValue(channel.Inbound), Outbound: boolValue(channel.Outbound), RequiredControls: append([]string(nil), channel.RequiredControls...), OnVoicemail: channel.OnVoicemail})
 	}
-	if pkg.Agent.Capacity != nil {
-		data.Capacity = scaffold.Capacity{PeakSessions: pkg.Agent.Capacity.PeakSessions, MaxSessions: pkg.Agent.Capacity.MaxSessions, AvgSessionDuration: pkg.Agent.Capacity.AvgSessionDuration}
+	if pkg.Capacity != nil {
+		data.Capacity = scaffold.Capacity{PeakSessions: pkg.Capacity.PeakSessions, MaxSessions: pkg.Capacity.MaxSessions, PeakStartsPerSecond: pkg.Capacity.PeakStartsPerSecond, AvgSessionDuration: pkg.Capacity.AvgSessionDuration}
 	}
 	return data, nil
 }
@@ -520,6 +519,8 @@ func roundTripLosses(original *packagespec.Package, data scaffold.Data) ([]strin
 	var losses []string
 	diffJSON("agent.yaml", normalized(original.Agent), normalized(rendered.Agent), &losses)
 	diffJSON("targets.yaml", normalized(original.Targets), normalized(rendered.Targets), &losses)
+	diffJSON("targets.yaml channels", normalized(original.Channels), normalized(rendered.Channels), &losses)
+	diffJSON("targets.yaml capacity", normalized(original.Capacity), normalized(rendered.Capacity), &losses)
 	toolNames := map[string]bool{}
 	for name := range original.Tools {
 		toolNames[name] = true

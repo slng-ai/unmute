@@ -104,15 +104,6 @@ conversation:
     speaks_first: agent
     text: "Hi there, I'm listening. What can I help you with?"
 
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 10
-  max_sessions: 20
-  avg_session_duration: 5m
-
 === instructions.md ===
 # Identity
 
@@ -160,6 +151,18 @@ class State(BaseModel):
 #
 # Nothing here holds a secret. Where a model override or a connection does name
 # a credential, it names the environment variable and never the value.
+
+# How callers reach the agent, and how many calls it takes at once. The same
+# for every target below.
+channels:
+  - name: web
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 10
+  max_sessions: 20
+  avg_session_duration: 5m
+
 targets:
   livekit:
     provider: livekit

@@ -285,12 +285,3 @@ conversation:
       en español, dímelo. What is your full phone number, starting with plus
       thirty-four?"
   max_duration: 20m
-
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 2
-  max_sessions: 5
-  avg_session_duration: 8m

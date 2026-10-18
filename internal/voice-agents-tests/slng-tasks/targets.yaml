@@ -1,5 +1,10 @@
 # eu-west, because SLNG refuses the Deepgram models internal/testdata uses in
 # eu-north, and these three are the ones a working managed agent runs there.
+
+channels:
+  - name: web
+    kind: realtime_audio
+
 targets:
   slng:
     provider: slng

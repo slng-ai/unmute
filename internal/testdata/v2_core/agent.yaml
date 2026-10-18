@@ -143,15 +143,6 @@ conversation:
     nudge_text: Are you still there?
     end_text: I'll let you go now. Call back any time.
 
-channels:
-  web:
-    kind: realtime_audio
-
-capacity:
-  peak_sessions: 5
-  max_sessions: 10
-  avg_session_duration: 5m
-
 tools:
   - find_slots
   - save_booking
