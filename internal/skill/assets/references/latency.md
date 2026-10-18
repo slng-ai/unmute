@@ -246,7 +246,7 @@ caller is waiting through the second LLM round trip plus the speech after it.
 
 ```yaml
 local:
-  handler: tools/salon.py
+  handler: tools/salon.py:record_complaint
 
 announce: Let me get that written down.
 ```

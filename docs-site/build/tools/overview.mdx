@@ -25,29 +25,19 @@ description: >-
   List Sage and Stone slots for one service and date, and the caller's own
   bookings. Call this before offering a time and before changing a booking.
 
-input:
-  type: object
-  properties:
-    service:
-      type: string
-      enum:
-        - haircut
-        - hair-color
-        - blowout
-    date:
-      type: string
-      description: Preferred date in YYYY-MM-DD form
-
 local:
-  handler: tools/find_slots.py
+  handler: tools/salon.py:find_slots
 ```
 
-The top of the file is the contract. `description` and `input` are everything
-the model knows about this tool. Write the description as an instruction rather
-than a label, and let the schema do real work: the `enum` above means the model
-cannot ask for a service the salon does not offer.
+The top of the file is the contract. For a local tool the function's typed
+signature in `tools/salon.py` is the input, and its Pydantic return model is the
+output, so the file has no `input:` or `output:`. A webhook tool writes both as
+JSON Schema instead. Write the description as an instruction rather than a
+label, and let the types do real work: a `Literal["haircut", "hair-color",
+"blowout"]` on the `service` argument means the model cannot ask for a service
+the salon does not offer.
 
-The schema is also the whole argument list. Generated Pipecat tools turn an
+The signature is also the whole argument list. Generated Pipecat tools turn an
 extra argument into a normal corrective tool result, so the model can retry
 with only the declared fields. A handler failure before any result is returned
 the same way, without exposing the private exception to the model or leaving a
@@ -106,7 +96,7 @@ Both blocks have no fields, but YAML still needs an explicit body: write
 | `client:` | no | no | no | no |
 | `provider_hosted:` | no | no | no | no |
 
-On Twilio, a `local:` tool needs flat `input` and `output` schemas, and the only
+On Twilio, a `local:` tool needs flat `input` and `output` schemas, as in `version: 1`, and the only
 builtin is `end_call`. The target runs one agent with no tasks, and it refuses
 `announce` and `interruption: cancel`. [The Twilio target](/targets/twilio#what-the-package-may-carry)
 lists every refusal.
@@ -197,7 +187,7 @@ the wrong one. A tool the agent list does not name is not offered at all, which 
 the cheapest way to narrow a choice.
 
 **Write the description as an instruction, not a label.** `description` and
-`input` are the whole of what the model knows. Say when to call it, and say when
+the input types are the whole of what the model knows. Say when to call it, and say when
 not to.
 
 ## Fields inside each execution block
@@ -226,15 +216,17 @@ The contract fields are shared, with one exception that matters:
 </ParamField>
 
 <ParamField path="input" type="object">
-  Required for authored local and webhook contracts: a JSON Schema with `type: object`
-  describing model arguments. Refused on builtin, MCP, knowledge, and hosted `slng` tools,
+  Required for authored webhook contracts: a JSON Schema with `type: object`
+  describing model arguments. A version 2 local tool leaves it out, because its handler
+  signature is the input. Refused on builtin, MCP, knowledge, and hosted `slng` tools,
   which own their schemas.
 </ParamField>
 
 <ParamField path="output" type="object">
   An author-side JSON Schema with `type: object`. Omit for no declared result schema. Used
   by assignments and success checks; it is not a general runtime result validator or a
-  model prompt. Refused on builtin, MCP, knowledge, and hosted `slng` tools.
+  model prompt. A version 2 local tool leaves it out, because its return model is the
+  output. Refused on builtin, MCP, knowledge, and hosted `slng` tools.
 </ParamField>
 
 <ParamField path="inject" type="list of one-key pairs">
@@ -351,8 +343,9 @@ to cover.
 ## Define once, attach by name
 
 **Define each tool once.** The full definition exists only in
-`tools/<name>.yaml`: `description`, `input`, optional `output` and `inject`, and
-one execution block. A local handler lives beside it in `tools/<handler>.py`.
+`tools/<name>.yaml`: `description`, `input` and optional `output` on a webhook tool,
+optional `inject`, and one execution block. A local handler lives beside it in a
+Python file, and the block names its function as `tools/<file>.py:<function>`.
 Do not put any of those fields in `agent.yaml`.
 
 Every `tools:` entry in `agent.yaml` is a string name:

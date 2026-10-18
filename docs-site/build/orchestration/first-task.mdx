@@ -6,7 +6,7 @@ description: "Add one task to the agent you already have, one key at a time, unt
 You have one agent working from [Your first agent](/build/your-first-agent).
 This page adds one task to it. Nothing here needs a second agent, a phone
 number or a new account. Every change below ends with `unmute validate`, and
-every change leaves you a package that runs.
+every change leaves you a package that compiles.
 
 The example is a parcel tracking line. A caller reads out a tracking number,
 the agent looks it up and says when the parcel is due. It is small on purpose.
@@ -42,13 +42,13 @@ stop anywhere and come back.
 
 1. **Start with no task** - confirm the package you already have still works
 2. **Give the agent a tool** - a lookup, so there is something to move
-3. **Say what you want to keep** - declare the variables
+3. **Say what you want to keep** - add fields to `State`
 4. **Add the task** - move the tool onto it
 5. **Save the answer** - `assign:`
 6. **Read it back** - a placeholder in the owner's prompt
 7. **Say what success looks like** - `finish:`, so the tool ends the step
 8. **Open with the question** - `announce:` and `opening: listen`
-9. **Run it** - talk to it in the browser
+9. **Run it** - run it as a whole call
 
 <Steps>
   <Step title="Start with no task">
@@ -67,47 +67,26 @@ stop anywhere and come back.
     Python function that stands in for your delivery system. It lives in the
     package, in two files.
 
-    The tool file says what the tool takes and what it returns:
+    The tool file says what the tool does and which function runs it:
 
     ```yaml tools/look_up_parcel.yaml
     description: >-
       Look up a parcel by its tracking number. Call it once the caller has read
       the number out and you have said it back to them.
 
-    input:
-      type: object
-      properties:
-        tracking_number:
-          type: string
-          description: The tracking number as the caller gave it, letters and digits, no spaces.
-      required:
-        - tracking_number
-
-    output:
-      type: object
-      properties:
-        status:
-          type: string
-          enum:
-            - found
-            - not_found
-        tracking_number:
-          type: string
-        delivery_date:
-          type: string
-      required:
-        - status
-        - tracking_number
-        - delivery_date
-
     local:
-      handler: tools/look_up_parcel.py
+      handler: tools/look_up_parcel.py:look_up_parcel
     ```
 
-    The handler is a function with the same name as the tool:
+    The file has no `input:` or `output:`. The handler is a typed Python
+    function, and `handler:` names it as `file.py:function`. Its arguments are
+    the tool's input. The Pydantic model it returns is the tool's output:
 
     ```python tools/look_up_parcel.py
     from datetime import date, timedelta
+    from typing import Annotated, Literal
+
+    from pydantic import BaseModel, Field
 
     # A stand-in for your delivery system. Two parcels, due in a few days.
     PARCELS = {
@@ -116,18 +95,32 @@ stop anywhere and come back.
     }
 
 
-    def look_up_parcel(tracking_number):
+    class Parcel(BaseModel):
+        status: Literal["found", "not_found"]
+        tracking_number: str
+        delivery_date: date | None = None
+
+
+    def look_up_parcel(
+        tracking_number: Annotated[
+            str,
+            Field(description="The tracking number as the caller gave it, letters and digits, no spaces."),
+        ],
+    ) -> Parcel:
         number = tracking_number.replace(" ", "").upper()
         days = PARCELS.get(number)
         if days is None:
-            return {"status": "not_found", "tracking_number": number, "delivery_date": ""}
-        due = date.today() + timedelta(days=days)
-        return {"status": "found", "tracking_number": number, "delivery_date": due.isoformat()}
+            return Parcel(status="not_found", tracking_number=number)
+        return Parcel(
+            status="found",
+            tracking_number=number,
+            delivery_date=date.today() + timedelta(days=days),
+        )
     ```
 
-    Look at the `status` field in `output:`. It has an `enum:`, a fixed list
-    of the values it can hold. That list is what will let the task know, later,
-    whether the lookup worked. Write one for any tool a task will end on.
+    Look at the `status` field. Its `Literal` is a fixed list of the values it
+    can hold. That list is what will let the task know, later, whether the
+    lookup worked. Write one for any tool a task will end on.
 
     Now name the tool in two places in `agent.yaml`. The agent's own list says
     the agent may call it. The top-level list says the tool exists.
@@ -168,8 +161,8 @@ stop anywhere and come back.
 
   <Step title="Say what you want to keep">
     A task can save what it learns. You say what that is by declaring a
-    field, once, with a type. Write a `State` class in a new `state.py` next to
-    `agent.yaml`:
+    field, once, with a type. `unmute init` already wrote a `state.py` next to
+    `agent.yaml` with an empty `State` class. Add two fields to it:
 
     ```python state.py
     from datetime import date
@@ -178,6 +171,8 @@ stop anywhere and come back.
 
 
     class State(BaseModel):
+        """What one call knows, shared by every agent and task in it."""
+
         tracking_number: str = Field(
             "", description="The tracking number of the parcel we found for this caller."
         )
@@ -311,19 +306,18 @@ stop anywhere and come back.
 
     Here is what that line did. Every task gets a `finish` call, a function
     the model calls to say the task is done. `assign:` gives that call two
-    arguments, `tracking_number` and `delivery_date`, typed from the variables
+    arguments, `tracking_number` and `delivery_date`, typed from the `State` fields
     they land in. When the model calls `finish`, each value is checked against
     its type. If one is wrong, nothing is saved and the task stays open, so a
     bad date never gets written down.
 
     You do not write "call finish when you are done" in the task's prompt.
-    The compiler adds that rule to the prompt for you. You will see the exact
-    words when you add `finish:`.
+    unmute-core adds that rule for you.
 
     A wrong name on the left is refused with the line it is on:
 
     ```text
-    unmute: validate my-agent: build: agent.yaml:36: task "find_parcel": assign writes to "due_date", and it is not declared under the variables: block
+    unmute: validate my-agent: build: agent.yaml:36: task "find_parcel": assign writes to "due_date", which State in state.py does not declare
     ```
   </Step>
 
@@ -369,7 +363,8 @@ stop anywhere and come back.
             finish:
               - tool: look_up_parcel
                 success:
-                  - status: found
+                  - status:
+                      - found
             assign:
               - tracking_number: result.tracking_number
               - delivery_date: result.delivery_date
@@ -398,8 +393,8 @@ stop anywhere and come back.
     unmute: validate my-agent: build: agent.yaml:36: task "find_parcel": finish names "look_up_parcel" with no success:; a step cannot end on a result nothing checks
     ```
 
-    And every `success:` value has to be one the tool declares in its `enum:`,
-    so a typo is caught here and not on a call that never ends:
+    And every `success:` value has to be one the tool's return type allows, here
+    the `Literal` on `status`, so a typo is caught here and not on a call that never ends:
 
     ```text
     unmute: validate my-agent: build: agent.yaml:36: task "find_parcel": look_up_parcel never returns status: fund; it declares found, not_found
@@ -460,20 +455,22 @@ stop anywhere and come back.
   </Step>
 
   <Step title="Run it">
+    `unmute dev` does not run a version 2 project yet, and says so. To run
+    this package, add a `scenarios/` folder with one scripted call and run it
+    as a whole call on the real model:
+
     ```sh
-    unmute dev my-agent
+    make e2e PKG=my-agent FW=livekit
     ```
 
-    Your keys from the quickstart are still in `.env`. When the browser opens,
-    ask where your parcel is and read out one of the two numbers in the
-    handler, "A B one two three four five six".
+    Use `FW=pipecat` for Pipecat. Your keys from the quickstart are still in
+    `.env`. In the scenario, ask where the parcel is and read out one of the two
+    numbers in the handler, "A B one two three four five six".
 
-    Watch the dev page while you talk. The task shows up as its own row when
-    the model enters it, then `look_up_parcel` gets a row of its own, and then
-    the agent answers. If you never see the task's row, the model went round
-    it. Check two things: that the agent does not hold the task's tool, and
-    that the `when:` line describes what the caller actually said. [Running it
-    locally](/dev/overview) explains every row on that page.
+    The call should enter the task, then call `look_up_parcel`, and then the
+    agent should answer. If the task never runs, the model went round it.
+    Check two things: that the agent does not hold the task's tool, and that
+    the `when:` line describes what the caller actually said.
   </Step>
 </Steps>
 
@@ -485,7 +482,7 @@ nested under it, and the task's own tool, `finish:` and `assign:`.
 
 <Accordion title="Complete agent.yaml">
 ```yaml
-version: 1
+version: 2
 
 name: my-agent
 entry_agent: assistant

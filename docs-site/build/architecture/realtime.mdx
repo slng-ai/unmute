@@ -28,7 +28,7 @@ unmute init voice-desk
 Replace `voice-desk/agent.yaml` with this **complete file**:
 
 ```yaml voice-desk/agent.yaml
-version: 1
+version: 2
 name: voice-desk
 architecture: realtime
 entry_agent: desk
@@ -54,6 +54,8 @@ capacity:
   avg_session_duration: 3m
 ```
 
+Keep the scaffold's `state.py` as it is. Version 2 needs it, and this desk saves no values.
+
 Keep the scaffold's `targets.yaml`, but remove its target-level `models:` overrides because the model palette above replaces the scaffold's.
 Keep its framework provider and version pin, and remove any phone `connection:` for this browser example. Replace `voice-desk/instructions.md` with this complete prompt:
 
@@ -67,10 +69,11 @@ Set `OPENAI_API_KEY` in your shell or the package's `.env`, then run:
 ```sh Terminal
 unmute validate voice-desk
 unmute compile voice-desk
-unmute dev voice-desk --target livekit
 ```
 
-Use Docker for this LiveKit run. The [Pipecat target](/targets/pipecat) is another option; it runs locally with `uv`.
+<Note>
+  `unmute dev` does not run a version 2 project yet, and says so. Validate and compile here. A package with a `scenarios/` folder runs as whole calls with `make e2e PKG=<name> FW=<livekit|pipecat>`.
+</Note>
 The example below stays with this same `desk` agent.
 
 ## Pros and cons
@@ -158,15 +161,15 @@ It has no separate `backend:` model.
 For document questions, add a [knowledge search tool](/build/tools/knowledge) in the same way.
 The [pharmacy example](https://github.com/slng-ai/unmute/tree/main/examples/pharmacy-refills) combines local tools, knowledge, and semantic turn detection.
 
-After each change, stop the old run and check the same desk:
+After each change, check the same desk:
 
 ```sh Terminal
 unmute validate voice-desk
-unmute dev voice-desk --target livekit
+unmute compile voice-desk
 ```
 
-Ask a question that requires the tool. Pause in the middle of a sentence, then finish it.
-Check both the spoken reply and the tool row in the dev page.
+Run the package as a whole call with `make e2e`. Ask a question that requires the tool. Pause in the middle of a sentence, then finish it.
+Check both the spoken reply and the tool row in the call record.
 
 ## Advanced
 

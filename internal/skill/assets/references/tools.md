@@ -10,29 +10,18 @@ description: >-
   List Sage and Stone slots for one service and date, and the caller's own
   bookings. Call this before offering a time and before changing a booking.
 
-input:
-  type: object
-  properties:
-    service:
-      type: string
-      enum:
-        - haircut
-        - hair-color
-        - blowout
-    date:
-      type: string
-      description: Preferred date in YYYY-MM-DD form
-
 local:
-  handler: tools/find_slots.py
+  handler: tools/salon.py:find_slots
 ```
 
-The top is the contract. `description` and `input` are everything the model
-knows about this tool, so write the description as an instruction rather than a
-label, and let the schema do real work. The `enum` above means the model cannot
-ask for a service the salon does not offer.
+The top is the contract. For a local tool, the typed signature of `find_slots` in
+`tools/salon.py` is the input, and its Pydantic return model is the output, so the
+file has no `input:` or `output:`. A webhook tool writes both as JSON Schema. Write
+the description as an instruction rather than a label, and let the types do real
+work: a `Literal["haircut", "hair-color", "blowout"]` on `service` means the model
+cannot ask for a service the salon does not offer.
 
-The schema is the complete argument list. Keep workflow prerequisites in the
+The signature is the complete argument list. Keep workflow prerequisites in the
 agent or task prompt; do not make their names look like extra tool inputs in the
 description. Generated Pipecat direct tools return a corrective result when a
 provider adds an undeclared argument, or when a handler fails before returning,
@@ -60,8 +49,8 @@ also the list of what you could have written.
 | Field | Required | Legal on |
 |---|---|---|
 | `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
-| `input` | yes, except on `builtin:`, `mcp:` and `knowledge:` | everywhere else |
-| `output` | no | everywhere except `builtin:`, `mcp:` and `knowledge:`, but see below |
+| `input` | on `webhook:` only; a `local:` tool's handler signature is its input | `webhook:` and version 1 `local:` |
+| `output` | no | `webhook:` and version 1 `local:`, but see below. A version 2 `local:` return model is its output |
 | `inject` | no | `webhook:`, `local:` and `slng:`, and `builtin:` for a capability's own settings |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` and `knowledge:` |
@@ -455,35 +444,32 @@ Say so and write a Python handler instead.
 
 ## Python tools
 
-Two files that go together: the tool file and the handler beside it.
+Two files that go together: the tool file and the typed handler it names. The
+handler's signature is the tool's input and its Pydantic return model is the
+output, so the tool file has no `input:` or `output:`. LiveKit and Pipecat compile
+`version: 2` only, and this is the version 2 form.
 
 ```yaml tools/cancel_appointment.yaml
 description: Cancel the appointment outright. Call it only when the customer says plainly that they want to cancel, never when they want a different time.
 
-input:
-  type: object
-  properties: {}
-
 inject:
   - customer_id: "{{state.customer_id}}"
 
-output:
-  type: object
-  properties:
-    cancelled:
-      type: boolean
-    customer_id:
-      type: string
-  required:
-    - cancelled
-    - customer_id
-
-local: {}
+local:
+  handler: tools/cancel_appointment.py:cancel_appointment
 ```
 
 ```python tools/cancel_appointment.py
-def cancel_appointment(customer_id):
-    return {"cancelled": True, "customer_id": customer_id}
+from pydantic import BaseModel
+
+
+class Cancellation(BaseModel):
+    cancelled: bool
+    customer_id: str
+
+
+def cancel_appointment(customer_id: str) -> Cancellation:
+    return Cancellation(cancelled=True, customer_id=customer_id)
 ```
 
 This is a self-contained fixture that runs without a booking API.
@@ -492,29 +478,21 @@ The rules the function follows:
 
 | Rule | Why |
 |---|---|
-| the function name matches the tool name | that is how the generated code finds it |
-| its parameters match the `input` properties plus the `inject` keys | the call is built from both |
-| it returns the value your description and prompt expect | the result goes back to the model; the code targets do not enforce `output`, SLNG turns it into a pydantic `Output` class and validates the return value against it |
-| it may be `async def` on the code targets | the generated code awaits an awaitable result; SLNG calls the handler synchronously and refuses an `async def`, and refuses any import of `requests`, `httpx`, `urllib`, `urllib3`, `aiohttp`, `http.client` or `socket`, because custom code there has no network |
-| it imports nothing from Unmute | the generated project does not depend on Unmute at run time |
+| every parameter has a type | the type becomes the model's input schema |
+| the return type is a Pydantic model | its fields are the tool's output, which `assign:`, `finish:` and `replies:` read |
+| a `Field(description=...)` on a parameter says what it means | the model reads that text |
+| a parameter named by `inject:` is not the model's | it takes its value from State, so the model never sees it |
+| it may be `async def` | the code targets await an awaitable result |
 
-**An optional `input` property is always passed, as an empty string.** The
-generated call is by keyword every time, so a Python default in your handler is
-dead code: it receives `""`, not `None` and not your default. Write
-`def check(date, part_of_day="")` and treat `""` as "not given". A handler that
-tests `if part_of_day is None:` compiles clean and misbehaves on the first call,
-and neither `validate` nor `compile` will say a word about it.
+`handler:` is written `file.py:function`. The function name need not match the
+tool name, and one file can hold many tools. Twilio and SLNG still accept
+`version: 1`, where a local tool writes `input:` and `output:` as JSON Schema.
 
 A handler reaches a credential through `os.environ`, and the variable name goes
 in `secrets:` like any other. Literal lookups are also inferred for generated
 environment instructions and startup checks.
 
-`unmute compile` copies the file into the generated project and imports it as a
-plain module.
-
-The `local.handler` field is optional. When it is absent, Unmute uses
-`tools/<tool-name>.py`, so the example above resolves to
-`tools/cancel_appointment.py`.
+`unmute compile` copies the file into the generated project.
 
 ## MCP servers
 

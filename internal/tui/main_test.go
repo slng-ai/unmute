@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/stateschema"
@@ -13,7 +12,7 @@ import (
 // they check is the files the console writes, not the types Python reads.
 func TestMain(m *testing.M) {
 	stateReader = recordedState{stateschema.RecordedInRepo()}
-	os.Exit(m.Run())
+	m.Run()
 }
 
 type recordedState struct{ stateschema.Recorded }

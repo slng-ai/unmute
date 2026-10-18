@@ -22,7 +22,7 @@ func newInitCmd() *cobra.Command {
 	var provider string
 	command := &cobra.Command{
 		Use:   "init [name]",
-		Short: "Scaffold a new v1 agent package.",
+		Short: "Scaffold a new agent package.",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if fromManifest && len(args) > 1 {
 				return fmt.Errorf("--from-manifest opens a picker and takes no name; the name before it is the agent's")

@@ -29,7 +29,7 @@ unmute init voice-desk
 Replace `voice-desk/agent.yaml` with this **complete file**:
 
 ```yaml voice-desk/agent.yaml
-version: 1
+version: 2
 name: voice-desk
 architecture: live
 entry_agent: desk
@@ -59,6 +59,8 @@ capacity:
   avg_session_duration: 3m
 ```
 
+Keep the scaffold's `state.py` as it is. Version 2 needs it, and this desk saves no values.
+
 Keep the scaffold's `targets.yaml`, but remove its target-level `models:` overrides because the model palette above replaces the scaffold's.
 Keep its framework provider and version pin, and remove any phone `connection:` for this browser example. Replace `voice-desk/instructions.md` with this complete prompt:
 
@@ -72,10 +74,11 @@ Set `OPENAI_API_KEY` in your shell or the package's `.env`, then run:
 ```sh Terminal
 unmute validate voice-desk
 unmute compile voice-desk
-unmute dev voice-desk --target livekit
 ```
 
-Use Docker for this LiveKit run. The [Pipecat target](/targets/pipecat) is another option; it runs locally with `uv`.
+<Note>
+  `unmute dev` does not run a version 2 project yet, and says so. Validate and compile here. A package with a `scenarios/` folder runs as whole calls with `make e2e PKG=<name> FW=<livekit|pipecat>`.
+</Note>
 The example below stays with this same `desk` agent.
 
 ## Pros and cons
@@ -127,17 +130,23 @@ Add one local tool to the same desk. Create these two **complete new files**:
 
 ```yaml voice-desk/tools/opening_hours.yaml
 description: Look up the information desk's opening hours.
-input:
-  type: object
-  properties: {}
 local:
-  handler: tools/opening_hours.py
+  handler: tools/opening_hours.py:opening_hours
 ```
 
 ```python voice-desk/tools/opening_hours.py
-def opening_hours():
-    return {"hours": "Monday to Friday, nine in the morning to five in the afternoon."}
+from pydantic import BaseModel
+
+
+class OpeningHours(BaseModel):
+    hours: str
+
+
+def opening_hours() -> OpeningHours:
+    return OpeningHours(hours="Monday to Friday, nine in the morning to five in the afternoon.")
 ```
+
+The handler's signature is the tool's input, and its return model is the output. The tool file has no `input:` or `output:`.
 
 Merge these attachments into `agent.yaml`. Keep the existing `instructions` and `live` binding under `desk`:
 
@@ -161,15 +170,15 @@ A tool's returned data should determine the answer; the model should not invent 
 
 ## 3. Try tools and knowledge in a call
 
-Stop the earlier dev run, then validate and restart:
+Validate and compile the package again:
 
 ```sh Terminal
 unmute validate voice-desk
-unmute dev voice-desk --target livekit
+unmute compile voice-desk
 ```
 
-Ask when the desk opens, then interrupt with a follow-up question.
-Check that the dev page records the tool and that the spoken answer matches its result.
+Run the package as a whole call with `make e2e`. Ask when the desk opens, then interrupt with a follow-up question.
+Check that the call records the tool and that the spoken answer matches its result.
 
 For document lookup, follow [Knowledge bases](/build/tools/knowledge) and attach the resulting search tool to this same agent.
 It runs through the backend too. The complete [takeaway example](https://github.com/slng-ai/unmute/tree/main/examples/takeaway-orders) combines orders and knowledge on both frameworks.

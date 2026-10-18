@@ -570,32 +570,29 @@ act on a number it never read back. The run would pass a path a real call fails.
 ```yaml tools/book_appointment.yaml
 description: Book the selected appointment for the current customer.
 
-input:
-  type: object
-  properties:
-    slot_id:
-      type: string
-  required:
-    - slot_id
-
 inject:
   - customer_id: "{{state.customer_id}}"
   - service: "{{state.requested_service}}"
 
 local:
-  handler: tools/book_appointment.py
+  handler: tools/book_appointment.py:book_appointment
+```
+
+```python tools/book_appointment.py
+def book_appointment(slot_id: str, customer_id: str, service: str) -> Booking:
+    ...
 ```
 
 `inject` values are not part of the model's schema, so the model can neither
-see them nor overwrite them. An `inject` key that also names an `input`
-property is a compile error, for exactly that reason.
+see them nor overwrite them. On a webhook tool, an `inject` key that also names an
+`input` property is a compile error, for exactly that reason.
 
 Each authored injected value must be a scalar, such as a string containing
 `{{state.variable}}`. An exact placeholder passes the value with its native type,
 including a referenced object or list. Mixed text such as `"Booking {{state.booking_id}}"`
 produces a string. An authored map or list is refused.
 
-Keep injected keys out of both `input.properties` and `input.required`.
+On a webhook tool, keep injected keys out of both `input.properties` and `input.required`.
 Injection hides an argument from the model; it does not hide data a tool
 returns or data already present in the conversation.
 

@@ -10,9 +10,9 @@ What an author writes, file by file. This is the surface you work in.
 | `manifest.yaml` | when linked | the company rules copied into this package; see [manifests](manifests.md) |
 | an instructions file | yes | the prompt, in Markdown, named by each agent |
 | `targets.yaml` | yes | where it runs, and the framework version pinned |
-| `state.py` | no | the call's `State` class: every variable's type, default and description. Needs `uv` to read |
+| `state.py` | yes on `livekit` and `pipecat` | the call's `State` class: every variable's type, default and description. `unmute init` writes it empty. Needs `uv` to read |
 | `tools/<name>.yaml` | no | one file per tool |
-| `tools/<name>.py` | no | a Python handler, beside its tool file |
+| `tools/<name>.py` | no | a typed Python handler, named by its tool file as `file.py:function` |
 | `connections/<name>.yaml` | phone agents only | one phone route |
 | `build/<target>/` | generated | never edit, never hand-write |
 
@@ -31,7 +31,7 @@ writing.
 ## The smallest agent that works
 
 ```yaml agent.yaml
-version: 1
+version: 2
 name: acme-appointments
 entry_agent: appointment_desk
 
@@ -83,13 +83,13 @@ capacity:
   avg_session_duration: 5m
 ```
 
-That is the shape `unmute init <name>` scaffolds, and it runs in a browser.
+That is the shape `unmute init <name>` scaffolds, with an empty `State` class in `state.py` beside it. `unmute dev` does not run a version 2 project yet. A package with a `scenarios/` folder runs as whole calls with `make e2e PKG=<name> FW=<livekit|pipecat>`.
 
 ## Every top-level key
 
 | Key | Required | What it is |
 |---|---|---|
-| `version` | yes | the schema version, `1` |
+| `version` | yes | the schema version. Write `2`: `livekit` and `pipecat` compile version 2 only. `1` compiles on `twilio` and `slng` only |
 | `manifest` | when a root manifest exists | the literal `manifest.yaml`, linking the company contract |
 | `name` | yes | what the deployed agent is called |
 | `entry_agent` | yes | which agent answers |

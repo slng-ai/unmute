@@ -217,8 +217,7 @@ func slngRequestBody(site slngSite, binding ir.Binding) map[string]any {
 // that is not an optimisation but a requirement: the plugin applies its own
 // constructor options after the per-request ones, so either dict left here would
 // silently win while the emitted per-request source still looked right. A
-// LiveKit router construction therefore carries no router extras at all, which
-// is what the gate in livekit_v1_test.go holds.
+// LiveKit router construction therefore carries no router extras at all.
 func slngRequestExtras(site slngSite, binding ir.Binding) map[string]any {
 	extras := map[string]any{}
 	if !site.BodyPerRequest {

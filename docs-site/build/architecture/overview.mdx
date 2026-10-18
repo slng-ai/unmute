@@ -29,14 +29,12 @@ Install the [CLI and runtime prerequisites](/start/installation) first, and set 
 ```sh Repository root
 unmute validate examples/pharmacy-refills
 unmute compile examples/pharmacy-refills
-unmute dev examples/pharmacy-refills --target pipecat
 ```
 
-Ask for a refill on the demo reference RX4821B, pausing halfway through the reference.
-Stop the process before trying `--target livekit` with the same package.
-Pipecat runs locally with `uv`; LiveKit uses Docker Compose.
+The example is a `version: 2` package, so it compiles onto unmute-core for LiveKit and Pipecat.
+`unmute dev` does not run a version 2 project yet, and says so.
 
-That is the loop: **choose the architecture, bind its models, validate, talk**.
+That is the loop: **choose the architecture, bind its models, validate, compile**.
 The steps below explain how to switch an existing package.
 
 ## Pros and cons
@@ -153,12 +151,10 @@ Run these from the directory containing your package. `voice-desk` is its direct
 ```sh Terminal
 unmute validate voice-desk
 unmute compile voice-desk
-unmute dev voice-desk --target livekit
 ```
 
 Without `--target`, validate and compile check every declared target.
-Use `--target pipecat` to run that framework if the package declares it.
-Stop the old dev process and start a new call after switching; an active session keeps its current architecture.
+Start a new call after switching; an active session keeps its current architecture.
 
 Test a greeting, a tool call, knowledge lookup, and interruption.
 A successful compile checks the package; it does not prove provider access or audible behavior.
@@ -183,7 +179,7 @@ Live decides turns itself and uses its own voice.
 
 <Accordion title="Compare latency without changing everything at once">
 Keep the prompt and local tools as similar as the architectures allow.
-Compare the dev page's reported measurements and the conversation you hear.
+Compare the call's reported measurements and the conversation you hear.
 Speech-to-speech removes separate transcription and synthesis stages, but does not guarantee a faster call.
 See [Latency](/optimization/latency).
 </Accordion>
@@ -208,7 +204,7 @@ The destination S2S architecture does not support those capabilities.
 ### The call still uses the old architecture
 
 The running process was started from an earlier build.
-**Fix:** stop it, rerun `unmute dev`, and open a new call.
+**Fix:** stop it, compile again, restart it, and open a new call.
 
 ## Further reading
 

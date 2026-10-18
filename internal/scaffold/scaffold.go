@@ -1,4 +1,4 @@
-// Package scaffold renders the files `unmute init` writes: a v1 agent package
+// Package scaffold renders the files `unmute init` writes: a version 2 agent package
 // (agent.yaml + instructions.md + targets.yaml). Templates live in templates/
 // and are embedded; each runs through text/template with [[ ]] delimiters, so
 // the voice-agent {{ }} variable syntax in prompts passes through verbatim.
