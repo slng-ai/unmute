@@ -9,6 +9,7 @@ import (
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/scaffold"
 	packagespec "github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/stateschema"
 )
 
 // TestMaintainKeepsTheArchitecture is the console half of the architecture key.
@@ -60,6 +61,9 @@ func TestMaintainKeepsTheArchitecture(t *testing.T) {
 	// back fine and is refused by the next `unmute validate`.
 	pkg, err := packagespec.Load(root)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pkg.ReadState(t.Context(), stateschema.RecordedInRepo()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ir.Build(pkg); err != nil {
@@ -181,6 +185,9 @@ func TestMaintainKeepsAHalfCascade(t *testing.T) {
 	}
 	// A half cascade that no longer validates is the failure an author meets,
 	// so hold the whole build rather than the keys alone.
+	if err := pkg.ReadState(t.Context(), stateschema.RecordedInRepo()); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := ir.Build(pkg); err != nil {
 		t.Errorf("the console wrote a half cascade that no longer builds: %v", err)
 	}
@@ -229,6 +236,9 @@ func TestMaintainWritesOneBackendPerName(t *testing.T) {
 	}
 	if len(agent.data.Backends) != 1 {
 		t.Errorf("backends = %+v, want one entry for the one name both models share", agent.data.Backends)
+	}
+	if err := pkg.ReadState(t.Context(), stateschema.RecordedInRepo()); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := ir.Build(pkg); err != nil {
 		t.Errorf("the console wrote a live package that no longer builds: %v", err)

@@ -182,6 +182,17 @@ func runDeploy(cmd *cobra.Command, dir string, opts deployOptions) error {
 		// has here, between the two, and a run refused at this point leaves both
 		// the build directory and the organisation exactly as it found them.
 		runner := newVoiceaiRunner(bin, pushEnv, opts.profile)
+		// A local tool is a code tool this run publishes before the account is
+		// read, so resolution finds it like any tool the organisation holds.
+		pending, err := publishCodeTools(out, runner, resolved.Name, artifact.Files, opts.dryRun)
+		if err != nil {
+			return fmt.Errorf("deploy %s: %w", dir, err)
+		}
+		if len(pending) > 0 {
+			notef(errOut, "%s: the preview stops here, because the rest is checked against %s as this build has it: deploy without --dry-run to publish it first\n",
+				resolved.Name, strings.Join(pending, " and "))
+			continue
+		}
 		cache := newResolveCache()
 		deployment, preflight, err := deployResolution(cmd, runner, cache, resolved.Name,
 			artifact, agent, env, opts.dryRun)

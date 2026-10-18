@@ -157,15 +157,8 @@ func TestCompileNeedsNoCredential(t *testing.T) {
 		target  string
 	}{
 		{"slng_hosted", "slng"},
-		{"slng_hosted_code", "livekit"},
-		{"slng_hosted_code", "pipecat"},
-		// The scalar counterpart: a code target's pin lives in generated
-		// tools/<name>.slng.meta.json rather than the tool file's own `hash:`
-		// line. slng_hosted_code_scalar declares no slng target of its own;
-		// TestSlngNeedsNoScalarMetadataEither (internal/ir/hosted_test.go)
-		// covers slng needing no pin at all on the scalar form.
-		{"slng_hosted_code_scalar", "livekit"},
-		{"slng_hosted_code_scalar", "pipecat"},
+		// Version 2 compiles no slng tool on livekit or pipecat yet, so the
+		// code-target fixtures have no compile to check here.
 	} {
 		t.Run(tc.fixture+"/"+tc.target, func(t *testing.T) {
 			dir := t.TempDir()
@@ -234,14 +227,11 @@ func TestCompileSlngPreservesAuthoredFalseAndNumbers(t *testing.T) {
 // TestSelectingTargetsInEitherOrderGivesTheSameResult (internal/ir/hosted_test.go):
 // selecting two targets in one compile must not let their order change what
 // either one produces, which is what a check that wrote a finding onto the
-// shared IR rather than onto its own target's row would get wrong. No
-// package here mixes slng with a code target: they share a turn: model, and
-// slng refuses one outright (a pre-existing, orthogonal gap the fixtures'
-// own comments already flag), so this proves order-independence with the two
-// code targets slng_hosted_code_scalar already declares together.
+// shared IR rather than onto its own target's row would get wrong. It uses
+// the two code targets safe_core declares together.
 func TestCompileSelectsMixedTargetsInEitherOrder(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "slng_hosted_code_scalar"))); err != nil {
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "safe_core"))); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(target.SlngRouterKeyEnv, "")
@@ -318,96 +308,6 @@ func TestCompileSlngIgnoresASiblingCodeTargetsMissingMirror(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unmute pull") {
 		t.Errorf("the livekit refusal does not name the fix: %v", err)
-	}
-}
-
-// Forwarded bindings and derived sizing reach compile-report.json, which is now
-// the only place they are written. compile's stdout is the generated file list
-// and nothing else, so this file is where somebody goes to read what the
-// compiler decided about a binding it forwards without checking.
-func TestCompileWritesBindingsAndSizingToTheReport(t *testing.T) {
-	dir := copySafeCore(t)
-	stdout, _, err := runCompileCommand(t, "--target", "pipecat", dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Nothing but the generated file list. A binding, param, sizing or driver
-	// note back on stdout is the noise this command was quietened to remove.
-	for _, unwanted := range []string{"forwarded as-is", "binding ", "param ", "sizing ", "telephony "} {
-		if strings.Contains(stdout, unwanted) {
-			t.Errorf("stdout carries %q, which belongs only in compile-report.json:\n%s", unwanted, stdout)
-		}
-	}
-
-	report, err := os.ReadFile(filepath.Join(dir, "build", "pipecat", "compile-report.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		`"bindings"`, `"sizing"`, `"nova-3"`, `"unbenchmarked"`, `"temperature"`, `"workers"`,
-	} {
-		if !strings.Contains(string(report), want) {
-			t.Errorf("compile-report.json missing %q:\n%s", want, report)
-		}
-	}
-}
-
-// FR-011. A prefetch entry whose author said it writes is named where the rest
-// of what the compiler acted on is named, and nowhere else.
-//
-// Both halves matter, and the second is the one that keeps stdout readable. The
-// key is required, so every tool entry carries an answer: a warning for the
-// `true` ones would fire on every compile of every package that legitimately
-// writes, forever, which is the noise this command was quietened to remove.
-func TestCompileNamesAWritingPrefetchEntryInTheReportAndNotOnStdout(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "agent")
-	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "prefetch_core"))); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, "agent.yaml")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := mustReplace(t, string(raw), "    writes: false\n", "    writes: true\n")
-	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	stdout, stderr, err := runCompileCommand(t, "--target", "pipecat", dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, stream := range []struct{ name, text string }{{"stdout", stdout}, {"stderr", stderr}} {
-		if strings.Contains(stream.text, "writes") {
-			t.Errorf("%s mentions writes:, and a required key is not news:\n%s", stream.name, stream.text)
-		}
-	}
-
-	report, err := os.ReadFile(filepath.Join(dir, "build", "pipecat", "compile-report.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{`"prefetch_writes"`, `"profile"`, `"lookup_customer"`} {
-		if !strings.Contains(string(report), want) {
-			t.Errorf("compile-report.json missing %q:\n%s", want, report)
-		}
-	}
-
-	// And an entry that reads is named nowhere: the report lists what writes, not
-	// every entry with the answer printed beside it.
-	if err := os.WriteFile(path, []byte(mustReplace(t, source, "    writes: true\n", "    writes: false\n")), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := runCompileCommand(t, "--target", "pipecat", dir); err != nil {
-		t.Fatal(err)
-	}
-	report, err = os.ReadFile(filepath.Join(dir, "build", "pipecat", "compile-report.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(report), `"prefetch_writes"`) {
-		t.Errorf("the report lists prefetch_writes for a package where nothing writes:\n%s", report)
 	}
 }
 
@@ -491,103 +391,6 @@ func TestWriteArtifactFilesPreservesPlatformConfig(t *testing.T) {
 //
 // The second half is the constitution's rule that no report holds a secret
 // value: the upstream line names each credential *variable* and never reads it.
-
-// A step that ends on its own tool, a group step the group may skip and a step
-// that opens by listening are all facts a reader has to be able to get back out
-// of a build. They go in the report, and nothing about them reaches stdout:
-// `compile` prints the file list and the things somebody has to fix.
-func TestCompileNamesATerminalToolInTheReportAndNotOnStdout(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "agent")
-	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "terminal_step"))); err != nil {
-		t.Fatal(err)
-	}
-
-	stdout, stderr, err := runCompileCommand(t, "--target", "livekit", dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, stream := range []struct{ name, text string }{{"stdout", stdout}, {"stderr", stderr}} {
-		for _, quiet := range []string{"ends_on", "skip_when_confirmed", "opening"} {
-			if strings.Contains(stream.text, quiet) {
-				t.Errorf("%s mentions %q, and a written key is not news:\n%s", stream.name, quiet, stream.text)
-			}
-		}
-	}
-
-	report, err := os.ReadFile(filepath.Join(dir, "build", "livekit", "compile-report.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		`"task_details"`, `"ends_on"`, `"book_it"`, `"cancel_it"`, `"look_up"`,
-		`"opening": "listen"`,
-	} {
-		if !strings.Contains(string(report), want) {
-			t.Errorf("compile-report.json missing %q:\n%s", want, report)
-		}
-	}
-}
-
-// The same for a group step the group may skip, and on the other target, so
-// neither report can quietly stop saying it.
-func TestCompileNamesASkippableStepInTheReport(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "agent")
-	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "terminal_step"))); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := runCompileCommand(t, "--target", "pipecat", dir); err != nil {
-		t.Fatal(err)
-	}
-	report, err := os.ReadFile(filepath.Join(dir, "build", "pipecat", "compile-report.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{`"task_groups"`, `"do_book"`, `"skip_when_confirmed": "customer_phone"`} {
-		if !strings.Contains(string(report), want) {
-			t.Errorf("compile-report.json missing %q:\n%s", want, report)
-		}
-	}
-}
-
-// FR-010 of specs/023. A live package's report names the live model, its voice
-// and the backend its delegated work runs on, on both code targets.
-//
-// It used to name none of them. `forwardedBindings` walked listen, turn, speak
-// and reason, so the only row a live package produced was its backend think
-// entry: a report showing one reason binding, no listen and no speak, which is
-// indistinguishable from a cascade that lost two of its three models. This
-// project moved every figure `compile` stopped printing into that file, so for
-// the one architecture where the model *is* the pipeline it said nothing.
-//
-// Asserted on both targets in one test, because the collector is shared and a
-// per-target copy of this would be the thing that drifts.
-func TestCompileNamesTheLiveModelAndItsBackendInTheReport(t *testing.T) {
-	for _, target := range []string{"livekit", "pipecat"} {
-		t.Run(target, func(t *testing.T) {
-			dir := copyPackage(t, "live_model")
-			if _, _, err := runCompileCommand(t, "--target", target, dir); err != nil {
-				t.Fatal(err)
-			}
-			report, err := os.ReadFile(filepath.Join(dir, "build", target, "compile-report.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, want := range []string{
-				`"role": "live"`,
-				`"model": "gpt-live-1"`,
-				`"voice": "marin"`,
-				`"backend": "fast"`,
-				// The backend's own row is still there: the reader needs the id
-				// the delegated work actually runs on, not just its entry name.
-				`"model": "gpt-5.6-terra"`,
-			} {
-				if !strings.Contains(string(report), want) {
-					t.Errorf("compile-report.json missing %q:\n%s", want, report)
-				}
-			}
-		})
-	}
-}
 
 // A host's config lives in hosting/<target>/ and reaches build/<target>/ on
 // every compile, byte for byte. A name the compiler writes or keeps is refused

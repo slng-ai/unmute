@@ -237,6 +237,7 @@ func TestConsoleActionUsesCommandPaths(t *testing.T) {
 	if _, err := scaffold.Write(dir, data); err != nil {
 		t.Fatal(err)
 	}
+	consoleAction := consoleActionIn(recordedCtx(t))
 	for _, action := range []string{"validate", "compile"} {
 		t.Run(action, func(t *testing.T) {
 			var output bytes.Buffer

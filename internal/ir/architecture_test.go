@@ -153,7 +153,7 @@ func TestAnArchitectureRefusalPointsAtTheKey(t *testing.T) {
 // resolved value is never empty, so no reader downstream has to treat an absent
 // key as a fourth case.
 func TestOmittedArchitectureIsCascade(t *testing.T) {
-	pkg, err := loadRecorded(filepath.Join("..", "testdata", "simple-prompt"))
+	pkg, err := loadRecorded(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}

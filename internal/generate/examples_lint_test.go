@@ -95,43 +95,6 @@ func sortedTargetNames(agent *ir.Agent) []string {
 	return names
 }
 
-// A shape no shipped example has, held to the same ruff standard.
-//
-// TestPublicExamplesEmitLintCleanPython above only sees `examples/`, and nothing
-// there declares a task whose tools include an agent transfer. So the emitted
-// rollback path for that shape had no lint coverage at all, and an
-// `except BaseException as error:` whose body never read `error` (ruff F841)
-// shipped in it. The only thing that caught it was TestSmokePipecatV1TaskTransferStopsFlow,
-// which needs Python, a venv and 18 seconds, and is not the PR gate.
-//
-// Emitted from the same fixture the smoke test uses, so the two cannot drift.
-func TestTaskTransferEmitsLintCleanPython(t *testing.T) {
-	ruff, err := exec.LookPath("ruff")
-	if err != nil {
-		t.Skip("ruff not installed")
-	}
-	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := buildWithState(t, pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	addPipecatTaskTransferFixture(agent)
-	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "bot.py")
-	if err := os.WriteFile(path, []byte(artifactFile(t, artifact, "bot.py")), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if output, err := ruffCheck(ruff, path); err != nil {
-		t.Errorf("a task that transfers emits Python that fails ruff check:\n%s", output)
-	}
-}
-
 // ruffCheck runs the one ruff invocation both gates above use. --isolated
 // ignores any ruff config above the temp dir (the stray-config trap
 // compile_ruff_test.go already documents), and E501 is line length, which

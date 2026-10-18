@@ -86,6 +86,18 @@ func buildCoreSpeech(resolved ir.Target) (coreSpeech, error) {
 		fmt.Fprintf(&body, "\n\ndef %s() -> Any:\n    \"\"\"Return the realtime model %s: it listens, thinks and speaks.\"\"\"\n    return %s\n", function, pyQuote(name), call)
 		realtime = append(realtime, fmt.Sprintf("%s: %s", pyQuote(name), function))
 	}
+	for _, name := range sortedKeys(resolved.Models.Live) {
+		call, extraImport, err := coreLiveCall(fw, resolved.Models.Live[name], resolved.Models.Reason, env, render)
+		if err != nil {
+			return out, fmt.Errorf("live %q: %w", name, err)
+		}
+		if extraImport != "" && !slices.Contains(imports, extraImport) {
+			imports = append(imports, extraImport)
+		}
+		function := "realtime_" + pythonName.ReplaceAllString(name, "_")
+		fmt.Fprintf(&body, "\n\ndef %s() -> Any:\n    \"\"\"Return the live model %s: it listens and speaks, and hands careful work to its backend.\"\"\"\n    return %s\n", function, pyQuote(name), call)
+		realtime = append(realtime, fmt.Sprintf("%s: %s", pyQuote(name), function))
+	}
 	slices.Sort(imports)
 	out.Source = "\"\"\"This agent's speech models that are not SLNG's. Written by `unmute compile`.\n\n" +
 		"Each constructor comes from the same catalogue row version 1 uses. SLNG speech is built in\n" +
@@ -162,4 +174,36 @@ func coreRealtimeCall(fw targetcap.Provider, binding ir.Binding, env *envSet,
 		return "", nil, err
 	}
 	return renderCall(call), []string{"from pipecat.services.openai.realtime import events as realtime_events"}, nil
+}
+
+// coreLiveCall renders one live model the way version 1's drivers do. The
+// backend think model it names runs the tools and the careful work, through
+// OpenAI's Responses delegation, which both frameworks' live models take as a
+// constructor argument. With no backend, LiveKit hands that work to the client,
+// which has no tool channel: validation has refused tools in that case.
+func coreLiveCall(fw targetcap.Provider, binding ir.Binding, reason map[string]ir.Binding, env *envSet,
+	render func(targetcap.Role, ir.Binding) (string, error)) (string, string, error) {
+	call, _, err := resolveService(fw, targetcap.Live, binding, env, slngSite{})
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := render(targetcap.Live, binding); err != nil { // the row's import and install
+		return "", "", err
+	}
+	backend, hasBackend := reason[binding.Backend]
+	switch {
+	case fw == targetcap.LiveKit && !hasBackend:
+		call.Args = append(call.Args, pyKV{Key: "delegation", Value: pyQuote("client")})
+	case fw == targetcap.LiveKit:
+		call.Args = append(call.Args,
+			pyKV{Key: "delegation", Value: pyQuote("responses")},
+			pyKV{Key: "responses_options", Value: "{\"model\": " + pyQuote(backend.Model) + "}"})
+	case hasBackend:
+		call.Args = append(call.Args, pyKV{
+			Key:   "delegation",
+			Value: "OpenAILiveLLMService.ResponsesDelegation(settings=OpenAIResponsesLLMService.Settings(model=" + pyQuote(backend.Model) + "))",
+		})
+		return renderCall(call), "from pipecat.services.openai.responses.llm import OpenAIResponsesLLMService", nil
+	}
+	return renderCall(call), "", nil
 }

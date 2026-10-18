@@ -26,13 +26,13 @@ effect: returns_data
 [[end]][[end]][[if .MCPTools]]  tools:
 [[range .MCPTools]]    - [[.]]
 [[end]][[end]][[else]]description: [[quote .Description]]
-input:[[yamlBlock 2 .Input]]
+[[if ne .ExecutionKind "local"]]input:[[yamlBlock 2 .Input]]
 [[if .Output]]output:[[yamlBlock 2 .Output]]
-[[end]]
+[[end]][[end]]
 [[.ExecutionKind]]:[[if eq .ExecutionKind "client"]] {}
 [[else if eq .ExecutionKind "provider_hosted"]] {}
 [[else]]
-[[if eq .ExecutionKind "local"]]  handler: [[if .Handler]][[.Handler]][[else]]tools/[[.Name]].py[[end]]
+[[if eq .ExecutionKind "local"]]  handler: [[.HandlerRef]]
 [[else if .URLEnv]]  url_env: [[.URLEnv]]
 [[end]][[end]][[if .Auth]]  auth:
     type: [[.Auth.Type]]

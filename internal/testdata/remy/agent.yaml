@@ -10,7 +10,7 @@
 # Targeted at LiveKit only: task groups and task-return are code-target features
 # (they fail on Vapi), and this is the LiveKit first-run example.
 
-version: 1
+version: 2
 
 name: remy-fixture
 

@@ -9,7 +9,7 @@
 #     on at least one of the four
 #   - outbound calls: omitted; Deepgram's carrier-conditional lowering warns
 
-version: 1
+version: 2
 
 name: safe-core-fixture
 
