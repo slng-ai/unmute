@@ -8,7 +8,7 @@
 # Deliberately kept compiling on both code targets, so the byte-identical and
 # per-target-warning tests have one package to read rather than two.
 
-version: 1
+version: 2
 
 name: prefetch-fixture
 

@@ -83,12 +83,12 @@ Run LiveKit commands from `build/livekit/`, where these files are generated:
 
 | File | Role |
 | --- | --- |
-| `agent.py` and supporting files | Worker entry point, its modules, prompts, tasks and tool wiring |
-| `pyproject.toml` | Python project manifest and selected dependencies |
+| `agent.py`, `spec.py`, `speech.py` and `agent.json` | Worker entry point, and the agent data it builds from |
+| `state.py` | Your `State` class, when the package has one |
+| `pyproject.toml` | Python project manifest, including the `unmute-core` library |
 | `Dockerfile` and `.dockerignore` | Image build and file exclusions |
 | `tools/` | Copied local tool handlers, when declared |
 | `.env.example` | Environment names for this package and route |
-| `README.md` | Package-specific runbook |
 | `compile-report.json` | Resolved bindings and compiler decisions |
 
 The compiler supplies the project manifest and Dockerfile. No custom adapter
@@ -258,8 +258,8 @@ parameters and LiveKit media placement are separate settings. See
 
 LiveKit documents a deployment's region as fixed after creation. To move,
 create in the new region and retire the old deployment after verification.
-For several regions, the generated README supplies one create command and one
-`livekit.<region>.toml` per region. Pass the matching `--config` on subsequent
+For several regions, run one create command per region. Each writes its own
+`livekit.<region>.toml` when you pass a separate `--config`. Pass the matching `--config` on subsequent
 updates, secret changes and inspection commands.
 
 All those workers share the dispatch name. Routing may use another region
@@ -268,26 +268,14 @@ before relying on worker placement for strict locality.
 
 ### Telephony needs two more records
 
-An inbound SIP route needs a LiveKit inbound trunk and a dispatch rule. You
-create both after deploying, from `build/livekit/`. Put your number into
-`sip-inbound-trunk.json` where it says `${SIP_FROM_NUMBER}`, then:
-
-```sh
-lk --project "<project-name>" sip inbound create sip-inbound-trunk.json
-```
-
-Copy the `ST_` ID it prints into `sip-dispatch-rule.json` where it says
-`${UNMUTE_SIP_TRUNK_ID}`, then:
-
-```sh
-lk --project "<project-name>" sip dispatch create sip-dispatch-rule.json
-```
-
-Name the project on both. `lk` has a default project, and a command without
-`--project` writes the records into it and reports success. The two JSON files
-come from `unmute compile`, and they carry fields the `lk` flags cannot express.
+An inbound SIP route needs a LiveKit inbound trunk and a dispatch rule.
+Unmute does not write the two JSON files for them yet, so you write them
+yourself. Create both after deploying, with `lk sip inbound create` and
+`lk sip dispatch create`. The dispatch rule names the worker. Name the project
+on both. `lk` has a default project, and a command without `--project` writes
+the records into it and reports success.
 [Create the two LiveKit records](/telephony/livekit-twilio#4-create-the-two-livekit-records)
-has the full sequence, including which flags to avoid and why.
+has the sequence, including which flags to avoid and why.
 
 ### Renaming the agent breaks that rule
 
@@ -302,8 +290,7 @@ it.
 Deploy the new worker and confirm its dispatch name with `lk agent list`.
 Then list the rules with `lk --project "<project-name>" sip dispatch list`, and
 remove the stale one with `lk --project "<project-name>" sip dispatch delete
-<rule-id>`. Create the rule again from `sip-dispatch-rule.json` with the same
-trunk ID, using the command above. The number is unrouted between the delete and
+<rule-id>`. Create the rule again with the same trunk ID, using `lk sip dispatch create`. The number is unrouted between the delete and
 the create. Check that the rule names the new worker, then make a test call.
 
 For the `connector` route, redeploy the bridge from the new build: its

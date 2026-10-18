@@ -584,18 +584,19 @@ func TestDevDispatchNameMatchesTheEmittedWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var botpy string
+	var compose string
 	for _, file := range artifact.Files {
-		if file.Path == "agent.py" {
-			botpy = string(file.Content)
+		if file.Path == "compose.dev.yaml" {
+			compose = string(file.Content)
 		}
 	}
-	if botpy == "" {
-		t.Fatal("no agent.py emitted")
+	if compose == "" {
+		t.Fatal("no compose.dev.yaml emitted")
 	}
 	dispatched := devDispatchName(agent, resolved)
-	if !strings.Contains(botpy, `@server.rtc_session(agent_name="`+dispatched+`")`) {
-		t.Errorf("dev dispatches to %q, which the emitted worker does not register", dispatched)
+	// The core worker registers under LIVEKIT_AGENT_NAME, which the dev stack sets.
+	if !strings.Contains(compose, "LIVEKIT_AGENT_NAME="+dispatched+"\n") {
+		t.Errorf("dev dispatches to %q, which the dev stack does not name the worker", dispatched)
 	}
 	if dispatched == resolved.Name {
 		t.Fatal("this test needs the dispatch name to differ from the target name")

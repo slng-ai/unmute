@@ -822,3 +822,43 @@ func TestResolvedBodyCarriesExactlyWhatWasChecked(t *testing.T) {
 		t.Error("a body was produced with an MCP selection unchecked")
 	}
 }
+
+// A version 2 local tool reaches SLNG as a code tool: its body and sample sit
+// where `voiceai agents push` reads them, and one finish rule ends the step on
+// it, with its say line reading the tool's result.
+func TestSlngLocalToolIsACodeToolThatCanFinishAStep(t *testing.T) {
+	_, files := compileSlng(t, filepath.Join("..", voiceAgentTestsDir, "slng-live"))
+	var tool struct {
+		Name     string `json:"name"`
+		ToolType string `json:"tool_type"`
+		CodeSrc  string `json:"code_src"`
+	}
+	if err := json.Unmarshal([]byte(files["tools/book_slot.json"]), &tool); err != nil {
+		t.Fatalf("tools/book_slot.json: %v", err)
+	}
+	if tool.Name != "book_slot" || tool.ToolType != "code" {
+		t.Errorf("tool body = %s/%s, want book_slot/code", tool.Name, tool.ToolType)
+	}
+	for _, want := range []string{"def book_slot(", "Input = _create_model(", `Output = _hints["return"]`, "def handler(input: Input) -> Output:"} {
+		if !strings.Contains(tool.CodeSrc, want) {
+			t.Errorf("code_src does not carry %q", want)
+		}
+	}
+	if !strings.Contains(files["samples/book_slot.json"], `"time": "10:00"`) {
+		t.Errorf("samples/book_slot.json = %q, want the package's sample", files["samples/book_slot.json"])
+	}
+	body := slngBodyOf(t, files)
+	for _, task := range body["tasks"].([]any) {
+		task := task.(map[string]any)
+		if task["name"] != "take_booking" {
+			continue
+		}
+		finish, _ := json.Marshal(task["finish"])
+		want := `[{"say":["Thanks for having us. You're booked for {{result.booking.time}} on {{result.booking.day}}."],"success":[{"status":"booked"}],"tool":"book_slot"}]`
+		if string(finish) != want {
+			t.Errorf("take_booking finish = %s\nwant %s", finish, want)
+		}
+		return
+	}
+	t.Fatal("no take_booking task in agent.json")
+}

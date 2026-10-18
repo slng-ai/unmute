@@ -191,12 +191,13 @@ It opens with the target's name and says what to write instead.
 ## Share code, don't duplicate it
 
 A new target reuses driver-shared Go wherever the shape is the same, and writes its own template only
-where the target is genuinely different. `envRef`, `pyQuote` and the `primitiveTypes` table in
-[internal/generate/artifact.go](internal/generate/artifact.go) are used by every Python-emitting driver.
-[`googleVertexClient`](internal/generate/google.go) is one string constant of Python, written once for
-the LiveKit and Pipecat drivers, and reused verbatim by `buildTwilioData` in
-[internal/generate/twilio_v1.go](internal/generate/twilio_v1.go) when a binding sets `vertexai: true`.
-Nobody re-derived the Vertex host logic for the third target. Each driver's Python and text templates
+where the target is genuinely different. `envRef` in
+[internal/generate/artifact.go](internal/generate/artifact.go) and `pyQuote` and `pyLiteral` in
+[internal/generate/pyshared.go](internal/generate/pyshared.go) are used by every Python-emitting driver.
+[`googleVertexClient`](internal/generate/google.go) is one string constant of Python, reused verbatim by
+`buildTwilioData` in [internal/generate/twilio_v1.go](internal/generate/twilio_v1.go) when a binding sets
+`vertexai: true`.
+Each driver's Python and text templates
 are embedded with `//go:embed` and rendered through `text/template`
 ([internal/generate/templates/twilio_v1/](internal/generate/templates/twilio_v1/), loaded by
 `twilio_v1.go`'s `twilioTemplates`).

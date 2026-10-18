@@ -1085,10 +1085,11 @@ func toolExecutionGate(kind toolExecutionKind, target string) (targetcap.Capabil
 func chooseToolExecution(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) (bool, error) {
 	target := data.Target
 	for {
-		handler := filepath.ToSlash(filepath.Join("tools", tool.Name+".py"))
+		handlerFile := filepath.ToSlash(filepath.Join("tools", tool.Name+".py"))
+		handler := handlerFile + ":" + tool.Name
 		detail := map[string]string{
 			"webhook":   "HTTP endpoint from an environment variable",
-			"local":     "creates " + handler + " when saved",
+			"local":     "creates " + handlerFile + " when saved",
 			"mcp":       "server address from an environment variable",
 			"builtin":   "provider prebuilt tool (end_call)",
 			"knowledge": knowledgeDetail(data),

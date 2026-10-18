@@ -58,11 +58,12 @@ LiveKit browser loop, or [uv](https://docs.astral.sh/uv/) for Pipecat.
 
 ## An agent is a file
 
-This is a whole agent.
+This is a whole agent. It has `agent.yaml`, `instructions.md`, a `tools/end_call.yaml`
+that names the built-in hang-up, and a `state.py`. `unmute init` writes all of them.
 
 ```yaml
 # agent.yaml
-version: 1
+version: 2
 name: my-agent
 entry_agent: assistant
 
@@ -131,6 +132,18 @@ Three things to notice:
   at a different model and every agent using it follows.
 - Nothing here mentions Pipecat or LiveKit. That choice lives in its own file.
 
+```python
+# state.py
+from pydantic import BaseModel
+
+
+class State(BaseModel):
+    """What one call knows, shared by every agent and task in it."""
+```
+
+`state.py` is where the call's saved values get their types. This one holds none
+yet. See [`customer-intake`](examples/customer-intake/) for one that does.
+
 ```yaml
 # targets.yaml
 targets:
@@ -158,14 +171,18 @@ change.
 | Target | Kind | What you get |
 |---|---|---|
 | [LiveKit Agents](https://unmute.ai/targets/livekit) | code | `build/livekit/agent.py`, a Python project you host and run |
-| [Pipecat](https://unmute.ai/targets/pipecat) | code | `build/pipecat/bot.py`, plus a `pcc-deploy.toml` for Pipecat Cloud |
-| [SLNG](https://unmute.ai/targets/slng) | hosted | `unmute deploy` pushes a deployment body and SLNG runs the agent |
+| [Pipecat](https://unmute.ai/targets/pipecat) | code | `build/pipecat/bot.py`, a Python project you host and run |
+| [SLNG](https://unmute.ai/targets/slng) | hosted | `unmute deploy` pushes a deployment body and SLNG runs the agent, with each local tool as an SLNG code tool |
 | [Twilio](https://unmute.ai/targets/twilio) | phone app | `build/<target>/app.py`, a small app Twilio ConversationRelay calls; you host it |
 
 `pipecat`, `livekit`, `slng` and `twilio` are the only values `provider`
 accepts. A code target gives you something to host. The hosted target has
 nothing to host, and no `unmute dev`. The Twilio target answers inbound phone
-calls only, and has no `unmute dev` either.
+calls only, and has no `unmute dev` either. SLNG and Twilio run version 2 with
+their own runtimes, without unmute-core, so they refuse the keys that need the
+library, such as a tool's `assign`, `replies` and `precheck`, `entry_by`, and a
+task's `confirm`. The error names each one. `mcp:` and `slng:` tools and every
+built-in but `end_call` run on SLNG only for now.
 
 ## What compile writes
 
@@ -173,20 +190,28 @@ One directory per target, under `build/`.
 
 ```
 build/livekit/
-├── agent.py             # the agent
+├── agent.json           # the agent, as data
+├── spec.py              # the spec the library reads
+├── speech.py            # speech providers
+├── agent.py             # the entry point
+├── state.py             # your state.py, copied
 ├── tools/               # your local Python handlers, copied
-├── dev_metrics.py       # per-turn timings, read by unmute dev
-├── pyproject.toml       # pinned dependencies
+├── knowledge/           # your documents, when the package has any
+├── pyproject.toml       # pinned dependencies, with unmute-core
+├── .python-version
 ├── Dockerfile
 ├── .dockerignore
 ├── compose.dev.yaml
 ├── .env.example         # exactly the variables you supply
-├── README.md            # the runbook for this build
 └── compile-report.json
 ```
 
-Pipecat gets the same shape with `bot.py` as its entry point. Neither project
-imports Unmute.
+Pipecat gets the same shape with `bot.py` as its entry point. Both projects
+import the [`unmute-core`](https://pypi.org/project/unmute-core/) library from
+PyPI, which holds the call logic, state and tools. Neither imports Unmute.
+You deploy a code target with its platform's own tool, such as `lk agent create`
+or `pcc deploy`, using the Dockerfile. Unmute does not write a deploy file for
+them yet.
 
 Treat `build/` as output. Edit the package and compile again. Anything you change
 inside `build/` is overwritten on the next compile.
@@ -473,9 +498,9 @@ an optional argument. From inside the package you run them bare; from anywhere
 else you pass the path, as in `unmute dev my-agent`.
 
 `validate` and `compile` work offline. SLNG deployment resolves hosted tools
-by name with `unmute deploy`: no hash, mirror or `pull` step is needed. Only
-LiveKit and Pipecat need `unmute pull` to fetch the hosted tools they run
-themselves. `deploy`, `pull` and `resources` use your SLNG account.
+by name with `unmute deploy`: no hash, mirror or `pull` step is needed.
+`unmute pull` fetches a hosted tool's definition into the package.
+`deploy`, `pull` and `resources` use your SLNG account.
 
 Warnings go to standard error and still exit 0. Errors exit 1.
 

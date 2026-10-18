@@ -106,6 +106,9 @@ func SlngRuntimeVariables(agent *Agent) map[string]bool {
 	return out
 }
 
+// slngMaxFinishSay is MAX_RECEIPT_LINES in the backend's agent_tasks.py.
+const slngMaxFinishSay = 5
+
 func validateSlngTasks(agent *Agent, row *TargetValidation) {
 	fail := func(format string, args ...any) {
 		row.Errors = add(row.Errors, targetcap.SlngDiagnostic(format, args...))
@@ -134,6 +137,7 @@ func validateSlngTasks(agent *Agent, row *TargetValidation) {
 				fail("task %q lists %q, and a SLNG task cannot start another task or hand the call over: move it to the agent's tools", name, ref)
 			}
 		}
+		validateSlngFinish(agent, name, task, fail)
 	}
 	for _, name := range slices.Sorted(maps.Keys(agent.TaskGroups)) {
 		group := agent.TaskGroups[name]
@@ -181,6 +185,40 @@ func validateSlngTasks(agent *Agent, row *TargetValidation) {
 		}
 		if _, err := SlngType(variable.Schema); err != nil {
 			fail("variable %q: %v", name, err)
+		}
+	}
+}
+
+// validateSlngFinish holds a task's finish: to what SLNG runs today: one tool
+// ends the step, and its say: lines read the tool's result or a whole saved
+// value. SLNG has no confirm: read-back.
+func validateSlngFinish(agent *Agent, name string, task Task, fail func(format string, args ...any)) {
+	if len(task.Finish) > 1 {
+		fail("task %q ends on %d tools, and SLNG ends a step on one tool for now: keep one finish: entry", name, len(task.Finish))
+	}
+	fromResult := map[string]bool{}
+	for _, assign := range task.Assign {
+		if !assign.FromInput {
+			fromResult[assign.Var] = true
+		}
+	}
+	for _, rule := range task.Finish {
+		for _, assign := range agent.Tools[rule.Tool].Assign {
+			fromResult[assign.Var] = true
+		}
+		if len(rule.Confirm) > 0 {
+			fail("task %q reads its change back with confirm:, and SLNG has no read-back: remove confirm:, or compile to livekit or pipecat", name)
+		}
+		if len(rule.Say) > slngMaxFinishSay {
+			fail("task %q says %d lines when it finishes, and SLNG speaks at most %d: keep %d", name, len(rule.Say), slngMaxFinishSay, slngMaxFinishSay)
+		}
+		for _, line := range rule.Say {
+			for _, token := range templateToken.FindAllString(line, -1) {
+				root, rest, dotted := strings.Cut(strings.Trim(strings.TrimPrefix(strings.Trim(token, "{} "), "state."), " "), ".")
+				if dotted && !fromResult[root] {
+					fail("task %q says %s when it finishes, and SLNG reads only a whole saved value or a field of the tool's result: save %s.%s from result. in assign:, or say {{state.%s}}", name, token, root, rest, root)
+				}
+			}
 		}
 	}
 }

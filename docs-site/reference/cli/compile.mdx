@@ -5,7 +5,7 @@ description: "Write the compiled project for each target, and read the report wr
 
 ```text
 $ unmute compile --help
-Compile a v1 agent package to its resolved target artifacts.
+Compile an agent package to its resolved target artifacts.
 
 With no package-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
 
@@ -29,24 +29,21 @@ Every file written is printed. This is a package scaffolded by
 ```text
 generated my-agent/build/livekit/.dockerignore
 generated my-agent/build/livekit/.env.example
+generated my-agent/build/livekit/.python-version
 generated my-agent/build/livekit/Dockerfile
-generated my-agent/build/livekit/README.md
+generated my-agent/build/livekit/agent.json
 generated my-agent/build/livekit/agent.py
-generated my-agent/build/livekit/agents.py
-generated my-agent/build/livekit/call.py
 generated my-agent/build/livekit/compile-report.json
 generated my-agent/build/livekit/compose.dev.yaml
-generated my-agent/build/livekit/prompts/__init__.py
-generated my-agent/build/livekit/prompts/<agent>.md
 generated my-agent/build/livekit/pyproject.toml
-generated my-agent/build/livekit/settings.py
-generated my-agent/build/livekit/utils/__init__.py
-generated my-agent/build/livekit/utils/dev_metrics.py
+generated my-agent/build/livekit/spec.py
+generated my-agent/build/livekit/speech.py
+generated my-agent/build/livekit/state.py
 ```
 
-A package with tools, knowledge files, tracing, or a phone route writes more:
-`tools/<name>.py` per tool, `utils/knowledge.py`, `utils/tracing.py`,
-`session.py`, `state.py`, `call_state.py`, and on Pipecat `pcc-deploy.toml`.
+A package with tools or knowledge files writes more: `tools/<name>.py` per
+local tool and a `knowledge/` folder. `state.py` appears when the package has a
+`State` class. On Pipecat the entry point is `bot.py` in place of `agent.py`.
 
 Output goes to `<package>/build/<target-instance-name>/`. With no `--target`,
 every declared target is compiled. `--target` is repeatable.
@@ -81,6 +78,10 @@ copied byte for byte, and they do not change the build's `artifact_id`.
 The compiler does not print what it decided. It writes that to
 `build/<target>/compile-report.json`, next to the files it describes, one JSON
 object per target:
+
+A LiveKit or Pipecat build on version 2 writes a short report: the `target`, the
+`runtime` (the `unmute-core` version it pins) and `required_env`. The fields
+below describe the other targets.
 
 - `bindings`: what each model role resolved to, forwarded to the provider
   without being checked. A LiveKit OpenAI Responses binding is the one

@@ -1,0 +1,20 @@
+# Written by `unmute compile`. Local development only.
+# `unmute dev` runs Pipecat on the host, so the browser can reach its WebRTC
+# addresses. This file runs the same image in Docker, to check it builds and starts.
+services:
+  application:
+    build:
+      context: .
+    command: ["python", "bot.py", "-t", "webrtc", "--host", "0.0.0.0", "--port", "7860"]
+    environment:
+      - UNMUTE_DEV_METRICS
+      - UNMUTE_CALL_START
+      - UNMUTE_CALL_FACTS{{.DevEnv}}
+    ports:
+      - "${UNMUTE_DEV_PORT:-7860}:7860"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 7860), timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 10s

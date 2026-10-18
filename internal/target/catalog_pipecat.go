@@ -1,6 +1,6 @@
 package target
 
-// Pipecat entries. Contract: the pipecat_v1 driver templates, pipecat-ai
+// Pipecat entries. Contract: the core speech.py emitter (internal/generate/core_speech.go), pipecat-ai
 // ==1.12.0. Official services ship as pipecat-ai extras and take model/
 // voice/params nested in Class.Settings(...) (flat forms deprecated since
 // v0.0.105; verified against the per-service docs 2026-07-15). The SLNG

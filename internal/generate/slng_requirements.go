@@ -33,10 +33,14 @@ type Requirements struct {
 	// server that must offer it.
 	MCPTools []Requirement
 	// Hosted is one entry per `slng:` tool. Like a builtin, the name must
-	// already exist: unmute creates no tool. Unlike a builtin, the package pins
+	// already exist: unmute creates no hosted tool. Unlike a builtin, the package pins
 	// a version of it, so each entry carries what it was pinned to and the
 	// preflight can say when the organisation has moved on.
 	Hosted []Requirement
+	// Code is one entry per version 2 local tool. Deploy creates or updates it
+	// from build/slng/tools/<name>.json, runs its sample and publishes it, so
+	// the account need not hold it yet: Count leaves it out.
+	Code []Requirement
 	// Secrets are credentials a tool authenticates with, stored in the vault
 	// under the same name the package uses for the environment variable.
 	Secrets []Requirement
@@ -165,6 +169,16 @@ func slngRequirements(agent *ir.Agent, built slngArtifacts) Requirements {
 			hosted.Version, hosted.ContentHash = tool.Mirror.Version, tool.Mirror.ContentHash
 		}
 		requirements.Hosted = append(requirements.Hosted, hosted)
+	}
+
+	for _, ref := range built.Body.ToolRefs {
+		if agent.Tools[ref.origin].Execution != ir.ToolLocal {
+			continue
+		}
+		requirements.Code = append(requirements.Code, Requirement{
+			Name: ref.Tool, Source: ref.origin,
+			Where: "tools/" + ref.origin + ".yaml is a local tool, which deploy publishes to SLNG as a code tool",
+		})
 	}
 
 	// MCP servers and their tools. The body carries one reference per exposed

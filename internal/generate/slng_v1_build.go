@@ -246,8 +246,9 @@ type slngMCP struct {
 // slngArtifacts is everything the driver needs to write: the body and the facts
 // the runbook prints.
 //
-// There is no tool body here any more. The slng target creates no tool: every
-// tool it names is one the organisation already holds, referenced by name.
+// The body names every tool by name. A version 2 local tool is a code tool
+// written beside it (slng_code_tool.go); every other tool is one the
+// organisation already holds.
 type slngArtifacts struct {
 	Body     slngBody
 	Runbook  slngRunbook

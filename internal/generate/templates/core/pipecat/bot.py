@@ -48,6 +48,7 @@ from pipecat_slng import SlngSTTService, SlngTTSService
 from unmute_core.call import CallStartError
 from unmute_core.model import model_name
 from unmute_core.pipecat import (
+    DevObserver,
     IdleNudgeObserver,
     ModelCallLLMService,
     TelemetryObserver,
@@ -61,19 +62,21 @@ from unmute_core.pipecat import (
     telephony_call_info,
     vad_params,
 )
+from unmute_core.dev import DevRecorder, call_id_from, metrics_enabled
 from unmute_core.settings import env_value
-from unmute_core.slng import tracking_ids
+from unmute_core.slng import TrackingIds, tracking_ids
 from unmute_core.state import CallInfo, CallState, call_phone_region, use_phone_region
 from unmute_core.telemetry import Langfuse, Telemetry
 from unmute_core.turn import turn_window
 
 import spec
+import speech
 
 load_dotenv()
 spec.start_knowledge()
 logger = logging.getLogger("bot")
 MODELS: dict[str, Any] = spec.SPEC["models"]
-WINDOW = turn_window(MODELS["turn"].get("pace", "balanced"), "pipecat")
+WINDOW = turn_window((MODELS["turn"] or {}).get("pace", "balanced"), "pipecat")
 
 transport_params: dict[str, Callable[..., Any]] = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
@@ -134,6 +137,8 @@ def build_llm(first: str, state: CallState) -> LLMService[Any]:
     ``UnmuteFlows`` sets its prompt. An OpenAI binding's params that Pipecat's settings
     do not name, like ``reasoning_effort``, go in each request as they are.
     """
+    if realtime := spec.SPEC["agents"][first].get("realtime"):
+        return speech.REALTIME[realtime]()
     binding = MODELS["think"][spec.SPEC["agents"][first]["model"]]
     if binding["provider"] == "slng":
         call = spec.router(binding, state.call)
@@ -183,13 +188,46 @@ def dispatched(runner_args: RunnerArguments) -> dict[str, Any] | None:
     return None
 
 
+def build_stt(ids: TrackingIds) -> Any:
+    """Return the speech-to-text service: SLNG's with the call's tracking ids, else speech.py's."""
+    if speech.LISTEN is not None:
+        return speech.LISTEN()
+    listen = MODELS["listen"]
+    return SlngSTTService(
+        api_key=required("SLNG_API_KEY"),
+        model=listen["model"],
+        language=Language(listen.get("language", "en")),
+        world_part=listen.get("params", {}).get("world_part", "eu-north"),
+        **ids,
+    )
+
+
+def build_tts(name: str, ids: TrackingIds) -> Any:
+    """Return one voice's service: SLNG's with the call's tracking ids, else speech.py's."""
+    if (make := speech.SPEAK.get(name)) is not None:
+        return make()
+    voice = MODELS["speak"][name]
+    return SlngTTSService(
+        api_key=required("SLNG_API_KEY"),
+        model=voice["model"],
+        voice=voice.get("voice", ""),
+        language=Language(voice.get("language", "en")),
+        warm_standby_enabled=True,
+        world_part=voice.get("params", {}).get("world_part", "eu-north"),
+        **ids,
+    )
+
+
 def build_pipeline(
     state: CallState, transport: BaseTransport, telemetry: Telemetry | None
 ) -> tuple[PipelineWorker, UnmuteFlows]:
     """Return the call's worker and the flows that run the call's first agent on it."""
     first = spec.entry(state)
+    entry = spec.SPEC["agents"][first]
+    realtime = entry.get("realtime")
     context = LLMContext()
-    aggregators = LLMContextAggregatorPair(
+    # A realtime service decides the caller's turns itself, so its aggregators are plain.
+    aggregators = LLMContextAggregatorPair(context) if realtime else LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(params=vad_params(WINDOW)),
@@ -204,35 +242,14 @@ def build_pipeline(
         ),
     )
     llm = build_llm(first, state)
-    entry = spec.SPEC["agents"][first]
-    listen, voice = MODELS["listen"], MODELS["speak"][entry["voice"]]
-    key = required("SLNG_API_KEY")
     ids = tracking_ids(state.call)
-    pipeline = Pipeline(
-        [
-            transport.input(),
-            SlngSTTService(
-                api_key=key,
-                model=listen["model"],
-                language=Language(listen.get("language", "en")),
-                world_part=listen.get("params", {}).get("world_part", "eu-north"),
-                **ids,
-            ),
-            aggregators.user(),
-            llm,
-            SlngTTSService(
-                api_key=key,
-                model=voice["model"],
-                voice=voice.get("voice", ""),
-                language=Language(voice.get("language", "en")),
-                warm_standby_enabled=True,
-                world_part=voice.get("params", {}).get("world_part", "eu-north"),
-                **ids,
-            ),
-            transport.output(),
-            aggregators.assistant(),
-        ]
-    )
+    if realtime:
+        # One model listens, thinks and speaks: no speech-to-text, no voice.
+        steps = [transport.input(), aggregators.user(), llm, transport.output()]
+    else:
+        stt, tts = build_stt(ids), build_tts(entry["voice"], ids)
+        steps = [transport.input(), stt, aggregators.user(), llm, tts, transport.output()]
+    pipeline = Pipeline([*steps, aggregators.assistant()])
     worker = PipelineWorker(
         pipeline, params=PipelineParams(enable_metrics=True, enable_usage_metrics=True)
     )
@@ -282,7 +299,7 @@ def build_pipeline(
     )
     flows.install()
     if telemetry is not None:
-        binding = MODELS["think"][entry["model"]]
+        binding = MODELS["realtime"][realtime] if realtime else MODELS["think"][entry["model"]]
         worker.add_observer(
             TelemetryObserver(
                 telemetry, model=binding["model"], provider=binding["provider"], flows=flows
@@ -311,6 +328,13 @@ async def bot(runner_args: RunnerArguments) -> None:
             Langfuse.from_env(), agent=spec.AGENT_ID, call_id=state.call.session_id
         )
     worker, flows = build_pipeline(state, transport, telemetry)
+    if metrics_enabled():
+        recorder = DevRecorder(call_id_from(runner_args.body) or state.call.session_id)
+        recorder.watch_state(state)
+        flows.listen(recorder.task_event)
+        handoffs = {tool["name"] for tool in flows.tasks.delegate_tools()}
+        controls = [*spec.HANDOFFS, *spec.SPEC["transfers"]]
+        worker.add_observer(DevObserver(recorder, handoffs=handoffs, controls=controls))
     end_reason = "ended"
 
     @transport.event_handler("on_client_connected")
@@ -321,7 +345,7 @@ async def bot(runner_args: RunnerArguments) -> None:
                 LLMUpdateSettingsFrame(
                     delta=LLMSettings(system_instruction=flows.main_instruction())
                 ),
-                *greeting_frames(spec.GREETING, state),
+                *greeting_frames(spec.GREETING, state, llm=flows.llm),
             ]
         )
         if spec.MAX_DURATION_S is not None:
