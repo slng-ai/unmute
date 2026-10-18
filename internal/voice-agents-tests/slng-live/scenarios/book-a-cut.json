@@ -1,0 +1,13 @@
+{
+  "name": "A caller books a cut through the book group, and the booking tool ends the step",
+  "turns": [
+    {"caller": "Hi, I'd like to book a haircut please."},
+    {"caller": "My number is plus three four, six zero zero, one one one, two two two."},
+    {"caller": "Yes, that's right."},
+    {"caller": "A cut on Monday the second of November, twenty twenty-six."},
+    {"caller": "Ten o'clock, please."},
+    {"caller": "No, that's everything. Thank you, goodbye."}
+  ],
+  "tools": ["find_free_slots", "book_slot", "end_call"],
+  "says": ["Thanks for having us"]
+}

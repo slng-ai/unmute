@@ -100,6 +100,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	for name, tool := range pkg.Tools {
 		built := buildTool(name, tool)
 		built.HandlerSource = pkg.Handlers[built.Handler]
+		built.Sample = pkg.Samples[name]
 		if err := handlerTypes(pkg, name, &built); err != nil {
 			return nil, err
 		}

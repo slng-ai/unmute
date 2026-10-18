@@ -2160,7 +2160,9 @@ func checkTransferBlock(control *HumanTransfer) []string {
 func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
 	for _, name := range slices.Sorted(maps.Keys(agent.Tools)) {
 		tool := agent.Tools[name]
-		if tool.Output != nil {
+		// A typed handler's output is read from its return type, not authored,
+		// so only an authored output: is held to the target.
+		if tool.Output != nil && tool.HandlerFunction == "" {
 			applyCapability(caps, targetcap.FieldToolOutput, provider, row)
 		}
 		switch tool.Execution {

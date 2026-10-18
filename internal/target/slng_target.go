@@ -163,11 +163,18 @@ var (
 	// `content_hash` and its `latest_version`. That is everything `unmute pull`
 	// mirrors, so a hosted tool costs one read.
 	//
-	// It reads. There is no `voiceai tool create`: the `tool` group is list, get
-	// and run, verified at 0.1.16 on 2026-09-03, which is the fact that makes a
-	// hosted reference the only way onto the platform and the SLNG dashboard the
-	// only place a tool is born.
+	// It reads, and it is how deploy tells a code tool that is current from one
+	// it has to update.
 	SlngToolGet = SlngCommand{"tool", "get"}
+
+	// The code tool writes, since voiceai 0.1.23: create or update builds the
+	// Python, run proves it on a sample, and publish makes the version an agent
+	// attaches. Deploy runs them for a version 2 local tool, on a real deploy
+	// only. Create takes the .py path, update the tool name and --file.
+	SlngToolCreate  = SlngCommand{"tool", "create"}
+	SlngToolUpdate  = SlngCommand{"tool", "update"}
+	SlngToolRun     = SlngCommand{"tool", "run"}
+	SlngToolPublish = SlngCommand{"tool", "publish"}
 
 	// SlngMCPList and SlngMCPTools both read the stored capability probe rather
 	// than calling the server. A server can be listed healthy and be unreachable,

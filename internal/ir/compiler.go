@@ -819,6 +819,9 @@ type Tool struct {
 	// AnnounceWait is version 2: the tool runs once its announce line has played.
 	AnnounceWait  bool   `json:"announce_wait,omitempty" yaml:"announce_wait,omitempty"`
 	HandlerSource string `json:"-" yaml:"-"` // local handler file content, loaded by spec.Load
+	// Sample is the local tool's tools/<name>.sample.json, one set of
+	// arguments. The slng target runs it once before it publishes the tool.
+	Sample []byte `json:"-" yaml:"-"`
 	// Dependencies are the local handler's exact `name==version` pins, as the
 	// author wrote them. Canonicalisation happens where they are emitted.
 	Dependencies []string `json:"dependencies,omitempty" yaml:"dependencies,omitempty"`
