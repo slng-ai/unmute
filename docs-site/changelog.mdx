@@ -16,6 +16,243 @@ kinds were validated live here.
 
 {/* changelog:entries */}
 
+<Update label="October 2026" description="v0.9.1" tags={["CLI"]}>
+
+SLNG's own US East is us-east again.
+
+SLNG's agents API renamed its own US East region from us-east-slng to
+us-east. This release follows that rename. It only changes packages
+with an SLNG target.
+
+Highlights:
+
+* An SLNG target's deployment_region takes us-east for SLNG's own
+  US East. SLNG's own region names are now spelled the same as the
+  world parts that speech and the router use.
+* A retired region name now fails `unmute validate` with the name to
+  use and whose region it is. For example:
+  slng target deployment region "us-east-slng" was renamed: use
+  "us-east" (SLNG's own US East)
+  LiveKit Cloud's eu-central and ap-south still point to
+  eu-central-livekit and ap-south-livekit.
+* The docs, the README and the bundled skill use the new names.
+
+Changes that can break you:
+
+* us-east-slng is refused. Write us-east.
+* us-east now means SLNG's own US East. A package that still says
+  us-east for LiveKit Cloud now deploys to SLNG's cluster, and
+  `unmute validate` does not warn about it. Write us-east-livekit to
+  stay on LiveKit Cloud.
+
+How to upgrade:
+
+1. Upgrade unmute: `brew upgrade --cask slng-ai/tap/unmute`.
+2. In targets.yaml, change us-east-slng to us-east. Check that any
+   us-east you kept for LiveKit Cloud now says us-east-livekit.
+3. Run `unmute skill install` to refresh the bundled skill.
+4. Run `unmute validate`, then compile again and redeploy.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.9.1)
+
+</Update>
+
+<Update label="October 2026" description="v0.9.0" tags={["CLI"]}>
+
+One agent.yaml contract, simpler to write.
+
+agent.yaml has one contract now, and no version: line. Tool behaviour
+sits next to the tool, handoffs, transfers and flows sit inside the
+agent that uses them, and several keys have shorter names. Every old
+agent.yaml needs a rewrite, once. A new skill does it for you: read
+"How to upgrade".
+
+Highlights:
+
+* One contract. The version: key is gone, and version 1 is gone from
+  every target. A file that still has version: is refused at line 1
+  with a pointer to the migration guide.
+* A migration skill. `unmute skill install` adds `unmute-migrate`. Ask
+  your coding assistant to migrate the package, and it runs
+  `unmute validate` until the package is clean. The same table is at
+  https://unmute.ai/reference/migrate
+* Tool behaviour in agent.yaml. A tool's entry says what each result
+  saves and says, as `outcomes:` with `if:`, `save:`, `say:` and
+  `then: done` or `then: failed`. A step's `start:` says a line, waits
+  for the caller, or calls a tool in code as the step opens.
+* Lines read the tool directly. A `confirm:` line reads
+  `{{input.x}}`, and an outcome's `say:` reads `{{result.x}}`. You no
+  longer save a value only to say it.
+* Each agent speaks in its own voice. Before this release, every agent
+  after a handoff spoke with the first agent's voice. An agent can also
+  name its own `listen:` model.
+* A handoff's `say:` takes several lines. One is picked each time,
+  never the one said last, in the next agent's voice.
+* unmute-core 0.18.1.
+
+Changes that can break you:
+
+* `version:` is refused. Delete the line.
+* `agents:` is a list: `- name: concierge`, then its keys.
+  `instructions:` is `prompt:`.
+* `handoffs:`, `escalations:` and `task_groups:` move inside the agent
+  that uses them, as `handoffs:`, `transfers:` and `flows:`. A transfer
+  names the environment variable with the number, `to: MANAGER_PHONE`,
+  and `brief:` makes it warm. `destinations:` is gone.
+* A step's `finish:`, `replies:` and `assign:` become the step's
+  `tools:` entries with `outcomes:`, and the step's `save:`.
+  `opening:`, `announce:` and `opens_with:` become `start:`.
+* In a tool file, `assign:`, `replies:`, `announce:`, `announce_wait:`
+  and `hidden:` move to the tool's entry in agent.yaml. `inject:` is
+  `with:` and reads `state.x`.
+* Renamed: prefetch `call:`, `with:`, `save:`; handoff `say:` (a list)
+  and `save:`; flow `fills:`; greeting `say:`.
+* `mode:`, a task's `inputs:` and `via:` are gone.
+* `channels:` and `capacity:` move to the top of targets.yaml.
+  `channels:` is a list: `- name: web`.
+* The top-level `tools:` list keeps only entries with behaviour. Every
+  file in tools/ is a tool already.
+
+Each retired key's error names its new spelling, with the file and the
+line.
+
+How to upgrade:
+
+1. Upgrade unmute: `brew upgrade --cask slng-ai/tap/unmute`.
+2. Run `unmute skill install` in your project.
+3. Ask your coding assistant to migrate each package, or follow
+   https://unmute.ai/reference/migrate by hand.
+4. Run `unmute validate`, then compile again and redeploy. LiveKit and
+   Pipecat projects now pin unmute-core 0.18.1.
+
+Known limits:
+
+* Twilio and SLNG refuse an agent's own `listen:`. They use the
+  package's listen model.
+* `unmute maintain` does not open a package where an agent has its own
+  `listen:` yet.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.9.0)
+
+</Update>
+
+<Update label="October 2026" description="v0.8.0" tags={["CLI"]}>
+
+Agent.yaml version 2 on every target, built on unmute-core.
+
+LiveKit and Pipecat agents now compile onto unmute-core, the library
+that holds the voice-agent behaviour both frameworks share. The model
+picks what to do. Code says the lines that must be exact: read-backs,
+offers and receipts. Version 1 packages no longer compile for LiveKit
+or Pipecat, so read "Changes that can break you" before you upgrade.
+
+Highlights:
+
+* agent.yaml version 2. Your call state is a Pydantic `State` class in
+  `state.py`. A local tool takes its types from its Python handler:
+  `local: handler: tools/salon.py:find_slots`. New keys let code do the
+  exact parts: a tool's `assign`, `replies`, `precheck` and
+  `announce_wait`, and a task's `finish` rule with `confirm` and `say`.
+* Fewer model requests. The salon example books with one model request
+  per caller turn. On version 1 it took two or three.
+* Every target reads version 2. Twilio and SLNG keep their own
+  runtimes. On SLNG, `unmute deploy` publishes your typed Python tools
+  as SLNG code tools, and a `finish` rule can end a step on one tool.
+* New runtimes: LiveKit Agents 1.8.8, Pipecat 1.12.0, Python 3.12, and
+  unmute-core 0.17.1.
+* `unmute dev` runs version 2 projects. The dev page now shows how long
+  the caller waited on tool turns too.
+* The docs site has a second tab, Unmute Core, with the library's docs.
+
+Changes that can break you:
+
+* LiveKit and Pipecat compile version 2 only. A version 1 package now
+  fails `unmute validate` with:
+  "livekit compiles agent.yaml version 2 only: set `version: 2`, add a
+  state.py and type your local tools". Twilio and SLNG still accept
+  version 1.
+* `targets.yaml` must pin LiveKit "1.8.8" and Pipecat "1.12.0". Any
+  other version is refused.
+* Not compiled yet on LiveKit and Pipecat: `mcp:` and `slng:` tools,
+  builtins other than `end_call`, and `tracing: coval`. Langfuse
+  tracing works. The tools still work on the slng target.
+* The build folder is new. It holds `agent.json`, `spec.py`,
+  `speech.py`, `agent.py` or `bot.py`, `compose.dev.yaml` and a
+  `Dockerfile`. `call.py`, `settings.py`, `prompts/`, `utils/`,
+  `pcc-deploy.toml` and `sip-*.json` are gone. Pipecat Cloud now takes
+  its agent name, secrets, region and `--min-agents` as
+  `pipecat cloud deploy` flags. You write LiveKit SIP trunk and
+  dispatch files yourself.
+* `warm_instances` and `deployment_region` have no effect on a LiveKit
+  or Pipecat build yet.
+* `compile-report.json` lists only the target, the runtime and the
+  required environment variables.
+* LiveKit Speechmatics 1.8.2 ignores ten settings without a word. The
+  compiler now refuses them.
+* `unmute dev` no longer forwards a Coval simulation header. Coval is
+  still a tracing target on version 1 and on the slng target.
+
+How to upgrade:
+
+1. Upgrade unmute: `brew upgrade --cask slng-ai/tap/unmute`.
+2. For each LiveKit or Pipecat package, set `version: 2`, add a
+   `state.py` with `class State(BaseModel)`, and point each local tool
+   at a typed handler. Then run `unmute validate`. It names each key to
+   change. Guide: https://unmute.ai/reference/agent-yaml-v2
+3. Move the target versions in `targets.yaml` to "1.8.8" and "1.12.0".
+4. Compile again and redeploy. Update any deploy script that reads the
+   old build files.
+5. Run `unmute skill install` to refresh the bundled assistant guidance.
+
+Known limits:
+
+* On the dev page, Pipecat realtime and live models ignore typed
+  lines. Voice works.
+* On LiveKit, GPT-Live does not hand a typed line to its backend
+  model, so the backend's tools do not run. Spoken turns are not
+  tested yet.
+* A step's receipt, like "Lovely, your haircut is booked", shows no
+  "Caller waited" on the dev page yet.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.8.0)
+
+</Update>
+
+<Update label="October 2026" description="v0.7.4" tags={["CLI"]}>
+
+Deploy to the new SLNG agent region codes.
+
+How to upgrade:
+
+1. Upgrade unmute: `brew upgrade --cask slng-ai/tap/unmute`.
+2. If your package sets `deployment_region` on the slng target, check
+   it against the list below. You do not need to compile LiveKit or
+   Pipecat agents again.
+
+Fixes:
+
+* The slng target now uses the agent region codes of the SLNG agents
+  API. Before, it checked `deployment_region` against the world part
+  list, so the API refused some valid regions.
+* LiveKit Cloud's agent regions are renamed. `us-east`, `eu-central`
+  and `ap-south` are now `us-east-livekit`, `eu-central-livekit` and
+  `ap-south-livekit`. The API refuses the old codes with
+  `422 AGENT_REGION_RENAMED`.
+* `unmute validate` now catches an old code and names the new one.
+  Before, you found out only at `unmute deploy`.
+* SLNG's own US East region is `us-east-slng`. It is not renamed yet.
+* The error for more than one region now lists the agent region
+  codes, not the world parts.
+
+Only the slng target changes. The livekit and pipecat targets keep
+their own platform region names.
+
+Run `unmute skill install` to refresh the bundled assistant guidance.
+
+[Full notes and downloads](https://github.com/slng-ai/unmute/releases/tag/v0.7.4)
+
+</Update>
+
 <Update label="October 2026" description="v0.7.3" tags={["CLI"]}>
 
 Dev page Metrics fixes and a working Claude skill install.
