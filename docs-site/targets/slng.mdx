@@ -111,13 +111,15 @@ Write these inside `targets.<name>`. The name selects this target with
 </ParamField>
 
 <ParamField path="deployment_region" type="string or one-item list of strings" required>
-  Accepts SLNG's own regions `us-east-slng`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`,
+  Accepts SLNG's own regions `us-east`, `us-west`, `br`, `eu-west`, `eu-north`, `gb`, `za`, `il`, `jp`, `sg`, `id`, `in`, `au`,
   and the LiveKit Cloud regions `us-east-livekit`, `eu-central-livekit` and `ap-south-livekit`.
   Exactly one region is required; omission, an unknown name, and multiple regions are refused.
   The retired `any` value is refused. These are the agents API's region names, not the world parts
-  that speech and the router take. `us-east-livekit` is LiveKit Cloud's US East; SLNG's own is
-  `us-east-slng`. LiveKit Cloud's codes before the `-livekit` suffix (`us-east`, `eu-central`,
-  `ap-south`) are refused with the new code to use, as the agents API refuses them.
+  that speech and the router take, although SLNG's own are spelled the same.
+  `us-east-livekit` is LiveKit Cloud's US East; SLNG's own is `us-east`. The retired codes are
+  refused with the code to use, as the agents API refuses them: LiveKit Cloud's `eu-central` and
+  `ap-south`, and SLNG's `us-east-slng`. A package that names `us-east` for LiveKit Cloud, as
+  packages did before the `-livekit` suffix, now deploys to SLNG's own US East.
 </ParamField>
 
 <ParamField path="models" type="map of model definitions">

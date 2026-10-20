@@ -354,10 +354,8 @@ func TestValidateSlngScope(t *testing.T) {
 }
 
 // Speech and the router take the world parts; deployment takes the agents API's
-// agent region codes, a different list that shares twelve spellings with it.
-// Holding them as one list refused us-east-slng and LiveKit Cloud's regions at
-// deployment, and sent us-east meaning SLNG's own US East where the agents API
-// read LiveKit Cloud's.
+// agent region codes: SLNG's own, spelled like the world parts, and LiveKit
+// Cloud's, which are no world part.
 func TestSlngRolesTakeTheirOwnRegionLists(t *testing.T) {
 	for _, part := range SlngRegions {
 		want := "https://" + part + ".context-router.slng.ai/v1"
@@ -374,6 +372,12 @@ func TestSlngRolesTakeTheirOwnRegionLists(t *testing.T) {
 			t.Error(err)
 		}
 	}
+	// SLNG's own deploy under their world part's name.
+	for _, part := range SlngRegions {
+		if err := CheckSlngRegion(part); err != nil {
+			t.Errorf("deployment refused SLNG's own region %q: %v", part, err)
+		}
+	}
 	// The refusal of a second region suggests the regions to pick from, so it
 	// reads the same list: a copy of it kept offering the world parts.
 	refusal := Default().Capability(FieldDeploymentMultiRegion, Slng).Note
@@ -381,7 +385,7 @@ func TestSlngRolesTakeTheirOwnRegionLists(t *testing.T) {
 		t.Errorf("multi-region refusal does not offer the deployment regions: %q", refusal)
 	}
 	// Agent regions that are no world part deploy, and reach no model service.
-	for _, region := range []string{"us-east-slng", "us-east-livekit", "eu-central-livekit", "ap-south-livekit"} {
+	for _, region := range []string{"us-east-livekit", "eu-central-livekit", "ap-south-livekit"} {
 		if err := CheckSlngRegion(region); err != nil {
 			t.Error(err)
 		}
@@ -405,15 +409,14 @@ func TestSlngRolesTakeTheirOwnRegionLists(t *testing.T) {
 	}
 }
 
-// LiveKit Cloud's agent regions took a -livekit suffix, and the agents API
-// refuses their old codes. A package naming one hears the new code from
-// validate, and us-east, which is also a world part, hears SLNG's own US East
-// too.
+// LiveKit Cloud's agent regions took a -livekit suffix, and SLNG's own US East
+// took us-east; the agents API refuses the old codes. A package naming one hears
+// the new code, and whose region it is, from validate.
 func TestSlngRenamedRegionsNameTheNewCode(t *testing.T) {
 	for old, want := range map[string][]string{
-		"us-east":    {`"us-east-livekit"`, "us-east-slng"},
-		"eu-central": {`"eu-central-livekit"`},
-		"ap-south":   {`"ap-south-livekit"`},
+		"us-east-slng": {`"us-east"`, "SLNG's own US East"},
+		"eu-central":   {`"eu-central-livekit"`, "LiveKit Cloud"},
+		"ap-south":     {`"ap-south-livekit"`, "LiveKit Cloud"},
 	} {
 		err := CheckSlngRegion(old)
 		if err == nil {
@@ -426,7 +429,7 @@ func TestSlngRenamedRegionsNameTheNewCode(t *testing.T) {
 			}
 		}
 	}
-	if _, ok := SlngRouterBaseURL("us-east"); !ok {
-		t.Error("router refused us-east, which is still a world part")
+	if err := CheckSlngRegion("us-east"); err != nil {
+		t.Errorf("deployment refused us-east, SLNG's own US East: %v", err)
 	}
 }
