@@ -99,18 +99,12 @@ func (m console) renderHeader() string {
 }
 
 func (m console) renderFooter() string {
-	hint := "↑/↓ move · ↵ select · ctrl+p palette · esc back · q quit"
-	switch {
-	case m.palette != nil:
-		hint = "type to filter · ↑/↓ move · ↵ jump · esc close"
-	case m.notice != nil:
-		hint = "↑/↓ scroll · enter/esc back"
-	case m.req != nil && m.req.kind == kindInput:
-		hint = "↵ confirm · esc back"
-	case m.req != nil && m.req.kind == kindText:
-		hint = "ctrl+d save · esc back"
+	hints := m.footerHints()
+	glyphs := make([]string, len(hints))
+	for i, h := range hints {
+		glyphs[i] = h.glyph
 	}
-	return style.Dim(hint)
+	return style.Dim(strings.Join(glyphs, " · "))
 }
 
 func (m console) renderPalette(w, h int) string {
